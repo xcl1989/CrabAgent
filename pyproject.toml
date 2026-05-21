@@ -1,0 +1,50 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "crabagent"
+version = "0.1.0"
+description = "CrabAgent - AI Agent Platform with dual-mode (CLI + Serve)"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "litellm>=1.40",
+    "httpx>=0.27",
+    "rich>=13.0",
+    "prompt_toolkit>=3.0",
+    "sqlalchemy>=2.0",
+    "aiosqlite>=0.20",
+    "python-jose[cryptography]>=3.3",
+    "passlib[bcrypt]>=1.7",
+    "bcrypt>=4.0,<4.1",
+]
+
+[project.optional-dependencies]
+serve = [
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    "redis>=5.0",
+]
+dev = [
+    "ruff>=0.4",
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
+
+[project.scripts]
+crabagent = "crabagent.cli.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/crabagent"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

@@ -1,0 +1,247 @@
+from __future__ import annotations
+
+import asyncio
+import logging
+import time
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from crabagent.core.agent.context import AgentContext
+from crabagent.core.agent.loop import run_agent
+from crabagent.core.agent.tools.registry import registry
+from crabagent.core.config import settings
+from crabagent.core.database import User, async_session_factory, get_db
+from crabagent.core.event import AgentEvent, EventType
+from crabagent.serve.deps import get_current_user, get_owned_conversation
+from crabagent.serve.services import conversation as conv_svc
+from crabagent.serve.services.message import get_messages, message_to_dict, save_message
+from crabagent.serve.services.persistence import PersistenceListener
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(tags=["prompt"])
+
+_tasks: dict[str, asyncio.Task] = {}
+
+_session_locks: dict[str, asyncio.Lock] = {}
+
+
+class PromptRequest(BaseModel):
+    message: str
+    model: str | None = None
+    provider: str | None = None
+
+
+@router.post("/sessions/{session_id}/prompt", status_code=status.HTTP_202_ACCEPTED)
+async def prompt_async(
+    session_id: str,
+    req: PromptRequest,
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    conv = await get_owned_conversation(db, session_id, user)
+
+    if session_id in _tasks and not _tasks[session_id].done():
+        raise HTTPException(status_code=409, detail="Session is already processing a prompt")
+
+    active_branch = conv.active_branch or "main"
+    history_msgs = await get_messages(db, conv.id, branch_id=active_branch)
+    user_msg_seq = max((m.sequence for m in history_msgs), default=0) + 1
+    await save_message(
+        db,
+        conversation_id=conv.id,
+        sequence=user_msg_seq,
+        role="user",
+        content=req.message,
+        branch_id=active_branch,
+    )
+
+    workspace = Path(conv.workspace) if conv.workspace else Path.cwd()
+    workspace = workspace.resolve()
+
+    context = AgentContext(
+        workspace=workspace,
+        tool_registry=registry,
+        max_iterations=settings.max_iterations,
+        model=req.model or conv.model or None,
+        provider_name=req.provider,
+        system_prompt=f"You are CrabAgent, an AI assistant. Working directory: {workspace}",
+    )
+
+    from crabagent.core.agent.skill.loader import discover_skills, register_skill_tool
+
+    skill_dirs = settings.skill_discovery_dirs()
+    skills = discover_skills(skill_dirs)
+    if skills:
+        register_skill_tool(context.tool_registry, skills)
+
+    from crabagent.core.molt.tools import register_molt_tools
+    register_molt_tools(context.tool_registry)
+
+    from crabagent.core.todo.tools import register_todo_tools
+    register_todo_tools(context.tool_registry)
+
+    from crabagent.core.tool_loader import discover_and_register_tools
+    discover_and_register_tools(context.tool_registry, workspace)
+
+    context.metadata["session_id"] = session_id
+    context.metadata["branch_id"] = active_branch
+
+    for msg_record in history_msgs:
+        if msg_record.role == "stats":
+            continue
+        context.messages.append(message_to_dict(msg_record))
+
+    persistence = PersistenceListener(conversation_id=conv.id, branch_id=active_branch)
+    persistence.sequence = user_msg_seq
+    context.event_bus.subscribe(persistence.on_event)
+
+    queues = request.app.state.event_queues
+
+    def _sse_forward(event: AgentEvent):
+        now = time.time()
+        stale = []
+        for qid, entry in list(queues.items()):
+            if len(entry) == 2:
+                sid, queue = entry
+                ts = now
+            else:
+                sid, queue, ts = entry
+            if now - ts > 300:
+                stale.append(qid)
+                continue
+            if sid == session_id:
+                queue.put_nowait(event)
+                queues[qid] = (sid, queue, now)
+        for qid in stale:
+            queues.pop(qid, None)
+
+    context.event_bus.subscribe(_sse_forward)
+
+    if not settings.auto_approve_tools:
+        from crabagent.serve.api.confirm import request_confirmation
+
+        async def _serve_confirm(tool_name: str, args: dict) -> bool:
+            future = request_confirmation(context.event_bus, session_id, tool_name, args)
+            try:
+                return await asyncio.wait_for(future, timeout=120.0)
+            except asyncio.TimeoutError:
+                return False
+
+        context.confirm_callback = _serve_confirm
+
+    from crabagent.serve.api.input import request_user_input
+
+    async def _serve_ask(question: str, options: list[str] | None = None) -> str:
+        future = request_user_input(context.event_bus, session_id, question, options=options)
+        try:
+            return await asyncio.wait_for(future, timeout=300.0)
+        except asyncio.TimeoutError:
+            return ""
+
+    context.ask_callback = _serve_ask
+
+    @context.tool_registry.register(
+        name="ask_question",
+        description="Ask the user a question and get their response. Use when you need clarification, more information, or a decision from the user before proceeding.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "question": {
+                    "type": "string",
+                    "description": "The question to ask the user",
+                },
+                "options": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional list of choices for the user to pick from",
+                },
+            },
+            "required": ["question"],
+        },
+    )
+    async def ask_question(question: str, options: list[str] | None = None, context=None) -> str:
+        cb = getattr(context, "ask_callback", None)
+        if not cb:
+            return "Error: no ask callback available"
+        return await cb(question, options)
+
+    async def _run():
+        t0 = time.time()
+        try:
+            if not conv.title:
+                try:
+                    async with async_session_factory() as title_db:
+                        title = req.message[:50] + ("..." if len(req.message) > 50 else "")
+                        await conv_svc.update_conversation(title_db, session_id, title=title)
+                except Exception:
+                    pass
+            await run_agent(context, req.message)
+        except asyncio.CancelledError:
+            logger.info("Agent task cancelled for session %s", session_id)
+        except Exception:
+            logger.exception("Agent task failed for session %s", session_id)
+        finally:
+            elapsed = round(time.time() - t0, 1)
+            resolved_model = context.metadata.get("resolved_model", context.model or "")
+            stats_data = {
+                "elapsed_seconds": elapsed,
+                "model": resolved_model,
+                "tokens": context.total_tokens,
+                "iterations": context.iteration,
+            }
+
+            import json
+
+            await context.event_bus.emit(
+                AgentEvent(
+                    type=EventType.MESSAGE_CREATED,
+                    data={
+                        "message": {
+                            "role": "stats",
+                            "content": json.dumps(stats_data, ensure_ascii=False),
+                        }
+                    },
+                )
+            )
+
+            await context.event_bus.emit(
+                AgentEvent(
+                    type=EventType.AGENT_END,
+                    data=stats_data,
+                )
+            )
+
+            _tasks.pop(session_id, None)
+            _session_locks.pop(session_id, None)
+
+            try:
+                async with async_session_factory() as update_db:
+                    await conv_svc.update_conversation(update_db, session_id, model=resolved_model)
+            except Exception:
+                logger.exception("Failed to update conversation")
+
+    task = asyncio.create_task(_run())
+    _tasks[session_id] = task
+
+    return {"status": "processing", "session_id": session_id}
+
+
+@router.post("/sessions/{session_id}/abort")
+async def abort_session(
+    session_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await _get_owned_conversation(db, session_id, user)
+
+    task = _tasks.get(session_id)
+    if not task or task.done():
+        raise HTTPException(status_code=404, detail="No running task for this session")
+
+    task.cancel()
+    return {"status": "aborted", "session_id": session_id}

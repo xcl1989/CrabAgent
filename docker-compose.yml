@@ -1,0 +1,18 @@
+version: "3.9"
+
+services:
+  crabagent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "5210:5210"
+    volumes:
+      - crabagent_data:/data
+    environment:
+      - CRAB_JWT_SECRET=${CRAB_JWT_SECRET:-change-me-in-production}
+      - CRAB_ENCRYPTION_KEY=${CRAB_ENCRYPTION_KEY:-}
+    restart: unless-stopped
+
+volumes:
+  crabagent_data:
