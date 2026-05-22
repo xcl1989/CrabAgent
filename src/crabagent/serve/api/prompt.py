@@ -185,6 +185,33 @@ async def prompt_async(
 
     context.event_bus.subscribe(_sse_forward)
 
+    import base64 as _b64
+    import re as _re
+
+    async def _on_browser_screenshot(event: AgentEvent):
+        if event.type != EventType.TOOL_RESULT:
+            return
+        name = event.data.get("name", "")
+        if not name.startswith("browser_"):
+            return
+        result = str(event.data.get("result", "") or "")
+        match = _re.search(r"([/\w]+crabagent_screenshots/[a-f0-9_]+\.png)", result)
+        if not match:
+            return
+        path = match.group(1)
+        try:
+            with open(path, "rb") as f:
+                b64 = _b64.b64encode(f.read()).decode()
+            data_url = f"data:image/png;base64,{b64}"
+        except Exception:
+            return
+        await context.event_bus.emit(AgentEvent(
+            type=EventType.SCREENSHOT,
+            data={"image": data_url, "tool": name},
+        ))
+
+    context.event_bus.subscribe(_on_browser_screenshot)
+
     if not settings.auto_approve_tools:
         from crabagent.serve.api.confirm import request_confirmation
 

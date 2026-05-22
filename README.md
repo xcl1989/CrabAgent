@@ -212,6 +212,8 @@ playwright install chromium
 - **Session-scoped**: One browser instance per conversation, shared across all tool calls
 - **Auto-cleanup**: Browser closes automatically when the agent finishes or the session ends
 - **Headless by default**: Set `CRAB_BROWSER_HEADLESS=false` to run in headed mode (useful for debugging)
+- **Inline screenshots**: Browser screenshots automatically appear as images in the chat — no need to open external files
+- **Image preview**: Click any image (screenshot or uploaded) to view full-size in a lightbox overlay
 - Screenshots are saved to `/tmp/crabagent_screenshots/`
 
 ### Example Usage

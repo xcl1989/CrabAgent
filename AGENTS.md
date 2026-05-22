@@ -1,7 +1,7 @@
 # Project Rules
 
 ## Version
-- Current: **0.3.0** (browser automation)
+- Current: **0.3.1** (browser screenshot inline display)
 - Version in: `pyproject.toml`, `src/crabagent/serve/app.py`, CLI banner in `src/crabagent/cli/__main__.py`
 
 ## Database Schema Changes

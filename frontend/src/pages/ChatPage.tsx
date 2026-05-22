@@ -132,6 +132,16 @@ function sseEventToMessages(event: SSEEvent, messages: ChatMessage[]): ChatMessa
     return updated;
   }
 
+  if (event.type === "screenshot") {
+    updated.push({
+      id: `ss-${Date.now()}`,
+      role: "screenshot",
+      content: "",
+      images: [event.data.image as string || ""],
+    });
+    return updated;
+  }
+
   return updated;
 }
 

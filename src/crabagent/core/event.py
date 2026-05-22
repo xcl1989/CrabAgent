@@ -25,6 +25,7 @@ class EventType(StrEnum):
     TOOL_CONFIRM_REQUEST = "tool_confirm_request"
     USER_INPUT_REQUEST = "user_input_request"
     CONTEXT_COMPRESSED = "context_compressed"
+    SCREENSHOT = "screenshot"
 
 
 @dataclass

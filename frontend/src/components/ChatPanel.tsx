@@ -119,6 +119,7 @@ function UserInputOptions({ options, inputId, onSubmit }: { options: string[]; i
 }
 
 const ChatPanel = forwardRef<HTMLDivElement, Props>(({ messages, connected, onToolConfirm, onUserInput, onBranch, replaying }, bottomRef) => {
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
   const grouped: (ChatMessage | ChatMessage[])[] = [];
   let i = 0;
   while (i < messages.length) {
@@ -428,6 +429,23 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(({ messages, connected, onTo
           );
         }
 
+        if (msg.role === "screenshot") {
+          return (
+            <div key={msg.id} className="mb-3" style={{ marginLeft: "12px" }}>
+              {msg.images && msg.images.length > 0 && msg.images.map((img, i) => (
+                <img
+                  key={i}
+                  src={img}
+                  alt="Browser screenshot"
+                  className="max-w-full max-h-[400px] rounded-lg object-contain cursor-pointer border"
+                  style={{ borderColor: "var(--border)" }}
+                  onClick={() => setPreviewImage(img)}
+                />
+              ))}
+            </div>
+          );
+        }
+
         const isUser = msg.role === "user";
 
         return (
@@ -464,7 +482,7 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(({ messages, connected, onTo
                   {msg.images && msg.images.length > 0 && (
                     <div className="flex gap-2 mb-2 flex-wrap">
                       {msg.images.map((img, i) => (
-                        <img key={i} src={img} className="max-w-[200px] max-h-[200px] rounded-lg cursor-pointer object-contain" onClick={() => window.open(img, "_blank")} />
+                        <img key={i} src={img} className="max-w-[200px] max-h-[200px] rounded-lg cursor-pointer object-contain" onClick={() => setPreviewImage(img)} />
                       ))}
                     </div>
                   )}
@@ -517,6 +535,20 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(({ messages, connected, onTo
         );
       })}
       <div ref={bottomRef} />
+      {previewImage && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center"
+          style={{ background: "rgba(0,0,0,0.85)" }}
+          onClick={() => setPreviewImage(null)}
+        >
+          <img
+            src={previewImage}
+            alt="Preview"
+            className="max-w-[90vw] max-h-[90vh] object-contain rounded-lg"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
     </div>
   );
 });
