@@ -1,4 +1,4 @@
-import { forwardRef, useState } from "react";
+import { forwardRef, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -120,6 +120,32 @@ function UserInputOptions({ options, inputId, onSubmit }: { options: string[]; i
           {opt}
         </button>
       ))}
+    </div>
+  );
+}
+
+function SubAgentContent({ content, completed }: { content: string; completed: boolean }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const maxH = completed ? undefined : 300;
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [content]);
+
+  return (
+    <div
+      ref={scrollRef}
+      className="px-3 py-2 text-xs whitespace-pre-wrap font-mono"
+      style={{
+        color: "var(--text-secondary)",
+        lineHeight: 1.6,
+        maxHeight: maxH,
+        overflowY: maxH ? "auto" : "visible",
+      }}
+    >
+      {content || "(working...)"}
     </div>
   );
 }
@@ -431,9 +457,9 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(({ messages, connected, onTo
             msg.sub_agent_name === "writer" ? "📝" : "🤖";
           return (
             <div key={msg.id} className="mb-3" style={{ marginLeft: "8px" }}>
-              <details className="rounded-lg" style={{ background: "var(--bg-tertiary)", border: "1px solid var(--border)" }} open>
-                <summary className="cursor-pointer px-3 py-2 text-xs font-medium flex items-center gap-2 select-none"
-                  style={{ color: "var(--text-primary)" }}>
+              <div className="rounded-lg overflow-hidden" style={{ background: "var(--bg-tertiary)", border: "1px solid var(--border)" }}>
+                <div className="px-3 py-2 text-xs font-medium flex items-center gap-2 select-none"
+                  style={{ color: "var(--text-primary)", borderBottom: "1px solid var(--border)" }}>
                   <span>{agentIcon}</span>
                   <span>{msg.sub_agent_display || msg.sub_agent_name}</span>
                   {completed && (
@@ -442,11 +468,9 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(({ messages, connected, onTo
                     </span>
                   )}
                   {!completed && <span className="ml-auto text-[10px] animate-pulse" style={{ color: "var(--accent)" }}>running...</span>}
-                </summary>
-                <div className="px-3 pb-3 text-xs whitespace-pre-wrap" style={{ color: "var(--text-secondary)", lineHeight: 1.6 }}>
-                  {msg.content || "(working...)"}
                 </div>
-              </details>
+                <SubAgentContent content={msg.content} completed={completed} />
+              </div>
             </div>
           );
         }

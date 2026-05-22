@@ -169,7 +169,10 @@ function sseEventToMessages(event: SSEEvent, messages: ChatMessage[]): ChatMessa
     const subId = event.data.sub_agent_id as string || "";
     const last = updated[updated.length - 1];
     if (last?.sub_agent_id === subId && last?.role === "sub_agent") {
-      last.content += (event.data.text as string) || "";
+      updated[updated.length - 1] = {
+        ...last,
+        content: last.content + ((event.data.text as string) || ""),
+      };
       return updated;
     }
     return updated;
@@ -179,9 +182,12 @@ function sseEventToMessages(event: SSEEvent, messages: ChatMessage[]): ChatMessa
     const subId = event.data.sub_agent_id as string || "";
     const last = updated[updated.length - 1];
     if (last?.sub_agent_id === subId && last?.role === "sub_agent") {
-      last.sub_agent_elapsed = event.data.elapsed as number;
-      last.sub_agent_tokens = event.data.tokens as number;
-      last.sub_agent_iterations = event.data.iterations as number;
+      updated[updated.length - 1] = {
+        ...last,
+        sub_agent_elapsed: event.data.elapsed as number,
+        sub_agent_tokens: event.data.tokens as number,
+        sub_agent_iterations: event.data.iterations as number,
+      };
     }
     return updated;
   }
