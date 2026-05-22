@@ -402,6 +402,7 @@ export default function ChatPage({ onLogout }: Props) {
   }, [providers]);
 
   const selectSession = async (session: Session) => {
+    setSending(false);
     setActiveSession(session);
     const branch = session.active_branch || "main";
     setActiveBranch(branch);
@@ -411,6 +412,7 @@ export default function ChatPage({ onLogout }: Props) {
   };
 
   const newSession = async () => {
+    setSending(false);
     const s = await sessionsApi.createSession();
     setSessions((prev) => [s, ...prev]);
     setActiveSession(s);
