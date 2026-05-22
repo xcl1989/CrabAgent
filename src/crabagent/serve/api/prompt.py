@@ -30,10 +30,34 @@ _tasks: dict[str, asyncio.Task] = {}
 _session_locks: dict[str, asyncio.Lock] = {}
 
 
+def _save_image_temp(data_url: str) -> dict:
+    import base64
+    import hashlib
+    import os
+    import tempfile
+
+    header, b64 = data_url.split(",", 1)
+    mime = header.split(":")[1].split(";")[0]
+    ext = mime.split("/")[1] if "/" in mime else "png"
+    size_kb = len(b64) * 3 // 4 // 1024
+
+    img_dir = os.path.join(tempfile.gettempdir(), "crabagent_images")
+    os.makedirs(img_dir, exist_ok=True)
+    h = hashlib.md5(b64.encode()).hexdigest()[:12]
+    path = os.path.join(img_dir, f"{h}.{ext}")
+
+    if not os.path.exists(path):
+        with open(path, "wb") as f:
+            f.write(base64.b64decode(b64))
+
+    return {"file_path": path, "mime": mime, "size_kb": size_kb}
+
+
 class PromptRequest(BaseModel):
     message: str
     model: str | None = None
     provider: str | None = None
+    images: list[str] | None = None
 
 
 @router.post("/sessions/{session_id}/prompt", status_code=status.HTTP_202_ACCEPTED)
@@ -52,12 +76,29 @@ async def prompt_async(
     active_branch = conv.active_branch or "main"
     history_msgs = await get_messages(db, conv.id, branch_id=active_branch)
     user_msg_seq = max((m.sequence for m in history_msgs), default=0) + 1
+
+    if req.images:
+        import json as _json
+        content_blocks = [{"type": "text", "text": req.message}]
+        for img in req.images:
+            meta = _save_image_temp(img)
+            content_blocks.append({
+                "type": "image_url",
+                "image_url": {"url": img},
+                "file_path": meta["file_path"],
+                "mime": meta["mime"],
+                "size_kb": meta["size_kb"],
+            })
+        db_content = _json.dumps(content_blocks)
+    else:
+        db_content = req.message
+
     await save_message(
         db,
         conversation_id=conv.id,
         sequence=user_msg_seq,
         role="user",
-        content=req.message,
+        content=db_content,
         branch_id=active_branch,
     )
 
@@ -72,6 +113,16 @@ async def prompt_async(
         provider_name=req.provider,
         system_prompt=f"You are CrabAgent, an AI assistant. Today is {datetime.now(UTC).strftime('%Y-%m-%d %A')}. Working directory: {workspace}",
     )
+
+    if req.images:
+        from crabagent.core.agent.token_limits import is_vision_model
+        resolved = req.model or conv.model or ""
+        if not is_vision_model(resolved):
+            context.system_prompt += (
+                "\n\nThe user has attached images. This model cannot view images directly. "
+                "The images are saved as local files. "
+                "Use available MCP tools or file analysis tools to process the images, then describe what you find."
+            )
 
     from crabagent.core.agent.skill.loader import discover_skills, register_skill_tool
 
@@ -187,7 +238,21 @@ async def prompt_async(
                         await conv_svc.update_conversation(title_db, session_id, title=title)
                 except Exception:
                     pass
-            await run_agent(context, req.message)
+            agent_query: str | list[dict]
+            if req.images:
+                agent_query = [{"type": "text", "text": req.message}]
+                for img in req.images:
+                    meta = _save_image_temp(img)
+                    agent_query.append({
+                        "type": "image_url",
+                        "image_url": {"url": img},
+                        "file_path": meta["file_path"],
+                        "mime": meta["mime"],
+                        "size_kb": meta["size_kb"],
+                    })
+            else:
+                agent_query = req.message
+            await run_agent(context, agent_query)
         except asyncio.CancelledError:
             logger.info("Agent task cancelled for session %s", session_id)
         except Exception:

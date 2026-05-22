@@ -1,16 +1,8 @@
 # 🦀 CrabAgent
 
-> 本地 AI 助手 — CLI + Web 双模，文件操作、自定义插件、对话回滚等
+> 本地 AI Agent 平台 — CLI + Web 双模，多模态（图片）支持、MCP 客户端、网页搜索、文件操作、自定义插件等
 
 CrabAgent 是一个 AI Agent 平台，可以从任意项目目录启动。支持终端（CLI）和浏览器（Web UI）两种模式，能够完整访问本地文件、运行工具和插件。
-
----
-
-## 截图
-
-```
-待补充 — Web UI 和 CLI 截图
-```
 
 ---
 
@@ -19,12 +11,15 @@ CrabAgent 是一个 AI Agent 平台，可以从任意项目目录启动。支持
 | 功能 | 说明 |
 |------|------|
 | **双模操作** | CLI 终端 + Web 浏览器，同一套数据 |
+| **多模态（图片）** | 支持粘贴、上传、拖拽发送图片；自动检测视觉模型兼容性 |
+| **MCP 客户端** | 连接外部 MCP 服务器（stdio + HTTP），持久连接，UI 管理 |
+| **网页搜索 & 抓取** | 内置 `web_search`（DuckDuckGo 零配置 + SearXNG 可选）和 `web_scrape` 工具 |
 | **文件操作** | 读、写、编辑、搜索、bash 执行 |
 | **快照回滚 🦀** | 修改文件前自动拍照，随时回滚 |
 | **待办列表** | Agent 管理任务，前端浮窗实时同步 |
 | **Agent 提问** | Agent 可以主动问你问题（支持选项选择） |
 | **插件系统** | `.crabagent/tools/*.py`，写个函数就是工具 |
-| **多 Provider** | 支持 OpenAI、DeepSeek、Anthropic 等 |
+| **多 Provider** | 支持 OpenAI、DeepSeek、Anthropic、Google Gemini 等 LiteLLM 兼容 Provider |
 | **对话分支** | 从任意消息创建分支，探索不同方向 |
 | **技能系统** | SKILL.md 定义领域指令 |
 | **上下文压缩** | 长对话自动摘要 |
@@ -50,6 +45,7 @@ crabagent "帮我整理这个目录"
 # Web UI
 crabagent --serve
 # → http://localhost:5210
+# 默认登录：admin / xcl1989
 
 # Docker
 docker compose up -d
@@ -129,6 +125,7 @@ crabagent skill list
 | `/todo [cmd]` | 待办管理 |
 | `/skills` | 列出可用技能 |
 | `/skill <name>` | 查看技能内容 |
+| `/image <path> [msg]` | 发送图片（附带可选消息） |
 
 ---
 
@@ -136,12 +133,96 @@ crabagent skill list
 
 运行 `crabagent --serve`，打开 `http://localhost:5210`。
 
-- **注册 / 登录** — 创建账号
+- **登录** — 默认管理员账号：`admin` / `xcl1989`
 - **对话** — 发送消息，流式输出
+- **图片支持** — 剪贴板粘贴、点击上传、拖拽放入图片（每条消息最多 5 张，单张最大 5MB）
+- **MCP 服务器** — 添加、连接/断开、管理 MCP 服务器
+- **设置** — 配置 SearXNG 地址等（MCP 面板 → 设置标签页）
+- **网页搜索** — 内置 `web_search` 和 `web_scrape` 工具（默认 DuckDuckGo，可配置 SearXNG）
 - **文件浏览器** — 浏览和预览项目文件
 - **待办浮窗** — 右下角任务列表，实时同步
 - **会话管理** — 创建、切换、删除会话
 - **Provider 管理** — 在 UI 中添加配置 provider
+
+---
+
+## 图片 / 多模态支持
+
+CrabAgent 支持 CLI 和 Web UI 中发送图片。
+
+### Web UI
+- **粘贴**：Ctrl+V / Cmd+V 从剪贴板粘贴图片
+- **上传**：点击附件按钮选择文件
+- **拖拽**：直接拖拽图片到聊天区域
+- 发送前显示缩略图预览，历史消息中展示图片
+
+### CLI
+```bash
+# 发送图片并附带消息
+/image /path/to/image.png 这张图片里有什么？
+```
+
+### 视觉模型检测
+CrabAgent 自动检测当前模型是否支持视觉：
+- **视觉模型**（Claude 3+、GPT-4o、Gemini 等）：图片以原生多模态格式发送
+- **非视觉模型**（DeepSeek、o1-mini 等）：图片保存到临时文件，发送文本占位符（含文件路径），方便 MCP 工具后续处理
+
+### 限制
+- 每条消息最多 **5 张**图片
+- 单张图片最大 **5MB**
+- 支持格式：PNG、JPEG、GIF、WebP
+
+---
+
+## MCP（Model Context Protocol）
+
+CrabAgent 作为 **MCP 客户端**，连接外部 MCP 服务器扩展 Agent 能力。
+
+### 支持的传输方式
+
+- **stdio** — 本地子进程（如 `npx -y @mcp/server-filesystem`）
+- **HTTP** — 通过 Streamable HTTP 连接远程 MCP 服务器
+
+### 配置
+
+通过 Web UI（MCP 面板）或直接配置数据库。
+
+MCP 工具自动添加前缀 `mcp__{server}__{tool}`，在聊天中以紫色图标区分显示。
+
+### 连接管理
+
+- 持久连接，单例管理 — 避免每次请求启动子进程
+- 出错时手动重连 — 在 UI 中点击"重新连接"
+- 状态轮询间隔 60 秒
+
+---
+
+## 网页搜索
+
+Agent 内置两个网页工具：
+
+| 工具 | 说明 |
+|------|------|
+| `web_search` | 搜索网页。配置了 SearXNG 则优先使用，否则使用 DuckDuckGo（无需 API key） |
+| `web_scrape` | 抓取任意 URL 并提取可读内容 |
+
+### SearXNG 配置（可选）
+
+如需更好的搜索质量，部署 SearXNG 实例：
+
+```bash
+docker run -d --name searxng -p 8888:8080 searxng/searxng
+```
+
+在 SearXNG 的 `settings.yml` 中启用 JSON API：
+```yaml
+search:
+  formats:
+    - html
+    - json
+```
+
+在 **设置**（MCP 面板 → 设置标签页）中配置地址，或使用"测试连接"按钮验证。
 
 ---
 
@@ -202,6 +283,8 @@ CrabAgent/
 │   └── crabagent/
 │       ├── cli/       # CLI 入口
 │       ├── core/      # Agent 循环、工具、事件、数据库
+│       │   ├── agent/  # Agent 上下文、循环、工具注册、Token 限制
+│       │   └── mcp/    # MCP 客户端管理器
 │       └── serve/     # FastAPI 服务 + API 端点
 ├── frontend/          # React SPA 前端
 ├── crabagent.db       # SQLite 数据库

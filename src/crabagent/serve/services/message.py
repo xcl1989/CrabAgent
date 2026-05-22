@@ -73,7 +73,13 @@ def message_to_dict(msg: Message) -> dict:
     d: dict = {"role": msg.role}
 
     if msg.content:
-        d["content"] = msg.content
+        if msg.content.startswith("["):
+            try:
+                d["content"] = json.loads(msg.content)
+            except json.JSONDecodeError:
+                d["content"] = msg.content
+        else:
+            d["content"] = msg.content
     else:
         d["content"] = None
 

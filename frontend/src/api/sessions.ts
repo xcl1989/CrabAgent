@@ -47,8 +47,8 @@ export function getMessages(sessionId: string): Promise<Message[]> {
   return api.get(`/sessions/${sessionId}/messages?limit=1000`);
 }
 
-export function sendPrompt(sessionId: string, message: string, model?: string): Promise<{ status: string }> {
-  return api.post(`/sessions/${sessionId}/prompt`, { message, model });
+export function sendPrompt(sessionId: string, message: string, model?: string, images?: string[]): Promise<{ status: string }> {
+  return api.post(`/sessions/${sessionId}/prompt`, { message, model, images });
 }
 
 export function abortSession(sessionId: string): Promise<{ status: string }> {

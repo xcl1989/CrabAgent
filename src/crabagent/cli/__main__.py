@@ -21,7 +21,7 @@ from crabagent.core.event import AgentEvent, EventType
 SLASH_COMMANDS = [
     "/exit", "/quit", "/help", "/clear", "/history",
     "/model", "/models", "/provider", "/skills", "/skill",
-    "/sessions", "/session", "/new", "/molt", "/todo",
+    "/sessions", "/session", "/new", "/molt", "/todo", "/image",
 ]
 PROVIDER_SUB = ["add", "list", "remove", "set-default"]
 PROMPT_STYLE = Style.from_dict({
@@ -784,6 +784,7 @@ async def _handle_slash_command(cmd: str, context, args, user, state: dict, cons
         print("  /new                   Start a new conversation")
         print("  /molt [cmd]            List, show, or rollback molts (snapshots)")
         print("  /todo [cmd]            Manage todo list")
+        print("  /image <path> [msg]    Send an image with an optional message")
         print("  /help                  Show this help")
         print("  Ctrl+C                 Interrupt current agent response")
         print("  Tab                    Autocomplete slash commands")
@@ -1028,6 +1029,84 @@ async def _handle_slash_command(cmd: str, context, args, user, state: dict, cons
 
         else:
             print("Usage: /todo {list|add|done|delete}")
+
+    elif command == "/image":
+        if not arg:
+            print("Usage: /image <file_path> [message]")
+            print("Example: /image ~/photo.png describe this image")
+            return False
+
+        import base64
+        import mimetypes
+        import os
+
+        parts = arg.split(maxsplit=1)
+        file_path = os.path.expanduser(parts[0])
+        message = parts[1] if len(parts) > 1 else "Please describe this image."
+
+        if not os.path.isfile(file_path):
+            print(f"File not found: {file_path}")
+            return False
+
+        file_size = os.path.getsize(file_path)
+        if file_size > 5 * 1024 * 1024:
+            print(f"File too large: {file_size / 1024 / 1024:.1f}MB (max 5MB)")
+            return False
+
+        mime_type = mimetypes.guess_type(file_path)[0] or "image/png"
+        if not mime_type.startswith("image/"):
+            print(f"Not an image file: {mime_type}")
+            return False
+
+        with open(file_path, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode("utf-8")
+        data_url = f"data:{mime_type};base64,{b64}"
+
+        content_blocks = [
+            {"type": "text", "text": message},
+            {
+                "type": "image_url",
+                "image_url": {"url": data_url},
+                "file_path": os.path.abspath(file_path),
+                "mime": mime_type,
+                "size_kb": file_size // 1024,
+            },
+        ]
+
+        if conversation_id[0] and not getattr(args, "no_persist", False):
+            import json as _json
+
+            from crabagent.core.database import async_session_factory
+            from crabagent.serve.services.message import save_message
+
+            seq = len(context.messages) + 1
+            async with async_session_factory() as db:
+                await save_message(
+                    db,
+                    conversation_id=conversation_id[0],
+                    sequence=seq,
+                    role="user",
+                    content=_json.dumps(content_blocks),
+                    branch_id="main",
+                )
+
+            if first_message[0]:
+                first_message[0] = False
+                from crabagent.serve.services.conversation import update_conversation
+
+                title = message[:50] + ("..." if len(message) > 50 else "")
+                async with async_session_factory() as db:
+                    await update_conversation(db, session_id_str[0], title=title)
+
+        try:
+            context.iteration = 0
+            await run_agent(context, content_blocks)
+        except KeyboardInterrupt:
+            print("\n[interrupted]")
+        except Exception as e:
+            print(f"\nError: {e}")
+
+        return False
 
     elif command == "/new":
         conv = await _init_conversation(user.id, workspace=str(context.workspace), model=context.model or "")

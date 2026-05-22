@@ -35,7 +35,7 @@ def _litellm_params(provider: ProviderInfo) -> dict:
 
 async def run_agent(
     context: AgentContext,
-    query: str,
+    query: str | list[dict],
 ) -> list[dict]:
     context.messages.append({"role": "user", "content": query})
 
@@ -243,11 +243,39 @@ async def _grace_call(context: AgentContext, llm: dict, model: str):
 
 
 def _build_messages(context: AgentContext) -> list[dict]:
+    from crabagent.core.agent.token_limits import is_vision_model
+
+    vision = is_vision_model(context.model or "")
     messages = []
     if context.system_prompt:
         messages.append({"role": "system", "content": context.system_prompt})
     for msg in context.messages:
         content = msg.get("content")
+        if isinstance(content, list):
+            if vision:
+                clean_blocks = []
+                for block in content:
+                    if block.get("type") == "text":
+                        clean_blocks.append({"type": "text", "text": block.get("text", "")})
+                    elif block.get("type") == "image_url":
+                        clean_blocks.append({"type": "image_url", "image_url": {"url": block["image_url"]["url"]}})
+                messages.append({**msg, "content": clean_blocks})
+            else:
+                text_parts = []
+                for block in content:
+                    if block.get("type") == "text":
+                        text_parts.append(block.get("text", ""))
+                    elif block.get("type") == "image_url":
+                        file_path = block.get("file_path", "")
+                        mime = block.get("mime", "")
+                        size_kb = block.get("size_kb", 0)
+                        if file_path:
+                            text_parts.append(f"\n[Attached image: {file_path} ({mime}, {size_kb}KB)]")
+                        elif mime:
+                            text_parts.append(f"\n[Attached image: {mime}, {size_kb}KB]")
+                text = "".join(text_parts)
+                messages.append({**msg, "content": text})
+            continue
         if content is None:
             msg = dict(msg, content="")
         elif msg.get("role") == "assistant" and not content and not msg.get("tool_calls"):

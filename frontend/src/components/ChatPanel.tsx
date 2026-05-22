@@ -17,6 +17,7 @@ interface ChatMessage {
   options?: string[];
   source?: "builtin" | "mcp";
   server_name?: string;
+  images?: string[];
 }
 
 interface Props {
@@ -459,7 +460,16 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(({ messages, connected, onTo
                 </details>
               )}
               {isUser ? (
-                <p className="whitespace-pre-wrap">{msg.content}</p>
+                <>
+                  {msg.images && msg.images.length > 0 && (
+                    <div className="flex gap-2 mb-2 flex-wrap">
+                      {msg.images.map((img, i) => (
+                        <img key={i} src={img} className="max-w-[200px] max-h-[200px] rounded-lg cursor-pointer object-contain" onClick={() => window.open(img, "_blank")} />
+                      ))}
+                    </div>
+                  )}
+                  <p className="whitespace-pre-wrap">{msg.content}</p>
+                </>
               ) : (
                 <div
                   className="prose prose-invert prose-sm max-w-none

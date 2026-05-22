@@ -49,6 +49,49 @@ _PREFIX_MATCH_ORDER = [
 
 _FALLBACK = 128_000
 
+VISION_UNSUPPORTED_EXACT = {
+    "deepseek-chat",
+    "deepseek-reasoner",
+    "deepseek-v4-flash",
+    "deepseek-v4-pro",
+    "o3-mini",
+    "o1-mini",
+    "o1-preview",
+    "gpt-3.5-turbo",
+    "qwen-turbo",
+    "qwen-plus",
+    "qwen-max",
+    "qwen-long",
+    "glm-4",
+    "glm-4-flash",
+    "glm-4-plus",
+    "glm-4-long",
+    "glm-5",
+    "glm-5-turbo",
+    "glm-5.1",
+    "glm-4.5",
+    "glm-4.6",
+    "glm-4.7",
+    "minimax-01",
+}
+
+VISION_UNSUPPORTED_PREFIXES = [
+    "deepseek-",
+    "minimax-",
+    "gpt-3.5-",
+    "o1-",
+]
+
+
+def is_vision_model(model: str) -> bool:
+    clean = model.split("/", 1)[-1] if "/" in model else model
+    if clean in VISION_UNSUPPORTED_EXACT:
+        return False
+    for prefix in VISION_UNSUPPORTED_PREFIXES:
+        if clean.startswith(prefix):
+            return False
+    return True
+
 
 def get_model_token_limit(model: str) -> int:
     clean = model.split("/", 1)[-1] if "/" in model else model

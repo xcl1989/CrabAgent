@@ -1,6 +1,6 @@
 # 🦀 CrabAgent
 
-> A local AI assistant — CLI + Web dual-mode, MCP support, web search, file operations, custom plugins, and more.
+> A local AI agent platform — CLI + Web dual-mode, MCP client, multimodal (image) support, web search, file operations, custom plugins, and more.
 
 CrabAgent is an AI agent platform that runs from any project directory. It works in your terminal (CLI) or your browser (Web UI), with full access to your local files, tools, and plugins.
 
@@ -11,14 +11,15 @@ CrabAgent is an AI agent platform that runs from any project directory. It works
 | Feature | Description |
 |---------|-------------|
 | **Dual Mode** | CLI terminal + Web browser, same data |
+| **Multimodal (Image)** | Send images via paste, upload, or drag-and-drop; auto vision detection for model compatibility |
 | **MCP Client** | Connect to external MCP servers (stdio + HTTP), persistent connections with UI management |
 | **Web Search & Scrape** | Built-in `web_search` (DuckDuckGo zero-config + SearXNG optional) and `web_scrape` tools |
-| **File Operations** | read, write, edit, search, bash execution |
+| **File Operations** | Read, write, edit, search, bash execution |
 | **Snapshot / Rollback 🦀** | Auto-snapshot before file changes, rollback anytime |
 | **Todo List** | Agent-managed tasks, real-time floating widget |
 | **Agent Questions** | Agent can ask you questions (with options) |
 | **Plugin System** | Write a Python function in `.crabagent/tools/` — it becomes a tool |
-| **Multi-Provider** | OpenAI, DeepSeek, Anthropic, and any LiteLLM-compatible provider |
+| **Multi-Provider** | OpenAI, DeepSeek, Anthropic, Google Gemini, and any LiteLLM-compatible provider |
 | **Conversation Branches** | Branch from any message, explore different paths |
 | **Skill System** | Domain-specific instructions via SKILL.md |
 | **Context Compression** | Auto-summarize long conversations |
@@ -124,6 +125,7 @@ crabagent skill list
 | `/todo [cmd]` | Manage tasks |
 | `/skills` | List available skills |
 | `/skill <name>` | Show skill content |
+| `/image <path> [msg]` | Send an image with optional message |
 
 ---
 
@@ -133,12 +135,42 @@ Start with `crabagent --serve`, then open `http://localhost:5210`.
 
 - **Login** — Default admin account: `admin` / `xcl1989`
 - **Chat** — Send messages, stream responses in real-time
+- **Image Support** — Paste from clipboard, click to upload, or drag-and-drop images (max 5 per message, 5MB each)
 - **MCP Servers** — Add, connect/disconnect, manage MCP servers via UI
+- **Settings** — Configure SearXNG URL and other settings (MCP panel → Settings tab)
 - **Web Search** — Built-in `web_search` and `web_scrape` tools (DuckDuckGo by default, configure SearXNG for better results)
 - **File Browser** — Browse and preview project files
 - **Todo Widget** — Floating task list (bottom-right)
 - **Session Management** — Create, switch, delete sessions
 - **Provider Management** — Add/configure providers in the UI
+
+---
+
+## Image / Multimodal Support
+
+CrabAgent supports sending images alongside text in both CLI and Web UI.
+
+### Web UI
+- **Paste**: Ctrl+V / Cmd+V to paste images from clipboard
+- **Upload**: Click the attachment button to select files
+- **Drag & Drop**: Drag images directly into the chat
+- Images appear as thumbnails before sending and in the chat history
+
+### CLI
+```bash
+# Send an image with a message
+/image /path/to/image.png What's in this image?
+```
+
+### Vision Model Detection
+CrabAgent automatically detects whether the current model supports vision:
+- **Vision models** (Claude 3+, GPT-4o, Gemini, etc.): Images sent as native multimodal content
+- **Non-vision models** (DeepSeek, o1-mini, etc.): Images saved to temp files, text placeholder sent to LLM with file path info for MCP tool usage
+
+### Limits
+- Max **5 images** per message
+- Max **5MB** per image
+- Supported formats: PNG, JPEG, GIF, WebP
 
 ---
 
@@ -156,6 +188,12 @@ CrabAgent acts as an **MCP client**, connecting to external MCP servers to exten
 Via Web UI (MCP panel) or directly in the database.
 
 MCP tools are automatically prefixed as `mcp__{server}__{tool}` and visually distinguished with a purple icon in the chat.
+
+### Connection Management
+
+- Persistent connections via singleton manager — no subprocess spawn overhead on each request
+- Manual reconnect on error — click Reconnect in the UI
+- Status polling every 60 seconds
 
 ---
 
@@ -176,7 +214,15 @@ For better search quality, deploy a SearXNG instance:
 docker run -d --name searxng -p 8888:8080 searxng/searxng
 ```
 
-Then enable JSON API and configure the URL in Settings (MCP panel → Settings tab).
+Then enable JSON API in SearXNG's `settings.yml`:
+```yaml
+search:
+  formats:
+    - html
+    - json
+```
+
+Configure the URL in **Settings** (MCP panel → Settings tab) or use the "Test Connection" button to verify.
 
 ---
 
@@ -237,7 +283,7 @@ CrabAgent/
 │   └── crabagent/
 │       ├── cli/       # CLI entrypoint
 │       ├── core/      # Agent loop, tools, events, database
-│       │   ├── agent/  # Agent context, loop, tool registry
+│       │   ├── agent/  # Agent context, loop, tool registry, token limits
 │       │   └── mcp/    # MCP client manager
 │       └── serve/     # FastAPI server + API endpoints
 ├── frontend/          # React SPA

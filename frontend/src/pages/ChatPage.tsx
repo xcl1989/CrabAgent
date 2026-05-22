@@ -31,6 +31,7 @@ interface ChatMessage {
   options?: string[];
   source?: "builtin" | "mcp";
   server_name?: string;
+  images?: string[];
 }
 
 function sseEventToMessages(event: SSEEvent, messages: ChatMessage[]): ChatMessage[] {
@@ -194,6 +195,17 @@ function dbMessagesToChat(msgs: Message[]): ChatMessage[] {
 
     const base: ChatMessage = { id: `db-${m.id}`, role: m.role, content: m.content || "" };
     if (m.reasoning_content) base.reasoning_content = m.reasoning_content;
+    if (m.role === "user" && m.content && m.content.startsWith("[{")) {
+      try {
+        const blocks = JSON.parse(m.content);
+        if (Array.isArray(blocks)) {
+          const textBlock = blocks.find((b: any) => b.type === "text");
+          const imageBlocks = blocks.filter((b: any) => b.type === "image_url");
+          if (textBlock) base.content = textBlock.text || "";
+          if (imageBlocks.length > 0) base.images = imageBlocks.map((b: any) => b.image_url?.url || "");
+        }
+      } catch { /* keep original content */ }
+    }
     result.push(base);
   }
 
@@ -224,6 +236,7 @@ export default function ChatPage({ onLogout }: Props) {
   const [replayProgress, setReplayProgress] = useState({ current: 0, total: 0 });
   const [showFiles, setShowFiles] = useState(false);
   const [todoRefreshKey, setTodoRefreshKey] = useState(0);
+  const [pendingImages, setPendingImages] = useState<string[]>([]);
   const activeSessionRef = useRef<Session | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const prevMsgCountRef = useRef(0);
@@ -350,16 +363,65 @@ export default function ChatPage({ onLogout }: Props) {
   };
 
   const handleSend = async () => {
-    if (!input.trim() || !activeSession || sending) return;
+    if ((!input.trim() && pendingImages.length === 0) || !activeSession || sending) return;
     const text = input.trim();
+    const images = [...pendingImages];
     setInput("");
-    setMessages((prev) => [...prev, { id: `u-${Date.now()}`, role: "user", content: text }]);
+    setPendingImages([]);
+    setMessages((prev) => [...prev, { id: `u-${Date.now()}`, role: "user", content: text, images: images.length > 0 ? images : undefined }]);
     setSending(true);
     try {
-      await sessionsApi.sendPrompt(activeSession.session_id, text, selectedModel);
+      await sessionsApi.sendPrompt(activeSession.session_id, text || "请分析这张图片", selectedModel, images.length > 0 ? images : undefined);
     } catch {
       setSending(false);
     }
+  };
+
+  const processImageFile = (file: File) => {
+    if (pendingImages.length >= 5) return;
+    if (file.size > 5 * 1024 * 1024) return;
+    if (!file.type.startsWith("image/")) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const dataUrl = e.target?.result as string;
+      if (dataUrl) setPendingImages((prev) => [...prev, dataUrl]);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleImagePaste = (e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (const item of Array.from(items)) {
+      if (item.type.startsWith("image/")) {
+        e.preventDefault();
+        const file = item.getAsFile();
+        if (file) processImageFile(file);
+        return;
+      }
+    }
+  };
+
+  const handleImageUpload = () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/*";
+    input.multiple = true;
+    input.onchange = (e) => {
+      const files = (e.target as HTMLInputElement).files;
+      if (files) Array.from(files).forEach(processImageFile);
+    };
+    input.click();
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    const files = e.dataTransfer?.files;
+    if (files) Array.from(files).forEach(processImageFile);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
   };
 
   const handleToolConfirm = async (confirmId: string, approved: boolean) => {
@@ -502,7 +564,7 @@ export default function ChatPage({ onLogout }: Props) {
 
             <McpStatusBar status={mcpStatus} />
 
-            <div className="px-4 pb-4">
+            <div className="px-4 pb-4" onDrop={handleDrop} onDragOver={handleDragOver}>
               {models.length > 0 && (
                 <div className="mb-2 flex items-center gap-2">
                   <span className="text-xs" style={{ color: "var(--text-secondary)" }}>Model:</span>
@@ -518,13 +580,39 @@ export default function ChatPage({ onLogout }: Props) {
                   </select>
                 </div>
               )}
+              {pendingImages.length > 0 && (
+                <div className="flex gap-2 mb-2 flex-wrap">
+                  {pendingImages.map((img, i) => (
+                    <div key={i} className="relative inline-block">
+                      <img src={img} className="h-16 w-16 object-cover rounded-lg" style={{ border: "1px solid var(--border)" }} />
+                      <button
+                        onClick={() => setPendingImages((prev) => prev.filter((_, idx) => idx !== i))}
+                        className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full flex items-center justify-center text-xs"
+                        style={{ background: "var(--danger)", color: "#fff", fontSize: "10px", lineHeight: 1 }}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
               <div className="flex gap-2">
+                <button
+                  onClick={handleImageUpload}
+                  disabled={sending || replaying || pendingImages.length >= 5}
+                  className="px-3 py-3 rounded-lg text-sm disabled:opacity-30"
+                  style={{ background: "var(--bg-secondary)", color: "var(--text-secondary)", border: "1px solid var(--border)" }}
+                  title="Attach image"
+                >
+                  📎
+                </button>
                 <input
                   type="text"
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSend()}
-                  placeholder="Type a message..."
+                  onPaste={handleImagePaste}
+                  placeholder="Type a message... (paste/drag images here)"
                   disabled={sending || replaying}
                   className="flex-1 px-4 py-3 rounded-lg text-sm outline-none disabled:opacity-50"
                   style={{ background: "var(--bg-secondary)", color: "var(--text-primary)", border: "1px solid var(--border)" }}
@@ -540,7 +628,7 @@ export default function ChatPage({ onLogout }: Props) {
                 ) : (
                   <button
                     onClick={handleSend}
-                    disabled={!input.trim()}
+                    disabled={!input.trim() && pendingImages.length === 0}
                     className="px-4 py-3 rounded-lg text-sm font-medium text-white disabled:opacity-50"
                     style={{ background: "var(--accent)" }}
                   >
