@@ -10,14 +10,14 @@ function cronToHuman(expr: string): string {
   const parts = expr.trim().split(/\s+/);
   if (parts.length !== 5) return expr;
   const [min, hour, day, month, week] = parts;
-  if (min.startsWith("*/")) return `每${min.slice(2)}分钟`;
-  if (hour === "*" && day === "*" && month === "*" && week === "*") return `每天 ${hour}:${min.padStart(2, "0")}`;
+  if (min.startsWith("*/")) return `Every ${min.slice(2)} min`;
+  if (hour === "*" && day === "*" && month === "*" && week === "*") return `Daily at ${hour}:${min.padStart(2, "0")}`;
   if (day === "*" && month === "*" && week !== "*") {
-    const days: Record<string, string> = { "0": "日", "1": "一", "2": "二", "3": "三", "4": "四", "5": "五", "6": "六" };
-    const wdays = week.split(",").map((d) => days[d] || d).join("、");
-    return `每周${wdays} ${hour}:${min.padStart(2, "0")}`;
+    const days: Record<string, string> = { "0": "Sun", "1": "Mon", "2": "Tue", "3": "Wed", "4": "Thu", "5": "Fri", "6": "Sat" };
+    const wdays = week.split(",").map((d) => days[d] || d).join(", ");
+    return `Every ${wdays} at ${hour}:${min.padStart(2, "0")}`;
   }
-  if (hour !== "*" && day !== "*" && month !== "*") return `${month}月${day}日 ${hour}:${min.padStart(2, "0")}`;
+  if (hour !== "*" && day !== "*" && month !== "*") return `${month}/${day} ${hour}:${min.padStart(2, "0")}`;
   return expr;
 }
 
@@ -48,12 +48,12 @@ export function ScheduledTaskPanel({ onClose, onSwitchSession }: Props) {
 
   const handleSubmit = async () => {
     if (!form.name.trim() || !form.prompt.trim() || !form.cron_expression.trim()) {
-      setError("所有字段必填");
+      setError("All fields are required");
       return;
     }
     const parts = form.cron_expression.trim().split(/\s+/);
     if (parts.length !== 5) {
-      setError("cron 表达式需要5个字段（分 时 日 月 周），用空格分隔");
+      setError("Cron expression requires 5 fields: min hour day month weekday");
       return;
     }
     setLoading(true);
@@ -67,20 +67,20 @@ export function ScheduledTaskPanel({ onClose, onSwitchSession }: Props) {
       await fetchTasks();
       resetForm();
     } catch (e: any) {
-      setError(e?.message || e?.detail || "操作失败");
+      setError(e?.message || e?.detail || "Operation failed");
     } finally {
       setLoading(false);
     }
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm("确定删除此任务？")) return;
+    if (!confirm("Delete this task?")) return;
     setActing(id);
     try {
       await deleteScheduledTask(id);
       await fetchTasks();
     } catch (e: any) {
-      setError(e?.message || "删除失败");
+      setError(e?.message || "Delete failed");
     } finally {
       setActing(null);
     }
@@ -100,7 +100,7 @@ export function ScheduledTaskPanel({ onClose, onSwitchSession }: Props) {
     try {
       await runScheduledTask(id);
     } catch (e: any) {
-      setError(e?.message || "执行失败");
+      setError(e?.message || "Run failed");
     } finally {
       setActing(null);
     }
@@ -117,7 +117,7 @@ export function ScheduledTaskPanel({ onClose, onSwitchSession }: Props) {
     <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.6)" }}>
       <div className="w-full max-w-lg rounded-xl p-6 max-h-[85vh] overflow-y-auto" style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}>
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-bold" style={{ color: "var(--text-primary)" }}>定时任务</h2>
+          <h2 className="text-lg font-bold" style={{ color: "var(--text-primary)" }}>Scheduled Tasks</h2>
           <button onClick={onClose} className="text-xl leading-none" style={{ color: "var(--text-secondary)" }}>✕</button>
         </div>
 
@@ -132,10 +132,10 @@ export function ScheduledTaskPanel({ onClose, onSwitchSession }: Props) {
               className="w-full mb-4 py-2 rounded-lg text-sm font-medium transition-opacity hover:opacity-80"
               style={{ background: "var(--accent)", color: "#fff" }}
             >
-              + 新建任务
+              + New Task
             </button>
             {tasks.length === 0 ? (
-              <div className="text-center text-sm py-6" style={{ color: "var(--text-secondary)" }}>暂无定时任务</div>
+              <div className="text-center text-sm py-6" style={{ color: "var(--text-secondary)" }}>No scheduled tasks</div>
             ) : (
               tasks.map((t) => (
                 <div key={t.id} className="mb-3 p-3 rounded-lg" style={{ background: "var(--bg-primary)", border: "1px solid var(--border)" }}>
@@ -147,7 +147,7 @@ export function ScheduledTaskPanel({ onClose, onSwitchSession }: Props) {
                         className="text-[10px] px-2 py-0.5 rounded"
                         style={{ background: t.enabled ? "#065f46" : "#4b5563", color: "#fff" }}
                       >
-                        {t.enabled ? "运行中" : "已暂停"}
+                        {t.enabled ? "Active" : "Paused"}
                       </button>
                     </div>
                   </div>
@@ -160,9 +160,9 @@ export function ScheduledTaskPanel({ onClose, onSwitchSession }: Props) {
                   <div className="text-xs mb-2 truncate" style={{ color: "var(--text-secondary)" }}>{t.prompt}</div>
                   {t.last_run_at && (
                     <div className="text-[10px] mb-2" style={{ color: "var(--text-secondary)" }}>
-                      上次: {new Date(t.last_run_at).toLocaleString("zh-CN")}
-                      {t.last_status === "error" && <span style={{ color: "#fca5a5" }}> (失败)</span>}
-                      {t.last_status === "success" && <span style={{ color: "#34d399" }}> (成功)</span>}
+                      Last: {new Date(t.last_run_at).toLocaleString()}
+                      {t.last_status === "error" && <span style={{ color: "#fca5a5" }}> (failed)</span>}
+                      {t.last_status === "success" && <span style={{ color: "#34d399" }}> (success)</span>}
                     </div>
                   )}
                   <div className="flex items-center gap-2">
@@ -171,7 +171,7 @@ export function ScheduledTaskPanel({ onClose, onSwitchSession }: Props) {
                       className="text-[10px] px-2 py-0.5 rounded transition-opacity hover:opacity-80"
                       style={{ background: "var(--accent)", color: "#fff" }}
                     >
-                      {acting === t.id ? "..." : "▶ 立即执行"}
+                      {acting === t.id ? "..." : "▶ Run Now"}
                     </button>
                     {t.last_conversation_id && (
                       <button
@@ -179,7 +179,7 @@ export function ScheduledTaskPanel({ onClose, onSwitchSession }: Props) {
                         className="text-[10px] px-2 py-0.5 rounded transition-opacity hover:opacity-80"
                         style={{ background: "var(--bg-tertiary)", color: "var(--text-primary)" }}
                       >
-                        查看结果
+                        View Result
                       </button>
                     )}
                     <button
@@ -187,14 +187,14 @@ export function ScheduledTaskPanel({ onClose, onSwitchSession }: Props) {
                       className="text-[10px] px-2 py-0.5 rounded transition-opacity hover:opacity-80"
                       style={{ background: "var(--bg-tertiary)", color: "var(--text-primary)" }}
                     >
-                      编辑
+                      Edit
                     </button>
                     <button
                       onClick={() => handleDelete(t.id)} disabled={acting === t.id}
                       className="text-[10px] px-2 py-0.5 rounded transition-opacity hover:opacity-80"
                       style={{ background: "#2d1215", color: "#fca5a5" }}
                     >
-                      删除
+                      Delete
                     </button>
                   </div>
                 </div>
@@ -203,27 +203,27 @@ export function ScheduledTaskPanel({ onClose, onSwitchSession }: Props) {
           </>
         ) : (
           <div>
-            <label className="block text-xs font-medium mb-1" style={{ color: "var(--text-primary)" }}>任务名称</label>
+            <label className="block text-xs font-medium mb-1" style={{ color: "var(--text-primary)" }}>Name</label>
             <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}
               className="w-full mb-3 px-3 py-2 rounded-lg text-sm outline-none" style={{ background: "var(--bg-primary)", color: "var(--text-primary)", border: "1px solid var(--border)" }}
-              placeholder="如：每日新闻汇总" />
+              placeholder="e.g. Morning news summary" />
 
-            <label className="block text-xs font-medium mb-1" style={{ color: "var(--text-primary)" }}>提示词</label>
+            <label className="block text-xs font-medium mb-1" style={{ color: "var(--text-primary)" }}>Prompt</label>
             <textarea value={form.prompt} onChange={(e) => setForm({ ...form, prompt: e.target.value })}
               className="w-full mb-3 px-3 py-2 rounded-lg text-sm outline-none resize-none" rows={3}
               style={{ background: "var(--bg-primary)", color: "var(--text-primary)", border: "1px solid var(--border)" }}
-              placeholder="定时发送给 AI 的问题" />
+              placeholder="The question to send to the AI" />
 
-            <label className="block text-xs font-medium mb-1" style={{ color: "var(--text-primary)" }}>cron 表达式 (分 时 日 月 周)</label>
+            <label className="block text-xs font-medium mb-1" style={{ color: "var(--text-primary)" }}>Cron Expression (min hour day month weekday)</label>
             <input value={form.cron_expression} onChange={(e) => setForm({ ...form, cron_expression: e.target.value })}
               className="w-full mb-1 px-3 py-2 rounded-lg text-sm font-mono outline-none" style={{ background: "var(--bg-primary)", color: "var(--text-primary)", border: "1px solid var(--border)" }}
               placeholder="0 9 * * *" />
             {form.cron_expression && <div className="text-[10px] mb-3" style={{ color: "var(--text-secondary)" }}>→ {cronToHuman(form.cron_expression)}</div>}
 
-            <label className="block text-xs font-medium mb-1" style={{ color: "var(--text-primary)" }}>模型 (可选)</label>
+            <label className="block text-xs font-medium mb-1" style={{ color: "var(--text-primary)" }}>Model (optional)</label>
             <input value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })}
               className="w-full mb-4 px-3 py-2 rounded-lg text-sm outline-none" style={{ background: "var(--bg-primary)", color: "var(--text-primary)", border: "1px solid var(--border)" }}
-              placeholder="留空使用默认模型" />
+              placeholder="Leave empty to use default model" />
 
             <div className="flex items-center gap-2">
               <button
@@ -231,14 +231,14 @@ export function ScheduledTaskPanel({ onClose, onSwitchSession }: Props) {
                 className="flex-1 py-2 rounded-lg text-sm font-medium transition-opacity hover:opacity-80"
                 style={{ background: "var(--accent)", color: "#fff" }}
               >
-                {loading ? "..." : editingId ? "保存修改" : "创建任务"}
+                {loading ? "..." : editingId ? "Save Changes" : "Create Task"}
               </button>
               <button
                 onClick={resetForm}
                 className="flex-1 py-2 rounded-lg text-sm transition-opacity hover:opacity-80"
                 style={{ background: "var(--bg-tertiary)", color: "var(--text-primary)" }}
               >
-                取消
+                Cancel
               </button>
             </div>
           </div>

@@ -255,6 +255,10 @@ def _build_messages(context: AgentContext) -> list[dict]:
             if vision:
                 clean_blocks = []
                 for block in content:
+                    if not isinstance(block, dict):
+                        if isinstance(block, str):
+                            clean_blocks.append({"type": "text", "text": block})
+                        continue
                     if block.get("type") == "text":
                         clean_blocks.append({"type": "text", "text": block.get("text", "")})
                     elif block.get("type") == "image_url":
@@ -263,6 +267,10 @@ def _build_messages(context: AgentContext) -> list[dict]:
             else:
                 text_parts = []
                 for block in content:
+                    if not isinstance(block, dict):
+                        if isinstance(block, str):
+                            text_parts.append(block)
+                        continue
                     if block.get("type") == "text":
                         text_parts.append(block.get("text", ""))
                     elif block.get("type") == "image_url":

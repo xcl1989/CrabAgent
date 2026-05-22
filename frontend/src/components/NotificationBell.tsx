@@ -61,7 +61,7 @@ export function NotificationBell({ onSwitchSession }: Props) {
         onClick={() => setOpen(!open)}
         className="relative p-1.5 rounded hover:opacity-80 transition-opacity"
         style={{ background: "transparent" }}
-        title="通知"
+        title="Notifications"
       >
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
@@ -82,15 +82,15 @@ export function NotificationBell({ onSwitchSession }: Props) {
           style={{ background: "var(--bg-primary)", border: "1px solid var(--border)" }}
         >
           <div className="flex items-center justify-between px-4 py-2.5" style={{ borderBottom: "1px solid var(--border)" }}>
-            <span className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>通知</span>
+            <span className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>Notifications</span>
             {notifications.some((n) => !n.read) && (
               <button onClick={handleMarkAll} className="text-xs" style={{ color: "var(--accent)" }}>
-                全部已读
+                Mark all read
               </button>
             )}
           </div>
           {notifications.length === 0 ? (
-            <div className="px-4 py-6 text-center text-xs" style={{ color: "var(--text-secondary)" }}>暂无通知</div>
+            <div className="px-4 py-6 text-center text-xs" style={{ color: "var(--text-secondary)" }}>No notifications</div>
           ) : (
             notifications.slice(0, 20).map((n) => (
               <div
@@ -108,7 +108,7 @@ export function NotificationBell({ onSwitchSession }: Props) {
                 </div>
                 <div className="text-xs mt-0.5 truncate" style={{ color: "var(--text-secondary)" }}>{n.body}</div>
                 <div className="text-[10px] mt-1" style={{ color: "var(--text-secondary)" }}>
-                  {n.created_at ? new Date(n.created_at).toLocaleString("zh-CN") : ""}
+                  {n.created_at ? new Date(n.created_at).toLocaleString() : ""}
                 </div>
               </div>
             ))
