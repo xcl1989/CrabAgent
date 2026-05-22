@@ -21,6 +21,11 @@ from crabagent.serve.services import conversation as conv_svc
 from crabagent.serve.services.message import get_messages, message_to_dict, save_message
 from crabagent.serve.services.persistence import PersistenceListener
 
+try:
+    import crabagent.core.agent.tools.browser  # noqa: F401
+except Exception:
+    pass
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["prompt"])
@@ -260,6 +265,14 @@ async def prompt_async(
         finally:
             elapsed = round(time.time() - t0, 1)
             resolved_model = context.metadata.get("resolved_model", context.model or "")
+
+            browser_mgr = context.metadata.get("_browser_manager")
+            if browser_mgr:
+                try:
+                    await browser_mgr.close()
+                except Exception:
+                    pass
+
             stats_data = {
                 "elapsed_seconds": elapsed,
                 "model": resolved_model,

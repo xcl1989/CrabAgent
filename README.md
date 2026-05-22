@@ -11,6 +11,7 @@ CrabAgent is an AI agent platform that runs from any project directory. It works
 | Feature | Description |
 |---------|-------------|
 | **Dual Mode** | CLI terminal + Web browser, same data |
+| **Browser Automation** | Playwright-powered headless browser: navigate, click, type, screenshot, extract, scroll |
 | **Multimodal (Image)** | Send images via paste, upload, or drag-and-drop; auto vision detection for model compatibility |
 | **MCP Client** | Connect to external MCP servers (stdio + HTTP), persistent connections with UI management |
 | **Web Search & Scrape** | Built-in `web_search` (DuckDuckGo zero-config + SearXNG optional) and `web_scrape` tools |
@@ -63,7 +64,13 @@ pip install 'crabagent[serve]'
 
 Optional extras:
 - `pip install 'crabagent[serve]'` — Web UI dependencies
+- `pip install 'crabagent[browser]'` — Browser automation (Playwright)
 - `pip install 'crabagent[dev]'` — Development dependencies (testing, linting)
+
+After installing browser support, install the Chromium browser:
+```bash
+playwright install chromium
+```
 
 ### From source
 
@@ -174,6 +181,50 @@ CrabAgent automatically detects whether the current model supports vision:
 
 ---
 
+## Browser Automation
+
+CrabAgent can control a headless Chromium browser to interact with web pages, powered by [Playwright](https://playwright.dev/python/).
+
+### Setup
+
+```bash
+pip install 'crabagent[browser]'
+playwright install chromium
+```
+
+> Browser tools are optional — if Playwright is not installed, CrabAgent works normally without them.
+
+### Available Tools
+
+| Tool | Permission | Description |
+|------|-----------|-------------|
+| `browser_navigate` | Required | Open a URL, return page title, content preview, and screenshot |
+| `browser_click` | Required | Click an element by CSS selector or visible text |
+| `browser_type` | Required | Type text into an input field, optionally submit the form |
+| `browser_screenshot` | Auto | Take a screenshot (viewport or full page), saved to temp file |
+| `browser_extract` | Auto | Extract text content from the page or a specific element |
+| `browser_scroll` | Auto | Scroll the page up or down by a specified amount |
+| `browser_close` | Auto | Close the browser and release resources |
+
+### How It Works
+
+- **Lazy start**: The browser launches on first `browser_navigate` call — no resource overhead until needed
+- **Session-scoped**: One browser instance per conversation, shared across all tool calls
+- **Auto-cleanup**: Browser closes automatically when the agent finishes or the session ends
+- **Headless by default**: Set `CRAB_BROWSER_HEADLESS=false` to run in headed mode (useful for debugging)
+- Screenshots are saved to `/tmp/crabagent_screenshots/`
+
+### Example Usage
+
+Ask the agent in natural language:
+```
+> Open https://news.ycombinator.com and show me the top 5 stories
+> Search for "Python async" on Google and extract the results
+> Take a screenshot of the current page
+```
+
+---
+
 ## MCP (Model Context Protocol)
 
 CrabAgent acts as an **MCP client**, connecting to external MCP servers to extend agent capabilities.
@@ -268,6 +319,7 @@ Environment variables / `.env`:
 | `CRAB_MAX_ITERATIONS` | `50` | Max agent iterations |
 | `CRAB_MAX_TOKENS` | `4096` | Max response tokens |
 | `CRAB_MOLT_KEEP_COUNT` | `20` | Number of snapshots to keep |
+| `CRAB_BROWSER_HEADLESS` | `true` | Run browser in headless mode (`false` for headed) |
 
 ---
 

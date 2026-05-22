@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "crabagent"
-version = "0.2.0"
+version = "0.3.0"
 description = "CrabAgent - AI Agent Platform with dual-mode (CLI + Serve)"
 requires-python = ">=3.12"
 dependencies = [
@@ -29,6 +29,9 @@ serve = [
     "fastapi>=0.110",
     "uvicorn>=0.29",
     "redis>=5.0",
+]
+browser = [
+    "playwright>=1.40",
 ]
 dev = [
     "ruff>=0.4",

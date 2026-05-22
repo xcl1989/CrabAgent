@@ -366,6 +366,10 @@ async def _setup_agent_context(args, conversation_id: int | None = None, history
     import crabagent.core.agent.tools.read  # noqa: F401
     import crabagent.core.agent.tools.web  # noqa: F401
     import crabagent.core.agent.tools.write  # noqa: F401
+    try:
+        import crabagent.core.agent.tools.browser  # noqa: F401
+    except Exception:
+        pass
     from crabagent.core.agent.tools import registry as _registry
 
     workspace = args.workspace or settings.workspace
@@ -513,6 +517,12 @@ async def _run_single(args):
                 await mcp_mgr.stop_all()
             except Exception:
                 pass
+        browser_mgr = context.metadata.get("_browser_manager")
+        if browser_mgr:
+            try:
+                await browser_mgr.close()
+            except Exception:
+                pass
 
     if session_id_str:
         from crabagent.core.database import async_session_factory
@@ -527,10 +537,10 @@ def _print_banner(context, provider: str, model: str):
         from rich.console import Console
         from rich.text import Text
         console = Console()
-        t = Text("CrabAgent v0.1.0", style="bold")
+        t = Text("CrabAgent v0.3.0", style="bold")
         console.print(t)
     except ImportError:
-        print("CrabAgent v0.1.0")
+        print("CrabAgent v0.3.0")
 
     print(f"  provider: {provider}  model: {model}")
     print(f"  workspace: {context.workspace}")
@@ -686,6 +696,12 @@ async def _run_interactive(args):
                     await mcp_mgr.stop_all()
                 except Exception:
                     pass
+            browser_mgr = context.metadata.get("_browser_manager")
+            if browser_mgr:
+                try:
+                    await browser_mgr.close()
+                except Exception:
+                    pass
             print("\nBye!")
             break
 
@@ -702,6 +718,12 @@ async def _run_interactive(args):
                 if mcp_mgr:
                     try:
                         await mcp_mgr.stop_all()
+                    except Exception:
+                        pass
+                browser_mgr = context.metadata.get("_browser_manager")
+                if browser_mgr:
+                    try:
+                        await browser_mgr.close()
                     except Exception:
                         pass
                 break

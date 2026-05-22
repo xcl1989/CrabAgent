@@ -1,6 +1,6 @@
 # 🦀 CrabAgent
 
-> 本地 AI Agent 平台 — CLI + Web 双模，多模态（图片）支持、MCP 客户端、网页搜索、文件操作、自定义插件等
+> 本地 AI Agent 平台 — CLI + Web 双模，浏览器自动化、多模态（图片）支持、MCP 客户端、网页搜索、文件操作、自定义插件等
 
 CrabAgent 是一个 AI Agent 平台，可以从任意项目目录启动。支持终端（CLI）和浏览器（Web UI）两种模式，能够完整访问本地文件、运行工具和插件。
 
@@ -11,6 +11,7 @@ CrabAgent 是一个 AI Agent 平台，可以从任意项目目录启动。支持
 | 功能 | 说明 |
 |------|------|
 | **双模操作** | CLI 终端 + Web 浏览器，同一套数据 |
+| **浏览器自动化** | Playwright 驱动的无头浏览器：导航、点击、输入、截图、提取、滚动 |
 | **多模态（图片）** | 支持粘贴、上传、拖拽发送图片；自动检测视觉模型兼容性 |
 | **MCP 客户端** | 连接外部 MCP 服务器（stdio + HTTP），持久连接，UI 管理 |
 | **网页搜索 & 抓取** | 内置 `web_search`（DuckDuckGo 零配置 + SearXNG 可选）和 `web_scrape` 工具 |
@@ -63,7 +64,13 @@ pip install 'crabagent[serve]'
 
 可选扩展：
 - `pip install 'crabagent[serve]'` — Web UI 依赖
+- `pip install 'crabagent[browser]'` — 浏览器自动化（Playwright）
 - `pip install 'crabagent[dev]'` — 开发依赖（测试、lint）
+
+安装浏览器自动化后，还需安装 Chromium：
+```bash
+playwright install chromium
+```
 
 ### 源码安装
 
@@ -174,6 +181,50 @@ CrabAgent 自动检测当前模型是否支持视觉：
 
 ---
 
+## 浏览器自动化
+
+CrabAgent 可以控制无头 Chromium 浏览器与网页交互，基于 [Playwright](https://playwright.dev/python/)。
+
+### 安装
+
+```bash
+pip install 'crabagent[browser]'
+playwright install chromium
+```
+
+> 浏览器工具是可选的 — 未安装 Playwright 时 CrabAgent 其他功能不受影响。
+
+### 可用工具
+
+| 工具 | 需确认 | 说明 |
+|------|--------|------|
+| `browser_navigate` | 是 | 打开 URL，返回页面标题、内容预览和截图 |
+| `browser_click` | 是 | 通过 CSS 选择器或可见文本点击元素 |
+| `browser_type` | 是 | 在输入框中输入文本，可选自动提交表单 |
+| `browser_screenshot` | 否 | 截取页面截图（可视区域或整页），保存到临时文件 |
+| `browser_extract` | 否 | 提取页面或指定元素的文本内容 |
+| `browser_scroll` | 否 | 向上或向下滚动页面 |
+| `browser_close` | 否 | 关闭浏览器释放资源 |
+
+### 工作原理
+
+- **惰性启动**：首次调用 `browser_navigate` 时才启动浏览器 — 不使用时不占用资源
+- **会话级共享**：每个对话共享一个浏览器实例
+- **自动清理**：Agent 完成或会话结束时自动关闭浏览器
+- **默认无头模式**：设置 `CRAB_BROWSER_HEADLESS=false` 可切换为有头模式（便于调试）
+- 截图保存到 `/tmp/crabagent_screenshots/`
+
+### 使用示例
+
+用自然语言让 Agent 操作浏览器：
+```
+> 打开 https://news.ycombinator.com 并显示前 5 条新闻
+> 在 Google 上搜索 "Python async" 并提取搜索结果
+> 给当前页面截图
+```
+
+---
+
 ## MCP（Model Context Protocol）
 
 CrabAgent 作为 **MCP 客户端**，连接外部 MCP 服务器扩展 Agent 能力。
@@ -268,6 +319,7 @@ def run(name: str) -> str:
 | `CRAB_MAX_ITERATIONS` | `50` | Agent 最大迭代次数 |
 | `CRAB_MAX_TOKENS` | `4096` | 最大响应 Token 数 |
 | `CRAB_MOLT_KEEP_COUNT` | `20` | 保留的快照数量 |
+| `CRAB_BROWSER_HEADLESS` | `true` | 浏览器无头模式（设为 `false` 为有头模式） |
 
 ---
 
