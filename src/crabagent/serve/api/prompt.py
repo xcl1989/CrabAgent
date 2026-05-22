@@ -26,6 +26,11 @@ try:
 except Exception:
     pass
 
+try:
+    import crabagent.core.agent.tools.scheduled_task  # noqa: F401
+except Exception:
+    pass
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["prompt"])

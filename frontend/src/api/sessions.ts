@@ -39,6 +39,10 @@ export function createSession(title?: string): Promise<Session> {
   return api.post("/sessions", { title: title || "" });
 }
 
+export function getSession(sessionId: string): Promise<Session> {
+  return api.get(`/sessions/${sessionId}`);
+}
+
 export function deleteSession(sessionId: string): Promise<void> {
   return api.del(`/sessions/${sessionId}`);
 }

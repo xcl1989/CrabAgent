@@ -28,16 +28,29 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.warning("Failed to initialize some MCP servers")
 
+    from crabagent.serve.scheduler import get_scheduler
+
+    try:
+        await get_scheduler().start()
+        logger.info("Scheduler started")
+    except Exception:
+        logger.warning("Failed to start scheduler")
+
     yield
 
     await manager.stop_all()
     logger.info("MCP servers stopped")
 
+    try:
+        await get_scheduler().shutdown()
+    except Exception:
+        pass
+
 
 def create_app() -> FastAPI:
     app = FastAPI(
         title="CrabAgent",
-        version="0.3.1",
+        version="0.4.0",
         lifespan=lifespan,
     )
     app.state.event_queues = {}
@@ -59,9 +72,11 @@ def create_app() -> FastAPI:
     from crabagent.serve.api.mcp_server import router as mcp_server_router
     from crabagent.serve.api.message import router as message_router
     from crabagent.serve.api.molt import router as molt_router
+    from crabagent.serve.api.notification import router as notification_router
     from crabagent.serve.api.prompt import router as prompt_router
     from crabagent.serve.api.provider import router as provider_router
     from crabagent.serve.api.replay import router as replay_router
+    from crabagent.serve.api.scheduled_task import router as scheduled_task_router
     from crabagent.serve.api.session import router as session_router
     from crabagent.serve.api.settings import router as settings_router
     from crabagent.serve.api.todo import router as todo_router
@@ -81,10 +96,12 @@ def create_app() -> FastAPI:
     app.include_router(replay_router, prefix="/api")
     app.include_router(settings_router, prefix="/api")
     app.include_router(todo_router, prefix="/api")
+    app.include_router(notification_router, prefix="/api")
+    app.include_router(scheduled_task_router, prefix="/api")
 
     @app.get("/health")
     async def health():
-        return {"status": "ok", "version": "0.3.1"}
+        return {"status": "ok", "version": "0.4.0"}
 
     _mount_spa(app)
 

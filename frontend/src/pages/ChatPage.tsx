@@ -15,6 +15,8 @@ import McpStatusBar from "../components/McpStatusBar";
 import BranchSelector from "../components/BranchSelector";
 import FileBrowser from "../components/FileBrowser";
 import TodoWidget from "../components/TodoWidget";
+import { NotificationBell } from "../components/NotificationBell";
+import { ScheduledTaskPanel } from "../components/ScheduledTaskPanel";
 
 interface ChatMessage {
   id: string;
@@ -234,6 +236,7 @@ export default function ChatPage({ onLogout }: Props) {
   const [sending, setSending] = useState(false);
   const [showProviders, setShowProviders] = useState(false);
   const [showMcpServers, setShowMcpServers] = useState(false);
+  const [showScheduledTasks, setShowScheduledTasks] = useState(false);
   const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
   const [mcpStatus, setMcpStatus] = useState<McpServerStatus[]>([]);
   const [providers, setProviders] = useState<Provider[]>([]);
@@ -370,6 +373,19 @@ export default function ChatPage({ onLogout }: Props) {
     setActiveSession(s);
     setMessages([]);
     setSelectedModel(models.length > 0 ? models[0].id : "");
+  };
+
+  const selectSessionById = async (sessionId: string) => {
+    try {
+      const s = await sessionsApi.getSession(sessionId);
+      if (s) {
+        setSessions((prev) => {
+          if (prev.some((x) => x.session_id === s.session_id)) return prev;
+          return [s, ...prev];
+        });
+        selectSession(s);
+      }
+    } catch { /* ignore */ }
   };
 
   const handleSend = async () => {
@@ -528,6 +544,7 @@ export default function ChatPage({ onLogout }: Props) {
         onLogout={onLogout}
         onOpenProviders={() => setShowProviders(true)}
         onOpenMcpServers={() => setShowMcpServers(true)}
+        onOpenScheduledTasks={() => setShowScheduledTasks(true)}
       />
 
       <div className="flex-1 flex flex-col min-w-0">
@@ -542,6 +559,7 @@ export default function ChatPage({ onLogout }: Props) {
                   onReplay={startReplay}
                 />
               </div>
+              <NotificationBell onSwitchSession={selectSessionById} />
               <button
                 onClick={() => setShowFiles((v) => !v)}
                 className="px-3 py-2 text-sm"
@@ -704,6 +722,13 @@ export default function ChatPage({ onLogout }: Props) {
             mcpServersApi.listMcpServers().then(setMcpServers);
             mcpServersApi.getMcpStatus().then(setMcpStatus);
           }}
+        />
+      )}
+
+      {showScheduledTasks && (
+        <ScheduledTaskPanel
+          onClose={() => setShowScheduledTasks(false)}
+          onSwitchSession={selectSessionById}
         />
       )}
     </div>

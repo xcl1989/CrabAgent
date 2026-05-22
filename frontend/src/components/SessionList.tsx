@@ -11,9 +11,10 @@ interface Props {
   onLogout: () => void;
   onOpenProviders: () => void;
   onOpenMcpServers: () => void;
+  onOpenScheduledTasks: () => void;
 }
 
-export default function SessionList({ sessions, activeId, onSelect, onNew, onDelete, onLogout, onOpenProviders, onOpenMcpServers }: Props) {
+export default function SessionList({ sessions, activeId, onSelect, onNew, onDelete, onLogout, onOpenProviders, onOpenMcpServers, onOpenScheduledTasks }: Props) {
   const [collapsed, setCollapsed] = useState(false);
 
   if (collapsed) {
@@ -25,6 +26,9 @@ export default function SessionList({ sessions, activeId, onSelect, onNew, onDel
         <div className="flex-1" />
         <button onClick={onOpenMcpServers} className="text-xs" style={{ color: "#a78bfa" }} title="MCP Servers">
           &#x1f50c;
+        </button>
+        <button onClick={onOpenScheduledTasks} className="text-xs" style={{ color: "#fbbf24" }} title="Scheduled Tasks">
+          🕐
         </button>
         <button onClick={onOpenProviders} className="text-xs" style={{ color: "var(--text-secondary)" }} title="Providers">
           ⚙
@@ -100,6 +104,13 @@ export default function SessionList({ sessions, activeId, onSelect, onNew, onDel
           style={{ background: "#2d1f5e", color: "#a78bfa" }}
         >
           MCP
+        </button>
+        <button
+          onClick={onOpenScheduledTasks}
+          className="flex-1 text-xs py-2 rounded"
+          style={{ background: "#2d1f5e", color: "#fbbf24" }}
+        >
+          ⏱ Tasks
         </button>
         <button
           onClick={onOpenProviders}

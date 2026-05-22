@@ -370,6 +370,10 @@ async def _setup_agent_context(args, conversation_id: int | None = None, history
         import crabagent.core.agent.tools.browser  # noqa: F401
     except Exception:
         pass
+    try:
+        import crabagent.core.agent.tools.scheduled_task  # noqa: F401
+    except Exception:
+        pass
     from crabagent.core.agent.tools import registry as _registry
 
     workspace = args.workspace or settings.workspace
@@ -537,10 +541,10 @@ def _print_banner(context, provider: str, model: str):
         from rich.console import Console
         from rich.text import Text
         console = Console()
-        t = Text("CrabAgent v0.3.1", style="bold")
+        t = Text("CrabAgent v0.4.0", style="bold")
         console.print(t)
     except ImportError:
-        print("CrabAgent v0.3.1")
+        print("CrabAgent v0.4.0")
 
     print(f"  provider: {provider}  model: {model}")
     print(f"  workspace: {context.workspace}")

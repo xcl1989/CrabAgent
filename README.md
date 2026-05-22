@@ -11,6 +11,7 @@ CrabAgent is an AI agent platform that runs from any project directory. It works
 | Feature | Description |
 |---------|-------------|
 | **Dual Mode** | CLI terminal + Web browser, same data |
+| **Scheduled Tasks** | Create timed tasks via conversation or Web UI; Agent executes autonomously with notifications |
 | **Browser Automation** | Playwright-powered headless browser: navigate, click, type, screenshot, extract, scroll |
 | **Multimodal (Image)** | Send images via paste, upload, or drag-and-drop; auto vision detection for model compatibility |
 | **MCP Client** | Connect to external MCP servers (stdio + HTTP), persistent connections with UI management |
@@ -224,6 +225,48 @@ Ask the agent in natural language:
 > Search for "Python async" on Google and extract the results
 > Take a screenshot of the current page
 ```
+
+---
+
+## Scheduled Tasks
+
+CrabAgent can run autonomously on a schedule — you define what to do and when, it executes and notifies you.
+
+### Creating Tasks
+
+**Via conversation** — just tell the Agent:
+```
+> 每天早上9点打开 Hacker News 把前5条新闻截图给我
+> 每30分钟检查一次这个商品页面，价格低于500就通知我
+```
+
+The Agent uses `scheduled_task_create` tool and defaults to your current model.
+
+**Via Web UI** — click ⏱ Tasks in the sidebar to create and manage tasks manually.
+
+### Available Tools
+
+| Tool | Description |
+|------|-------------|
+| `scheduled_task_create` | Create a task with name, question, and cron expression |
+| `scheduled_task_update` | Modify an existing task |
+| `scheduled_task_delete` | Delete a task |
+| `scheduled_task_list` | List all tasks and their status |
+| `scheduled_task_pause` | Pause a task |
+| `scheduled_task_resume` | Resume a paused task |
+
+### Notifications
+
+- When a scheduled task completes, a notification appears in the notification bell (top-right of the chat header)
+- Click the notification to jump to the task's result conversation
+- Notifications poll every 30 seconds; unread count shown as a badge
+
+### Task Execution
+
+- **Auto-approve**: Tools run without confirmation (unattended mode)
+- **Full capabilities**: Tasks have access to browser, web search, file operations, and MCP tools
+- **Result storage**: Each execution creates a new conversation with full message history and screenshots
+- **Error tracking**: Failed tasks log error details and notify you
 
 ---
 
