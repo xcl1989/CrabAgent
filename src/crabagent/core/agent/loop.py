@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 
@@ -150,6 +151,7 @@ async def run_agent(
             if not tool_calls_list:
                 break
 
+            tool_metas = []
             for tc in tool_calls_list:
                 func = tc["function"]
                 tool_name = func["name"]
@@ -157,34 +159,45 @@ async def run_agent(
                     args = json.loads(func["arguments"])
                 except json.JSONDecodeError:
                     args = {}
-
                 tool_info = context.tool_registry.get(tool_name)
                 tool_source = tool_info.metadata.get("source", "builtin") if tool_info else "builtin"
                 tool_server = tool_info.metadata.get("server_name", "") if tool_info else ""
+                tool_metas.append({
+                    "tc": tc, "name": tool_name, "args": args,
+                    "source": tool_source, "server": tool_server,
+                })
 
+            for meta in tool_metas:
                 await context.event_bus.emit(
                     AgentEvent(
                         type=EventType.TOOL_CALL,
                         data={
-                            "name": tool_name,
-                            "arguments": args,
-                            "id": tc["id"],
-                            "source": tool_source,
-                            "server_name": tool_server,
+                            "name": meta["name"],
+                            "arguments": meta["args"],
+                            "id": meta["tc"]["id"],
+                            "source": meta["source"],
+                            "server_name": meta["server"],
                         },
                     )
                 )
 
-                result = await context.tool_registry.execute(tool_name, args, context=context)
+            async def _run_one(meta: dict) -> tuple[dict, str]:
+                result = await context.tool_registry.execute(
+                    meta["name"], meta["args"], context=context
+                )
+                return meta, result
 
+            gathered = await asyncio.gather(*[_run_one(m) for m in tool_metas])
+
+            for meta, result in gathered:
                 await context.event_bus.emit(
                     AgentEvent(
                         type=EventType.TOOL_RESULT,
                         data={
-                            "name": tool_name,
+                            "name": meta["name"],
                             "result": result[:2000],
-                            "source": tool_source,
-                            "server_name": tool_server,
+                            "source": meta["source"],
+                            "server_name": meta["server"],
                         },
                     )
                 )
@@ -192,7 +205,7 @@ async def run_agent(
                 tool_msg = {
                     "role": "tool",
                     "content": result,
-                    "tool_call_id": tc["id"],
+                    "tool_call_id": meta["tc"]["id"],
                 }
                 context.messages.append(tool_msg)
 

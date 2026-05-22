@@ -253,6 +253,33 @@ function dbMessagesToChat(msgs: Message[]): ChatMessage[] {
       continue;
     }
 
+    if (m.role === "sub_agent" && m.content) {
+      try {
+        const data = JSON.parse(m.content);
+        if (data.text) {
+          result.push({
+            id: `db-${m.id}`,
+            role: "sub_agent",
+            content: data.text,
+            sub_agent_name: data.agent_name || m.name || "",
+            sub_agent_display: data.display_name || data.agent_name || m.name || "",
+            sub_agent_elapsed: data.elapsed,
+            sub_agent_tokens: data.tokens,
+            sub_agent_iterations: data.iterations,
+          });
+        }
+      } catch {
+        result.push({
+          id: `db-${m.id}`,
+          role: "sub_agent",
+          content: m.content,
+          sub_agent_name: m.name || "",
+          sub_agent_display: m.name || "",
+        });
+      }
+      continue;
+    }
+
     const base: ChatMessage = { id: `db-${m.id}`, role: m.role, content: m.content || "" };
     if (m.reasoning_content) base.reasoning_content = m.reasoning_content;
     if (m.role === "user" && m.content && m.content.startsWith("[{")) {

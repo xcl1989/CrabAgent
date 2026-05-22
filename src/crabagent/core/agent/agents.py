@@ -165,6 +165,27 @@ async def spawn_sub_agent(
             },
         ))
 
+        import json as _json
+
+        sub_content = _json.dumps({
+            "text": last_text,
+            "agent_name": agent_name,
+            "display_name": agent_def["display_name"],
+            "elapsed": elapsed,
+            "tokens": sub_context.total_tokens,
+            "iterations": sub_context.iteration,
+        }, ensure_ascii=False)
+        await parent_context.event_bus.emit(AgentEvent(
+            type=EventType.MESSAGE_CREATED,
+            data={
+                "message": {
+                    "role": "sub_agent",
+                    "content": sub_content,
+                    "name": agent_name,
+                },
+            },
+        ))
+
         return last_text or "(sub-agent produced no output)"
     except Exception as e:
         logger.exception("Sub-agent %s failed", agent_name)
