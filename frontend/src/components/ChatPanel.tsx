@@ -18,6 +18,12 @@ interface ChatMessage {
   source?: "builtin" | "mcp";
   server_name?: string;
   images?: string[];
+  sub_agent_id?: string;
+  sub_agent_name?: string;
+  sub_agent_display?: string;
+  sub_agent_elapsed?: number;
+  sub_agent_tokens?: number;
+  sub_agent_iterations?: number;
 }
 
 interface Props {
@@ -412,6 +418,35 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(({ messages, connected, onTo
                   </div>
                 )}
               </div>
+            </div>
+          );
+        }
+
+        if (msg.role === "sub_agent") {
+          const completed = msg.sub_agent_elapsed !== undefined;
+          const agentIcon =
+            msg.sub_agent_name === "researcher" ? "🔍" :
+            msg.sub_agent_name === "analyst" ? "📊" :
+            msg.sub_agent_name === "coder" ? "💻" :
+            msg.sub_agent_name === "writer" ? "📝" : "🤖";
+          return (
+            <div key={msg.id} className="mb-3" style={{ marginLeft: "8px" }}>
+              <details className="rounded-lg" style={{ background: "var(--bg-tertiary)", border: "1px solid var(--border)" }} open>
+                <summary className="cursor-pointer px-3 py-2 text-xs font-medium flex items-center gap-2 select-none"
+                  style={{ color: "var(--text-primary)" }}>
+                  <span>{agentIcon}</span>
+                  <span>{msg.sub_agent_display || msg.sub_agent_name}</span>
+                  {completed && (
+                    <span className="ml-auto text-[10px]" style={{ color: "var(--text-secondary)" }}>
+                      {msg.sub_agent_iterations} steps · {msg.sub_agent_elapsed}s · {msg.sub_agent_tokens} tokens
+                    </span>
+                  )}
+                  {!completed && <span className="ml-auto text-[10px] animate-pulse" style={{ color: "var(--accent)" }}>running...</span>}
+                </summary>
+                <div className="px-3 pb-3 text-xs whitespace-pre-wrap" style={{ color: "var(--text-secondary)", lineHeight: 1.6 }}>
+                  {msg.content || "(working...)"}
+                </div>
+              </details>
             </div>
           );
         }

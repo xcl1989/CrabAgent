@@ -1,7 +1,7 @@
 # Project Rules
 
 ## Version
-- Current: **0.4.0** (scheduled tasks + notifications)
+- Current: **0.5.0** (agent team + multi-agent delegation)
 - Version in: `pyproject.toml`, `src/crabagent/serve/app.py`, CLI banner in `src/crabagent/cli/__main__.py`
 
 ## Database Schema Changes

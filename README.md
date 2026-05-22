@@ -12,6 +12,7 @@ CrabAgent is an AI agent platform that runs from any project directory. It works
 |---------|-------------|
 | **Dual Mode** | CLI terminal + Web browser, same data |
 | **Scheduled Tasks** | Create timed tasks via conversation or Web UI; Agent executes autonomously with notifications |
+| **Agent Team** | Multi-agent collaboration: delegate tasks to specialized agents (Researcher, Analyst, Coder, Writer) |
 | **Browser Automation** | Playwright-powered headless browser: navigate, click, type, screenshot, extract, scroll |
 | **Multimodal (Image)** | Send images via paste, upload, or drag-and-drop; auto vision detection for model compatibility |
 | **MCP Client** | Connect to external MCP servers (stdio + HTTP), persistent connections with UI management |
@@ -267,6 +268,48 @@ The Agent uses `scheduled_task_create` tool and defaults to your current model.
 - **Full capabilities**: Tasks have access to browser, web search, file operations, and MCP tools
 - **Result storage**: Each execution creates a new conversation with full message history and screenshots
 - **Error tracking**: Failed tasks log error details and notify you
+
+---
+
+## Agent Team (Multi-Agent)
+
+CrabAgent supports multi-agent collaboration — delegate tasks to specialized agents that work independently and report back.
+
+### Built-in Agents
+
+| Agent | Role | Best For |
+|-------|------|----------|
+| `researcher` 🔍 | Web Researcher | Web search, browsing, data collection |
+| `analyst` 📊 | Data Analyst | Data comparison, pattern analysis, reports |
+| `coder` 💻 | Code Expert | Code writing, review, debugging, refactoring |
+| `writer` 📝 | Content Writer | Writing, editing, translation, formatting |
+
+### Delegate Tasks
+
+The main agent automatically uses `delegate_task` to spawn sub-agents:
+
+```
+User: Compare our 3 competitors
+
+Main Agent → delegate_task("researcher", "Browse competitor A and summarize")
+Main Agent → delegate_task("researcher", "Browse competitor B and summarize")
+Main Agent → delegate_task("analyst", "Compare the findings and write a report")
+
+Each sub-agent runs independently with full tool access
+Results are collated by the main agent and presented to you
+```
+
+### How It Works
+
+- **Isolated execution**: Each sub-agent has its own context, event bus, and tools
+- **Auto-approve tools**: Sub-agents run without user confirmation
+- **Event streaming**: Sub-agent progress (text, tool calls, completion) is streamed to the chat
+- **Sub-agent cards**: Collapsible cards in the UI show each agent's work
+- **No recursion**: Sub-agents can't delegate further (prevents infinite loops)
+
+### Manage Agents
+
+Click 🤖 Team in the sidebar to view and customize agent roles, goals, and models.
 
 ---
 

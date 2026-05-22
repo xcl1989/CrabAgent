@@ -157,6 +157,23 @@ class Notification(Base):
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
 
 
+class AgentProfile(Base):
+    __tablename__ = "agent_profiles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    display_name: Mapped[str] = mapped_column(String(200), default="")
+    role: Mapped[str] = mapped_column(String(500), nullable=False)
+    goal: Mapped[str] = mapped_column(Text, nullable=False)
+    backstory: Mapped[str] = mapped_column(Text, default="")
+    model: Mapped[str] = mapped_column(String(200), default="")
+    allow_delegation: Mapped[bool] = mapped_column(Boolean, default=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
 engine = create_async_engine(settings.db_url, echo=False)
 async_session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
@@ -240,6 +257,7 @@ async def init_db() -> None:
     await migrate_plaintext_keys()
 
     await _ensure_default_admin()
+    await _ensure_default_agents()
 
 
 async def _ensure_default_admin():
@@ -258,4 +276,57 @@ async def _ensure_default_admin():
             enabled=True,
         )
         db.add(user)
+        await db.commit()
+
+
+DEFAULT_AGENTS = [
+    {
+        "name": "researcher",
+        "display_name": "Web Researcher",
+        "role": "Web Researcher",
+        "goal": "Find, collect, and summarize information from the web using browser and search tools. Always cite sources.",
+        "backstory": "You are an experienced web researcher with expertise in finding accurate and relevant information quickly.",
+    },
+    {
+        "name": "analyst",
+        "display_name": "Data Analyst",
+        "role": "Data Analyst",
+        "goal": "Analyze data, compare findings, identify patterns, and generate structured reports with clear conclusions.",
+        "backstory": "You are a meticulous data analyst who excels at turning raw data into actionable insights.",
+    },
+    {
+        "name": "coder",
+        "display_name": "Code Expert",
+        "role": "Code Expert",
+        "goal": "Write, review, debug, optimize, and refactor code. Generate clean, well-documented solutions.",
+        "backstory": "You are a senior software engineer with deep expertise across multiple programming languages and frameworks.",
+    },
+    {
+        "name": "writer",
+        "display_name": "Content Writer",
+        "role": "Content Writer",
+        "goal": "Write, edit, translate, and format content. Produce clear, engaging, and well-structured documents.",
+        "backstory": "You are a professional writer skilled at transforming complex information into clear, readable content.",
+    },
+]
+
+
+async def _ensure_default_agents():
+    from sqlalchemy import select
+
+    async with async_session_factory() as db:
+        for agent_data in DEFAULT_AGENTS:
+            result = await db.execute(
+                select(AgentProfile).where(AgentProfile.name == agent_data["name"])
+            )
+            if result.scalar_one_or_none():
+                continue
+            db.add(AgentProfile(
+                user_id=1,
+                name=agent_data["name"],
+                display_name=agent_data["display_name"],
+                role=agent_data["role"],
+                goal=agent_data["goal"],
+                backstory=agent_data["backstory"],
+            ))
         await db.commit()

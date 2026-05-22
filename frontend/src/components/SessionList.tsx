@@ -12,9 +12,10 @@ interface Props {
   onOpenProviders: () => void;
   onOpenMcpServers: () => void;
   onOpenScheduledTasks: () => void;
+  onOpenAgentTeam: () => void;
 }
 
-export default function SessionList({ sessions, activeId, onSelect, onNew, onDelete, onLogout, onOpenProviders, onOpenMcpServers, onOpenScheduledTasks }: Props) {
+export default function SessionList({ sessions, activeId, onSelect, onNew, onDelete, onLogout, onOpenProviders, onOpenMcpServers, onOpenScheduledTasks, onOpenAgentTeam }: Props) {
   const [collapsed, setCollapsed] = useState(false);
 
   if (collapsed) {
@@ -29,6 +30,9 @@ export default function SessionList({ sessions, activeId, onSelect, onNew, onDel
         </button>
         <button onClick={onOpenScheduledTasks} className="text-xs" style={{ color: "#fbbf24" }} title="Scheduled Tasks">
           🕐
+        </button>
+        <button onClick={onOpenAgentTeam} className="text-xs" style={{ color: "#8b5cf6" }} title="Agent Team">
+          🤖
         </button>
         <button onClick={onOpenProviders} className="text-xs" style={{ color: "var(--text-secondary)" }} title="Providers">
           ⚙
@@ -111,6 +115,13 @@ export default function SessionList({ sessions, activeId, onSelect, onNew, onDel
           style={{ background: "#2d1f5e", color: "#fbbf24" }}
         >
           ⏱ Tasks
+        </button>
+        <button
+          onClick={onOpenAgentTeam}
+          className="flex-1 text-xs py-2 rounded"
+          style={{ background: "#4c1d95", color: "#a78bfa" }}
+        >
+          🤖 Team
         </button>
         <button
           onClick={onOpenProviders}

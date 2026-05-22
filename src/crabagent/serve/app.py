@@ -50,7 +50,7 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     app = FastAPI(
         title="CrabAgent",
-        version="0.4.0",
+        version="0.5.0",
         lifespan=lifespan,
     )
     app.state.event_queues = {}
@@ -63,6 +63,7 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    from crabagent.serve.api.agent import router as agent_router
     from crabagent.serve.api.auth import router as auth_router
     from crabagent.serve.api.branch import router as branch_router
     from crabagent.serve.api.confirm import router as confirm_router
@@ -81,6 +82,7 @@ def create_app() -> FastAPI:
     from crabagent.serve.api.settings import router as settings_router
     from crabagent.serve.api.todo import router as todo_router
 
+    app.include_router(agent_router, prefix="/api")
     app.include_router(auth_router, prefix="/api")
     app.include_router(session_router, prefix="/api")
     app.include_router(message_router, prefix="/api")
@@ -101,7 +103,7 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     async def health():
-        return {"status": "ok", "version": "0.4.0"}
+        return {"status": "ok", "version": "0.5.0"}
 
     _mount_spa(app)
 

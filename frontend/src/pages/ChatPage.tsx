@@ -17,6 +17,7 @@ import FileBrowser from "../components/FileBrowser";
 import TodoWidget from "../components/TodoWidget";
 import { NotificationBell } from "../components/NotificationBell";
 import { ScheduledTaskPanel } from "../components/ScheduledTaskPanel";
+import { AgentTeamPanel } from "../components/AgentTeamPanel";
 
 interface ChatMessage {
   id: string;
@@ -34,6 +35,12 @@ interface ChatMessage {
   source?: "builtin" | "mcp";
   server_name?: string;
   images?: string[];
+  sub_agent_id?: string;
+  sub_agent_name?: string;
+  sub_agent_display?: string;
+  sub_agent_elapsed?: number;
+  sub_agent_tokens?: number;
+  sub_agent_iterations?: number;
 }
 
 function sseEventToMessages(event: SSEEvent, messages: ChatMessage[]): ChatMessage[] {
@@ -144,6 +151,41 @@ function sseEventToMessages(event: SSEEvent, messages: ChatMessage[]): ChatMessa
     return updated;
   }
 
+  if (event.type === "sub_agent_start") {
+    const subId = event.data.sub_agent_id as string || "";
+    const name = event.data.agent_name as string || "";
+    updated.push({
+      id: `sa-${subId}`,
+      role: "sub_agent",
+      content: `Task: ${event.data.task || ""}`,
+      sub_agent_id: subId,
+      sub_agent_name: name,
+      sub_agent_display: (event.data.display_name as string) || name,
+    });
+    return updated;
+  }
+
+  if (event.type === "sub_agent_text_delta") {
+    const subId = event.data.sub_agent_id as string || "";
+    const last = updated[updated.length - 1];
+    if (last?.sub_agent_id === subId && last?.role === "sub_agent") {
+      last.content += (event.data.text as string) || "";
+      return updated;
+    }
+    return updated;
+  }
+
+  if (event.type === "sub_agent_end") {
+    const subId = event.data.sub_agent_id as string || "";
+    const last = updated[updated.length - 1];
+    if (last?.sub_agent_id === subId && last?.role === "sub_agent") {
+      last.sub_agent_elapsed = event.data.elapsed as number;
+      last.sub_agent_tokens = event.data.tokens as number;
+      last.sub_agent_iterations = event.data.iterations as number;
+    }
+    return updated;
+  }
+
   return updated;
 }
 
@@ -237,6 +279,7 @@ export default function ChatPage({ onLogout }: Props) {
   const [showProviders, setShowProviders] = useState(false);
   const [showMcpServers, setShowMcpServers] = useState(false);
   const [showScheduledTasks, setShowScheduledTasks] = useState(false);
+  const [showAgentTeam, setShowAgentTeam] = useState(false);
   const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
   const [mcpStatus, setMcpStatus] = useState<McpServerStatus[]>([]);
   const [providers, setProviders] = useState<Provider[]>([]);
@@ -545,6 +588,7 @@ export default function ChatPage({ onLogout }: Props) {
         onOpenProviders={() => setShowProviders(true)}
         onOpenMcpServers={() => setShowMcpServers(true)}
         onOpenScheduledTasks={() => setShowScheduledTasks(true)}
+        onOpenAgentTeam={() => setShowAgentTeam(true)}
       />
 
       <div className="flex-1 flex flex-col min-w-0">
@@ -729,6 +773,12 @@ export default function ChatPage({ onLogout }: Props) {
         <ScheduledTaskPanel
           onClose={() => setShowScheduledTasks(false)}
           onSwitchSession={selectSessionById}
+        />
+      )}
+
+      {showAgentTeam && (
+        <AgentTeamPanel
+          onClose={() => setShowAgentTeam(false)}
         />
       )}
     </div>

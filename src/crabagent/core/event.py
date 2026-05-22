@@ -26,6 +26,12 @@ class EventType(StrEnum):
     USER_INPUT_REQUEST = "user_input_request"
     CONTEXT_COMPRESSED = "context_compressed"
     SCREENSHOT = "screenshot"
+    SUB_AGENT_START = "sub_agent_start"
+    SUB_AGENT_END = "sub_agent_end"
+    SUB_AGENT_ERROR = "sub_agent_error"
+    SUB_AGENT_TEXT_DELTA = "sub_agent_text_delta"
+    SUB_AGENT_TOOL_CALL = "sub_agent_tool_call"
+    SUB_AGENT_TOOL_RESULT = "sub_agent_tool_result"
 
 
 @dataclass
