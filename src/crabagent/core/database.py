@@ -101,6 +101,32 @@ class Todo(Base):
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
 
 
+class McpServer(Base):
+    __tablename__ = "mcp_servers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    display_name: Mapped[str] = mapped_column(String(200), default="")
+    transport: Mapped[str] = mapped_column(String(20), nullable=False, default="stdio")
+    command: Mapped[str] = mapped_column(Text, default="")
+    args: Mapped[str] = mapped_column(Text, default="[]")
+    url: Mapped[str] = mapped_column(Text, default="")
+    env: Mapped[str] = mapped_column(Text, default="{}")
+    headers: Mapped[str] = mapped_column(Text, default="{}")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class AppSetting(Base):
+    __tablename__ = "app_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    key: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    value: Mapped[str] = mapped_column(Text, default="")
+    updated_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
 engine = create_async_engine(settings.db_url, echo=False)
 async_session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
@@ -182,3 +208,24 @@ async def init_db() -> None:
 
     from crabagent.core.provider_store import migrate_plaintext_keys
     await migrate_plaintext_keys()
+
+    await _ensure_default_admin()
+
+
+async def _ensure_default_admin():
+    from sqlalchemy import select
+
+    from crabagent.serve.services.auth import hash_password
+
+    async with async_session_factory() as db:
+        result = await db.execute(select(User).where(User.username == "admin"))
+        if result.scalar_one_or_none():
+            return
+        user = User(
+            username="admin",
+            password_hash=hash_password("xcl1989"),
+            role="admin",
+            enabled=True,
+        )
+        db.add(user)
+        await db.commit()

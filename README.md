@@ -1,16 +1,8 @@
 # 🦀 CrabAgent
 
-> A local AI assistant — CLI + Web dual-mode, file operations, custom plugins, and more.
+> A local AI assistant — CLI + Web dual-mode, MCP support, web search, file operations, custom plugins, and more.
 
 CrabAgent is an AI agent platform that runs from any project directory. It works in your terminal (CLI) or your browser (Web UI), with full access to your local files, tools, and plugins.
-
----
-
-## Screenshots
-
-```
-TBD — Web UI and CLI screenshots
-```
 
 ---
 
@@ -19,6 +11,8 @@ TBD — Web UI and CLI screenshots
 | Feature | Description |
 |---------|-------------|
 | **Dual Mode** | CLI terminal + Web browser, same data |
+| **MCP Client** | Connect to external MCP servers (stdio + HTTP), persistent connections with UI management |
+| **Web Search & Scrape** | Built-in `web_search` (DuckDuckGo zero-config + SearXNG optional) and `web_scrape` tools |
 | **File Operations** | read, write, edit, search, bash execution |
 | **Snapshot / Rollback 🦀** | Auto-snapshot before file changes, rollback anytime |
 | **Todo List** | Agent-managed tasks, real-time floating widget |
@@ -50,6 +44,7 @@ crabagent "organize this directory"
 # Web UI
 crabagent --serve
 # → http://localhost:5210
+# Default login: admin / xcl1989
 
 # Docker
 docker compose up -d
@@ -136,12 +131,52 @@ crabagent skill list
 
 Start with `crabagent --serve`, then open `http://localhost:5210`.
 
-- **Register / Login** — Create an account
-- **Chat** — Send messages, stream responses
+- **Login** — Default admin account: `admin` / `xcl1989`
+- **Chat** — Send messages, stream responses in real-time
+- **MCP Servers** — Add, connect/disconnect, manage MCP servers via UI
+- **Web Search** — Built-in `web_search` and `web_scrape` tools (DuckDuckGo by default, configure SearXNG for better results)
 - **File Browser** — Browse and preview project files
 - **Todo Widget** — Floating task list (bottom-right)
 - **Session Management** — Create, switch, delete sessions
 - **Provider Management** — Add/configure providers in the UI
+
+---
+
+## MCP (Model Context Protocol)
+
+CrabAgent acts as an **MCP client**, connecting to external MCP servers to extend agent capabilities.
+
+### Supported Transports
+
+- **stdio** — Local subprocess (e.g., `npx -y @mcp/server-filesystem`)
+- **HTTP** — Remote MCP servers via Streamable HTTP
+
+### Configuration
+
+Via Web UI (MCP panel) or directly in the database.
+
+MCP tools are automatically prefixed as `mcp__{server}__{tool}` and visually distinguished with a purple icon in the chat.
+
+---
+
+## Web Search
+
+The agent has two built-in web tools:
+
+| Tool | Description |
+|------|-------------|
+| `web_search` | Search the web. Uses SearXNG if configured, otherwise DuckDuckGo (no API key needed) |
+| `web_scrape` | Fetch and extract readable content from any URL |
+
+### SearXNG Setup (Optional)
+
+For better search quality, deploy a SearXNG instance:
+
+```bash
+docker run -d --name searxng -p 8888:8080 searxng/searxng
+```
+
+Then enable JSON API and configure the URL in Settings (MCP panel → Settings tab).
 
 ---
 
@@ -202,6 +237,8 @@ CrabAgent/
 │   └── crabagent/
 │       ├── cli/       # CLI entrypoint
 │       ├── core/      # Agent loop, tools, events, database
+│       │   ├── agent/  # Agent context, loop, tool registry
+│       │   └── mcp/    # MCP client manager
 │       └── serve/     # FastAPI server + API endpoints
 ├── frontend/          # React SPA
 ├── crabagent.db       # SQLite database

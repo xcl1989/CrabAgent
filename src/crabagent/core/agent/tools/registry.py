@@ -13,6 +13,11 @@ class ToolInfo:
     parameters: dict[str, Any]
     handler: Callable
     requires_permission: bool = False
+    metadata: dict[str, Any] = None
+
+    def __post_init__(self):
+        if self.metadata is None:
+            self.metadata = {"source": "builtin"}
 
 
 class ToolRegistry:
@@ -25,6 +30,7 @@ class ToolRegistry:
         description: str,
         parameters: dict[str, Any],
         requires_permission: bool = False,
+        metadata: dict[str, Any] | None = None,
     ):
         def decorator(func: Callable):
             self._tools[name] = ToolInfo(
@@ -33,6 +39,7 @@ class ToolRegistry:
                 parameters=parameters,
                 handler=func,
                 requires_permission=requires_permission,
+                metadata=metadata or {"source": "builtin"},
             )
             return func
 

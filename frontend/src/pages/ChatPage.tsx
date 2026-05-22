@@ -5,9 +5,13 @@ import * as sessionsApi from "../api/sessions";
 import { Session, Message } from "../api/sessions";
 import * as providersApi from "../api/providers";
 import { Provider, CatalogEntry, ModelInfo } from "../api/providers";
+import * as mcpServersApi from "../api/mcpServers";
+import { McpServer, McpServerStatus } from "../api/mcpServers";
 import SessionList from "../components/SessionList";
 import ChatPanel from "../components/ChatPanel";
 import ProviderPanel from "../components/ProviderPanel";
+import McpServerPanel from "../components/McpServerPanel";
+import McpStatusBar from "../components/McpStatusBar";
 import BranchSelector from "../components/BranchSelector";
 import FileBrowser from "../components/FileBrowser";
 import TodoWidget from "../components/TodoWidget";
@@ -25,6 +29,8 @@ interface ChatMessage {
   args_summary?: string;
   confirmed?: boolean;
   options?: string[];
+  source?: "builtin" | "mcp";
+  server_name?: string;
 }
 
 function sseEventToMessages(event: SSEEvent, messages: ChatMessage[]): ChatMessage[] {
@@ -63,6 +69,8 @@ function sseEventToMessages(event: SSEEvent, messages: ChatMessage[]): ChatMessa
       id: callId ? `tc-${callId}` : `tc-${Date.now()}`,
       role: "tool_call",
       content: JSON.stringify({ name: event.data.name, arguments: event.data.arguments }),
+      source: (event.data.source as "builtin" | "mcp") || "builtin",
+      server_name: (event.data.server_name as string) || undefined,
     });
     return updated;
   }
@@ -76,6 +84,8 @@ function sseEventToMessages(event: SSEEvent, messages: ChatMessage[]): ChatMessa
       id: callId ? `tr-${callId}` : `tr-${Date.now()}`,
       role: "tool_result",
       content: (event.data.result as string) || "",
+      source: (event.data.source as "builtin" | "mcp") || "builtin",
+      server_name: (event.data.server_name as string) || undefined,
     });
     return updated;
   }
@@ -201,9 +211,13 @@ export default function ChatPage({ onLogout }: Props) {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [showProviders, setShowProviders] = useState(false);
+  const [showMcpServers, setShowMcpServers] = useState(false);
+  const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
+  const [mcpStatus, setMcpStatus] = useState<McpServerStatus[]>([]);
   const [providers, setProviders] = useState<Provider[]>([]);
   const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
   const [models, setModels] = useState<ModelInfo[]>([]);
+  const [providersLoading, setProvidersLoading] = useState(true);
   const [selectedModel, setSelectedModel] = useState<string>("");
   const [activeBranch, setActiveBranch] = useState<string>("main");
   const [replaying, setReplaying] = useState(false);
@@ -212,6 +226,7 @@ export default function ChatPage({ onLogout }: Props) {
   const [todoRefreshKey, setTodoRefreshKey] = useState(0);
   const activeSessionRef = useRef<Session | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const prevMsgCountRef = useRef(0);
 
   useEffect(() => {
     activeSessionRef.current = activeSession;
@@ -249,6 +264,9 @@ export default function ChatPage({ onLogout }: Props) {
       }, 500);
       return;
     }
+    if (event.type === "text_delta" || event.type === "tool_call" || event.type === "thinking_delta" || event.type === "iteration_start") {
+      setSending(true);
+    }
     if (event.type === "agent_end") {
       setSending(false);
       const stats = {
@@ -268,7 +286,8 @@ export default function ChatPage({ onLogout }: Props) {
       if (sid) {
         setTimeout(async () => {
           const msgs = await sessionsApi.getMessages(sid);
-          setMessages(dbMessagesToChat(msgs));
+          const dbMsgs = dbMessagesToChat(msgs);
+          setMessages((prev) => (dbMsgs.length > prev.length ? dbMsgs : prev));
         }, 800);
       }
     }
@@ -278,12 +297,27 @@ export default function ChatPage({ onLogout }: Props) {
   const { connected } = useSSE(activeSession?.session_id || null, handleSSEEvent);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (messages.length > prevMsgCountRef.current) {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+    prevMsgCountRef.current = messages.length;
   }, [messages]);
 
   useEffect(() => {
-    providersApi.listProviders().then(setProviders);
+    providersApi.listProviders().then((p) => {
+      setProviders(p);
+      setProvidersLoading(false);
+    });
     providersApi.getCatalog().then(setCatalog);
+    mcpServersApi.listMcpServers().then(setMcpServers);
+    mcpServersApi.getMcpStatus().then(setMcpStatus);
+  }, []);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      mcpServersApi.getMcpStatus().then(setMcpStatus).catch(() => {});
+    }, 60000);
+    return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
@@ -421,6 +455,7 @@ export default function ChatPage({ onLogout }: Props) {
         onDelete={handleDeleteSession}
         onLogout={onLogout}
         onOpenProviders={() => setShowProviders(true)}
+        onOpenMcpServers={() => setShowMcpServers(true)}
       />
 
       <div className="flex-1 flex flex-col min-w-0">
@@ -464,6 +499,8 @@ export default function ChatPage({ onLogout }: Props) {
               </div>
             )}
             <ChatPanel ref={bottomRef} messages={messages} connected={connected} onToolConfirm={handleToolConfirm} onUserInput={handleUserInput} onBranch={handleBranch} replaying={replaying} />
+
+            <McpStatusBar status={mcpStatus} />
 
             <div className="px-4 pb-4">
               {models.length > 0 && (
@@ -534,6 +571,40 @@ export default function ChatPage({ onLogout }: Props) {
           onClose={() => setShowProviders(false)}
           onRefresh={() => {
             providersApi.listProviders().then(setProviders);
+          }}
+        />
+      )}
+
+      {!providersLoading && providers.length === 0 && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.7)" }}>
+          <div
+            className="w-full max-w-sm rounded-xl p-8 text-center"
+            style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}
+          >
+            <div className="text-3xl mb-4">&#x26a0;&#xfe0f;</div>
+            <h2 className="text-lg font-semibold mb-2">No Provider Configured</h2>
+            <p className="text-sm mb-6" style={{ color: "var(--text-secondary)" }}>
+              CrabAgent needs at least one LLM provider to function. Please add a provider to get started.
+            </p>
+            <button
+              onClick={() => setShowProviders(true)}
+              className="w-full py-3 rounded-lg text-sm font-medium text-white"
+              style={{ background: "var(--accent)" }}
+            >
+              + Add Provider
+            </button>
+          </div>
+        </div>
+      )}
+
+      {showMcpServers && (
+        <McpServerPanel
+          servers={mcpServers}
+          status={mcpStatus}
+          onClose={() => setShowMcpServers(false)}
+          onRefresh={() => {
+            mcpServersApi.listMcpServers().then(setMcpServers);
+            mcpServersApi.getMcpStatus().then(setMcpStatus);
           }}
         />
       )}

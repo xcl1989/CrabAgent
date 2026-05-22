@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+from datetime import UTC, datetime
 import logging
 import sys
 from pathlib import Path
@@ -363,6 +364,7 @@ async def _setup_agent_context(args, conversation_id: int | None = None, history
     import crabagent.core.agent.tools.glob  # noqa: F401
     import crabagent.core.agent.tools.grep  # noqa: F401
     import crabagent.core.agent.tools.read  # noqa: F401
+    import crabagent.core.agent.tools.web  # noqa: F401
     import crabagent.core.agent.tools.write  # noqa: F401
     from crabagent.core.agent.tools import registry as _registry
 
@@ -375,7 +377,7 @@ async def _setup_agent_context(args, conversation_id: int | None = None, history
         max_iterations=args.max_iterations,
         model=getattr(args, "model", None),
         provider_name=args.provider,
-        system_prompt=f"You are CrabAgent, an AI assistant. Working directory: {workspace}",
+        system_prompt=f"You are CrabAgent, an AI assistant. Today is {datetime.now(UTC).strftime('%Y-%m-%d %A')}. Working directory: {workspace}",
     )
 
     if history:
@@ -401,6 +403,14 @@ async def _setup_agent_context(args, conversation_id: int | None = None, history
 
     from crabagent.core.tool_loader import discover_and_register_tools
     discover_and_register_tools(context.tool_registry, workspace)
+
+    from crabagent.core.mcp.client import MCPClientManager
+    from crabagent.core.mcp.tools import register_mcp_tools
+
+    mcp_manager = MCPClientManager()
+    await mcp_manager.start_all()
+    register_mcp_tools(context.tool_registry, mcp_manager)
+    context.metadata["_mcp_manager"] = mcp_manager
 
     if conversation_id and not getattr(args, "no_persist", False):
         from crabagent.serve.services.persistence import PersistenceListener
@@ -457,6 +467,11 @@ async def _run_single(args):
     await init_db()
 
     user = await _ensure_cli_user()
+
+    ok = await _ensure_provider_configured()
+    if not ok:
+        sys.exit(1)
+
     conversation_id = None
     session_id_str = None
 
@@ -491,6 +506,13 @@ async def _run_single(args):
         await run_agent(context, args.query)
     except KeyboardInterrupt:
         pass
+    finally:
+        mcp_mgr = context.metadata.get("_mcp_manager")
+        if mcp_mgr:
+            try:
+                await mcp_mgr.stop_all()
+            except Exception:
+                pass
 
     if session_id_str:
         from crabagent.core.database import async_session_factory
@@ -528,12 +550,71 @@ def _make_status_bar(context, provider_display: str) -> str:
     return f" [{provider_display}] {' '.join(parts)} "
 
 
+async def _ensure_provider_configured():
+    from crabagent.core.provider_store import (
+        PROVIDER_CATALOG,
+        create_provider,
+        list_providers,
+    )
+
+    providers = await list_providers()
+    if providers:
+        return True
+
+    print("\nNo LLM provider configured. CrabAgent needs at least one provider to function.\n")
+    print("Available provider types:")
+    for key, info in PROVIDER_CATALOG.items():
+        print(f"  {key}: {info['display_name']}")
+    print()
+
+    while True:
+        try:
+            choice = input("Would you like to add a provider now? [Y/n]: ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print("\nCannot continue without a provider.")
+            return False
+
+        if choice in ("n", "no"):
+            print("Cannot continue without a provider.")
+            return False
+
+        ptype = input(f"Provider type [deepseek]: ").strip().lower() or "deepseek"
+        catalog = PROVIDER_CATALOG.get(ptype)
+        if not catalog:
+            print(f"Unknown provider type '{ptype}'. Available: {', '.join(PROVIDER_CATALOG.keys())}")
+            continue
+
+        name = input(f"Name [{ptype}]: ").strip() or ptype
+        api_key = input("API key: ").strip()
+        if not api_key:
+            print("API key is required. Please try again.")
+            continue
+
+        try:
+            await create_provider(
+                name=name,
+                display_name=catalog["display_name"],
+                provider_type=ptype,
+                api_key=api_key,
+                base_url=catalog["base_url"],
+                is_default=True,
+            )
+            print(f"\nProvider '{name}' ({catalog['display_name']}) configured successfully!\n")
+            return True
+        except Exception as e:
+            print(f"Error: {e}. Please try again.\n")
+
+
 async def _run_interactive(args):
     from crabagent.core.database import init_db
 
     await init_db()
 
     user = await _ensure_cli_user()
+
+    ok = await _ensure_provider_configured()
+    if not ok:
+        sys.exit(1)
 
     workspace = args.workspace or settings.workspace
     workspace = workspace.resolve()
@@ -599,6 +680,12 @@ async def _run_interactive(args):
         try:
             user_input = await asyncio.get_event_loop().run_in_executor(None, _get_input)
         except (EOFError, KeyboardInterrupt):
+            mcp_mgr = context.metadata.get("_mcp_manager")
+            if mcp_mgr:
+                try:
+                    await mcp_mgr.stop_all()
+                except Exception:
+                    pass
             print("\nBye!")
             break
 
@@ -611,6 +698,12 @@ async def _run_interactive(args):
             cli_console = _cli_console()
             should_exit = await _handle_slash_command(user_input, context, args, user, state, cli_console)
             if should_exit:
+                mcp_mgr = context.metadata.get("_mcp_manager")
+                if mcp_mgr:
+                    try:
+                        await mcp_mgr.stop_all()
+                    except Exception:
+                        pass
                 break
             continue
 

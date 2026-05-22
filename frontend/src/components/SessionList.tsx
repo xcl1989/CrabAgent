@@ -10,9 +10,10 @@ interface Props {
   onDelete: (sessionId: string) => void;
   onLogout: () => void;
   onOpenProviders: () => void;
+  onOpenMcpServers: () => void;
 }
 
-export default function SessionList({ sessions, activeId, onSelect, onNew, onDelete, onLogout, onOpenProviders }: Props) {
+export default function SessionList({ sessions, activeId, onSelect, onNew, onDelete, onLogout, onOpenProviders, onOpenMcpServers }: Props) {
   const [collapsed, setCollapsed] = useState(false);
 
   if (collapsed) {
@@ -22,6 +23,9 @@ export default function SessionList({ sessions, activeId, onSelect, onNew, onDel
           ☰
         </button>
         <div className="flex-1" />
+        <button onClick={onOpenMcpServers} className="text-xs" style={{ color: "#a78bfa" }} title="MCP Servers">
+          &#x1f50c;
+        </button>
         <button onClick={onOpenProviders} className="text-xs" style={{ color: "var(--text-secondary)" }} title="Providers">
           ⚙
         </button>
@@ -90,6 +94,13 @@ export default function SessionList({ sessions, activeId, onSelect, onNew, onDel
       </div>
 
       <div className="p-3 flex gap-2 border-t" style={{ borderTop: "1px solid var(--border)" }}>
+        <button
+          onClick={onOpenMcpServers}
+          className="flex-1 text-xs py-2 rounded"
+          style={{ background: "#2d1f5e", color: "#a78bfa" }}
+        >
+          MCP
+        </button>
         <button
           onClick={onOpenProviders}
           className="flex-1 text-xs py-2 rounded"

@@ -46,6 +46,14 @@ async def run_agent(
         model = f"openai/{model}"
     context.metadata["resolved_model"] = model.split("/", 1)[-1] if "/" in model else model
 
+    mcp_summary = [
+        {"name": s["name"], "status": s["status"], "tool_count": s["tool_count"]}
+        for s in context.metadata.get("mcp_status", [])
+    ]
+    await context.event_bus.emit(
+        AgentEvent(type=EventType.AGENT_START, data={"mcp_servers": mcp_summary})
+    )
+
     while not context.budget_exhausted:
         context.iteration += 1
         await context.event_bus.emit(AgentEvent(type=EventType.ITERATION_START, data={"iteration": context.iteration}))
@@ -150,10 +158,20 @@ async def run_agent(
                 except json.JSONDecodeError:
                     args = {}
 
+                tool_info = context.tool_registry.get(tool_name)
+                tool_source = tool_info.metadata.get("source", "builtin") if tool_info else "builtin"
+                tool_server = tool_info.metadata.get("server_name", "") if tool_info else ""
+
                 await context.event_bus.emit(
                     AgentEvent(
                         type=EventType.TOOL_CALL,
-                        data={"name": tool_name, "arguments": args, "id": tc["id"]},
+                        data={
+                            "name": tool_name,
+                            "arguments": args,
+                            "id": tc["id"],
+                            "source": tool_source,
+                            "server_name": tool_server,
+                        },
                     )
                 )
 
@@ -162,7 +180,12 @@ async def run_agent(
                 await context.event_bus.emit(
                     AgentEvent(
                         type=EventType.TOOL_RESULT,
-                        data={"name": tool_name, "result": result[:2000]},
+                        data={
+                            "name": tool_name,
+                            "result": result[:2000],
+                            "source": tool_source,
+                            "server_name": tool_server,
+                        },
                     )
                 )
 

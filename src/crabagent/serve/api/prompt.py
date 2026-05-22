@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -69,7 +70,7 @@ async def prompt_async(
         max_iterations=settings.max_iterations,
         model=req.model or conv.model or None,
         provider_name=req.provider,
-        system_prompt=f"You are CrabAgent, an AI assistant. Working directory: {workspace}",
+        system_prompt=f"You are CrabAgent, an AI assistant. Today is {datetime.now(UTC).strftime('%Y-%m-%d %A')}. Working directory: {workspace}",
     )
 
     from crabagent.core.agent.skill.loader import discover_skills, register_skill_tool
@@ -87,6 +88,12 @@ async def prompt_async(
 
     from crabagent.core.tool_loader import discover_and_register_tools
     discover_and_register_tools(context.tool_registry, workspace)
+
+    from crabagent.core.mcp.tools import register_mcp_tools
+
+    mcp_manager = request.app.state.mcp_manager
+    register_mcp_tools(context.tool_registry, mcp_manager)
+    context.metadata["mcp_status"] = mcp_manager.get_status()
 
     context.metadata["session_id"] = session_id
     context.metadata["branch_id"] = active_branch
@@ -237,7 +244,7 @@ async def abort_session(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await _get_owned_conversation(db, session_id, user)
+    await get_owned_conversation(db, session_id, user)
 
     task = _tasks.get(session_id)
     if not task or task.done():

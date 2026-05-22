@@ -15,6 +15,8 @@ interface ChatMessage {
   args_summary?: string;
   confirmed?: boolean;
   options?: string[];
+  source?: "builtin" | "mcp";
+  server_name?: string;
 }
 
 interface Props {
@@ -48,6 +50,16 @@ const TOOL_ICONS: Record<string, string> = {
   grep: "🔎",
   skill: "📋",
 };
+
+function ToolCallSummary({ name, summary, source, server_name }: { name: string; summary: string; source?: string; server_name?: string }) {
+  const isMcp = source === "mcp";
+  const icon = isMcp ? "🔌" : (TOOL_ICONS[name] || "⚡");
+  const displayName = isMcp ? name.replace(/^mcp__/, "").replace(/__/g, ": ") : name;
+  const accentColor = isMcp ? "#a78bfa" : "var(--accent)";
+  const borderColor = isMcp ? "#7c3aed" : "var(--accent)";
+
+  return { icon, displayName, accentColor, borderColor, isMcp, serverLabel: isMcp && server_name ? `[MCP: ${server_name}]` : "" };
+}
 
 function UserInputField({ inputId, onSubmit }: { inputId: string; onSubmit: (id: string, answer: string) => void }) {
   const [value, setValue] = useState("");
@@ -131,7 +143,7 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(({ messages, connected, onTo
         if (Array.isArray(item)) {
           const [callMsg, resultMsg] = item;
           const { name, summary } = getToolSummary(callMsg.content);
-          const icon = TOOL_ICONS[name] || "⚡";
+          const meta = ToolCallSummary({ name, summary, source: callMsg.source, server_name: callMsg.server_name });
 
           return (
             <details
@@ -147,8 +159,13 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(({ messages, connected, onTo
                   color: "var(--text-secondary)",
                 }}
               >
-                <span style={{ color: "var(--accent)", fontFamily: "monospace", fontSize: "11px" }}>{icon}</span>
-                <span className="font-medium" style={{ color: "#67e8f9" }}>{name}</span>
+                <span style={{ color: meta.accentColor, fontFamily: "monospace", fontSize: "11px" }}>{meta.icon}</span>
+                <span className="font-medium" style={{ color: meta.isMcp ? "#c4b5fd" : "#67e8f9" }}>{meta.displayName}</span>
+                {meta.serverLabel && (
+                  <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: "#2d1f5e", color: "#a78bfa", fontSize: "10px" }}>
+                    {meta.serverLabel}
+                  </span>
+                )}
                 {summary && (
                   <span style={{ color: "var(--text-secondary)", fontFamily: "monospace" }}>
                     {summary}
@@ -159,7 +176,7 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(({ messages, connected, onTo
               <div
                 className="mt-1.5 rounded-md overflow-hidden"
                 style={{
-                  borderLeft: "3px solid var(--accent)",
+                  borderLeft: `3px solid ${meta.borderColor}`,
                   background: "var(--bg-secondary)",
                 }}
               >
@@ -235,15 +252,20 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(({ messages, connected, onTo
 
         if (msg.role === "tool_call") {
           const { name, summary } = getToolSummary(msg.content);
-          const icon = TOOL_ICONS[name] || "⚡";
+          const meta = ToolCallSummary({ name, summary, source: msg.source, server_name: msg.server_name });
           return (
             <details key={msg.id} className="mb-3" style={{ marginLeft: "12px" }}>
               <summary
                 className="flex items-center gap-2 cursor-pointer py-1.5 px-3 rounded-md text-xs select-none"
                 style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", color: "var(--text-secondary)" }}
               >
-                <span style={{ color: "var(--accent)", fontFamily: "monospace", fontSize: "11px" }}>{icon}</span>
-                <span className="font-medium" style={{ color: "#67e8f9" }}>{name}</span>
+                <span style={{ color: meta.accentColor, fontFamily: "monospace", fontSize: "11px" }}>{meta.icon}</span>
+                <span className="font-medium" style={{ color: meta.isMcp ? "#c4b5fd" : "#67e8f9" }}>{meta.displayName}</span>
+                {meta.serverLabel && (
+                  <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: "#2d1f5e", color: "#a78bfa", fontSize: "10px" }}>
+                    {meta.serverLabel}
+                  </span>
+                )}
                 {summary && <span style={{ color: "var(--text-secondary)", fontFamily: "monospace" }}>{summary}</span>}
               </summary>
             </details>
@@ -456,7 +478,14 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(({ messages, connected, onTo
                     [&_table]:text-xs [&_th]:px-2 [&_th]:py-1 [&_td]:px-2 [&_td]:py-1 [&_th]:bg-[var(--bg-tertiary)]
                   "
                 >
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    components={{
+                      a: ({ children, ...props }: any) => (
+                        <a {...props} target="_blank" rel="noopener noreferrer">{children}</a>
+                      ),
+                    }}
+                  >{msg.content}</ReactMarkdown>
                 </div>
               )}
             </div>
