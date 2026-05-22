@@ -153,11 +153,12 @@ function sseEventToMessages(event: SSEEvent, messages: ChatMessage[]): ChatMessa
 
   if (event.type === "sub_agent_start") {
     const subId = event.data.sub_agent_id as string || "";
+    if (updated.some(m => m.sub_agent_id === subId)) return updated;
     const name = event.data.agent_name as string || "";
     updated.push({
       id: `sa-${subId}`,
       role: "sub_agent",
-      content: `Task: ${event.data.task || ""}`,
+      content: "",
       sub_agent_id: subId,
       sub_agent_name: name,
       sub_agent_display: (event.data.display_name as string) || name,
@@ -167,23 +168,22 @@ function sseEventToMessages(event: SSEEvent, messages: ChatMessage[]): ChatMessa
 
   if (event.type === "sub_agent_text_delta") {
     const subId = event.data.sub_agent_id as string || "";
-    const last = updated[updated.length - 1];
-    if (last?.sub_agent_id === subId && last?.role === "sub_agent") {
-      updated[updated.length - 1] = {
-        ...last,
-        content: last.content + ((event.data.text as string) || ""),
+    const idx = updated.findIndex(m => m.sub_agent_id === subId && m.role === "sub_agent");
+    if (idx >= 0) {
+      updated[idx] = {
+        ...updated[idx],
+        content: updated[idx].content + ((event.data.text as string) || ""),
       };
-      return updated;
     }
     return updated;
   }
 
   if (event.type === "sub_agent_end") {
     const subId = event.data.sub_agent_id as string || "";
-    const last = updated[updated.length - 1];
-    if (last?.sub_agent_id === subId && last?.role === "sub_agent") {
-      updated[updated.length - 1] = {
-        ...last,
+    const idx = updated.findIndex(m => m.sub_agent_id === subId && m.role === "sub_agent");
+    if (idx >= 0) {
+      updated[idx] = {
+        ...updated[idx],
         sub_agent_elapsed: event.data.elapsed as number,
         sub_agent_tokens: event.data.tokens as number,
         sub_agent_iterations: event.data.iterations as number,
