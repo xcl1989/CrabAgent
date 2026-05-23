@@ -71,7 +71,6 @@ class CrabAgentTuiApp(App[None]):
         self._cli_args = None
         self._user = None
         self._state = {}
-        self._message_queue: asyncio.Queue = asyncio.Queue()
         self._exit_flag = False
 
     def compose(self) -> ComposeResult:
@@ -92,7 +91,6 @@ class CrabAgentTuiApp(App[None]):
             log.write("")
 
         self.set_interval(1, self._tick_status)
-        self._queue_drainer()
         input_widget.focus()
 
     async def _initialize(self):
@@ -163,19 +161,7 @@ class CrabAgentTuiApp(App[None]):
         self.agent_ctx.event_bus.subscribe(self._on_agent_event)
 
     async def _on_agent_event(self, event: AgentEvent):
-        await self._message_queue.put(event)
-
-    @work(exclusive=False, thread=False)
-    async def _queue_drainer(self):
         log = self.query_one("#output", RichLog)
-        while not self._exit_flag:
-            try:
-                event = await asyncio.wait_for(self._message_queue.get(), timeout=0.1)
-                await self._handle_event(event, log)
-            except asyncio.TimeoutError:
-                continue
-
-    async def _handle_event(self, event: AgentEvent, log: RichLog):
         if event.type == EventType.TEXT_DELTA:
             if self._thinking_active:
                 self._thinking_active = False
