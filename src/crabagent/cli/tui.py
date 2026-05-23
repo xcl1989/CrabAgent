@@ -64,12 +64,12 @@ class TuiSession:
                 self.agent_ctx.iteration = 0
                 await run_agent(self.agent_ctx, ui)
             except KeyboardInterrupt:
+                self._stop_live()
                 self.console.print("\n[dim][interrupted][/dim]"); continue
             except Exception as e:
+                self._stop_live()
                 self.console.print(f"\n[red]Error: {e}[/red]"); continue
             self._stop_live()
-            if self._stream.strip():
-                self.console.print(Markdown(self._stream))
             if self._conversation_id:
                 from crabagent.core.database import async_session_factory
                 from crabagent.serve.services.conversation import update_conversation
@@ -95,15 +95,25 @@ class TuiSession:
 
     def _on_agent_event(self, event: AgentEvent):
         if event.type == EventType.TEXT_DELTA:
+            if self._thinking_active:
+                self._thinking_active = False
+                self._stream += "\n"
             self._stream += event.data.get("text", "")
-            self._start_live()
-            self._live.update(Markdown(self._stream), refresh=True)
+            if self._live:
+                self._live.update(Markdown(self._stream), refresh=True)
         elif event.type == EventType.TEXT_DONE:
-            self._stop_live()
+            if self._stream.strip():
+                self._stop_live()
+                self._live = Live(Markdown(self._stream), console=self.console,
+                                    refresh_per_second=12, auto_refresh=False)
+                self._live.start()
+            self._stream = ""
         elif event.type == EventType.THINKING_DELTA:
-            self._stream += event.data.get("text", "")
-            self._start_live()
-            self._live.update(Markdown(self._stream), refresh=True)
+            self._thinking_active = True
+            self.console.print(event.data.get("text", ""), end="", style="dim italic", highlight=False)
+        elif event.type == EventType.THINKING_DONE:
+            self._thinking_active = False
+            self.console.print()
         elif event.type == EventType.AGENT_ERROR:
             self.console.print(f"[red]Error: {event.data.get('error')}[/red]")
         elif event.type == EventType.TOOL_CALL:
