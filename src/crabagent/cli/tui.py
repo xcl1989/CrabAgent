@@ -48,7 +48,7 @@ class CrabAgentTuiApp(App[None]):
     """
 
     BINDINGS = [
-        ("ctrl+q", "quit", "Quit"),
+        ("ctrl+backslash", "quit", "Quit"),
         ("ctrl+a", "select_all", "Select All"),
         ("escape", "focus_input", "Focus"),
     ]
