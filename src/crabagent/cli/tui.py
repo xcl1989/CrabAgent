@@ -49,6 +49,7 @@ class CrabAgentTuiApp(App[None]):
 
     BINDINGS = [
         ("ctrl+q", "quit", "Quit"),
+        ("ctrl+a", "select_all", "Select All"),
         ("escape", "focus_input", "Focus"),
     ]
 
@@ -72,7 +73,9 @@ class CrabAgentTuiApp(App[None]):
         self._exit_flag = False
 
     def compose(self) -> ComposeResult:
-        yield RichLog(highlight=True, markup=True, wrap=True, max_lines=10000, id="output")
+        log = RichLog(highlight=True, markup=True, wrap=True, max_lines=10000, id="output")
+        log.allow_select = True
+        yield log
         with Container(id="input-container"):
             yield Input(placeholder="Type a message or /command...", id="input")
 
@@ -269,6 +272,9 @@ class CrabAgentTuiApp(App[None]):
 
     def action_focus_input(self):
         self.query_one("#input", Input).focus()
+
+    def action_select_all(self):
+        self._log().text_select_all()
 
     def action_quit(self):
         self._exit_flag = True
