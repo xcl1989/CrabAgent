@@ -37,6 +37,7 @@ dependencies = [
     "bcrypt>=4.0,<4.1",
     "mcp>=1.0",
     "apscheduler>=3.10",
+    "textual>=8.0",
 ]
 
 [project.optional-dependencies]
