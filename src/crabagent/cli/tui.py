@@ -609,23 +609,28 @@ class CrabAgentTuiApp(App[None]):
     @staticmethod
     async def setup_agent_context(args, conversation_id=None, history=None, persistence_start_seq=0, session_id_str=None):
         import crabagent.core.agent.tools.bash  # noqa: F401
-        import crabagent.core.agent.tools.read  # noqa: F401
-        import crabagent.core.agent.tools.write  # noqa: F401
         import crabagent.core.agent.tools.edit  # noqa: F401
         import crabagent.core.agent.tools.glob  # noqa: F401
         import crabagent.core.agent.tools.grep  # noqa: F401
+        import crabagent.core.agent.tools.read  # noqa: F401
         import crabagent.core.agent.tools.web  # noqa: F401
-        import crabagent.core.agent.tools.agent  # noqa: F401
-        import crabagent.core.agent.tools.scheduled_task  # noqa: F401
-        import crabagent.core.agent.tools.ask  # noqa: F401
+        import crabagent.core.agent.tools.write  # noqa: F401
         try:
             import crabagent.core.agent.tools.browser  # noqa: F401
-        except ImportError:
+        except Exception:
+            pass
+        try:
+            import crabagent.core.agent.tools.scheduled_task  # noqa: F401
+        except Exception:
+            pass
+        try:
+            import crabagent.core.agent.tools.agent  # noqa: F401
+        except Exception:
             pass
 
         from datetime import UTC, datetime
 
-        from crabagent.core.agent.tools.registry import registry as tool_registry
+        from crabagent.core.agent.tools import registry as tool_registry
         from crabagent.core.agent.skill.loader import discover_skills, register_skill_tool
         from crabagent.core.molt.tools import register_molt_tools
         from crabagent.core.todo.tools import register_todo_tools
