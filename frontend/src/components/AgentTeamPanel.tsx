@@ -179,7 +179,7 @@ export function AgentTeamPanel({ onClose }: Props) {
       <div className="flex gap-2 pt-1">
         <button onClick={onSave} disabled={saving}
           className="text-xs px-4 py-1.5 rounded-lg font-medium transition-all hover:opacity-80"
-          style={{ background: "var(--accent)", color: "#fff" }}>
+          style={{ background: "var(--accent)", color: "var(--text-on-accent)" }}>
           {saving ? "Saving..." : "Save"}
         </button>
         <button onClick={() => { setEditing(null); setShowCreate(false); }}
@@ -211,7 +211,7 @@ export function AgentTeamPanel({ onClose }: Props) {
 
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
           {error && (
-            <div className="px-3 py-2 rounded-lg text-xs" style={{ background: "#2d1215", color: "#fca5a5", border: "1px solid #5c1d22" }}>
+            <div className="px-3 py-2 rounded-lg text-xs" style={{ background: "var(--danger-bg)", color: "var(--danger)", border: "1px solid var(--danger-border)" }}>
               {error}
             </div>
           )}
@@ -240,7 +240,7 @@ export function AgentTeamPanel({ onClose }: Props) {
                           {a.display_name}
                         </span>
                         {a.model && (
-                          <span className="text-[9px] px-1.5 py-0.5 rounded font-mono" style={{ background: "#1e3a5f", color: "#93c5fd" }}>
+                          <span className="text-[9px] px-1.5 py-0.5 rounded font-mono" style={{ background: "var(--accent-bg)", color: "var(--accent)" }}>
                             {a.model}
                           </span>
                         )}
@@ -255,13 +255,13 @@ export function AgentTeamPanel({ onClose }: Props) {
                       </button>
                       <button onClick={() => handleToggle(a)} title={a.enabled ? "Disable" : "Enable"}
                         className="text-[10px] px-2 py-1 rounded-md transition-opacity hover:opacity-80"
-                        style={{ background: a.enabled ? "#065f46" : "#4b5563", color: "#fff" }}>
+                        style={{ background: a.enabled ? "var(--success-bg)" : "var(--bg-elevated)", color: "var(--text-on-accent)" }}>
                         {a.enabled ? "On" : "Off"}
                       </button>
                       {!a.is_default && (
                         <button onClick={() => handleDelete(a)} title="Delete"
                           className="text-[10px] px-2 py-1 rounded-md transition-opacity hover:opacity-80"
-                          style={{ background: "#2d1215", color: "#fca5a5" }}>
+                          style={{ background: "var(--danger-bg)", color: "var(--danger)" }}>
                           Del
                         </button>
                       )}
@@ -286,7 +286,7 @@ export function AgentTeamPanel({ onClose }: Props) {
           <div className="px-5 py-3 shrink-0" style={{ borderTop: "1px solid var(--border)" }}>
             <button onClick={startCreate}
               className="w-full py-2 rounded-lg text-xs font-medium transition-all hover:opacity-80"
-              style={{ background: "var(--accent)", color: "#fff" }}>
+              style={{ background: "var(--accent)", color: "var(--text-on-accent)" }}>
               + New Agent
             </button>
           </div>

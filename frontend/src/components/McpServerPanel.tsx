@@ -179,10 +179,10 @@ export default function McpServerPanel({ servers, status, onClose, onRefresh }: 
   };
 
   const statusColor = (s: string) =>
-    s === "connected" ? "#34d399" : s === "connecting" ? "#fbbf24" : s === "error" ? "#f87171" : "var(--text-secondary)";
+    s === "connected" ? "var(--success)" : s === "connecting" ? "var(--warning)" : s === "error" ? "var(--danger)" : "var(--text-secondary)";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.6)" }}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "var(--overlay)" }}>
       <div
         className="w-full max-w-lg rounded-xl p-6 max-h-[85vh] overflow-y-auto"
         style={{ background: "var(--bg-secondary)" }}
@@ -199,9 +199,9 @@ export default function McpServerPanel({ servers, status, onClose, onRefresh }: 
             onClick={() => { setTab("servers"); setError(null); }}
             className="flex-1 py-1.5 rounded-lg text-sm font-medium"
             style={{
-              background: tab === "servers" ? "#4c1d95" : "var(--bg-tertiary)",
-              color: tab === "servers" ? "#d8b4fe" : "var(--text-secondary)",
-              border: `1px solid ${tab === "servers" ? "#7c3aed" : "var(--border)"}`,
+              background: tab === "servers" ? "var(--accent-2)" : "var(--bg-tertiary)",
+              color: tab === "servers" ? "var(--text-on-accent)" : "var(--text-secondary)",
+              border: `1px solid ${tab === "servers" ? "var(--accent-2)" : "var(--border)"}`,
             }}
           >
             Servers
@@ -210,9 +210,9 @@ export default function McpServerPanel({ servers, status, onClose, onRefresh }: 
             onClick={() => { setTab("settings"); setError(null); setTestResult(null); }}
             className="flex-1 py-1.5 rounded-lg text-sm font-medium"
             style={{
-              background: tab === "settings" ? "#4c1d95" : "var(--bg-tertiary)",
-              color: tab === "settings" ? "#d8b4fe" : "var(--text-secondary)",
-              border: `1px solid ${tab === "settings" ? "#7c3aed" : "var(--border)"}`,
+              background: tab === "settings" ? "var(--accent-2)" : "var(--bg-tertiary)",
+              color: tab === "settings" ? "var(--text-on-accent)" : "var(--text-secondary)",
+              border: `1px solid ${tab === "settings" ? "var(--accent-2)" : "var(--border)"}`,
             }}
           >
             Settings
@@ -222,7 +222,7 @@ export default function McpServerPanel({ servers, status, onClose, onRefresh }: 
         {error && (
           <div
             className="mb-3 px-3 py-2 rounded text-xs"
-            style={{ background: "#2d1215", border: "1px solid #5c1d22", color: "#fca5a5" }}
+            style={{ background: "var(--danger-bg)", border: "1px solid var(--danger-border)", color: "var(--danger)" }}
           >
             {error}
           </div>
@@ -256,7 +256,7 @@ export default function McpServerPanel({ servers, status, onClose, onRefresh }: 
                 onClick={handleSaveSettings}
                 disabled={saving}
                 className="flex-1 py-2 rounded-lg text-sm font-medium"
-                style={{ background: "#7c3aed", color: "#fff" }}
+                style={{ background: "var(--accent-2)", color: "var(--text-on-accent)" }}
               >
                 {saving ? "Saving..." : "Save"}
               </button>
@@ -264,7 +264,7 @@ export default function McpServerPanel({ servers, status, onClose, onRefresh }: 
                 onClick={handleTestSearxng}
                 disabled={testing || !searxngUrl}
                 className="flex-1 py-2 rounded-lg text-sm font-medium"
-                style={{ background: "#0d2818", color: "#34d399" }}
+                style={{ background: "var(--success-bg)", color: "var(--success)" }}
               >
                 {testing ? "Testing..." : "Test Connection"}
               </button>
@@ -274,9 +274,9 @@ export default function McpServerPanel({ servers, status, onClose, onRefresh }: 
               <div
                 className="px-3 py-2 rounded text-xs"
                 style={{
-                  background: testResult.success ? "#0d2818" : "#2d1215",
-                  border: `1px solid ${testResult.success ? "#166534" : "#5c1d22"}`,
-                  color: testResult.success ? "#34d399" : "#fca5a5",
+                  background: testResult.success ? "var(--success-bg)" : "var(--danger-bg)",
+                  border: `1px solid ${testResult.success ? "var(--success-border)" : "var(--danger-border)"}`,
+                  color: testResult.success ? "var(--success)" : "var(--danger)",
                 }}
               >
                 {testResult.success
@@ -309,13 +309,13 @@ export default function McpServerPanel({ servers, status, onClose, onRefresh }: 
                 >
                   <div className="flex items-center justify-between mb-1">
                     <div className="flex items-center gap-2">
-                      <span style={{ color: "#a78bfa", fontSize: "14px" }}>&#x1f50c;</span>
+                      <span style={{ color: "var(--accent-2)", fontSize: "14px" }}>&#x1f50c;</span>
                       <span className="text-sm font-medium">{s.display_name || s.name}</span>
                       <span
                         className="text-xs px-1.5 py-0.5 rounded"
                         style={{
-                          background: s.transport === "http" ? "#1e3a5f" : "#2d1f5e",
-                          color: s.transport === "http" ? "#60a5fa" : "#a78bfa",
+                          background: s.transport === "http" ? "var(--accent-bg)" : "var(--accent-2-bg)",
+                          color: s.transport === "http" ? "var(--accent)" : "var(--accent-2)",
                         }}
                       >
                         {s.transport}
@@ -349,7 +349,7 @@ export default function McpServerPanel({ servers, status, onClose, onRefresh }: 
                   </div>
 
                   {connError && (
-                    <div className="text-xs mb-1.5 px-2 py-1 rounded" style={{ color: "#fca5a5", background: "#2d1215" }}>
+                    <div className="text-xs mb-1.5 px-2 py-1 rounded" style={{ color: "var(--danger)", background: "var(--danger-bg)" }}>
                       {connError}
                     </div>
                   )}
@@ -370,7 +370,7 @@ export default function McpServerPanel({ servers, status, onClose, onRefresh }: 
                         onClick={() => handleConnect(s.name)}
                         disabled={isActing}
                         className="text-xs px-2.5 py-1 rounded font-medium"
-                        style={{ background: "#0d2818", color: "#34d399" }}
+                        style={{ background: "var(--success-bg)", color: "var(--success)" }}
                       >
                         {isActing ? "..." : connStatus === "error" ? "Reconnect" : "Connect"}
                       </button>
@@ -392,7 +392,7 @@ export default function McpServerPanel({ servers, status, onClose, onRefresh }: 
                 setMode("add");
               }}
               className="w-full mt-2 py-2 rounded-lg text-sm font-medium"
-              style={{ background: "#4c1d95", color: "#d8b4fe" }}
+              style={{ background: "var(--accent-2)", color: "var(--text-on-accent)" }}
             >
               + Add MCP Server
             </button>
@@ -442,9 +442,9 @@ export default function McpServerPanel({ servers, status, onClose, onRefresh }: 
                   onClick={() => setFormTransport("stdio")}
                   className="flex-1 py-2 rounded-lg text-sm font-medium"
                   style={{
-                    background: formTransport === "stdio" ? "#4c1d95" : "var(--bg-tertiary)",
-                    color: formTransport === "stdio" ? "#d8b4fe" : "var(--text-secondary)",
-                    border: `1px solid ${formTransport === "stdio" ? "#7c3aed" : "var(--border)"}`,
+                    background: formTransport === "stdio" ? "var(--accent-2)" : "var(--bg-tertiary)",
+                    color: formTransport === "stdio" ? "var(--text-on-accent)" : "var(--text-secondary)",
+                    border: `1px solid ${formTransport === "stdio" ? "var(--accent-2)" : "var(--border)"}`,
                   }}
                 >
                   Stdio (local)
@@ -453,9 +453,9 @@ export default function McpServerPanel({ servers, status, onClose, onRefresh }: 
                   onClick={() => setFormTransport("http")}
                   className="flex-1 py-2 rounded-lg text-sm font-medium"
                   style={{
-                    background: formTransport === "http" ? "#4c1d95" : "var(--bg-tertiary)",
-                    color: formTransport === "http" ? "#d8b4fe" : "var(--text-secondary)",
-                    border: `1px solid ${formTransport === "http" ? "#7c3aed" : "var(--border)"}`,
+                    background: formTransport === "http" ? "var(--accent-2)" : "var(--bg-tertiary)",
+                    color: formTransport === "http" ? "var(--text-on-accent)" : "var(--text-secondary)",
+                    border: `1px solid ${formTransport === "http" ? "var(--accent-2)" : "var(--border)"}`,
                   }}
                 >
                   HTTP (remote)
@@ -569,7 +569,7 @@ export default function McpServerPanel({ servers, status, onClose, onRefresh }: 
               <button
                 onClick={handleAdd}
                 className="flex-1 py-2 rounded-lg text-sm font-medium"
-                style={{ background: "#7c3aed", color: "#fff" }}
+                style={{ background: "var(--accent-2)", color: "var(--text-on-accent)" }}
               >
                 Add Server
               </button>

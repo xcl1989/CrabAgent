@@ -64,8 +64,8 @@ function ToolCallSummary({ name, summary, source, server_name }: { name: string;
   const isMcp = source === "mcp";
   const icon = isMcp ? "🔌" : (TOOL_ICONS[name] || "⚡");
   const displayName = isMcp ? name.replace(/^mcp__/, "").replace(/__/g, ": ") : name;
-  const accentColor = isMcp ? "#a78bfa" : "var(--accent)";
-  const borderColor = isMcp ? "#7c3aed" : "var(--accent)";
+  const accentColor = isMcp ? "var(--accent-2)" : "var(--accent)";
+  const borderColor = isMcp ? "var(--accent-2)" : "var(--accent)";
 
   return { icon, displayName, accentColor, borderColor, isMcp, serverLabel: isMcp && server_name ? `[MCP: ${server_name}]` : "" };
 }
@@ -117,7 +117,7 @@ function UserInputOptions({ options, inputId, onSubmit }: { options: string[]; i
           key={i}
           onClick={() => onSubmit(inputId, opt)}
           className="px-3 py-1.5 rounded text-xs font-medium"
-          style={{ background: "var(--accent)", color: "#fff" }}
+          style={{ background: "var(--accent)", color: "var(--text-on-accent)" }}
         >
           {opt}
         </button>
@@ -239,9 +239,9 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(({ messages, connected, onTo
                 }}
               >
                 <span style={{ color: meta.accentColor, fontFamily: "monospace", fontSize: "11px" }}>{meta.icon}</span>
-                <span className="font-medium" style={{ color: meta.isMcp ? "#c4b5fd" : "#67e8f9" }}>{meta.displayName}</span>
+                <span className="font-medium" style={{ color: meta.isMcp ? "#c4b5fd" : "var(--accent)" }}>{meta.displayName}</span>
                 {meta.serverLabel && (
-                  <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: "#2d1f5e", color: "#a78bfa", fontSize: "10px" }}>
+                  <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: "var(--accent-2-bg)", color: "var(--accent-2)", fontSize: "10px" }}>
                     {meta.serverLabel}
                   </span>
                 )}
@@ -317,7 +317,7 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(({ messages, connected, onTo
                 className="mt-1.5 p-3 rounded-md text-xs leading-relaxed"
                 style={{
                   background: "var(--bg-secondary)",
-                  borderLeft: "3px solid #8b5cf6",
+                  borderLeft: "3px solid var(--accent-2)",
                   color: "var(--text-secondary)",
                 }}
               >
@@ -339,9 +339,9 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(({ messages, connected, onTo
                 style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", color: "var(--text-secondary)" }}
               >
                 <span style={{ color: meta.accentColor, fontFamily: "monospace", fontSize: "11px" }}>{meta.icon}</span>
-                <span className="font-medium" style={{ color: meta.isMcp ? "#c4b5fd" : "#67e8f9" }}>{meta.displayName}</span>
+                <span className="font-medium" style={{ color: meta.isMcp ? "#c4b5fd" : "var(--accent)" }}>{meta.displayName}</span>
                 {meta.serverLabel && (
-                  <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: "#2d1f5e", color: "#a78bfa", fontSize: "10px" }}>
+                  <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: "var(--accent-2-bg)", color: "var(--accent-2)", fontSize: "10px" }}>
                     {meta.serverLabel}
                   </span>
                 )}
@@ -373,7 +373,7 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(({ messages, connected, onTo
                   fontFamily: "'SF Mono', 'Fira Code', monospace",
                 }}
               >
-                <span style={{ color: "#34d399" }}>✓</span>
+                <span style={{ color: "var(--success)" }}>✓</span>
                 {parts.map((p, i) => (
                   <span key={i}>
                     {i > 0 && <span style={{ color: "var(--border)", margin: "0 2px" }}>·</span>}
@@ -393,7 +393,7 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(({ messages, connected, onTo
                 style={{
                   background: "var(--bg-secondary)",
                   border: "1px solid var(--border)",
-                  color: "#fbbf24",
+                  color: "var(--warning)",
                   fontFamily: "'SF Mono', 'Fira Code', monospace",
                 }}
               >
@@ -413,16 +413,16 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(({ messages, connected, onTo
                 style={{
                   background: "var(--bg-secondary)",
                   border: "1px solid var(--border)",
-                  borderLeft: resolved ? (msg.confirmed ? "3px solid #34d399" : "3px solid #f87171") : "3px solid #fbbf24",
+                  borderLeft: resolved ? (msg.confirmed ? "3px solid var(--success)" : "3px solid var(--danger)") : "3px solid var(--warning)",
                 }}
               >
                 <div className="flex items-center gap-2 mb-1.5">
-                  <span style={{ color: "#fbbf24", fontSize: "14px" }}>⚠</span>
+                  <span style={{ color: "var(--warning)", fontSize: "14px" }}>⚠</span>
                   <span className="font-medium" style={{ color: "var(--text-primary)" }}>
                     {msg.tool_name || "Tool"} requires permission
                   </span>
                   {resolved && (
-                    <span style={{ color: msg.confirmed ? "#34d399" : "#f87171", fontSize: "12px" }}>
+                    <span style={{ color: msg.confirmed ? "var(--success)" : "var(--danger)", fontSize: "12px" }}>
                       {msg.confirmed ? "— Allowed" : "— Denied"}
                     </span>
                   )}
@@ -440,14 +440,14 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(({ messages, connected, onTo
                     <button
                       onClick={() => onToolConfirm(msg.confirm_id!, true)}
                       className="px-3 py-1.5 rounded text-xs font-medium"
-                      style={{ background: "#065f46", color: "#34d399" }}
+                      style={{ background: "var(--success-bg)", color: "var(--success)" }}
                     >
                       ✓ Allow
                     </button>
                     <button
                       onClick={() => onToolConfirm(msg.confirm_id!, false)}
                       className="px-3 py-1.5 rounded text-xs font-medium"
-                      style={{ background: "#7f1d1d", color: "#f87171" }}
+                      style={{ background: "var(--danger-bg)", color: "var(--danger)" }}
                     >
                       ✗ Deny
                     </button>
@@ -468,11 +468,11 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(({ messages, connected, onTo
                 style={{
                   background: "var(--bg-secondary)",
                   border: "1px solid var(--border)",
-                  borderLeft: resolved ? "3px solid #34d399" : "3px solid #60a5fa",
+                  borderLeft: resolved ? "3px solid var(--success)" : "3px solid var(--accent)",
                 }}
               >
                 <div className="flex items-center gap-2 mb-1.5">
-                  <span style={{ color: "#60a5fa", fontSize: "14px" }}>💬</span>
+                  <span style={{ color: "var(--accent)", fontSize: "14px" }}>💬</span>
                   <span className="font-medium" style={{ color: "var(--text-primary)" }}>
                     {msg.content}
                   </span>
@@ -504,17 +504,17 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(({ messages, connected, onTo
               className="mb-3 flex items-center gap-2 cursor-pointer py-1.5 px-3 rounded-md text-xs select-none transition-colors"
               style={{
                 marginLeft: "12px",
-                background: isActive ? "#2d1f5e" : "var(--bg-secondary)",
-                border: `1px solid ${isActive ? "#7c3aed" : "var(--border)"}`,
+                background: isActive ? "var(--accent-2-bg)" : "var(--bg-secondary)",
+                border: `1px solid ${isActive ? "var(--accent-2)" : "var(--border)"}`,
                 color: "var(--text-secondary)",
               }}
             >
               <span style={{ fontSize: "11px" }}>{agentIcon}</span>
               <span className="font-medium" style={{ color: "#c4b5fd" }}>{msg.sub_agent_display || msg.sub_agent_name}</span>
               {completed ? (
-                <span className="ml-1" style={{ color: "#34d399", fontFamily: "monospace" }}>✓</span>
+                <span className="ml-1" style={{ color: "var(--success)", fontFamily: "monospace" }}>✓</span>
               ) : (
-                <span className="ml-1 animate-spin inline-block" style={{ color: "#a78bfa", fontFamily: "monospace", fontSize: "10px" }}>⟳</span>
+                <span className="ml-1 animate-spin inline-block" style={{ color: "var(--accent-2)", fontFamily: "monospace", fontSize: "10px" }}>⟳</span>
               )}
               {completed && (
                 <span style={{ color: "var(--text-secondary)", fontSize: "10px" }}>
@@ -522,7 +522,7 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(({ messages, connected, onTo
                 </span>
               )}
               {!completed && (
-                <span className="animate-pulse" style={{ color: "#a78bfa", fontSize: "10px" }}>running...</span>
+                <span className="animate-pulse" style={{ color: "var(--accent-2)", fontSize: "10px" }}>running...</span>
               )}
             </button>
           );
@@ -533,7 +533,7 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(({ messages, connected, onTo
             <div key={msg.id} className="mb-3">
               <div
                 className="px-4 py-3 rounded-lg text-sm"
-                style={{ background: "#2d1215", border: "1px solid #5c1d22", color: "#fca5a5" }}
+                style={{ background: "var(--danger-bg)", border: "1px solid var(--danger-border)", color: "var(--danger)" }}
               >
                 ⚠ {msg.content}
               </div>
@@ -568,7 +568,7 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(({ messages, connected, onTo
               }`}
               style={{
                 background: isUser ? "var(--accent)" : "transparent",
-                color: isUser ? "#fff" : "var(--text-primary)",
+                color: isUser ? "var(--text-on-accent)" : "var(--text-primary)",
               }}
             >
               {msg.reasoning_content && (
@@ -581,7 +581,7 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(({ messages, connected, onTo
                   </summary>
                   <div
                     className="mt-1 p-2 rounded text-xs"
-                    style={{ background: "var(--bg-tertiary)", borderLeft: "3px solid #8b5cf6", color: "var(--text-secondary)" }}
+                    style={{ background: "var(--bg-tertiary)", borderLeft: "3px solid var(--accent-2)", color: "var(--text-secondary)" }}
                   >
                     <pre className="whitespace-pre-wrap" style={{ fontFamily: "'SF Mono', monospace", fontSize: "12px" }}>
                       {msg.reasoning_content}
@@ -676,7 +676,7 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(({ messages, connected, onTo
               className="flex flex-col rounded-xl overflow-hidden"
               style={{
                 background: "#1a1a2e",
-                border: "1px solid #7c3aed",
+                border: "1px solid var(--accent-2)",
                 width: "min(680px, 90vw)",
                 maxHeight: "80vh",
                 boxShadow: "0 20px 60px rgba(0,0,0,0.5), 0 0 0 1px rgba(124,58,237,0.3)",
@@ -685,7 +685,7 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(({ messages, connected, onTo
             >
               <div
                 className="flex items-center gap-2 px-4 py-3 select-none shrink-0"
-                style={{ borderBottom: "1px solid #2d1f5e", background: "#16162a" }}
+                style={{ borderBottom: "1px solid var(--accent-2-bg)", background: "#16162a" }}
               >
                 <span style={{ fontSize: "14px" }}>{agentIcon}</span>
                 <span className="font-medium text-sm" style={{ color: "#d8b4fe" }}>
@@ -693,19 +693,19 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(({ messages, connected, onTo
                 </span>
                 {!completed && (
                   <span className="flex items-center gap-1.5 ml-2">
-                    <span className="animate-spin inline-block" style={{ color: "#a78bfa", fontSize: "11px" }}>⟳</span>
-                    <span className="animate-pulse text-xs" style={{ color: "#a78bfa" }}>running...</span>
+                    <span className="animate-spin inline-block" style={{ color: "var(--accent-2)", fontSize: "11px" }}>⟳</span>
+                    <span className="animate-pulse text-xs" style={{ color: "var(--accent-2)" }}>running...</span>
                   </span>
                 )}
                 {completed && (
-                  <span className="text-xs ml-2" style={{ color: "#94a3b8" }}>
+                  <span className="text-xs ml-2" style={{ color: "var(--text-secondary)" }}>
                     ✓ {agent.sub_agent_iterations} steps · {agent.sub_agent_elapsed}s · {agent.sub_agent_tokens} tokens
                   </span>
                 )}
                 <button
                   onClick={closeSubAgent}
                   className="ml-auto text-sm px-2 py-0.5 rounded hover:opacity-80"
-                  style={{ color: "#94a3b8" }}
+                  style={{ color: "var(--text-secondary)" }}
                 >
                   ✕
                 </button>
@@ -715,7 +715,7 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(({ messages, connected, onTo
                   const segments = parseSubAgentContent(agent.content || "");
                   if (segments.length === 0) {
                     return (
-                      <span className="text-sm" style={{ color: "#94a3b8" }}>
+                      <span className="text-sm" style={{ color: "var(--text-secondary)" }}>
                         (working...)
                       </span>
                     );
@@ -754,13 +754,13 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(({ messages, connected, onTo
                               className="flex items-center gap-2 py-1.5 px-3 rounded-md text-xs select-none"
                               style={{
                                 background: "#1e1b2e",
-                                border: "1px solid #2d1f5e",
-                                color: "#94a3b8",
+                                border: "1px solid var(--accent-2-bg)",
+                                color: "var(--text-secondary)",
                               }}
                             >
-                              <span style={{ color: "#a78bfa", fontFamily: "monospace", fontSize: "11px" }}>⚡</span>
+                              <span style={{ color: "var(--accent-2)", fontFamily: "monospace", fontSize: "11px" }}>⚡</span>
                               <span className="font-medium" style={{ color: "#c4b5fd" }}>{seg.name}</span>
-                              <span style={{ color: "#94a3b8", fontFamily: "monospace" }}>{seg.content}</span>
+                              <span style={{ color: "var(--text-secondary)", fontFamily: "monospace" }}>{seg.content}</span>
                             </div>
                           );
                         }
@@ -770,17 +770,17 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(({ messages, connected, onTo
                               key={i}
                               className="rounded-md overflow-hidden"
                               style={{
-                                borderLeft: "3px solid #34d399",
+                                borderLeft: "3px solid var(--success)",
                                 background: "#1a1f1e",
                               }}
                             >
-                              <div className="px-3 py-1.5 text-[10px] font-medium" style={{ color: "#34d399", borderBottom: "1px solid #164e36" }}>
+                              <div className="px-3 py-1.5 text-[10px] font-medium" style={{ color: "var(--success)", borderBottom: "1px solid var(--success-border)" }}>
                                 ← {seg.name}
                               </div>
                               <pre
                                 className="px-3 py-2 text-xs whitespace-pre-wrap break-all leading-relaxed"
                                 style={{
-                                  color: "#cbd5e1",
+                                  color: "var(--text-primary)",
                                   fontFamily: "'SF Mono', 'Fira Code', monospace",
                                   fontSize: "12px",
                                   maxHeight: "200px",

@@ -122,7 +122,7 @@ export function ScheduledTaskPanel({ onClose, onSwitchSession }: Props) {
         </div>
 
         {error && (
-          <div className="mb-3 px-3 py-2 rounded text-xs" style={{ background: "#2d1215", color: "#fca5a5", border: "1px solid #5c1d22" }}>{error}</div>
+          <div className="mb-3 px-3 py-2 rounded text-xs" style={{ background: "var(--danger-bg)", color: "var(--danger)", border: "1px solid var(--danger-border)" }}>{error}</div>
         )}
 
         {!showForm ? (
@@ -130,7 +130,7 @@ export function ScheduledTaskPanel({ onClose, onSwitchSession }: Props) {
             <button
               onClick={() => { resetForm(); setShowForm(true); }}
               className="w-full mb-4 py-2 rounded-lg text-sm font-medium transition-opacity hover:opacity-80"
-              style={{ background: "var(--accent)", color: "#fff" }}
+              style={{ background: "var(--accent)", color: "var(--text-on-accent)" }}
             >
               + New Task
             </button>
@@ -145,7 +145,7 @@ export function ScheduledTaskPanel({ onClose, onSwitchSession }: Props) {
                       <button
                         onClick={() => handleToggle(t)} disabled={acting === t.id}
                         className="text-[10px] px-2 py-0.5 rounded"
-                        style={{ background: t.enabled ? "#065f46" : "#4b5563", color: "#fff" }}
+                        style={{ background: t.enabled ? "var(--success-bg)" : "var(--bg-elevated)", color: "var(--text-on-accent)" }}
                       >
                         {t.enabled ? "Active" : "Paused"}
                       </button>
@@ -161,15 +161,15 @@ export function ScheduledTaskPanel({ onClose, onSwitchSession }: Props) {
                   {t.last_run_at && (
                     <div className="text-[10px] mb-2" style={{ color: "var(--text-secondary)" }}>
                       Last: {new Date(t.last_run_at).toLocaleString()}
-                      {t.last_status === "error" && <span style={{ color: "#fca5a5" }}> (failed)</span>}
-                      {t.last_status === "success" && <span style={{ color: "#34d399" }}> (success)</span>}
+                      {t.last_status === "error" && <span style={{ color: "var(--danger)" }}> (failed)</span>}
+                      {t.last_status === "success" && <span style={{ color: "var(--success)" }}> (success)</span>}
                     </div>
                   )}
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => handleRun(t.id)} disabled={acting === t.id}
                       className="text-[10px] px-2 py-0.5 rounded transition-opacity hover:opacity-80"
-                      style={{ background: "var(--accent)", color: "#fff" }}
+                      style={{ background: "var(--accent)", color: "var(--text-on-accent)" }}
                     >
                       {acting === t.id ? "..." : "▶ Run Now"}
                     </button>
@@ -192,7 +192,7 @@ export function ScheduledTaskPanel({ onClose, onSwitchSession }: Props) {
                     <button
                       onClick={() => handleDelete(t.id)} disabled={acting === t.id}
                       className="text-[10px] px-2 py-0.5 rounded transition-opacity hover:opacity-80"
-                      style={{ background: "#2d1215", color: "#fca5a5" }}
+                      style={{ background: "var(--danger-bg)", color: "var(--danger)" }}
                     >
                       Delete
                     </button>
@@ -229,7 +229,7 @@ export function ScheduledTaskPanel({ onClose, onSwitchSession }: Props) {
               <button
                 onClick={handleSubmit} disabled={loading}
                 className="flex-1 py-2 rounded-lg text-sm font-medium transition-opacity hover:opacity-80"
-                style={{ background: "var(--accent)", color: "#fff" }}
+                style={{ background: "var(--accent)", color: "var(--text-on-accent)" }}
               >
                 {loading ? "..." : editingId ? "Save Changes" : "Create Task"}
               </button>

@@ -57,7 +57,7 @@ export function ResultCompare({ tasks, onClose, onExport }: Props) {
                 style={{
                   background: active?.subId === t.subId ? "var(--bg-tertiary)" : "transparent",
                   border: `1px solid ${active?.subId === t.subId ? "var(--border)" : "transparent"}`,
-                  color: t.status === "error" ? "#fca5a5" : "var(--text-primary)",
+                  color: t.status === "error" ? "var(--danger)" : "var(--text-primary)",
                 }}
               >
                 <div className="flex items-center gap-1.5">
@@ -83,8 +83,8 @@ export function ResultCompare({ tasks, onClose, onExport }: Props) {
                   </span>
                   <span className="text-[9px] px-1.5 py-0.5 rounded-full"
                     style={{
-                      background: active.status === "done" ? "#05966920" : "#dc262620",
-                      color: active.status === "done" ? "#059669" : "#dc2626",
+                      background: active.status === "done" ? "var(--success-bg)" : "var(--danger-bg)",
+                      color: active.status === "done" ? "var(--success)" : "var(--danger)",
                     }}>
                     {active.status === "done" ? "Completed" : "Failed"}
                   </span>
@@ -98,7 +98,7 @@ export function ResultCompare({ tasks, onClose, onExport }: Props) {
                   {active.content || "(no output)"}
                 </div>
                 {active.error && (
-                  <div className="mt-3 p-2.5 rounded-lg text-xs" style={{ background: "#2d1215", color: "#fca5a5", border: "1px solid #5c1d22" }}>
+                  <div className="mt-3 p-2.5 rounded-lg text-xs" style={{ background: "var(--danger-bg)", color: "var(--danger)", border: "1px solid var(--danger-border)" }}>
                     {active.error}
                   </div>
                 )}

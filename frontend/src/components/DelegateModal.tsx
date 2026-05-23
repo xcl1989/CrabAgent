@@ -35,11 +35,11 @@ export function DelegateModal({ onClose, onDelegate }: Props) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.6)" }}>
-      <div className="w-full max-w-md rounded-xl overflow-hidden" style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", boxShadow: "0 25px 60px rgba(0,0,0,0.4)" }}>
-        <div className="flex items-center justify-between px-5 py-3.5" style={{ borderBottom: "1px solid var(--border)" }}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "var(--overlay)" }}>
+      <div className="w-full max-w-md rounded-xl overflow-hidden" style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", boxShadow: "0 25px 60px rgba(0,0,0,0.5), var(--glow-accent-2)" }}>
+        <div className="flex items-center justify-between px-5 py-3.5" style={{ borderBottom: "1px solid var(--border)", background: "var(--bg-tertiary)" }}>
           <h3 className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>Delegate to Team</h3>
-          <button onClick={onClose} className="text-sm opacity-60 hover:opacity-100" style={{ color: "var(--text-secondary)" }}>✕</button>
+          <button onClick={onClose} className="text-sm opacity-60 hover:opacity-100 transition-opacity" style={{ color: "var(--text-secondary)" }}>✕</button>
         </div>
 
         <div className="px-5 py-4 space-y-4">
@@ -54,9 +54,10 @@ export function DelegateModal({ onClose, onDelegate }: Props) {
                   onClick={() => toggle(a.name)}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs transition-all"
                   style={{
-                    background: selected.has(a.name) ? "#7c3aed20" : "var(--bg-tertiary)",
-                    border: `1px solid ${selected.has(a.name) ? "#7c3aed" : "var(--border)"}`,
-                    color: selected.has(a.name) ? "#a78bfa" : "var(--text-secondary)",
+                    background: selected.has(a.name) ? "var(--accent-2)" : "var(--bg-tertiary)",
+                    border: `1px solid ${selected.has(a.name) ? "var(--accent-2)" : "var(--border)"}`,
+                    color: selected.has(a.name) ? "var(--text-on-accent)" : "var(--text-secondary)",
+                    boxShadow: selected.has(a.name) ? "var(--glow-accent-2)" : "none",
                   }}
                 >
                   <span>{a.icon || "🤖"}</span>
@@ -111,7 +112,7 @@ export function DelegateModal({ onClose, onDelegate }: Props) {
             onClick={handleDelegate}
             disabled={selected.size === 0 || !task.trim()}
             className="flex-1 py-2 rounded-lg text-xs font-medium text-white disabled:opacity-40 transition-opacity"
-            style={{ background: "#7c3aed" }}
+             style={{ background: "var(--accent-2)" }}
           >
             Delegate to {selected.size} agent{selected.size !== 1 ? "s" : ""}
           </button>

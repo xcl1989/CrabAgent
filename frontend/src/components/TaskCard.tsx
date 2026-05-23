@@ -11,9 +11,9 @@ interface Props {
 
 export function TaskCard({ task, onClick }: Props) {
   const statusConfig: Record<TaskStatus, { border: string; bg: string; badge: string; label: string }> = {
-    running: { border: "#7c3aed", bg: "rgba(124,58,237,0.08)", badge: "#7c3aed", label: "Running" },
-    done: { border: "#059669", bg: "rgba(5,150,105,0.06)", badge: "#059669", label: "Done" },
-    error: { border: "#dc2626", bg: "rgba(220,38,38,0.06)", badge: "#dc2626", label: "Error" },
+    running: { border: "var(--accent-2)", bg: "var(--accent-2-bg)", badge: "var(--accent-2)", label: "Running" },
+    done: { border: "var(--success)", bg: "var(--success-bg)", badge: "var(--success)", label: "Done" },
+    error: { border: "var(--danger)", bg: "var(--danger-bg)", badge: "var(--danger)", label: "Error" },
   };
 
   const cfg = statusConfig[task.status];
@@ -68,7 +68,7 @@ export function TaskCard({ task, onClick }: Props) {
           </>
         )}
         {task.status === "error" && task.error && (
-          <span className="truncate" style={{ color: "#fca5a5" }}>{task.error}</span>
+          <span className="truncate" style={{ color: "var(--danger)" }}>{task.error}</span>
         )}
       </div>
     </button>

@@ -95,7 +95,7 @@ export default function ProviderPanel({ providers, catalog, onClose, onRefresh }
             <button
               onClick={() => setMode("add")}
               className="w-full mt-2 py-2 rounded-lg text-sm font-medium"
-              style={{ background: "var(--accent)", color: "#fff" }}
+              style={{ background: "var(--accent)", color: "var(--text-on-accent)" }}
             >
               + Add Provider
             </button>
@@ -158,7 +158,7 @@ export default function ProviderPanel({ providers, catalog, onClose, onRefresh }
               <button
                 onClick={handleAdd}
                 className="flex-1 py-2 rounded-lg text-sm font-medium"
-                style={{ background: "var(--accent)", color: "#fff" }}
+                style={{ background: "var(--accent)", color: "var(--text-on-accent)" }}
               >
                 Add
               </button>

@@ -35,7 +35,7 @@ export function TaskBoard({ tasks, onTaskClick }: Props) {
             {runningCount > 0 && (
               <span
                 className="ml-2 text-[9px] px-1.5 py-0.5 rounded-full font-medium animate-pulse"
-                style={{ background: "#7c3aed20", color: "#7c3aed" }}
+                style={{ background: "var(--accent-2-bg)", color: "var(--accent-2)" }}
               >
                 {runningCount} running
               </span>
@@ -48,7 +48,7 @@ export function TaskBoard({ tasks, onTaskClick }: Props) {
             {runningCount > 0 && (
               <span
                 className="w-4 h-4 rounded-full text-[8px] font-bold flex items-center justify-center"
-                style={{ background: "#7c3aed", color: "#fff" }}
+                style={{ background: "var(--accent-2)", color: "var(--text-on-accent)" }}
               >
                 {runningCount}
               </span>
