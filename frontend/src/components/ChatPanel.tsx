@@ -33,6 +33,8 @@ interface Props {
   onUserInput?: (inputId: string, answer: string) => void;
   onBranch?: (messageId: string) => void;
   replaying?: boolean;
+  externalSubAgentId?: string | null;
+  onSubAgentModalClose?: () => void;
 }
 
 function getToolSummary(content: string): { name: string; summary: string } {
@@ -189,9 +191,12 @@ function parseSubAgentContent(raw: string): SubAgentSegment[] {
   return segments;
 }
 
-const ChatPanel = forwardRef<HTMLDivElement, Props>(({ messages, connected, onToolConfirm, onUserInput, onBranch, replaying }, bottomRef) => {
+const ChatPanel = forwardRef<HTMLDivElement, Props>(({ messages, connected, onToolConfirm, onUserInput, onBranch, replaying, externalSubAgentId, onSubAgentModalClose }, bottomRef) => {
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [activeSubAgentId, setActiveSubAgentId] = useState<string | null>(null);
+
+  const resolvedSubAgentId = externalSubAgentId ?? activeSubAgentId;
+  const closeSubAgent = onSubAgentModalClose ?? (() => setActiveSubAgentId(null));
   const grouped: (ChatMessage | ChatMessage[])[] = [];
   let i = 0;
   while (i < messages.length) {
@@ -491,11 +496,11 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(({ messages, connected, onTo
         if (msg.role === "sub_agent") {
           const completed = msg.sub_agent_elapsed !== undefined;
           const agentIcon = AGENT_ICONS[msg.sub_agent_name || ""] || "🤖";
-          const isActive = activeSubAgentId === msg.sub_agent_id;
+          const isActive = resolvedSubAgentId === msg.sub_agent_id;
           return (
             <button
               key={msg.id}
-              onClick={() => setActiveSubAgentId(isActive ? null : (msg.sub_agent_id ?? msg.id))}
+              onClick={() => { if (isActive) closeSubAgent(); else setActiveSubAgentId(msg.sub_agent_id ?? msg.id); }}
               className="mb-3 flex items-center gap-2 cursor-pointer py-1.5 px-3 rounded-md text-xs select-none transition-colors"
               style={{
                 marginLeft: "12px",
@@ -656,8 +661,8 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(({ messages, connected, onTo
           />
         </div>
       )}
-      {activeSubAgentId && (() => {
-        const agent = messages.find(m => m.sub_agent_id === activeSubAgentId || m.id === activeSubAgentId);
+      {resolvedSubAgentId && (() => {
+        const agent = messages.find(m => m.sub_agent_id === resolvedSubAgentId || m.id === resolvedSubAgentId);
         if (!agent) return null;
         const completed = agent.sub_agent_elapsed !== undefined;
         const agentIcon = AGENT_ICONS[agent.sub_agent_name || ""] || "🤖";
@@ -665,7 +670,7 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(({ messages, connected, onTo
           <div
             className="fixed inset-0 z-50 flex items-center justify-center"
             style={{ background: "rgba(0,0,0,0.6)" }}
-            onClick={() => setActiveSubAgentId(null)}
+            onClick={closeSubAgent}
           >
             <div
               className="flex flex-col rounded-xl overflow-hidden"
@@ -698,7 +703,7 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(({ messages, connected, onTo
                   </span>
                 )}
                 <button
-                  onClick={() => setActiveSubAgentId(null)}
+                  onClick={closeSubAgent}
                   className="ml-auto text-sm px-2 py-0.5 rounded hover:opacity-80"
                   style={{ color: "#94a3b8" }}
                 >

@@ -18,6 +18,12 @@ import TodoWidget from "../components/TodoWidget";
 import { NotificationBell } from "../components/NotificationBell";
 import { ScheduledTaskPanel } from "../components/ScheduledTaskPanel";
 import { AgentTeamPanel } from "../components/AgentTeamPanel";
+import { TaskBoard } from "../components/TaskBoard";
+import { TaskInfo } from "../components/TaskBoard.types";
+import { AgentBar } from "../components/AgentBar";
+import { DelegateModal } from "../components/DelegateModal";
+import { ResultCompare } from "../components/ResultCompare";
+import { AgentProfile as AgentProfileType, listAgentProfiles } from "../api/agents";
 
 interface ChatMessage {
   id: string;
@@ -334,6 +340,11 @@ export default function ChatPage({ onLogout }: Props) {
   const [showMcpServers, setShowMcpServers] = useState(false);
   const [showScheduledTasks, setShowScheduledTasks] = useState(false);
   const [showAgentTeam, setShowAgentTeam] = useState(false);
+  const [taskBoardTasks, setTaskBoardTasks] = useState<TaskInfo[]>([]);
+  const [viewingSubAgent, setViewingSubAgent] = useState<string | null>(null);
+  const [showDelegate, setShowDelegate] = useState(false);
+  const [showResultCompare, setShowResultCompare] = useState(false);
+  const [agentProfiles, setAgentProfiles] = useState<AgentProfileType[]>([]);
   const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
   const [mcpStatus, setMcpStatus] = useState<McpServerStatus[]>([]);
   const [providers, setProviders] = useState<Provider[]>([]);
@@ -365,6 +376,65 @@ export default function ChatPage({ onLogout }: Props) {
       if (name === "todo_add" || name === "todo_done" || name === "todo_delete") {
         setTimeout(() => setTodoRefreshKey(k => k + 1), 300);
       }
+    }
+
+    if (event.type === "sub_agent_start") {
+      const subId = event.data.sub_agent_id as string || "";
+      const name = event.data.agent_name as string || "";
+      setTaskBoardTasks((prev) => {
+        if (prev.some((t) => t.subId === subId)) return prev;
+        return [...prev, {
+          subId,
+          agentName: name,
+          displayName: (event.data.display_name as string) || name,
+          icon: "",
+          status: "running" as const,
+          task: (event.data.task as string) || "",
+          content: "",
+          toolCalls: 0,
+          startedAt: Date.now(),
+        }];
+      });
+    }
+
+    if (event.type === "sub_agent_tool_call") {
+      const subId = event.data.sub_agent_id as string || "";
+      setTaskBoardTasks((prev) =>
+        prev.map((t) => t.subId === subId ? { ...t, toolCalls: t.toolCalls + 1 } : t)
+      );
+    }
+
+    if (event.type === "sub_agent_text_delta") {
+      const subId = event.data.sub_agent_id as string || "";
+      const text = (event.data.text as string) || "";
+      setTaskBoardTasks((prev) =>
+        prev.map((t) => t.subId === subId ? { ...t, content: t.content + text } : t)
+      );
+    }
+
+    if (event.type === "sub_agent_end") {
+      const subId = event.data.sub_agent_id as string || "";
+      setTaskBoardTasks((prev) =>
+        prev.map((t) => t.subId === subId ? {
+          ...t,
+          status: "done" as const,
+          content: (event.data.result as string) || t.content,
+          elapsed: event.data.elapsed as number,
+          tokens: event.data.tokens as number,
+          iterations: event.data.iterations as number,
+        } : t)
+      );
+    }
+
+    if (event.type === "sub_agent_error") {
+      const subId = event.data.sub_agent_id as string || "";
+      setTaskBoardTasks((prev) =>
+        prev.map((t) => t.subId === subId ? {
+          ...t,
+          status: "error" as const,
+          error: (event.data.error as string) || "Unknown error",
+        } : t)
+      );
     }
     if (event.type === "agent_start" && event.data.replay) {
       setReplaying(true);
@@ -434,6 +504,7 @@ export default function ChatPage({ onLogout }: Props) {
     providersApi.getCatalog().then(setCatalog);
     mcpServersApi.listMcpServers().then(setMcpServers);
     mcpServersApi.getMcpStatus().then(setMcpStatus);
+    listAgentProfiles().then(setAgentProfiles).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -458,6 +529,7 @@ export default function ChatPage({ onLogout }: Props) {
   const selectSession = async (session: Session) => {
     setSending(false);
     setActiveSession(session);
+    setTaskBoardTasks([]);
     const branch = session.active_branch || "main";
     setActiveBranch(branch);
     const msgs = await sessionsApi.getMessages(session.session_id);
@@ -489,13 +561,27 @@ export default function ChatPage({ onLogout }: Props) {
 
   const handleSend = async () => {
     if ((!input.trim() && pendingImages.length === 0) || !activeSession || sending) return;
-    const text = input.trim();
+    let text = input.trim();
     const images = [...pendingImages];
     setInput("");
     setPendingImages([]);
     setMessages((prev) => [...prev, { id: `u-${Date.now()}`, role: "user", content: text, images: images.length > 0 ? images : undefined }]);
     setSending(true);
     try {
+      const mentions = parseAgentMentions(text, agentProfiles);
+      if (mentions.length > 0) {
+        const mainText = text.replace(/@\w+/g, "").replace(/\s+/g, " ").trim();
+        if (mentions.length === 1) {
+          const taskText = mainText || "Please complete this task";
+          text = `[delegate_task] agent_name="${mentions[0].name}" task="${taskText.replace(/"/g, "'")}"\n\nOriginal request: ${text}`;
+        } else {
+          const tasksJson = mentions.map((m) => ({
+            agent_name: m.name,
+            task: mainText || "Please complete this task",
+          }));
+          text = `[delegate_parallel] tasks=${JSON.stringify(tasksJson)}\n\nOriginal request: ${text}`;
+        }
+      }
       await sessionsApi.sendPrompt(activeSession.session_id, text || "请分析这张图片", selectedModel, images.length > 0 ? images : undefined);
     } catch {
       setSending(false);
@@ -623,6 +709,59 @@ export default function ChatPage({ onLogout }: Props) {
     }
   };
 
+  const parseAgentMentions = (text: string, profiles: AgentProfileType[]) => {
+    const enabled = profiles.filter((p) => p.enabled);
+    const matches: AgentProfileType[] = [];
+    for (const p of enabled) {
+      if (text.includes(`@${p.name}`)) {
+        matches.push(p);
+      }
+    }
+    return matches;
+  };
+
+  const handleDelegateFromModal = async (tasks: { agent_name: string; task: string }[]) => {
+    if (!activeSession || sending) return;
+    setShowDelegate(false);
+    const names = tasks.map((t) => `@${t.agent_name}`).join(" ");
+    const taskDesc = tasks.length === 1 ? tasks[0].task : tasks.map((t) => `${t.agent_name}: ${t.task}`).join("; ");
+    setMessages((prev) => [...prev, { id: `u-${Date.now()}`, role: "user", content: `${names} ${taskDesc}` }]);
+    setSending(true);
+    try {
+      let promptText: string;
+      if (tasks.length === 1) {
+        promptText = `[delegate_task] agent_name="${tasks[0].agent_name}" task="${tasks[0].task.replace(/"/g, "'")}"`;
+      } else {
+        promptText = `[delegate_parallel] tasks=${JSON.stringify(tasks)}`;
+      }
+      await sessionsApi.sendPrompt(activeSession.session_id, promptText, selectedModel);
+    } catch {
+      setSending(false);
+    }
+  };
+
+  const handleAgentBarClick = (agent: AgentProfileType) => {
+    setInput((prev) => {
+      const mention = `@${agent.name} `;
+      if (prev.includes(mention.trim())) return prev;
+      return prev ? `${prev} ${mention}` : mention;
+    });
+  };
+
+  const handleExportReport = async () => {
+    if (!activeSession) return;
+    const token = localStorage.getItem("crab_token") || "";
+    const resp = await fetch(`/api/sessions/${encodeURIComponent(activeSession.session_id)}/report?token=${encodeURIComponent(token)}`);
+    const text = await resp.text();
+    const blob = new Blob([text], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `crabagent-report-${activeSession.session_id.slice(0, 8)}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const handleDeleteSession = async (sessionId: string) => {
     await sessionsApi.deleteSession(sessionId);
     setSessions((prev) => prev.filter((s) => s.session_id !== sessionId));
@@ -660,6 +799,16 @@ export default function ChatPage({ onLogout }: Props) {
             )}
           </div>
           <NotificationBell onSwitchSession={selectSessionById} />
+          {taskBoardTasks.filter((t) => t.status === "done").length > 0 && (
+            <button
+              onClick={() => setShowResultCompare(true)}
+              className="px-3 py-2 text-sm"
+              style={{ color: "#a78bfa" }}
+              title="View agent results"
+            >
+              📋
+            </button>
+          )}
           <button
             onClick={() => setShowFiles((v) => !v)}
             className="px-3 py-2 text-sm"
@@ -690,11 +839,13 @@ export default function ChatPage({ onLogout }: Props) {
                 </div>
               </div>
             )}
-            <ChatPanel ref={bottomRef} messages={messages} connected={connected} onToolConfirm={handleToolConfirm} onUserInput={handleUserInput} onBranch={handleBranch} replaying={replaying} />
+            <ChatPanel ref={bottomRef} messages={messages} connected={connected} onToolConfirm={handleToolConfirm} onUserInput={handleUserInput} onBranch={handleBranch} replaying={replaying}
+              externalSubAgentId={viewingSubAgent} onSubAgentModalClose={() => setViewingSubAgent(null)} />
 
             <McpStatusBar status={mcpStatus} />
 
             <div className="px-4 pb-4" onDrop={handleDrop} onDragOver={handleDragOver}>
+              <AgentBar onAgentClick={handleAgentBarClick} />
               {models.length > 0 && (
                 <div className="mb-2 flex items-center gap-2">
                   <span className="text-xs" style={{ color: "var(--text-secondary)" }}>Model:</span>
@@ -735,6 +886,15 @@ export default function ChatPage({ onLogout }: Props) {
                   title="Attach image"
                 >
                   📎
+                </button>
+                <button
+                  onClick={() => setShowDelegate(true)}
+                  disabled={sending || replaying}
+                  className="px-3 py-3 rounded-lg text-sm disabled:opacity-30"
+                  style={{ background: "var(--bg-secondary)", color: "#a78bfa", border: "1px solid #7c3aed40" }}
+                  title="Delegate to agent team"
+                >
+                  🤖
                 </button>
                 <input
                   type="text"
@@ -779,6 +939,8 @@ export default function ChatPage({ onLogout }: Props) {
       </div>
 
       <FileBrowser collapsed={!showFiles} onToggle={() => setShowFiles((v) => !v)} sessionId={activeSession?.session_id || null} />
+
+      <TaskBoard tasks={taskBoardTasks} onTaskClick={(t) => setViewingSubAgent(t.subId)} />
 
       <TodoWidget sessionId={activeSession?.session_id || null} refreshKey={todoRefreshKey} />
 
@@ -837,6 +999,21 @@ export default function ChatPage({ onLogout }: Props) {
       {showAgentTeam && (
         <AgentTeamPanel
           onClose={() => setShowAgentTeam(false)}
+        />
+      )}
+
+      {showDelegate && activeSession && (
+        <DelegateModal
+          onClose={() => setShowDelegate(false)}
+          onDelegate={handleDelegateFromModal}
+        />
+      )}
+
+      {showResultCompare && taskBoardTasks.length > 0 && (
+        <ResultCompare
+          tasks={taskBoardTasks}
+          onClose={() => setShowResultCompare(false)}
+          onExport={handleExportReport}
         />
       )}
     </div>
