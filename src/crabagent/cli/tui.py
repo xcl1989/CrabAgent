@@ -84,19 +84,21 @@ class TuiSession:
                 await self._persist_user_message(user_input)
 
             try:
-                self._stop_live()
                 self._full_text = ""
                 self._tool_results = []
+                if self._live:
+                    self._live.stop()
+                    self._live = None
                 self.console.print(f"\n[bold]▶ {user_input}[/bold]")
                 self.agent_ctx.iteration = 0
                 await run_agent(self.agent_ctx, user_input)
-                self._stop_live()
+                if self._live:
+                    self._live.stop()
+                    self._live = None
             except KeyboardInterrupt:
-                self._stop_live()
                 self.console.print("\n[dim][interrupted][/dim]")
                 continue
             except Exception as e:
-                self._stop_live()
                 self.console.print(f"\n[red]Error: {e}[/red]")
                 continue
 
@@ -121,54 +123,23 @@ class TuiSession:
         info = " | ".join(parts)
         return f" [{self._provider_display}/{model}] {info} "
 
-    def _start_live(self):
-        if not self._live:
-            self._live = Live(
-                Markdown(""), console=self.console,
-                refresh_per_second=15, auto_refresh=True,
-                vertical_overflow="visible", screen=True,
-            )
-            self._live.start()
-
-    def _stop_live(self):
-        if self._live:
-            self._live.stop()
-            self._live = None
-
-    def _update_live(self):
-        if not self._live:
-            return
-        from rich.console import Group
-        from rich.text import Text
-
-        items = []
-        if self._full_text.strip():
-            items.append(Markdown(self._full_text))
-        for tr in self._tool_results[-20:]:
-            items.append(Text(tr))
-
-        content = Group(*items) if items else Markdown("")
-        self._live.update(content, refresh=True)
-
     def _on_agent_event(self, event: AgentEvent):
         if event.type == EventType.TEXT_DELTA:
             if self._thinking_active:
                 self._thinking_active = False
             self._full_text += event.data.get("text", "")
-            self._start_live()
-            self._update_live()
+            self._render_live()
         elif event.type == EventType.TEXT_DONE:
-            self._update_live()
+            self._render_live()
         elif event.type == EventType.THINKING_DELTA:
             self._thinking_active = True
             self._full_text += event.data.get("text", "")
-            self._start_live()
-            self._update_live()
+            self._render_live()
         elif event.type == EventType.THINKING_DONE:
             self._thinking_active = False
         elif event.type == EventType.AGENT_ERROR:
-            self._tool_results.append(f"\nError: {event.data.get('error', 'Unknown error')}")
-            self._update_live()
+            self._tool_results.append(f"[red]Error: {event.data.get('error', 'Unknown error')}[/red]")
+            self._render_live()
         elif event.type == EventType.TOOL_CALL:
             call_id = event.data.get("id", "")
             display = self._format_tool_display(event.data.get("name", ""), event.data.get("arguments", {}))
@@ -183,16 +154,36 @@ class TuiSession:
                 first_line = (result or "").split("\n")[0]
                 if len(first_line) > 300:
                     first_line = first_line[:300] + "..."
-                self._tool_results.append(f"  {prefix}→ {call_info['display']}\n  ← {first_line}\n")
-            self._update_live()
+                self._tool_results.append(f"  {prefix}→ {call_info['display']}\n  ← {first_line}")
+            self._render_live()
         elif event.type == EventType.CONTEXT_COMPRESSED:
-            orig = event.data.get("original_count", 0)
-            comp = event.data.get("compressed_count", 0)
-            self._tool_results.append(f"Context compressed: {orig} → {comp} messages")
-            self._update_live()
+            self._tool_results.append(f"Context compressed: {event.data.get('original_count', 0)} → {event.data.get('compressed_count', 0)} messages")
+            self._render_live()
         elif event.type == EventType.BUDGET_EXHAUSTED:
             self._tool_results.append("Budget exhausted, generating summary...")
-            self._update_live()
+            self._render_live()
+
+    def _render_live(self):
+        from rich.console import Group
+        from rich.table import Table
+        from rich.text import Text
+
+        items = []
+        if self._full_text.strip():
+            items.append(Markdown(self._full_text))
+        for tr in self._tool_results[-30:]:
+            items.append(Text(tr))
+
+        content = Group(*items) if items else Markdown("")
+        if not self._live:
+            self._live = Live(
+                content, console=self.console,
+                refresh_per_second=12, screen=False,
+                vertical_overflow="visible", auto_refresh=False,
+            )
+            self._live.start()
+        else:
+            self._live.update(content, refresh=True)
 
     def _format_tool_display(self, name: str, args: dict) -> str:
         if name == "read" and "file_path" in args:
