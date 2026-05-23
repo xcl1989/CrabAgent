@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 from pathlib import Path
 
 from prompt_toolkit import PromptSession
@@ -140,7 +139,6 @@ class TuiSession:
         if not self._live:
             return
         from rich.console import Group
-        from rich.panel import Panel
         from rich.text import Text
 
         items = []
