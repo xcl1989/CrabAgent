@@ -12,6 +12,8 @@ from prompt_toolkit.completion import WordCompleter
 from prompt_toolkit.history import InMemoryHistory
 from prompt_toolkit.styles import Style
 from rich.console import Console
+from rich.live import Live
+from rich.markdown import Markdown
 
 from crabagent.core.agent.context import AgentContext
 from crabagent.core.agent.loop import run_agent
@@ -43,6 +45,8 @@ class TuiSession:
         self._session_id_str = None
         self._user = None
         self._state = {}
+        self._live: Live | None = None
+        self._full_text = ""
 
     async def run(self):
         await self._initialize()
@@ -82,12 +86,18 @@ class TuiSession:
                 await self._persist_user_message(user_input)
 
             try:
+                self._stop_live()
+                self._full_text = ""
+                self.console.print(f"\n[bold]▶ {user_input}[/bold]")
                 self.agent_ctx.iteration = 0
                 await run_agent(self.agent_ctx, user_input)
+                self._stop_live()
             except KeyboardInterrupt:
+                self._stop_live()
                 self.console.print("\n[dim][interrupted][/dim]")
                 continue
             except Exception as e:
+                self._stop_live()
                 self.console.print(f"\n[red]Error: {e}[/red]")
                 continue
 
@@ -112,26 +122,43 @@ class TuiSession:
         info = " | ".join(parts)
         return f" [{self._provider_display}/{model}] {info} "
 
+    def _start_live(self):
+        if not self._live:
+            self._live = Live(
+                Markdown(""), console=self.console,
+                refresh_per_second=10, auto_refresh=True,
+                vertical_overflow="visible", screen=False, transient=False,
+            )
+            self._live.start()
+
+    def _stop_live(self):
+        if self._live:
+            self._live.stop()
+            self._live = None
+
     def _on_agent_event(self, event: AgentEvent):
         if event.type == EventType.TEXT_DELTA:
             if self._thinking_active:
                 self._thinking_active = False
-                self.console.print()
-            text = event.data.get("text", "")
-            self.console.print(text, end="", highlight=False)
+            self._full_text += event.data.get("text", "")
+            self._start_live()
+            self._live.update(Markdown(self._full_text), refresh=True)
         elif event.type == EventType.TEXT_DONE:
-            self._stream_buffer = ""
-            self.console.print()
+            if self._full_text.strip():
+                self._start_live()
+                self._live.update(Markdown(self._full_text), refresh=True)
         elif event.type == EventType.THINKING_DELTA:
             self._thinking_active = True
-            text = event.data.get("text", "")
-            self.console.print(text, end="", style="dim italic", highlight=False)
+            self._full_text += event.data.get("text", "")
+            self._start_live()
+            self._live.update(Markdown(self._full_text[:-1] + "…"), refresh=True)
         elif event.type == EventType.THINKING_DONE:
             self._thinking_active = False
-            self.console.print()
         elif event.type == EventType.AGENT_ERROR:
+            self._stop_live()
             self.console.print(f"\n[red]Error: {event.data.get('error', 'Unknown error')}[/red]")
         elif event.type == EventType.TOOL_CALL:
+            self._stop_live()
             call_id = event.data.get("id", "")
             display = self._format_tool_display(event.data.get("name", ""), event.data.get("arguments", {}))
             source = event.data.get("source", "builtin")
@@ -150,6 +177,7 @@ class TuiSession:
                 self.console.print(f"  [dim]← {first_line}[/dim]")
                 self.console.print()
         elif event.type == EventType.CONTEXT_COMPRESSED:
+            self._stop_live()
             orig = event.data.get("original_count", 0)
             comp = event.data.get("compressed_count", 0)
             self.console.print(f"[yellow]Context compressed: {orig} → {comp} messages[/yellow]")
