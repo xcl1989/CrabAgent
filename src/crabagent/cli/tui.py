@@ -174,6 +174,7 @@ class CrabAgentTuiApp(App[None]):
         if event.type == EventType.TEXT_DELTA:
             if self._thinking_active:
                 self._thinking_active = False
+                self._append_output("\n")
             text = event.data.get("text", "")
             self._stream_buffer += text
             while "\n\n" in self._stream_buffer:
@@ -185,9 +186,11 @@ class CrabAgentTuiApp(App[None]):
                 self._stream_buffer = ""
             self._append_output("\n")
         elif event.type == EventType.THINKING_DELTA:
-            self._thinking_active = True
+            if not self._thinking_active:
+                self._thinking_active = True
+                self._append_output("Thinking: ")
             text = event.data.get("text", "")
-            self._append_output(f"[Thinking] {text}")
+            self._append_output(text)
         elif event.type == EventType.THINKING_DONE:
             self._thinking_active = False
             self._append_output("\n")
