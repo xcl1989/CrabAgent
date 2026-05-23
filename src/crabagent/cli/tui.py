@@ -57,7 +57,7 @@ class CrabAgentTuiApp(App[None]):
         super().__init__()
         global _tui_app
         _tui_app = self
-        self._context: AgentContext | None = None
+        self.agent_ctx: AgentContext | None = None
         self._tool_buffer: dict[str, dict] = {}
         self._stream_buffer = ""
         self._text_buffer: list[str] = []
@@ -68,7 +68,7 @@ class CrabAgentTuiApp(App[None]):
         self._session_id_str = None
         self._workspace = Path.cwd()
         self._first_message = True
-        self._args = None
+        self._cli_args = None
         self._user = None
         self._state = {}
         self._message_queue: asyncio.Queue = asyncio.Queue()
@@ -85,9 +85,9 @@ class CrabAgentTuiApp(App[None]):
 
         await self._initialize()
 
-        if self._context:
+        if self.agent_ctx:
             log.write("[bold]🦀 CrabAgent v0.5.1[/bold]")
-            log.write(f"  provider: {self._provider_display}  model: {self._context.model or 'default'}")
+            log.write(f"  provider: {self._provider_display}  model: {self.agent_ctx.model or 'default'}")
             log.write(f"  workspace: {self._workspace}")
             log.write("")
 
@@ -107,7 +107,7 @@ class CrabAgentTuiApp(App[None]):
             self.exit()
             return
 
-        workspace = (self._args.workspace if self._args and self._args.workspace else settings.workspace).resolve()
+        workspace = (self._cli_args.workspace if self._cli_args and self._cli_args.workspace else settings.workspace).resolve()
         self._workspace = workspace
 
         conversation_id = None
@@ -115,9 +115,9 @@ class CrabAgentTuiApp(App[None]):
         history = None
         max_seq = 0
 
-        if self._args and not getattr(self._args, "no_persist", False):
-            if getattr(self._args, "session", None):
-                conv, history, max_seq = await self._load_conversation(self._args.session, user.id)
+        if self._cli_args and not getattr(self._cli_args, "no_persist", False):
+            if getattr(self._cli_args, "session", None):
+                conv, history, max_seq = await self._load_conversation(self._cli_args.session, user.id)
                 if conv is None:
                     self.exit()
                     return
@@ -126,33 +126,33 @@ class CrabAgentTuiApp(App[None]):
                 if conv.workspace:
                     self._workspace = Path(conv.workspace).resolve()
                 if conv.model:
-                    self._args.model = conv.model
+                    self._cli_args.model = conv.model
             else:
-                args_model = getattr(self._args, "model", "") if self._args else ""
+                args_model = getattr(self._cli_args, "model", "") if self._cli_args else ""
                 conv = await self._init_conversation(user.id, workspace=str(self._workspace), model=args_model or "")
                 conversation_id = conv.id
                 session_id_str = conv.session_id
 
-        if self._args:
-            if not getattr(self._args, "model", None):
-                self._args.model = settings.load_last_model()
-            if not self._args.model:
+        if self._cli_args:
+            if not getattr(self._cli_args, "model", None):
+                self._cli_args.model = settings.load_last_model()
+            if not self._cli_args.model:
                 first_models = await self._fetch_models_from_provider()
                 if first_models:
-                    self._args.model = first_models[0]
-                    settings.save_last_model(self._args.model)
+                    self._cli_args.model = first_models[0]
+                    settings.save_last_model(self._cli_args.model)
 
-        self._context = await self.setup_agent_context(
-            self._args, conversation_id=conversation_id,
+        self.agent_ctx = await self.setup_agent_context(
+            self._cli_args, conversation_id=conversation_id,
             history=history, persistence_start_seq=max_seq,
             session_id_str=session_id_str,
         )
         self._conversation_id = conversation_id
         self._session_id_str = session_id_str
 
-        self._provider_display = await self._resolve_provider_display(self._args)
-        if self._context and not self._context.model and hasattr(self._args, "model") and self._args.model:
-            self._context.model = self._args.model
+        self._provider_display = await self._resolve_provider_display(self._cli_args)
+        if self.agent_ctx and not self.agent_ctx.model and hasattr(self._cli_args, "model") and self._cli_args.model:
+            self.agent_ctx.model = self._cli_args.model
 
         self._state = {
             "conversation_id": [conversation_id],
@@ -160,7 +160,7 @@ class CrabAgentTuiApp(App[None]):
             "first_message": [True],
         }
 
-        self._context.event_bus.subscribe(self._on_agent_event)
+        self.agent_ctx.event_bus.subscribe(self._on_agent_event)
 
     async def _on_agent_event(self, event: AgentEvent):
         await self._message_queue.put(event)
@@ -242,13 +242,13 @@ class CrabAgentTuiApp(App[None]):
         return name
 
     def _tick_status(self):
-        if not self._context:
+        if not self.agent_ctx:
             return
-        msg_count = len(self._context.messages)
-        iters = self._context.iteration
-        tokens = f"{self._context.total_tokens:,}" if self._context.total_tokens else "0"
+        msg_count = len(self.agent_ctx.messages)
+        iters = self.agent_ctx.iteration
+        tokens = f"{self.agent_ctx.total_tokens:,}" if self.agent_ctx.total_tokens else "0"
         tools_pending = len(self._tool_buffer)
-        model = self._context.model or "?"
+        model = self.agent_ctx.model or "?"
         parts = [f"Messages: {msg_count}", f"Tokens: {tokens}", f"Iterations: {iters}"]
         if tools_pending:
             parts.append(f"Tools: {tools_pending}")
@@ -257,7 +257,7 @@ class CrabAgentTuiApp(App[None]):
 
     @work(exclusive=True, thread=False)
     async def _run_agent_worker(self, user_input: str):
-        if not self._context or self._agent_running:
+        if not self.agent_ctx or self._agent_running:
             return
         self._agent_running = True
         self._tool_buffer.clear()
@@ -267,34 +267,34 @@ class CrabAgentTuiApp(App[None]):
         log.write(f"[bold]▶ {user_input}[/bold]")
 
         try:
-            self._context.iteration = 0
-            await run_agent(self._context, user_input)
+            self.agent_ctx.iteration = 0
+            await run_agent(self.agent_ctx, user_input)
         except Exception as e:
             log.write(f"[red]Error: {e}[/red]")
 
         self._agent_running = False
 
-        if self._conversation_id and self._context:
+        if self._conversation_id and self.agent_ctx:
             from crabagent.core.database import async_session_factory
             from crabagent.serve.services.conversation import update_conversation
 
             async with async_session_factory() as db:
-                await update_conversation(db, self._session_id_str, tokens=self._context.total_tokens)
+                await update_conversation(db, self._session_id_str, tokens=self.agent_ctx.total_tokens)
 
     def action_focus_input(self):
         self.query_one("#input", Input).focus()
 
     def action_quit(self):
         self._exit_flag = True
-        if self._context:
-            mcp_mgr = self._context.metadata.get("_mcp_manager")
+        if self.agent_ctx:
+            mcp_mgr = self.agent_ctx.metadata.get("_mcp_manager")
             if mcp_mgr:
                 try:
                     import asyncio as _a
                     _a.get_event_loop().create_task(mcp_mgr.stop_all())
                 except Exception:
                     pass
-            browser_mgr = self._context.metadata.get("_browser_manager")
+            browser_mgr = self.agent_ctx.metadata.get("_browser_manager")
             if browser_mgr:
                 try:
                     import asyncio as _a
@@ -313,11 +313,11 @@ class CrabAgentTuiApp(App[None]):
             await self._handle_slash(user_input)
             return
 
-        if self._conversation_id and not getattr(self._args, "no_persist", False):
+        if self._conversation_id and not getattr(self._cli_args, "no_persist", False):
             from crabagent.core.database import async_session_factory
             from crabagent.serve.services.message import save_message
 
-            seq = len(self._context.messages) + 1 if self._context else 1
+            seq = len(self.agent_ctx.messages) + 1 if self.agent_ctx else 1
             async with async_session_factory() as db:
                 await save_message(db, conversation_id=self._conversation_id, sequence=seq, role="user", content=user_input)
 
@@ -361,16 +361,16 @@ class CrabAgentTuiApp(App[None]):
             log.write("\n".join(commands))
 
         elif command == "/clear":
-            if self._context:
-                self._context.messages.clear()
+            if self.agent_ctx:
+                self.agent_ctx.messages.clear()
             log.clear()
             log.write("[dim]Context cleared.[/dim]")
 
         elif command == "/history":
-            if self._context:
-                msg_count = len(self._context.messages)
-                tokens = self._context.total_tokens or 0
-                log.write(f"[dim]Messages: {msg_count}, Tokens: {tokens:,}, Iterations: {self._context.iteration}[/dim]")
+            if self.agent_ctx:
+                msg_count = len(self.agent_ctx.messages)
+                tokens = self.agent_ctx.total_tokens or 0
+                log.write(f"[dim]Messages: {msg_count}, Tokens: {tokens:,}, Iterations: {self.agent_ctx.iteration}[/dim]")
 
         elif command == "/models":
             models = await self._fetch_models_from_provider()
@@ -378,7 +378,7 @@ class CrabAgentTuiApp(App[None]):
                 log.write("[dim]No models available.[/dim]")
             else:
                 for i, m in enumerate(models, 1):
-                    mark = " [bold]*[/bold]" if m == (self._context.model if self._context else None) else ""
+                    mark = " [bold]*[/bold]" if m == (self.agent_ctx.model if self.agent_ctx else None) else ""
                     log.write(f"  {i:>2}. {m}{mark}")
 
         elif command == "/model":
@@ -388,11 +388,11 @@ class CrabAgentTuiApp(App[None]):
                     log.write("[dim]No models available.[/dim]")
                 else:
                     for i, m in enumerate(models, 1):
-                        mark = " [bold]*[/bold]" if m == (self._context.model if self._context else None) else ""
+                        mark = " [bold]*[/bold]" if m == (self.agent_ctx.model if self.agent_ctx else None) else ""
                         log.write(f"  {i:>2}. {m}{mark}")
             else:
-                if self._context:
-                    self._context.model = arg
+                if self.agent_ctx:
+                    self.agent_ctx.model = arg
                 settings.save_last_model(arg)
                 log.write(f"[dim]Model set to: {arg}[/dim]")
 
@@ -400,7 +400,7 @@ class CrabAgentTuiApp(App[None]):
             await self._handle_provider_slash(arg)
 
         elif command == "/skills":
-            skills = self._context.metadata.get("_skills", {}) if self._context else {}
+            skills = self.agent_ctx.metadata.get("_skills", {}) if self.agent_ctx else {}
             if not skills:
                 log.write("[dim]No skills loaded.[/dim]")
             else:
@@ -408,15 +408,15 @@ class CrabAgentTuiApp(App[None]):
                     log.write(f"  {name}")
 
         elif command == "/skill":
-            skills = self._context.metadata.get("_skills", {}) if self._context else {}
+            skills = self.agent_ctx.metadata.get("_skills", {}) if self.agent_ctx else {}
             if arg in skills:
                 log.write(skills[arg])
             else:
                 log.write(f"[dim]Skill '{arg}' not found.[/dim]")
 
         elif command == "/new":
-            if self._context:
-                self._context.messages.clear()
+            if self.agent_ctx:
+                self.agent_ctx.messages.clear()
             log.clear()
             log.write("[dim]New conversation started.[/dim]")
 
@@ -694,5 +694,5 @@ def get_tui_app() -> CrabAgentTuiApp | None:
 
 async def run_textual(args):
     app = CrabAgentTuiApp()
-    app._args = args
+    app._cli_args = args
     await app.run_async()
