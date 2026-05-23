@@ -253,15 +253,14 @@ def _make_cli_event_handler(console):
         elif event.type == EventType.TEXT_DONE:
             full = "".join(text_buffer)
             text_buffer.clear()
-            _stop_live()
             if not full.strip():
                 print()
                 return
             if not console:
                 print()
                 return
-            from rich.markdown import Markdown
-            console.print(Markdown(full))
+            _update_live(full)
+            _stop_live()
         elif event.type == EventType.TOOL_CALL:
             name = event.data.get("name", "")
             call_args = event.data.get("arguments", {})
