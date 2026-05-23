@@ -207,7 +207,7 @@ def _make_cli_event_handler(console):
         if console and not live[0]:
             from rich.live import Live
             from rich.markdown import Markdown
-            live[0] = Live(Markdown(""), console=console, refresh_per_second=20, auto_refresh=True, vertical_overflow="crop")
+            live[0] = Live(Markdown(""), console=console, refresh_per_second=20, auto_refresh=False, vertical_overflow="visible", screen=False)
             live[0].start()
 
     def _update_live(text: str):
@@ -225,7 +225,7 @@ def _make_cli_event_handler(console):
         if console and not tool_live[0]:
             from rich.live import Live
             from rich.text import Text
-            tool_live[0] = Live(Text(""), console=console, refresh_per_second=20, auto_refresh=True, vertical_overflow="crop")
+            tool_live[0] = Live(Text(""), console=console, refresh_per_second=20, auto_refresh=False, vertical_overflow="visible", screen=False)
             tool_live[0].start()
 
     def _stop_tool_live():
