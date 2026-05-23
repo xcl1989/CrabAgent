@@ -1,7 +1,7 @@
 # Project Rules
 
 ## Version
-- Current: **0.5.0** (agent team + multi-agent delegation)
+- Current: **0.5.1** (agent team + multi-agent delegation)
 - Version in 3 places: `pyproject.toml`, `src/crabagent/serve/app.py` (`create_app` + `/health`), CLI banner in `src/crabagent/cli/__main__.py` (`_print_banner`)
 - Bump all three when changing version
 
