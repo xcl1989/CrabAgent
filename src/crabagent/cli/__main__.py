@@ -200,6 +200,8 @@ def _make_cli_event_handler(console):
     thinking_started = [False]
     text_buffer = []
     live = [None]
+    tool_live = [None]
+    tool_buffer: dict[str, dict] = {}
 
     def _ensure_live():
         if console and not live[0]:
@@ -218,6 +220,58 @@ def _make_cli_event_handler(console):
         if live[0]:
             live[0].stop()
             live[0] = None
+
+    def _ensure_tool_live():
+        if console and not tool_live[0]:
+            from rich.live import Live
+            from rich.text import Text
+            tool_live[0] = Live(Text(""), console=console, refresh_per_second=20, auto_refresh=True, vertical_overflow="crop")
+            tool_live[0].start()
+
+    def _stop_tool_live():
+        if tool_live[0]:
+            tool_live[0].stop()
+            tool_live[0] = None
+            tool_buffer.clear()
+
+    def _render_tools():
+        if not tool_live[0]:
+            return
+        from rich.text import Text
+        lines = Text()
+        for cid, t in tool_buffer.items():
+            name = t["display"]
+            source = t.get("source", "builtin")
+            prefix = "🔌 " if source == "mcp" else ""
+            style = "bright_magenta" if source == "mcp" else "cyan"
+            lines.append(f"  {prefix}→ {name}\n", style=style)
+            if t["status"] == "done":
+                result_text = t["result"]
+                if len(result_text) > 300:
+                    result_text = result_text[:300] + "..."
+                lines.append(f"  ← {result_text}\n", style="dim")
+            else:
+                lines.append("  …\n", style="dim")
+            lines.append("\n")
+        tool_live[0].update(lines, refresh=True)
+
+    def _format_tool_display(name: str, args: dict) -> str:
+        arg_keys = list(args.keys())
+        if name == "read" and "file_path" in args:
+            return f"read {args['file_path']}"
+        if name in ("write", "edit") and "file_path" in args:
+            return f"{name} {args['file_path']}"
+        if name == "bash" and "command" in args:
+            cmd = str(args["command"])[:80]
+            return f"bash {cmd}"
+        if name in ("web_search", "web_scrape"):
+            q = args.get("query") or args.get("url") or ""
+            return f"{name} {str(q)[:60]}"
+        if arg_keys:
+            first = arg_keys[0]
+            val = str(args[first])[:60]
+            return f"{name} {first}={val}"
+        return name
 
     def on_event(event: AgentEvent):
         if event.type == EventType.THINKING_DELTA:
@@ -244,6 +298,7 @@ def _make_cli_event_handler(console):
                     console.print()
                 else:
                     print()
+            _stop_tool_live()
             text_buffer.append(event.data.get("text", ""))
             if console:
                 _ensure_live()
@@ -264,17 +319,26 @@ def _make_cli_event_handler(console):
         elif event.type == EventType.TOOL_CALL:
             name = event.data.get("name", "")
             call_args = event.data.get("arguments", {})
-            args_str = json.dumps(call_args, ensure_ascii=False)[:100]
-            if console:
-                console.print(f"\n  [dim cyan]\u2192 {name}({args_str})[/dim cyan]")
-            else:
-                print(f"\n  \u2192 {name}({args_str})")
+            call_id = event.data.get("id", "")
+            source = event.data.get("source", "builtin")
+            server = event.data.get("server_name", "")
+            display = _format_tool_display(name, call_args)
+            tool_buffer[call_id] = {
+                "display": display, "status": "pending",
+                "result": "", "source": source, "server": server,
+            }
+            _ensure_tool_live()
+            _render_tools()
         elif event.type == EventType.TOOL_RESULT:
             result = event.data.get("result", "")
-            if console:
-                console.print(f"  [dim]\u2190 {str(result)[:200]}[/dim]")
-            else:
-                print(f"  \u2190 {str(result)[:200]}")
+            call_id = event.data.get("id", "")
+            if call_id in tool_buffer:
+                first_line = result.split("\n")[0] if result else ""
+                tool_buffer[call_id]["status"] = "done"
+                tool_buffer[call_id]["result"] = first_line[:300]
+                _render_tools()
+            if tool_buffer and all(t["status"] == "done" for t in tool_buffer.values()):
+                _stop_tool_live()
         elif event.type == EventType.AGENT_ERROR:
             err = event.data.get("error", "Unknown error")
             if console:

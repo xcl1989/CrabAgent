@@ -181,27 +181,27 @@ async def run_agent(
                     )
                 )
 
-            async def _run_one(meta: dict) -> tuple[dict, str]:
+            async def _run_and_emit(meta: dict):
                 result = await context.tool_registry.execute(
                     meta["name"], meta["args"], context=context
                 )
-                return meta, result
-
-            gathered = await asyncio.gather(*[_run_one(m) for m in tool_metas])
-
-            for meta, result in gathered:
                 await context.event_bus.emit(
                     AgentEvent(
                         type=EventType.TOOL_RESULT,
                         data={
                             "name": meta["name"],
                             "result": result[:2000],
+                            "id": meta["tc"]["id"],
                             "source": meta["source"],
                             "server_name": meta["server"],
                         },
                     )
                 )
+                return meta, result
 
+            gathered = await asyncio.gather(*[_run_and_emit(m) for m in tool_metas])
+
+            for meta, result in gathered:
                 tool_msg = {
                     "role": "tool",
                     "content": result,
