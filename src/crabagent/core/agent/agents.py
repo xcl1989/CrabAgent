@@ -31,6 +31,8 @@ async def load_agent_registry() -> list[dict]:
                 "backstory": r.backstory or "",
                 "model": r.model or "",
                 "allow_delegation": r.allow_delegation,
+                "icon": r.icon or "",
+                "is_default": r.is_default,
             }
             for r in rows
         ]
@@ -84,7 +86,7 @@ async def spawn_sub_agent(
     sub_registry = ToolRegistry()
 
     for name, tool in parent_context.tool_registry._tools.items():
-        if name in ("delegate_task", "list_agents", "handoff_to", "ask_question"):
+        if name in ("delegate_task", "delegate_parallel", "list_agents", "handoff_to", "ask_question"):
             continue
         sub_registry._tools[name] = tool
 

@@ -170,6 +170,8 @@ class AgentProfile(Base):
     model: Mapped[str] = mapped_column(String(200), default="")
     allow_delegation: Mapped[bool] = mapped_column(Boolean, default=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    icon: Mapped[str] = mapped_column(String(10), default="")
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
@@ -253,6 +255,13 @@ async def init_db() -> None:
         if "task" not in columns:
             await conn.execute(text("ALTER TABLE todos ADD COLUMN task TEXT NOT NULL DEFAULT ''"))
 
+        result = await conn.execute(text("PRAGMA table_info(agent_profiles)"))
+        columns = [row[1] for row in result.fetchall()]
+        if "icon" not in columns:
+            await conn.execute(text("ALTER TABLE agent_profiles ADD COLUMN icon VARCHAR(10) DEFAULT ''"))
+        if "is_default" not in columns:
+            await conn.execute(text("ALTER TABLE agent_profiles ADD COLUMN is_default BOOLEAN DEFAULT 0"))
+
     from crabagent.core.provider_store import migrate_plaintext_keys
     await migrate_plaintext_keys()
 
@@ -284,29 +293,57 @@ DEFAULT_AGENTS = [
         "name": "researcher",
         "display_name": "Web Researcher",
         "role": "Web Researcher",
-        "goal": "Find, collect, and summarize information from the web using browser and search tools. Always cite sources.",
-        "backstory": "You are an experienced web researcher with expertise in finding accurate and relevant information quickly.",
+        "goal": (
+            "Find, collect, and summarize information from the web "
+            "using browser and search tools. Always cite sources."
+        ),
+        "backstory": (
+            "You are an experienced web researcher with expertise "
+            "in finding accurate and relevant information quickly."
+        ),
+        "icon": "🔍",
     },
     {
         "name": "analyst",
         "display_name": "Data Analyst",
         "role": "Data Analyst",
-        "goal": "Analyze data, compare findings, identify patterns, and generate structured reports with clear conclusions.",
-        "backstory": "You are a meticulous data analyst who excels at turning raw data into actionable insights.",
+        "goal": (
+            "Analyze data, compare findings, identify patterns, "
+            "and generate structured reports with clear conclusions."
+        ),
+        "backstory": (
+            "You are a meticulous data analyst who excels at "
+            "turning raw data into actionable insights."
+        ),
+        "icon": "📊",
     },
     {
         "name": "coder",
         "display_name": "Code Expert",
         "role": "Code Expert",
-        "goal": "Write, review, debug, optimize, and refactor code. Generate clean, well-documented solutions.",
-        "backstory": "You are a senior software engineer with deep expertise across multiple programming languages and frameworks.",
+        "goal": (
+            "Write, review, debug, optimize, and refactor code. "
+            "Generate clean, well-documented solutions."
+        ),
+        "backstory": (
+            "You are a senior software engineer with deep expertise "
+            "across multiple programming languages and frameworks."
+        ),
+        "icon": "💻",
     },
     {
         "name": "writer",
         "display_name": "Content Writer",
         "role": "Content Writer",
-        "goal": "Write, edit, translate, and format content. Produce clear, engaging, and well-structured documents.",
-        "backstory": "You are a professional writer skilled at transforming complex information into clear, readable content.",
+        "goal": (
+            "Write, edit, translate, and format content. "
+            "Produce clear, engaging, and well-structured documents."
+        ),
+        "backstory": (
+            "You are a professional writer skilled at transforming "
+            "complex information into clear, readable content."
+        ),
+        "icon": "📝",
     },
 ]
 
@@ -319,7 +356,11 @@ async def _ensure_default_agents():
             result = await db.execute(
                 select(AgentProfile).where(AgentProfile.name == agent_data["name"])
             )
-            if result.scalar_one_or_none():
+            existing = result.scalar_one_or_none()
+            if existing:
+                if not existing.icon:
+                    existing.icon = agent_data["icon"]
+                    existing.is_default = True
                 continue
             db.add(AgentProfile(
                 user_id=1,
@@ -328,5 +369,7 @@ async def _ensure_default_agents():
                 role=agent_data["role"],
                 goal=agent_data["goal"],
                 backstory=agent_data["backstory"],
+                icon=agent_data["icon"],
+                is_default=True,
             ))
         await db.commit()

@@ -20,7 +20,11 @@ logger = logging.getLogger(__name__)
         "properties": {
             "agent_name": {
                 "type": "string",
-                "description": "Name of the agent to delegate to (e.g., 'researcher', 'analyst', 'coder', 'writer'). Use list_agents to see available agents.",
+                "description": (
+                    "Name of the agent to delegate to "
+                    "(e.g., 'researcher', 'analyst', 'coder', 'writer'). "
+                    "Use list_agents to see available agents."
+                ),
             },
             "task": {
                 "type": "string",
@@ -90,3 +94,55 @@ async def handoff_to(agent_name: str, summary: str, context=None) -> str:
         return "Error: agent handoff requires an active session"
     from crabagent.core.agent.agents import spawn_sub_agent
     return await spawn_sub_agent(agent_name, summary, context)
+
+
+@registry.register(
+    name="delegate_parallel",
+    description=(
+        "Delegate multiple tasks to different agents in parallel. "
+        "All agents run simultaneously and results are collected. "
+        "Use for independent tasks that can benefit from different expertise at the same time."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "tasks": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "agent_name": {"type": "string", "description": "Name of the agent"},
+                        "task": {"type": "string", "description": "Task description"},
+                    },
+                    "required": ["agent_name", "task"],
+                },
+                "description": "List of {agent_name, task} objects to execute in parallel",
+            },
+        },
+        "required": ["tasks"],
+    },
+    metadata={"source": "builtin", "category": "agent"},
+)
+async def delegate_parallel(tasks: list[dict], context=None) -> str:
+    if context is None:
+        return "Error: parallel delegation requires an active session"
+
+    import asyncio
+
+    from crabagent.core.agent.agents import spawn_sub_agent
+
+    if not tasks:
+        return "Error: empty task list"
+
+    coros = [spawn_sub_agent(t["agent_name"], t["task"], context) for t in tasks]
+    results = await asyncio.gather(*coros, return_exceptions=True)
+
+    lines = [f"# Parallel Delegation Results ({len(results)} agents)\n"]
+    for t, r in zip(tasks, results):
+        agent = t["agent_name"]
+        if isinstance(r, Exception):
+            lines.append(f"**{agent}**: Error - {r}")
+        else:
+            lines.append(f"**{agent}**:\n{r}")
+        lines.append("")
+    return "\n".join(lines)
