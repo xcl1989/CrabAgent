@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import asyncio
 import time
 from pathlib import Path
 
 from textual import work
 from textual.app import App, ComposeResult
 from textual.containers import Container
-from textual.widgets import Input, RichLog
+from textual.widgets import Input, TextArea
 
 from crabagent.core.agent.context import AgentContext
 from crabagent.core.agent.loop import run_agent
@@ -19,13 +18,11 @@ _tui_app = None
 
 class CrabAgentTuiApp(App[None]):
     CSS = """
-    RichLog {
+    #output {
         background: #0d1117;
         color: #e6edf3;
         scrollbar-color: #30363d;
         scrollbar-background: #0d1117;
-    }
-    RichLog:focus {
         border: none;
     }
     #input-container {
@@ -49,7 +46,7 @@ class CrabAgentTuiApp(App[None]):
     """
 
     BINDINGS = [
-        ("ctrl+c", "quit", "Quit"),
+        ("ctrl+q", "quit", "Quit"),
         ("escape", "focus_input", "Focus"),
     ]
 
@@ -60,7 +57,7 @@ class CrabAgentTuiApp(App[None]):
         self.agent_ctx: AgentContext | None = None
         self._tool_buffer: dict[str, dict] = {}
         self._stream_buffer = ""
-        self._text_buffer: list[str] = []
+        self._output_buffer = ""
         self._thinking_active = False
         self._agent_running = False
         self._provider_display = "default"
@@ -74,24 +71,37 @@ class CrabAgentTuiApp(App[None]):
         self._exit_flag = False
 
     def compose(self) -> ComposeResult:
-        yield RichLog(highlight=True, markup=True, wrap=True, max_lines=10000, id="output")
+        t = TextArea(id="output")
+        t.read_only = True
+        t.show_line_numbers = False
+        yield t
         with Container(id="input-container"):
             yield Input(placeholder="Type a message or /command...", id="input")
 
     async def on_mount(self) -> None:
-        log = self.query_one("#output", RichLog)
         input_widget = self.query_one("#input", Input)
 
         await self._initialize()
 
         if self.agent_ctx:
-            log.write("[bold]🦀 CrabAgent v0.5.1[/bold]")
-            log.write(f"  provider: {self._provider_display}  model: {self.agent_ctx.model or 'default'}")
-            log.write(f"  workspace: {self._workspace}")
-            log.write("")
+            self._append_output(f"🦀 CrabAgent v0.5.1\n")
+            self._append_output(f"  provider: {self._provider_display}  model: {self.agent_ctx.model or 'default'}\n")
+            self._append_output(f"  workspace: {self._workspace}\n")
+            self._append_output("\n")
 
         self.set_interval(1, self._tick_status)
+        self.set_interval(0.05, self._flush_output)
         input_widget.focus()
+
+    def _append_output(self, text: str):
+        self._output_buffer += text
+
+    def _flush_output(self):
+        if self._output_buffer:
+            t = self.query_one("#output", TextArea)
+            t.text += self._output_buffer
+            t.scroll_end(animate=False)
+            self._output_buffer = ""
 
     async def _initialize(self):
         from crabagent.core.database import init_db
@@ -161,7 +171,6 @@ class CrabAgentTuiApp(App[None]):
         self.agent_ctx.event_bus.subscribe(self._on_agent_event)
 
     async def _on_agent_event(self, event: AgentEvent):
-        log = self.query_one("#output", RichLog)
         if event.type == EventType.TEXT_DELTA:
             if self._thinking_active:
                 self._thinking_active = False
@@ -169,22 +178,22 @@ class CrabAgentTuiApp(App[None]):
             self._stream_buffer += text
             while "\n\n" in self._stream_buffer:
                 para, self._stream_buffer = self._stream_buffer.split("\n\n", 1)
-                log.write(para)
+                self._append_output(para + "\n\n")
         elif event.type == EventType.TEXT_DONE:
             if self._stream_buffer:
-                log.write(self._stream_buffer)
+                self._append_output(self._stream_buffer)
                 self._stream_buffer = ""
-            self._text_buffer.clear()
-            log.write("")
+            self._append_output("\n")
         elif event.type == EventType.THINKING_DELTA:
             self._thinking_active = True
             text = event.data.get("text", "")
-            log.write(f"[dim italic]{text}[/dim italic]")
+            self._append_output(f"[Thinking] {text}")
         elif event.type == EventType.THINKING_DONE:
             self._thinking_active = False
+            self._append_output("\n")
         elif event.type == EventType.AGENT_ERROR:
             err = event.data.get("error", "Unknown error")
-            log.write(f"[red]Error: {err}[/red]")
+            self._append_output(f"\nError: {err}\n")
         elif event.type == EventType.TOOL_CALL:
             call_id = event.data.get("id", "")
             display = self._format_tool_display(event.data.get("name", ""), event.data.get("arguments", {}))
@@ -195,20 +204,18 @@ class CrabAgentTuiApp(App[None]):
             call_info = self._tool_buffer.pop(call_id, None)
             if call_info:
                 prefix = "🔌 " if call_info["source"] == "mcp" else ""
-                style = "bright_magenta" if call_info["source"] == "mcp" else "cyan"
-                log.write(f"  [{style}]{prefix}→ {call_info['display']}[/{style}]")
+                self._append_output(f"    {prefix}→ {call_info['display']}\n")
                 result = event.data.get("result", "")
                 first_line = (result or "").split("\n")[0]
                 if len(first_line) > 300:
                     first_line = first_line[:300] + "..."
-                log.write(f"  [dim]← {first_line}[/dim]")
-                log.write("")
+                self._append_output(f"    ← {first_line}\n\n")
         elif event.type == EventType.CONTEXT_COMPRESSED:
             orig = event.data.get("original_count", 0)
             comp = event.data.get("compressed_count", 0)
-            log.write(f"[yellow]Context compressed: {orig} → {comp} messages[/yellow]")
+            self._append_output(f"\n[Context compressed: {orig} → {comp} messages]\n")
         elif event.type == EventType.BUDGET_EXHAUSTED:
-            log.write("[yellow]Budget exhausted, generating summary...[/yellow]")
+            self._append_output("\n[Budget exhausted, generating summary...]\n")
 
     def _format_tool_display(self, name: str, args: dict) -> str:
         if name == "read" and "file_path" in args:
@@ -249,14 +256,13 @@ class CrabAgentTuiApp(App[None]):
         self._tool_buffer.clear()
         self._stream_buffer = ""
 
-        log = self.query_one("#output", RichLog)
-        log.write(f"[bold]▶ {user_input}[/bold]")
+        self._append_output(f"\n▶ {user_input}\n")
 
         try:
             self.agent_ctx.iteration = 0
             await run_agent(self.agent_ctx, user_input)
         except Exception as e:
-            log.write(f"[red]Error: {e}[/red]")
+            self._append_output(f"\nError: {e}\n")
 
         self._agent_running = False
 
@@ -321,66 +327,66 @@ class CrabAgentTuiApp(App[None]):
         parts = user_input.split(maxsplit=1)
         command = parts[0].lower()
         arg = parts[1].strip() if len(parts) > 1 else ""
-        log = self.query_one("#output", RichLog)
 
         if command in ("/exit", "/quit"):
-            log.write("[dim]Bye![/dim]")
+            self._append_output("Bye!\n")
             self.action_quit()
 
         elif command == "/help":
-            commands = [
-                "/exit, /quit        Exit",
-                "/help               Show this help",
-                "/clear              Clear conversation context",
-                "/history            Show message count and token estimate",
-                "/model [name]       Switch model",
-                "/models             List available models",
-                "/provider [cmd]     Manage providers",
-                "/sessions           List recent sessions",
-                "/session [id]       Load a session",
-                "/new                Start a new conversation",
-                "/molt [cmd]         Snapshot list/show/rollback",
-                "/todo [cmd]         Manage todo list",
-                "/skills             List available skills",
-                "/skill <name>       Show skill content",
-            ]
-            log.write("\n".join(commands))
+            cmds = (
+                "/exit, /quit        Exit\n"
+                "/help               Show this help\n"
+                "/clear              Clear conversation context\n"
+                "/history            Show message count and token estimate\n"
+                "/model [name]       Switch model\n"
+                "/models             List available models\n"
+                "/provider [cmd]     Manage providers (list/add/remove/set-default)\n"
+                "/sessions           List recent sessions\n"
+                "/session [id]       Load a session\n"
+                "/new                Start a new conversation\n"
+                "/molt [cmd]         Snapshot list/show/rollback\n"
+                "/todo [cmd]         Manage todo list\n"
+                "/skills             List available skills\n"
+                "/skill <name>       Show skill content\n"
+            )
+            self._append_output(cmds)
 
         elif command == "/clear":
             if self.agent_ctx:
                 self.agent_ctx.messages.clear()
-            log.clear()
-            log.write("[dim]Context cleared.[/dim]")
+            t = self.query_one("#output", TextArea)
+            t.clear()
+            self._append_output("Context cleared.\n")
 
         elif command == "/history":
             if self.agent_ctx:
                 msg_count = len(self.agent_ctx.messages)
                 tokens = self.agent_ctx.total_tokens or 0
-                log.write(f"[dim]Messages: {msg_count}, Tokens: {tokens:,}, Iterations: {self.agent_ctx.iteration}[/dim]")
+                self._append_output(f"Messages: {msg_count}, Tokens: {tokens:,}, Iterations: {self.agent_ctx.iteration}\n")
 
         elif command == "/models":
             models = await self._fetch_models_from_provider()
             if not models:
-                log.write("[dim]No models available.[/dim]")
+                self._append_output("No models available.\n")
             else:
                 for i, m in enumerate(models, 1):
-                    mark = " [bold]*[/bold]" if m == (self.agent_ctx.model if self.agent_ctx else None) else ""
-                    log.write(f"  {i:>2}. {m}{mark}")
+                    mark = " *" if m == (self.agent_ctx.model if self.agent_ctx else None) else ""
+                    self._append_output(f"  {i:>2}. {m}{mark}\n")
 
         elif command == "/model":
             if not arg:
                 models = await self._fetch_models_from_provider()
                 if not models:
-                    log.write("[dim]No models available.[/dim]")
+                    self._append_output("No models available.\n")
                 else:
                     for i, m in enumerate(models, 1):
-                        mark = " [bold]*[/bold]" if m == (self.agent_ctx.model if self.agent_ctx else None) else ""
-                        log.write(f"  {i:>2}. {m}{mark}")
+                        mark = " *" if m == (self.agent_ctx.model if self.agent_ctx else None) else ""
+                        self._append_output(f"  {i:>2}. {m}{mark}\n")
             else:
                 if self.agent_ctx:
                     self.agent_ctx.model = arg
                 settings.save_last_model(arg)
-                log.write(f"[dim]Model set to: {arg}[/dim]")
+                self._append_output(f"Model set to: {arg}\n")
 
         elif command == "/provider":
             await self._handle_provider_slash(arg)
@@ -388,33 +394,33 @@ class CrabAgentTuiApp(App[None]):
         elif command == "/skills":
             skills = self.agent_ctx.metadata.get("_skills", {}) if self.agent_ctx else {}
             if not skills:
-                log.write("[dim]No skills loaded.[/dim]")
+                self._append_output("No skills loaded.\n")
             else:
                 for name in skills:
-                    log.write(f"  {name}")
+                    self._append_output(f"  {name}\n")
 
         elif command == "/skill":
             skills = self.agent_ctx.metadata.get("_skills", {}) if self.agent_ctx else {}
             if arg in skills:
-                log.write(skills[arg])
+                self._append_output(skills[arg] + "\n")
             else:
-                log.write(f"[dim]Skill '{arg}' not found.[/dim]")
+                self._append_output(f"Skill '{arg}' not found.\n")
 
         elif command == "/new":
             if self.agent_ctx:
                 self.agent_ctx.messages.clear()
-            log.clear()
-            log.write("[dim]New conversation started.[/dim]")
+            t = self.query_one("#output", TextArea)
+            t.clear()
+            self._append_output("New conversation started.\n")
 
         else:
-            log.write(f"[dim]Unknown command: {command}[/dim]")
+            self._append_output(f"Unknown command: {command}\n")
 
     async def _handle_provider_slash(self, arg: str):
         from crabagent.core.provider_store import (
             PROVIDER_CATALOG, create_provider, delete_provider,
             get_default_provider, list_providers, set_default_provider,
         )
-        log = self.query_one("#output", RichLog)
         sub_parts = arg.split(maxsplit=1) if arg else []
         subcmd = sub_parts[0].lower() if sub_parts else "list"
         subarg = sub_parts[1].strip() if len(sub_parts) > 1 else ""
@@ -422,12 +428,12 @@ class CrabAgentTuiApp(App[None]):
         if subcmd == "list":
             providers = await list_providers()
             if not providers:
-                log.write("[dim]No providers configured.[/dim]")
+                self._append_output("No providers configured. Use /provider add to add one.\n")
                 return
             default = await get_default_provider()
             for p in providers:
-                mark = " [bold][default][/bold]" if default and p.name == default.name else ""
-                log.write(f"  {p.name} ({p.display_name or p.name}){mark}")
+                mark = " [default]" if default and p.name == default.name else ""
+                self._append_output(f"  {p.name} ({p.display_name or p.name}){mark}\n")
 
         elif subcmd == "add":
             with self.suspend():
@@ -458,20 +464,20 @@ class CrabAgentTuiApp(App[None]):
 
         elif subcmd == "remove":
             if not subarg:
-                log.write("[dim]Usage: /provider remove <name>[/dim]")
+                self._append_output("Usage: /provider remove <name>\n")
                 return
             await delete_provider(subarg)
-            log.write(f"[dim]Provider '{subarg}' removed.[/dim]")
+            self._append_output(f"Provider '{subarg}' removed.\n")
 
         elif subcmd == "set-default":
             if not subarg:
-                log.write("[dim]Usage: /provider set-default <name>[/dim]")
+                self._append_output("Usage: /provider set-default <name>\n")
                 return
             await set_default_provider(subarg)
-            log.write(f"[dim]Default provider set to '{subarg}'.[/dim]")
+            self._append_output(f"Default provider set to '{subarg}'.\n")
 
         else:
-            log.write("[dim]Usage: /provider {list|add|remove|set-default}[/dim]")
+            self._append_output("Usage: /provider {list|add|remove|set-default}\n")
 
     @staticmethod
     async def _ensure_cli_user():
