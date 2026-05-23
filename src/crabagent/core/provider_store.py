@@ -193,3 +193,23 @@ async def delete_provider(name: str) -> bool:
         await session.delete(row)
         await session.commit()
         return True
+
+
+async def fetch_models(provider_name: str) -> list[str]:
+    p = await get_provider(provider_name)
+    if not p:
+        return []
+    base = p.base_url.rstrip("/")
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                f"{base}/models",
+                headers={"Authorization": f"Bearer {p.api_key}"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        return [m.get("id", "") for m in data.get("data", []) if m.get("id")]
+    except Exception:
+        logger.warning("Failed to fetch models for provider %s", provider_name, exc_info=True)
+        return []

@@ -1189,8 +1189,8 @@ async def _handle_provider_slash(arg: str, context):
 
     elif subcmd == "add":
         print("Available provider types:")
-        for cat in PROVIDER_CATALOG:
-            print(f"  {cat['name']} ({cat['display_name']})")
+        for key, cat in PROVIDER_CATALOG.items():
+            print(f"  {key} ({cat['display_name']})")
         ptype = input("Provider type: ").strip()
         name = input("Name: ").strip()
         display = input("Display name (optional): ").strip()
@@ -1200,7 +1200,14 @@ async def _handle_provider_slash(arg: str, context):
             print("provider type, name, and API key are required.")
             return
         try:
-            await create_provider(name=name, display_name=display or name, provider_type=ptype, api_key=api_key, base_url=base_url or "")
+            existing = await list_providers()
+            is_first = len(existing) == 0
+            await create_provider(
+                name=name, display_name=display or name,
+                provider_type=ptype, api_key=api_key,
+                base_url=base_url or "",
+                is_default=is_first,
+            )
             print(f"Provider '{name}' added.")
         except Exception as e:
             print(f"Error: {e}")
