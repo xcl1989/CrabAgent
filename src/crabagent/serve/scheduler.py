@@ -100,20 +100,22 @@ class SchedulerService:
             if not task:
                 logger.warning("[ST] Task #%d not found, skipping", task_id)
                 return
+            task_user_id = task.user_id
+            task_name = task.name
 
-            logger.info("[ST] Task #%d found: %s, user_id=%d", task_id, task.name, task.user_id)
+        logger.info("[ST] Task #%d found: %s, user_id=%d", task_id, task_name, task_user_id)
 
-            try:
-                import asyncio
-                logger.info("[ST] Task #%d: calling _run_agent", task_id)
-                session_id = await asyncio.wait_for(
-                    self._run_agent(task), timeout=600
-                )
-                logger.info("[ST] Task #%d: _run_agent returned, session_id=%s", task_id, session_id)
-            except TimeoutError:
-                logger.error("[ST] Task #%d: _run_agent timed out (600s)", task_id)
-            except Exception as e:
-                logger.error("[ST] Task #%d: _run_agent failed: %s\n%s", task_id, e, traceback.format_exc())
+        try:
+            import asyncio
+            logger.info("[ST] Task #%d: calling _run_agent", task_id)
+            session_id = await asyncio.wait_for(
+                self._run_agent(task), timeout=600
+            )
+            logger.info("[ST] Task #%d: _run_agent returned, session_id=%s", task_id, session_id)
+        except TimeoutError:
+            logger.error("[ST] Task #%d: _run_agent timed out (600s)", task_id)
+        except Exception as e:
+            logger.error("[ST] Task #%d: _run_agent failed: %s\n%s", task_id, e, traceback.format_exc())
 
         await self._refresh_next_run(task_id)
 
