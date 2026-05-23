@@ -188,7 +188,7 @@ class CrabAgentTuiApp(App[None]):
         elif event.type == EventType.THINKING_DELTA:
             if not self._thinking_active:
                 self._thinking_active = True
-                self._append_output("Thinking: ")
+                self._append_output("  💭 ")
             text = event.data.get("text", "")
             self._append_output(text)
         elif event.type == EventType.THINKING_DONE:
