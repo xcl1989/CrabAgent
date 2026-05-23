@@ -55,6 +55,7 @@ def main():
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
+    logging.getLogger("LiteLLM").setLevel(logging.WARNING)
 
     if args.serve:
         _run_serve(args)
@@ -555,17 +556,23 @@ def _print_banner(context, provider: str, model: str):
     print()
 
 
-def _make_status_bar(context, provider_display: str) -> str:
+def _make_status_bar(context, provider_display: str, model: str) -> str:
     msg_count = len(context.messages)
     iters = context.iteration
     tokens_display = f"{context.total_tokens:,}" if context.total_tokens else ""
     skills_count = len(context.metadata.get("_skills", {}))
-    parts = [f" C:{msg_count} I:{iters}"]
+    parts = []
+    if msg_count:
+        parts.append(f"Messages: {msg_count}")
     if tokens_display:
-        parts.append(f"T:{tokens_display}")
+        parts.append(f"Tokens: {tokens_display}")
+    if iters:
+        parts.append(f"Iterations: {iters}")
     if skills_count:
-        parts.append(f"S:{skills_count}")
-    return f" [{provider_display}] {' '.join(parts)} "
+        parts.append(f"Skills: {skills_count}")
+    info = " | ".join(parts) if parts else ""
+    model_suffix = f"/{model}" if model else ""
+    return f" [{provider_display}{model_suffix}] {info} "
 
 
 async def _ensure_provider_configured():
@@ -687,7 +694,7 @@ async def _run_interactive(args):
     }
 
     while True:
-        status = _make_status_bar(context, provider_display)
+        status = _make_status_bar(context, provider_display, context.model or "")
 
         def _get_input():
             return session.prompt(
