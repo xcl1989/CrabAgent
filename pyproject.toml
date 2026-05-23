@@ -6,7 +6,21 @@ build-backend = "hatchling.build"
 name = "crabagent"
 version = "0.5.0"
 description = "CrabAgent - AI Agent Platform with dual-mode (CLI + Serve)"
+readme = "README.md"
+license = {text = "Commercial"}
 requires-python = ">=3.12"
+authors = [
+    {name = "Xie Congling", email = "xcl1989@live.com"},
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "License :: Other/Proprietary License",
+    "Operating System :: OS Independent",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
 dependencies = [
     "pydantic>=2.0",
     "pydantic-settings>=2.0",
@@ -42,6 +56,11 @@ dev = [
 
 [project.scripts]
 crabagent = "crabagent.cli.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/xcl1989/CrabAgent"
+Repository = "https://github.com/xcl1989/CrabAgent"
+Issues = "https://github.com/xcl1989/CrabAgent/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/crabagent"]
