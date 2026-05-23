@@ -30,12 +30,15 @@ CrabAgent is a local-first AI agent platform. Run it from any project directory 
 pip install 'crabagent[serve]'
 
 crabagent init
+
+# TUI — interactive REPL with slash commands
+crabagent
+
+# Web UI
 crabagent --serve          # → http://localhost:5210
                            # Default login: admin / xcl1989
-```
 
-Single-query CLI:
-```bash
+# Single-query CLI
 crabagent "organize this directory"
 crabagent -p deepseek -m deepseek-chat "write a Python script"
 ```

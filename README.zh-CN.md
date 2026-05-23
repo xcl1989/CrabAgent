@@ -30,12 +30,15 @@ CrabAgent 是一个本地优先的 AI Agent 平台。从任意项目目录启动
 pip install 'crabagent[serve]'
 
 crabagent init
+
+# TUI — 交互式终端模式（支持斜杠命令）
+crabagent
+
+# Web UI
 crabagent --serve          # → http://localhost:5210
                            # 默认登录：admin / xcl1989
-```
 
-CLI 单次查询：
-```bash
+# CLI 单次查询
 crabagent "帮我整理这个目录"
 crabagent -p deepseek -m deepseek-chat "写一个 Python 脚本"
 ```
