@@ -155,41 +155,62 @@ function sseEventToMessages(event: SSEEvent, messages: ChatMessage[]): ChatMessa
     const subId = event.data.sub_agent_id as string || "";
     if (updated.some(m => m.sub_agent_id === subId)) return updated;
     const name = event.data.agent_name as string || "";
-    updated.push({
+    return [...updated, {
       id: `sa-${subId}`,
-      role: "sub_agent",
+      role: "sub_agent" as const,
       content: "",
       sub_agent_id: subId,
       sub_agent_name: name,
       sub_agent_display: (event.data.display_name as string) || name,
-    });
-    return updated;
+    }];
   }
 
   if (event.type === "sub_agent_text_delta") {
     const subId = event.data.sub_agent_id as string || "";
-    const idx = updated.findIndex(m => m.sub_agent_id === subId && m.role === "sub_agent");
-    if (idx >= 0) {
-      updated[idx] = {
-        ...updated[idx],
-        content: updated[idx].content + ((event.data.text as string) || ""),
-      };
-    }
-    return updated;
+    const text = (event.data.text as string) || "";
+    return updated.map(m =>
+      m.sub_agent_id === subId && m.role === "sub_agent"
+        ? { ...m, content: m.content + text }
+        : m
+    );
+  }
+
+  if (event.type === "sub_agent_tool_call") {
+    const subId = event.data.sub_agent_id as string || "";
+    const name = event.data.name as string || "";
+    const args = JSON.stringify(event.data.arguments || {});
+    return updated.map(m =>
+      m.sub_agent_id === subId && m.role === "sub_agent"
+        ? { ...m, content: m.content + `\n→ ${name}(${args.slice(0, 120)})\n` }
+        : m
+    );
+  }
+
+  if (event.type === "sub_agent_tool_result") {
+    const subId = event.data.sub_agent_id as string || "";
+    const name = event.data.name as string || "";
+    const result = (event.data.result as string) || "";
+    return updated.map(m =>
+      m.sub_agent_id === subId && m.role === "sub_agent"
+        ? { ...m, content: m.content + `\n← ${name}: ${result.slice(0, 200)}${result.length > 200 ? "..." : ""}\n` }
+        : m
+    );
   }
 
   if (event.type === "sub_agent_end") {
     const subId = event.data.sub_agent_id as string || "";
-    const idx = updated.findIndex(m => m.sub_agent_id === subId && m.role === "sub_agent");
-    if (idx >= 0) {
-      updated[idx] = {
-        ...updated[idx],
-        sub_agent_elapsed: event.data.elapsed as number,
-        sub_agent_tokens: event.data.tokens as number,
-        sub_agent_iterations: event.data.iterations as number,
-      };
-    }
-    return updated;
+    const resultText = (event.data.result as string) || "";
+    return updated.map(m =>
+      m.sub_agent_id === subId && m.role === "sub_agent"
+        ? {
+            ...m,
+            content: resultText || m.content || "(sub-agent produced no output)",
+            sub_agent_elapsed: event.data.elapsed as number,
+            sub_agent_tokens: event.data.tokens as number,
+            sub_agent_iterations: event.data.iterations as number,
+          }
+        : m
+    );
   }
 
   return updated;
@@ -256,7 +277,7 @@ function dbMessagesToChat(msgs: Message[]): ChatMessage[] {
     if (m.role === "sub_agent" && m.content) {
       try {
         const data = JSON.parse(m.content);
-        if (data.text) {
+        if (typeof data.text === "string") {
           result.push({
             id: `db-${m.id}`,
             role: "sub_agent",
@@ -627,27 +648,29 @@ export default function ChatPage({ onLogout }: Props) {
       />
 
       <div className="flex-1 flex flex-col min-w-0">
+        <div className="flex items-center border-b" style={{ borderBottom: "1px solid var(--border)" }}>
+          <div className="flex-1">
+            {activeSession && (
+              <BranchSelector
+                sessionId={activeSession.session_id}
+                activeBranch={activeBranch}
+                onSwitch={handleSwitchBranch}
+                onReplay={startReplay}
+              />
+            )}
+          </div>
+          <NotificationBell onSwitchSession={selectSessionById} />
+          <button
+            onClick={() => setShowFiles((v) => !v)}
+            className="px-3 py-2 text-sm"
+            style={{ color: showFiles ? "var(--accent)" : "var(--text-secondary)" }}
+            title="Toggle file browser"
+          >
+            📁
+          </button>
+        </div>
         {activeSession ? (
           <>
-            <div className="flex items-center border-b" style={{ borderBottom: "1px solid var(--border)" }}>
-              <div className="flex-1">
-                <BranchSelector
-                  sessionId={activeSession.session_id}
-                  activeBranch={activeBranch}
-                  onSwitch={handleSwitchBranch}
-                  onReplay={startReplay}
-                />
-              </div>
-              <NotificationBell onSwitchSession={selectSessionById} />
-              <button
-                onClick={() => setShowFiles((v) => !v)}
-                className="px-3 py-2 text-sm"
-                style={{ color: showFiles ? "var(--accent)" : "var(--text-secondary)" }}
-                title="Toggle file browser"
-              >
-                📁
-              </button>
-            </div>
             {replaying && replayProgress.total > 0 && (
               <div className="px-4 pt-2 pb-1" style={{ borderBottom: "1px solid var(--border)" }}>
                 <div className="flex items-center justify-between mb-1">

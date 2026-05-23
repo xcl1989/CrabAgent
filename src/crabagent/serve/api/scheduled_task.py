@@ -129,10 +129,11 @@ async def update_task(
     await db.refresh(task)
 
     if cron_changed or req.enabled is not None:
-        await get_scheduler().remove_task(task_id)
+        get_scheduler().remove_task(task_id)
         if task.enabled:
             await get_scheduler().add_task(task)
 
+    await db.refresh(task)
     return _to_response(task)
 
 
@@ -149,7 +150,7 @@ async def delete_task(
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
 
-    await get_scheduler().remove_task(task_id)
+    get_scheduler().remove_task(task_id)
     await db.execute(delete(ScheduledTask).where(ScheduledTask.id == task_id))
     await db.commit()
     return {"status": "deleted", "id": task_id}

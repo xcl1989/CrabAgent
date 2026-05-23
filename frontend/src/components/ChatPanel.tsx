@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useRef, useState } from "react";
+import { forwardRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -124,34 +124,74 @@ function UserInputOptions({ options, inputId, onSubmit }: { options: string[]; i
   );
 }
 
-function SubAgentContent({ content, completed }: { content: string; completed: boolean }) {
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const maxH = completed ? undefined : 300;
+const AGENT_ICONS: Record<string, string> = {
+  researcher: "🔍",
+  analyst: "📊",
+  coder: "💻",
+  writer: "📝",
+};
 
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+interface SubAgentSegment {
+  type: "text" | "tool_call" | "tool_result";
+  content: string;
+  name?: string;
+}
+
+function parseSubAgentContent(raw: string): SubAgentSegment[] {
+  const segments: SubAgentSegment[] = [];
+  let remaining = raw;
+
+  while (remaining.length > 0) {
+    const callIdx = remaining.indexOf("\n→ ");
+    const resultIdx = remaining.indexOf("\n← ");
+    const nextSpecial = Math.min(
+      callIdx >= 0 ? callIdx : Infinity,
+      resultIdx >= 0 ? resultIdx : Infinity
+    );
+
+    if (nextSpecial === Infinity) {
+      if (remaining.trim()) {
+        segments.push({ type: "text", content: remaining.trim() });
+      }
+      break;
     }
-  }, [content]);
 
-  return (
-    <div
-      ref={scrollRef}
-      className="px-3 py-2 text-xs whitespace-pre-wrap font-mono"
-      style={{
-        color: "var(--text-secondary)",
-        lineHeight: 1.6,
-        maxHeight: maxH,
-        overflowY: maxH ? "auto" : "visible",
-      }}
-    >
-      {content || "(working...)"}
-    </div>
-  );
+    if (nextSpecial > 0) {
+      const textPart = remaining.slice(0, nextSpecial).trim();
+      if (textPart) {
+        segments.push({ type: "text", content: textPart });
+      }
+    }
+
+    const isCall = callIdx >= 0 && (resultIdx < 0 || callIdx <= resultIdx);
+    const marker = isCall ? "\n→ " : "\n← ";
+    const start = remaining.indexOf(marker);
+    const end = remaining.indexOf("\n→ ", start + 1);
+    const end2 = remaining.indexOf("\n← ", start + 1);
+    const blockEnd = Math.min(end >= 0 ? end : Infinity, end2 >= 0 ? end2 : Infinity);
+    const block = blockEnd === Infinity ? remaining.slice(start + marker.length) : remaining.slice(start + marker.length, blockEnd);
+
+    if (isCall) {
+      const colonIdx = block.indexOf("(");
+      const name = colonIdx >= 0 ? block.slice(0, colonIdx) : block;
+      const args = colonIdx >= 0 ? block.slice(colonIdx) : "()";
+      segments.push({ type: "tool_call", content: args, name: name.trim() });
+    } else {
+      const colonIdx = block.indexOf(":");
+      const name = colonIdx >= 0 ? block.slice(0, colonIdx) : "";
+      const result = colonIdx >= 0 ? block.slice(colonIdx + 1) : block;
+      segments.push({ type: "tool_result", content: result.trim(), name: name.trim() });
+    }
+
+    remaining = blockEnd === Infinity ? "" : remaining.slice(blockEnd);
+  }
+
+  return segments;
 }
 
 const ChatPanel = forwardRef<HTMLDivElement, Props>(({ messages, connected, onToolConfirm, onUserInput, onBranch, replaying }, bottomRef) => {
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [activeSubAgentId, setActiveSubAgentId] = useState<string | null>(null);
   const grouped: (ChatMessage | ChatMessage[])[] = [];
   let i = 0;
   while (i < messages.length) {
@@ -450,28 +490,36 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(({ messages, connected, onTo
 
         if (msg.role === "sub_agent") {
           const completed = msg.sub_agent_elapsed !== undefined;
-          const agentIcon =
-            msg.sub_agent_name === "researcher" ? "🔍" :
-            msg.sub_agent_name === "analyst" ? "📊" :
-            msg.sub_agent_name === "coder" ? "💻" :
-            msg.sub_agent_name === "writer" ? "📝" : "🤖";
+          const agentIcon = AGENT_ICONS[msg.sub_agent_name || ""] || "🤖";
+          const isActive = activeSubAgentId === msg.sub_agent_id;
           return (
-            <div key={msg.id} className="mb-3" style={{ marginLeft: "8px" }}>
-              <div className="rounded-lg overflow-hidden" style={{ background: "var(--bg-tertiary)", border: "1px solid var(--border)" }}>
-                <div className="px-3 py-2 text-xs font-medium flex items-center gap-2 select-none"
-                  style={{ color: "var(--text-primary)", borderBottom: "1px solid var(--border)" }}>
-                  <span>{agentIcon}</span>
-                  <span>{msg.sub_agent_display || msg.sub_agent_name}</span>
-                  {completed && (
-                    <span className="ml-auto text-[10px]" style={{ color: "var(--text-secondary)" }}>
-                      {msg.sub_agent_iterations} steps · {msg.sub_agent_elapsed}s · {msg.sub_agent_tokens} tokens
-                    </span>
-                  )}
-                  {!completed && <span className="ml-auto text-[10px] animate-pulse" style={{ color: "var(--accent)" }}>running...</span>}
-                </div>
-                <SubAgentContent content={msg.content} completed={completed} />
-              </div>
-            </div>
+            <button
+              key={msg.id}
+              onClick={() => setActiveSubAgentId(isActive ? null : (msg.sub_agent_id ?? msg.id))}
+              className="mb-3 flex items-center gap-2 cursor-pointer py-1.5 px-3 rounded-md text-xs select-none transition-colors"
+              style={{
+                marginLeft: "12px",
+                background: isActive ? "#2d1f5e" : "var(--bg-secondary)",
+                border: `1px solid ${isActive ? "#7c3aed" : "var(--border)"}`,
+                color: "var(--text-secondary)",
+              }}
+            >
+              <span style={{ fontSize: "11px" }}>{agentIcon}</span>
+              <span className="font-medium" style={{ color: "#c4b5fd" }}>{msg.sub_agent_display || msg.sub_agent_name}</span>
+              {completed ? (
+                <span className="ml-1" style={{ color: "#34d399", fontFamily: "monospace" }}>✓</span>
+              ) : (
+                <span className="ml-1 animate-spin inline-block" style={{ color: "#a78bfa", fontFamily: "monospace", fontSize: "10px" }}>⟳</span>
+              )}
+              {completed && (
+                <span style={{ color: "var(--text-secondary)", fontSize: "10px" }}>
+                  {msg.sub_agent_iterations} steps · {msg.sub_agent_elapsed}s · {msg.sub_agent_tokens} tokens
+                </span>
+              )}
+              {!completed && (
+                <span className="animate-pulse" style={{ color: "#a78bfa", fontSize: "10px" }}>running...</span>
+              )}
+            </button>
           );
         }
 
@@ -608,6 +656,147 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(({ messages, connected, onTo
           />
         </div>
       )}
+      {activeSubAgentId && (() => {
+        const agent = messages.find(m => m.sub_agent_id === activeSubAgentId || m.id === activeSubAgentId);
+        if (!agent) return null;
+        const completed = agent.sub_agent_elapsed !== undefined;
+        const agentIcon = AGENT_ICONS[agent.sub_agent_name || ""] || "🤖";
+        return (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center"
+            style={{ background: "rgba(0,0,0,0.6)" }}
+            onClick={() => setActiveSubAgentId(null)}
+          >
+            <div
+              className="flex flex-col rounded-xl overflow-hidden"
+              style={{
+                background: "#1a1a2e",
+                border: "1px solid #7c3aed",
+                width: "min(680px, 90vw)",
+                maxHeight: "80vh",
+                boxShadow: "0 20px 60px rgba(0,0,0,0.5), 0 0 0 1px rgba(124,58,237,0.3)",
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div
+                className="flex items-center gap-2 px-4 py-3 select-none shrink-0"
+                style={{ borderBottom: "1px solid #2d1f5e", background: "#16162a" }}
+              >
+                <span style={{ fontSize: "14px" }}>{agentIcon}</span>
+                <span className="font-medium text-sm" style={{ color: "#d8b4fe" }}>
+                  {agent.sub_agent_display || agent.sub_agent_name}
+                </span>
+                {!completed && (
+                  <span className="flex items-center gap-1.5 ml-2">
+                    <span className="animate-spin inline-block" style={{ color: "#a78bfa", fontSize: "11px" }}>⟳</span>
+                    <span className="animate-pulse text-xs" style={{ color: "#a78bfa" }}>running...</span>
+                  </span>
+                )}
+                {completed && (
+                  <span className="text-xs ml-2" style={{ color: "#94a3b8" }}>
+                    ✓ {agent.sub_agent_iterations} steps · {agent.sub_agent_elapsed}s · {agent.sub_agent_tokens} tokens
+                  </span>
+                )}
+                <button
+                  onClick={() => setActiveSubAgentId(null)}
+                  className="ml-auto text-sm px-2 py-0.5 rounded hover:opacity-80"
+                  style={{ color: "#94a3b8" }}
+                >
+                  ✕
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto px-4 py-4" style={{ background: "#131325" }}>
+                {(() => {
+                  const segments = parseSubAgentContent(agent.content || "");
+                  if (segments.length === 0) {
+                    return (
+                      <span className="text-sm" style={{ color: "#94a3b8" }}>
+                        (working...)
+                      </span>
+                    );
+                  }
+                  return (
+                    <div className="flex flex-col gap-3">
+                      {segments.map((seg, i) => {
+                        if (seg.type === "text") {
+                          return (
+                            <div
+                              key={i}
+                              className="prose prose-invert prose-sm max-w-none
+                                [&_p]:my-1.5 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0
+                                [&_h1]:text-base [&_h1]:font-bold [&_h1]:mt-3 [&_h1]:mb-1.5 [&_h1]:text-white
+                                [&_h2]:text-sm [&_h2]:font-bold [&_h2]:mt-2 [&_h2]:mb-1 [&_h2]:text-white
+                                [&_h3]:text-sm [&_h3]:font-semibold [&_h3]:mt-2 [&_h3]:mb-1 [&_h3]:text-white
+                                [&_ul]:my-1 [&_ul]:pl-5 [&_ol]:my-1 [&_ol]:pl-5
+                                [&_li]:my-0.5
+                                [&_pre]:my-1.5 [&_pre]:rounded-lg [&_pre]:overflow-hidden
+                                [&_code]:text-[13px]
+                                [&_a]:text-blue-400 [&_a]:no-underline [&_a:hover]:underline
+                                [&_blockquote]:border-l-2 [&_blockquote]:border-gray-600 [&_blockquote]:pl-3 [&_blockquote]:text-gray-400
+                                [&_strong]:text-white [&_em]:text-gray-300
+                                [&_hr]:border-gray-700 [&_hr]:my-2
+                                [&_table]:text-xs [&_th]:px-2 [&_th]:py-1 [&_td]:px-2 [&_td]:py-1 [&_th]:bg-[#1a1a2e]
+                              "
+                            >
+                              <ReactMarkdown remarkPlugins={[remarkGfm]}>{seg.content}</ReactMarkdown>
+                            </div>
+                          );
+                        }
+                        if (seg.type === "tool_call") {
+                          return (
+                            <div
+                              key={i}
+                              className="flex items-center gap-2 py-1.5 px-3 rounded-md text-xs select-none"
+                              style={{
+                                background: "#1e1b2e",
+                                border: "1px solid #2d1f5e",
+                                color: "#94a3b8",
+                              }}
+                            >
+                              <span style={{ color: "#a78bfa", fontFamily: "monospace", fontSize: "11px" }}>⚡</span>
+                              <span className="font-medium" style={{ color: "#c4b5fd" }}>{seg.name}</span>
+                              <span style={{ color: "#94a3b8", fontFamily: "monospace" }}>{seg.content}</span>
+                            </div>
+                          );
+                        }
+                        if (seg.type === "tool_result") {
+                          return (
+                            <div
+                              key={i}
+                              className="rounded-md overflow-hidden"
+                              style={{
+                                borderLeft: "3px solid #34d399",
+                                background: "#1a1f1e",
+                              }}
+                            >
+                              <div className="px-3 py-1.5 text-[10px] font-medium" style={{ color: "#34d399", borderBottom: "1px solid #164e36" }}>
+                                ← {seg.name}
+                              </div>
+                              <pre
+                                className="px-3 py-2 text-xs whitespace-pre-wrap break-all leading-relaxed"
+                                style={{
+                                  color: "#cbd5e1",
+                                  fontFamily: "'SF Mono', 'Fira Code', monospace",
+                                  fontSize: "12px",
+                                  maxHeight: "200px",
+                                  overflow: "auto",
+                                }}
+                              >
+                                {seg.content}
+                              </pre>
+                            </div>
+                          );
+                        }
+                        return null;
+                      })}
+                    </div>
+                  );
+                })()}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 });

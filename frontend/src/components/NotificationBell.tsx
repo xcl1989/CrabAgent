@@ -5,10 +5,13 @@ interface Props {
   onSwitchSession: (sessionId: string) => void;
 }
 
+type Tab = "unread" | "read";
+
 export function NotificationBell({ onSwitchSession }: Props) {
   const [count, setCount] = useState(0);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [open, setOpen] = useState(false);
+  const [tab, setTab] = useState<Tab>("unread");
   const ref = useRef<HTMLDivElement>(null);
 
   const fetchUnread = async () => {
@@ -55,6 +58,10 @@ export function NotificationBell({ onSwitchSession }: Props) {
     setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
   };
 
+  const unreadItems = notifications.filter((n) => !n.read);
+  const readItems = notifications.filter((n) => n.read);
+  const displayItems = tab === "unread" ? unreadItems : readItems;
+
   return (
     <div ref={ref} className="relative" style={{ zIndex: 50 }}>
       <button
@@ -78,41 +85,74 @@ export function NotificationBell({ onSwitchSession }: Props) {
       </button>
       {open && (
         <div
-          className="absolute right-0 top-full mt-1 w-80 max-h-96 overflow-y-auto rounded-xl shadow-2xl"
-          style={{ background: "var(--bg-primary)", border: "1px solid var(--border)" }}
+          className="absolute right-0 top-full mt-1 w-80 rounded-xl shadow-2xl flex flex-col"
+          style={{ background: "var(--bg-primary)", border: "1px solid var(--border)", maxHeight: "420px" }}
         >
-          <div className="flex items-center justify-between px-4 py-2.5" style={{ borderBottom: "1px solid var(--border)" }}>
-            <span className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>Notifications</span>
-            {notifications.some((n) => !n.read) && (
-              <button onClick={handleMarkAll} className="text-xs" style={{ color: "var(--accent)" }}>
+          <div className="flex items-center shrink-0" style={{ borderBottom: "1px solid var(--border)" }}>
+            {(["unread", "read"] as Tab[]).map((t) => {
+              const isActive = tab === t;
+              const label = t === "unread" ? `Unread${unreadItems.length > 0 ? ` (${unreadItems.length})` : ""}` : "Read";
+              return (
+                <button
+                  key={t}
+                  onClick={() => setTab(t)}
+                  className="flex-1 px-3 py-2.5 text-xs font-medium transition-colors relative"
+                  style={{ color: isActive ? "var(--text-primary)" : "var(--text-secondary)" }}
+                >
+                  {label}
+                  {isActive && (
+                    <span
+                      className="absolute bottom-0 left-2 right-2 h-0.5 rounded-full"
+                      style={{ background: "var(--accent)" }}
+                    />
+                  )}
+                </button>
+              );
+            })}
+            {unreadItems.length > 0 && (
+              <button onClick={handleMarkAll} className="px-3 py-2.5 text-[10px] shrink-0" style={{ color: "var(--accent)" }}>
                 Mark all read
               </button>
             )}
           </div>
-          {notifications.length === 0 ? (
-            <div className="px-4 py-6 text-center text-xs" style={{ color: "var(--text-secondary)" }}>No notifications</div>
-          ) : (
-            notifications.slice(0, 20).map((n) => (
-              <div
-                key={n.id}
-                onClick={() => handleClick(n)}
-                className="px-4 py-3 cursor-pointer transition-colors hover:opacity-80"
-                style={{
-                  borderBottom: "1px solid var(--border)",
-                  background: n.read ? "transparent" : "var(--bg-tertiary)",
-                }}
-              >
-                <div className="flex items-center gap-2">
-                  {!n.read && <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: "var(--accent)" }} />}
-                  <span className="text-sm font-medium truncate" style={{ color: "var(--text-primary)" }}>{n.title}</span>
-                </div>
-                <div className="text-xs mt-0.5 truncate" style={{ color: "var(--text-secondary)" }}>{n.body}</div>
-                <div className="text-[10px] mt-1" style={{ color: "var(--text-secondary)" }}>
-                  {n.created_at ? new Date(n.created_at).toLocaleString() : ""}
-                </div>
+          <div className="flex-1 overflow-y-auto">
+            {displayItems.length === 0 ? (
+              <div className="px-4 py-6 text-center text-xs" style={{ color: "var(--text-secondary)" }}>
+                {tab === "unread" ? "No unread notifications" : "No read notifications"}
               </div>
-            ))
-          )}
+            ) : (
+              displayItems.slice(0, 20).map((n) => (
+                <div
+                  key={n.id}
+                  onClick={() => handleClick(n)}
+                  className="px-4 py-3 cursor-pointer transition-colors hover:opacity-80"
+                  style={{
+                    borderBottom: "1px solid var(--border)",
+                    background: n.read ? "transparent" : "var(--bg-tertiary)",
+                  }}
+                >
+                  <div className="flex items-center gap-2">
+                    {!n.read && <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: "var(--accent)" }} />}
+                    <span
+                      className="text-sm font-medium truncate"
+                      style={{ color: n.read ? "var(--text-secondary)" : "var(--text-primary)" }}
+                    >
+                      {n.title}
+                    </span>
+                  </div>
+                  <div
+                    className="text-xs mt-0.5 truncate"
+                    style={{ color: n.read ? "var(--text-secondary)" : "var(--text-secondary)" }}
+                  >
+                    {n.body}
+                  </div>
+                  <div className="text-[10px] mt-1" style={{ color: "var(--text-secondary)" }}>
+                    {n.created_at ? new Date(n.created_at).toLocaleString() : ""}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
         </div>
       )}
     </div>

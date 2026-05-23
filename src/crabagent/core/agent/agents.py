@@ -91,7 +91,7 @@ async def spawn_sub_agent(
     sub_context = AgentContext(
         workspace=parent_context.workspace,
         tool_registry=sub_registry,
-        max_iterations=min(parent_context.max_iterations, 30),
+        max_iterations=min(parent_context.max_iterations, 50),
         model=agent_def["model"] or parent_context.model,
         provider_name=parent_context.provider_name,
         system_prompt=_build_system_prompt(agent_def),
@@ -99,7 +99,8 @@ async def spawn_sub_agent(
 
     sub_context.confirm_callback = None
 
-    sub_id = f"{agent_name}_{int(time.time() * 1000)}"
+    import uuid as _uuid
+    sub_id = f"{agent_name}_{_uuid.uuid4().hex[:8]}"
 
     await parent_context.event_bus.emit(AgentEvent(
         type=EventType.SUB_AGENT_START,
@@ -175,16 +176,13 @@ async def spawn_sub_agent(
             "tokens": sub_context.total_tokens,
             "iterations": sub_context.iteration,
         }, ensure_ascii=False)
-        await parent_context.event_bus.emit(AgentEvent(
-            type=EventType.MESSAGE_CREATED,
-            data={
-                "message": {
-                    "role": "sub_agent",
-                    "content": sub_content,
-                    "name": agent_name,
-                },
-            },
-        ))
+
+        pending = parent_context.metadata.setdefault("_pending_sub_agent_messages", [])
+        pending.append({
+            "role": "sub_agent",
+            "content": sub_content,
+            "name": agent_name,
+        })
 
         return last_text or "(sub-agent produced no output)"
     except Exception as e:

@@ -56,7 +56,7 @@ class SchedulerService:
             day=parts[2],
             month=parts[3],
             day_of_week=parts[4],
-            timezone="Asia/Shanghai",
+            timezone="local",
         )
 
     async def add_task(self, task: ScheduledTask) -> None:
@@ -77,11 +77,12 @@ class SchedulerService:
         )
         self._job_ids[task.id] = job.id
         if job.next_run_time:
+            next_run_naive = job.next_run_time.replace(tzinfo=None)
             async with async_session_factory() as db:
                 result = await db.execute(select(ScheduledTask).where(ScheduledTask.id == task.id))
                 t = result.scalar_one_or_none()
                 if t:
-                    t.next_run_at = job.next_run_time
+                    t.next_run_at = next_run_naive
                     await db.commit()
         logger.info("Task #%d '%s' scheduled, next: %s", task.id, task.name, job.next_run_time)
 
@@ -92,38 +93,28 @@ class SchedulerService:
             logger.info("Task #%d removed from scheduler", task_id)
 
     async def _execute(self, task_id: int):
+        logger.info("[ST] _execute called, task_id=%d", task_id)
 
         async with async_session_factory() as db:
             result = await db.execute(select(ScheduledTask).where(ScheduledTask.id == task_id))
             task = result.scalar_one_or_none()
             if not task:
-                logger.warning("Task #%d not found, skipping", task_id)
+                logger.warning("[ST] Task #%d not found, skipping", task_id)
                 return
 
-            logger.info("Executing task #%d: %s", task_id, task.name)
+            logger.info("[ST] Task #%d found: %s, user_id=%d", task_id, task.name, task.user_id)
 
             try:
-                session_id = await self._run_agent(task)
-                task.last_status = "success"
-                task.last_error = ""
-                task.last_conversation_id = session_id
-                task.last_run_at = utcnow()
-                await db.commit()
-
-                await self._create_notification(
-                    db, task.user_id, task.name, "任务执行完成", session_id
+                import asyncio
+                logger.info("[ST] Task #%d: calling _run_agent", task_id)
+                session_id = await asyncio.wait_for(
+                    self._run_agent(task), timeout=600
                 )
-                logger.info("Task #%d completed, conversation: %s", task_id, session_id)
+                logger.info("[ST] Task #%d: _run_agent returned, session_id=%s", task_id, session_id)
+            except TimeoutError:
+                logger.error("[ST] Task #%d: _run_agent timed out (600s)", task_id)
             except Exception as e:
-                task.last_status = "error"
-                task.last_error = str(e)[:500]
-                task.last_run_at = utcnow()
-                await db.commit()
-
-                await self._create_notification(
-                    db, task.user_id, task.name, f"执行失败: {str(e)[:200]}", ""
-                )
-                logger.error("Task #%d failed: %s\n%s", task_id, e, traceback.format_exc())
+                logger.error("[ST] Task #%d: _run_agent failed: %s\n%s", task_id, e, traceback.format_exc())
 
     async def _run_agent(self, task: ScheduledTask) -> str:
         from crabagent.core.agent.context import AgentContext
@@ -179,39 +170,94 @@ class SchedulerService:
         context.metadata["session_id"] = ctx_conv_id
         context.metadata["branch_id"] = "main"
 
-        conversation_id = await _create_conversation(task.user_id, task.name, str(workspace), model)
+        conversation_id = await _create_conversation(task.user_id, task.name, str(workspace), model, ctx_conv_id)
+        logger.info("[ST] conversation created, id=%d, session=%s", conversation_id, ctx_conv_id)
         context.metadata["_db_conversation_id"] = conversation_id
 
+        from crabagent.serve.services.persistence import PersistenceListener
+
+        persistence = PersistenceListener(conversation_id=conversation_id, branch_id="main")
+        context.event_bus.subscribe(persistence.on_event)
+        logger.info("[ST] PersistenceListener subscribed")
+
+        agent_error = None
         try:
+            logger.info("[ST] calling run_agent, prompt=%.100s", task.prompt[:100])
             await run_agent(context, task.prompt)
-        finally:
-            browser_mgr = context.metadata.get("_browser_manager")
-            if browser_mgr:
-                try:
-                    await browser_mgr.close()
-                except Exception:
-                    pass
-            mcp_mgr = context.metadata.get("_mcp_manager")
-            if mcp_mgr:
-                try:
-                    await mcp_mgr.stop_all()
-                except Exception:
-                    pass
-            settings.auto_approve_tools = False
+            logger.info("[ST] run_agent finished, iterations=%d", context.iteration)
+        except Exception as e:
+            logger.error("[ST] run_agent error: %s", e)
+            agent_error = e
+
+        await self._commit_task_status(task.id, ctx_conv_id, agent_error)
+
+        if agent_error:
+            try:
+                await self._create_notification(
+                    task.user_id, task.name, f"执行失败: {str(agent_error)[:200]}", ""
+                )
+            except Exception:
+                pass
+        else:
+            try:
+                await self._create_notification(
+                    task.user_id, task.name, "任务执行完成", ctx_conv_id
+                )
+            except Exception:
+                pass
+
+        browser_mgr = context.metadata.get("_browser_manager")
+        if browser_mgr:
+            try:
+                await browser_mgr.close()
+            except Exception:
+                pass
+        mcp_mgr = context.metadata.get("_mcp_manager")
+        if mcp_mgr:
+            try:
+                import asyncio as _asyncio
+                await _asyncio.wait_for(mcp_mgr.stop_all(), timeout=10)
+            except Exception:
+                pass
+        settings.auto_approve_tools = False
+        logger.info("[ST] cleanup done, returning session_id=%s", ctx_conv_id)
 
         return ctx_conv_id
 
-    async def _create_notification(self, db, user_id: int, title: str, body: str, conversation_id: str):
+    async def _commit_task_status(self, task_id: int, conversation_id: str, error: Exception | None):
+        async with async_session_factory() as db:
+            result = await db.execute(select(ScheduledTask).where(ScheduledTask.id == task_id))
+            t = result.scalar_one_or_none()
+            if not t:
+                return
+            if error:
+                t.last_status = "error"
+                t.last_error = str(error)[:500]
+            else:
+                t.last_status = "success"
+                t.last_error = ""
+            t.last_conversation_id = conversation_id
+            t.last_run_at = utcnow()
+            await db.commit()
+            logger.info("[ST] Task #%d status committed: %s", task_id, t.last_status)
+
+    async def _create_notification(self, user_id: int, title: str, body: str, conversation_id: str):
         from crabagent.core.database import Notification
 
-        notif = Notification(
-            user_id=user_id,
-            title=title,
-            body=body,
-            conversation_id=conversation_id,
-        )
-        db.add(notif)
-        await db.commit()
+        logger.info("[ST] _create_notification: user_id=%d, title=%s, conv=%s", user_id, title, conversation_id)
+        try:
+            async with async_session_factory() as db:
+                notif = Notification(
+                    user_id=user_id,
+                    title=title,
+                    body=body,
+                    conversation_id=conversation_id,
+                )
+                db.add(notif)
+                await db.commit()
+            logger.info("[ST] notification created successfully, id=%d", notif.id)
+        except Exception as e:
+            logger.error("[ST] _create_notification FAILED: %s", e, exc_info=True)
 
 
 def utcnow():
@@ -224,12 +270,12 @@ def _generate_session_id() -> str:
     return secrets.token_hex(16)
 
 
-async def _create_conversation(user_id: int, title: str, workspace: str, model: str) -> int:
+async def _create_conversation(user_id: int, title: str, workspace: str, model: str, session_id: str) -> int:
     from crabagent.core.database import Conversation
 
     async with async_session_factory() as db:
         conv = Conversation(
-            session_id=_generate_session_id(),
+            session_id=session_id,
             user_id=user_id,
             title=title[:500],
             workspace=workspace,

@@ -56,11 +56,11 @@ async def _search_searxng(query: str, limit: int, searxng_url: str) -> list[dict
 
 
 async def _search_duckduckgo(query: str, limit: int) -> list[dict]:
-    from duckduckgo_search import DDGS
+    from ddgs import DDGS
 
     results = []
     with DDGS() as ddgs:
-        for r in ddgs.text(query, max_results=limit, backend="lite"):
+        for r in ddgs.text(query, max_results=limit):
             results.append({
                 "title": r.get("title", ""),
                 "url": r.get("href", ""),

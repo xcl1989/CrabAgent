@@ -213,6 +213,11 @@ async def run_agent(
                     AgentEvent(type=EventType.MESSAGE_CREATED, data={"message": tool_msg})
                 )
 
+            for msg in context.metadata.pop("_pending_sub_agent_messages", []):
+                await context.event_bus.emit(
+                    AgentEvent(type=EventType.MESSAGE_CREATED, data={"message": msg})
+                )
+
             await context.event_bus.emit(
                 AgentEvent(type=EventType.ITERATION_END, data={"iteration": context.iteration})
             )
