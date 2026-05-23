@@ -73,9 +73,7 @@ class CrabAgentTuiApp(App[None]):
         self._exit_flag = False
 
     def compose(self) -> ComposeResult:
-        log = RichLog(highlight=True, markup=True, wrap=True, max_lines=10000, id="output")
-        log.allow_select = True
-        yield log
+        yield RichLog(highlight=True, markup=True, wrap=True, max_lines=10000, id="output")
         with Container(id="input-container"):
             yield Input(placeholder="Type a message or /command...", id="input")
 
