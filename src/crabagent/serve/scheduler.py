@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import traceback
-from datetime import UTC
 from pathlib import Path
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -56,7 +55,7 @@ class SchedulerService:
             day=parts[2],
             month=parts[3],
             day_of_week=parts[4],
-            timezone="local",
+            timezone=_get_local_tz(),
         )
 
     async def add_task(self, task: ScheduledTask) -> None:
@@ -115,6 +114,8 @@ class SchedulerService:
                 logger.error("[ST] Task #%d: _run_agent timed out (600s)", task_id)
             except Exception as e:
                 logger.error("[ST] Task #%d: _run_agent failed: %s\n%s", task_id, e, traceback.format_exc())
+
+        await self._refresh_next_run(task_id)
 
     async def _run_agent(self, task: ScheduledTask) -> str:
         from crabagent.core.agent.context import AgentContext
@@ -241,6 +242,22 @@ class SchedulerService:
             await db.commit()
             logger.info("[ST] Task #%d status committed: %s", task_id, t.last_status)
 
+    async def _refresh_next_run(self, task_id: int):
+        job_id = self._job_ids.get(task_id)
+        if not job_id:
+            return
+        job = self._scheduler.get_job(job_id)
+        if not job or not job.next_run_time:
+            return
+        next_run_naive = job.next_run_time.replace(tzinfo=None)
+        async with async_session_factory() as db:
+            result = await db.execute(select(ScheduledTask).where(ScheduledTask.id == task_id))
+            t = result.scalar_one_or_none()
+            if t:
+                t.next_run_at = next_run_naive
+                await db.commit()
+        logger.info("[ST] Task #%d next_run_at refreshed to %s", task_id, next_run_naive)
+
     async def _create_notification(self, user_id: int, title: str, body: str, conversation_id: str):
         from crabagent.core.database import Notification
 
@@ -262,7 +279,16 @@ class SchedulerService:
 
 def utcnow():
     from datetime import datetime
-    return datetime.now(UTC)
+    return datetime.now()
+
+
+def _get_local_tz():
+    try:
+        import tzlocal
+        return tzlocal.get_localzone()
+    except Exception:
+        from datetime import datetime
+        return datetime.now().astimezone().tzinfo
 
 
 def _generate_session_id() -> str:

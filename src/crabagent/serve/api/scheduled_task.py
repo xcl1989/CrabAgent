@@ -134,6 +134,25 @@ async def update_task(
             await get_scheduler().add_task(task)
 
     await db.refresh(task)
+    if cron_changed and task.enabled:
+        try:
+            from datetime import datetime
+
+            from apscheduler.triggers.cron import CronTrigger
+
+            parts = task.cron_expression.strip().split()
+            tz = datetime.now().astimezone().tzinfo
+            trigger = CronTrigger(
+                minute=parts[0], hour=parts[1], day=parts[2],
+                month=parts[3], day_of_week=parts[4], timezone=tz,
+            )
+            next_time = trigger.get_next_fire_time(None, datetime.now(tz=tz))
+            if next_time:
+                task.next_run_at = next_time.replace(tzinfo=None)
+                await db.commit()
+        except Exception:
+            pass
+    await db.refresh(task)
     return _to_response(task)
 
 
