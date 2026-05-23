@@ -66,8 +66,8 @@ def main():
         return
 
     if not args.query:
-        from crabagent.cli.tui import run_textual
-        asyncio.run(run_textual(args))
+        from crabagent.cli.tui import run_tui
+        asyncio.run(run_tui(args))
     else:
         asyncio.run(_run_single(args))
 
