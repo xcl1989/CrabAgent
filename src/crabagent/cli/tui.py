@@ -37,9 +37,8 @@ class TuiSession:
         self.agent_ctx: AgentContext | None = None
         self.console = Console()
         self._tool_buffer: dict[str, dict] = {}
-        self._stream_buffer = ""
+        self._tool_results: list[str] = []
         self._thinking_active = False
-        self._agent_running = False
         self._provider_display = "default"
         self._conversation_id = None
         self._session_id_str = None
@@ -88,6 +87,7 @@ class TuiSession:
             try:
                 self._stop_live()
                 self._full_text = ""
+                self._tool_results = []
                 self.console.print(f"\n[bold]▶ {user_input}[/bold]")
                 self.agent_ctx.iteration = 0
                 await run_agent(self.agent_ctx, user_input)
@@ -126,8 +126,8 @@ class TuiSession:
         if not self._live:
             self._live = Live(
                 Markdown(""), console=self.console,
-                refresh_per_second=10, auto_refresh=True,
-                vertical_overflow="visible", screen=False, transient=False,
+                refresh_per_second=15, auto_refresh=True,
+                vertical_overflow="visible", screen=True,
             )
             self._live.start()
 
@@ -136,53 +136,65 @@ class TuiSession:
             self._live.stop()
             self._live = None
 
+    def _update_live(self):
+        if not self._live:
+            return
+        from rich.console import Group
+        from rich.panel import Panel
+        from rich.text import Text
+
+        items = []
+        if self._full_text.strip():
+            items.append(Markdown(self._full_text))
+        for tr in self._tool_results[-20:]:
+            items.append(Text(tr))
+
+        content = Group(*items) if items else Markdown("")
+        self._live.update(content, refresh=True)
+
     def _on_agent_event(self, event: AgentEvent):
         if event.type == EventType.TEXT_DELTA:
             if self._thinking_active:
                 self._thinking_active = False
             self._full_text += event.data.get("text", "")
             self._start_live()
-            self._live.update(Markdown(self._full_text), refresh=True)
+            self._update_live()
         elif event.type == EventType.TEXT_DONE:
-            if self._full_text.strip():
-                self._start_live()
-                self._live.update(Markdown(self._full_text), refresh=True)
+            self._update_live()
         elif event.type == EventType.THINKING_DELTA:
             self._thinking_active = True
             self._full_text += event.data.get("text", "")
             self._start_live()
-            self._live.update(Markdown(self._full_text[:-1] + "…"), refresh=True)
+            self._update_live()
         elif event.type == EventType.THINKING_DONE:
             self._thinking_active = False
         elif event.type == EventType.AGENT_ERROR:
-            self._stop_live()
-            self.console.print(f"\n[red]Error: {event.data.get('error', 'Unknown error')}[/red]")
+            self._tool_results.append(f"\nError: {event.data.get('error', 'Unknown error')}")
+            self._update_live()
         elif event.type == EventType.TOOL_CALL:
-            self._stop_live()
             call_id = event.data.get("id", "")
             display = self._format_tool_display(event.data.get("name", ""), event.data.get("arguments", {}))
             source = event.data.get("source", "builtin")
-            self._tool_buffer[call_id] = {"display": display, "source": source, "started": time.time()}
+            self._tool_buffer[call_id] = {"display": display, "source": source}
         elif event.type == EventType.TOOL_RESULT:
             call_id = event.data.get("id", "")
             call_info = self._tool_buffer.pop(call_id, None)
             if call_info:
                 prefix = "🔌 " if call_info["source"] == "mcp" else ""
-                style_name = "bright_magenta" if call_info["source"] == "mcp" else "cyan"
-                self.console.print(f"  [{style_name}]{prefix}→ {call_info['display']}[/{style_name}]")
                 result = event.data.get("result", "")
                 first_line = (result or "").split("\n")[0]
                 if len(first_line) > 300:
                     first_line = first_line[:300] + "..."
-                self.console.print(f"  [dim]← {first_line}[/dim]")
-                self.console.print()
+                self._tool_results.append(f"  {prefix}→ {call_info['display']}\n  ← {first_line}\n")
+            self._update_live()
         elif event.type == EventType.CONTEXT_COMPRESSED:
-            self._stop_live()
             orig = event.data.get("original_count", 0)
             comp = event.data.get("compressed_count", 0)
-            self.console.print(f"[yellow]Context compressed: {orig} → {comp} messages[/yellow]")
+            self._tool_results.append(f"Context compressed: {orig} → {comp} messages")
+            self._update_live()
         elif event.type == EventType.BUDGET_EXHAUSTED:
-            self.console.print("[yellow]Budget exhausted, generating summary...[/yellow]")
+            self._tool_results.append("Budget exhausted, generating summary...")
+            self._update_live()
 
     def _format_tool_display(self, name: str, args: dict) -> str:
         if name == "read" and "file_path" in args:
