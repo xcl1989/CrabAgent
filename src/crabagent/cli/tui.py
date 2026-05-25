@@ -32,6 +32,7 @@ SLASH_COMMANDS = [
     "/models",
     "/provider",
     "/agents",
+    "/agent_stats",
     "/delegate",
     "/memory",
     "/new",
@@ -314,7 +315,7 @@ class TuiSession:
 
     def _print_banner(self):
         self.console.print(
-            f"[bold]CrabAgent v0.6.0[/bold]\n  provider: {self._provider_display}  model: {self.agent_ctx.model or 'default'}\n  workspace: {self.agent_ctx.workspace}\n"
+            f"[bold]CrabAgent v0.6.1[/bold]\n  provider: {self._provider_display}  model: {self.agent_ctx.model or 'default'}\n  workspace: {self.agent_ctx.workspace}\n"
         )
 
     async def _handle_slash(self, ui: str) -> bool:
@@ -330,7 +331,9 @@ class TuiSession:
                 "/new  New session\n/sessions  List\n/session [id]  Load\n"
                 "/export  \u2192 .md\n/provider  Manage\n"
                 "/agents  Agent team\n/delegate [@agent] [task]  Delegate\n"
+                "/agent_stats <name>  Agent stats\n"
                 "/memory [list|search|clear]  Team memory\n"
+                "/skills  List skills\n/skill <name>  Show skill\n"
             )
         elif cmd == "/clear":
             if self.agent_ctx:
@@ -382,6 +385,39 @@ class TuiSession:
             await self._handle_session_load(arg)
         elif cmd == "/memory":
             await self._handle_memory_slash(arg)
+        elif cmd == "/skills":
+            from crabagent.core.agent.skill.loader import discover_skills
+            from crabagent.core.config import settings as _settings
+
+            dirs = _settings.skill_discovery_dirs()
+            skills = discover_skills(dirs)
+            if not skills:
+                self.console.print("[dim]No skills found.[/dim]")
+            else:
+                for s in sorted(skills.values(), key=lambda x: x.name):
+                    aux = f" ({len(s.auxiliary_files)} files)" if s.auxiliary_files else ""
+                    self.console.print(f"  [bold]{s.name}[/bold]{aux}")
+                    self.console.print(f"    {s.description}")
+        elif cmd == "/skill":
+            if not arg:
+                self.console.print("[dim]/skill <name>[/dim]")
+            else:
+                from crabagent.core.agent.skill.loader import discover_skills, format_skill_content
+                from crabagent.core.config import settings as _settings
+
+                dirs = _settings.skill_discovery_dirs()
+                skills = discover_skills(dirs)
+                skill = skills.get(arg)
+                if not skill:
+                    names = ", ".join(sorted(skills.keys())) if skills else "(none)"
+                    self.console.print(f"[dim]Skill '{arg}' not found. Available: {names}[/dim]")
+                else:
+                    self.console.print(format_skill_content(skill))
+        elif cmd == "/agent_stats":
+            if not arg:
+                self.console.print("[dim]/agent_stats <name>[/dim]")
+            else:
+                await self._handle_agent_stats(arg)
         else:
             self.console.print(f"[dim]Unknown: {cmd}[/dim]")
         return False
@@ -428,6 +464,42 @@ class TuiSession:
             self.console.print(f"[dim]Cleared {n} memories.[/dim]")
         else:
             self.console.print("[dim]/memory {list|search|clear}[/dim]")
+
+    async def _handle_agent_stats(self, name: str):
+        uid = self._user.id if self._user else 0
+        if not uid:
+            self.console.print("[dim]No user.[/dim]")
+            return
+        from crabagent.core.database import agent_memory_list_all, task_record_stats
+
+        stats = await task_record_stats(uid, name)
+        if stats["total"] == 0:
+            self.console.print(f"[dim]No task records for agent '{name}'.[/dim]")
+            return
+        lessons = await agent_memory_list_all(uid, memory_type="agent_lesson")
+        agent_lessons = [item for item in lessons if item["agent_name"] == name]
+        rule_count = sum(1 for item in agent_lessons if item.get("source") == "rule")
+        llm_count = sum(1 for item in agent_lessons if item.get("source") == "llm")
+        cats: dict[str, int] = {}
+        for item in agent_lessons:
+            tc = item.get("task_category", "general") or "general"
+            cats[tc] = cats.get(tc, 0) + 1
+        cat_parts = [f"{c}({n})" for c, n in sorted(cats.items(), key=lambda x: -x[1])[:4]]
+
+        self.console.print(f"[bold]📊 Agent: {name}[/bold]")
+        self.console.print(
+            f"  总任务: {stats['total']}    成功率: {stats['success_rate']}%    "
+            f"平均耗时: {stats['avg_elapsed']}s    平均 tokens: {stats['avg_tokens']}"
+        )
+        self.console.print(f"  总 lessons: {len(agent_lessons)} (规则: {rule_count}, LLM: {llm_count})")
+        if cat_parts:
+            self.console.print(f"  常用类别: {', '.join(cat_parts)}")
+        if agent_lessons:
+            self.console.print("  最近 lessons:")
+            for item in agent_lessons[:5]:
+                src = item.get("source", "")
+                tag = f"[{src}]" if src else ""
+                self.console.print(f"    - {tag} {item['content'][:100]}")
 
     async def _handle_export(self):
         if not self._conversation_id:

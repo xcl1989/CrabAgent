@@ -203,8 +203,24 @@ class AgentMemory(Base):
     confidence: Mapped[float] = mapped_column(Float, default=1.0)
     source_session: Mapped[str] = mapped_column(String(32), default="")
     access_count: Mapped[int] = mapped_column(Integer, default=0)
+    source: Mapped[str] = mapped_column(String(10), default="")
+    task_category: Mapped[str] = mapped_column(String(50), default="")
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class TaskRecord(Base):
+    __tablename__ = "task_records"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    agent_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    task_summary: Mapped[str] = mapped_column(String(200), default="")
+    success: Mapped[bool] = mapped_column(Boolean, default=True)
+    elapsed: Mapped[float] = mapped_column(Float, default=0.0)
+    tokens: Mapped[int] = mapped_column(Integer, default=0)
+    iterations: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
 
 
 engine = create_async_engine(settings.db_url, echo=False)
@@ -294,6 +310,13 @@ async def init_db() -> None:
             await conn.execute(text("ALTER TABLE agent_profiles ADD COLUMN is_default BOOLEAN DEFAULT 0"))
         if "tools" not in columns:
             await conn.execute(text("ALTER TABLE agent_profiles ADD COLUMN tools TEXT DEFAULT ''"))
+
+        result = await conn.execute(text("PRAGMA table_info(agent_memory)"))
+        columns = [row[1] for row in result.fetchall()]
+        if "source" not in columns:
+            await conn.execute(text("ALTER TABLE agent_memory ADD COLUMN source VARCHAR(10) DEFAULT ''"))
+        if "task_category" not in columns:
+            await conn.execute(text("ALTER TABLE agent_memory ADD COLUMN task_category VARCHAR(50) DEFAULT ''"))
 
     from crabagent.core.provider_store import migrate_plaintext_keys
     await migrate_plaintext_keys()
@@ -495,6 +518,8 @@ async def agent_memory_upsert(
     importance: float = 0.5,
     confidence: float = 1.0,
     source_session: str = "",
+    source: str = "",
+    task_category: str = "",
 ) -> None:
     from sqlalchemy import select
 
@@ -515,6 +540,10 @@ async def agent_memory_upsert(
             if confidence >= existing.confidence:
                 existing.confidence = confidence
             existing.source_session = source_session
+            if source:
+                existing.source = source
+            if task_category:
+                existing.task_category = task_category
             existing.updated_at = utcnow()
         else:
             db.add(AgentMemory(
@@ -527,6 +556,8 @@ async def agent_memory_upsert(
                 importance=importance,
                 confidence=confidence,
                 source_session=source_session,
+                source=source,
+                task_category=task_category,
             ))
         await db.commit()
 
@@ -734,3 +765,66 @@ async def agent_memory_replace(
         row.updated_at = utcnow()
         await db.commit()
         return True
+
+
+async def task_record_create(
+    user_id: int,
+    agent_name: str,
+    task_summary: str = "",
+    success: bool = True,
+    elapsed: float = 0.0,
+    tokens: int = 0,
+    iterations: int = 0,
+) -> None:
+    async with async_session_factory() as db:
+        db.add(TaskRecord(
+            user_id=user_id,
+            agent_name=agent_name,
+            task_summary=task_summary[:200],
+            success=success,
+            elapsed=elapsed,
+            tokens=tokens,
+            iterations=iterations,
+        ))
+        await db.commit()
+
+
+async def task_record_stats(user_id: int, agent_name: str) -> dict:
+    from sqlalchemy import func, select
+
+    async with async_session_factory() as db:
+        total = await db.execute(
+            select(func.count()).select_from(TaskRecord).where(
+                TaskRecord.user_id == user_id,
+                TaskRecord.agent_name == agent_name,
+            )
+        )
+        total_count = total.scalar() or 0
+        success_count_result = await db.execute(
+            select(func.count()).select_from(TaskRecord).where(
+                TaskRecord.user_id == user_id,
+                TaskRecord.agent_name == agent_name,
+                TaskRecord.success.is_(True),
+            )
+        )
+        success_count = success_count_result.scalar() or 0
+        avg_elapsed_result = await db.execute(
+            select(func.avg(TaskRecord.elapsed)).select_from(TaskRecord).where(
+                TaskRecord.user_id == user_id,
+                TaskRecord.agent_name == agent_name,
+            )
+        )
+        avg_elapsed = avg_elapsed_result.scalar() or 0.0
+        avg_tokens_result = await db.execute(
+            select(func.avg(TaskRecord.tokens)).select_from(TaskRecord).where(
+                TaskRecord.user_id == user_id,
+                TaskRecord.agent_name == agent_name,
+            )
+        )
+        avg_tokens = avg_tokens_result.scalar() or 0
+        return {
+            "total": total_count,
+            "success_rate": round(success_count / total_count * 100, 1) if total_count else 0,
+            "avg_elapsed": round(avg_elapsed, 1),
+            "avg_tokens": int(avg_tokens),
+        }

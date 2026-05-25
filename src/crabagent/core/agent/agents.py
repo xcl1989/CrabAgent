@@ -190,40 +190,152 @@ async def build_memory_prompt(user_id: int) -> str:
     return "\n".join(lines)
 
 
-def _extract_lesson(
+def _classify_task(task: str) -> str:
+    tl = task.lower()
+    code_kw = ["code", "代码", "bug", "debug", "refactor", "重构", "implement", "实现", "function", "函数", "class", "api", "test", "测试", "write", "编写", "fix", "修复"]
+    research_kw = ["search", "搜索", "research", "调研", "find", "查找", "browse", "浏览", "scrape", "爬取", "look up", "查询"]
+    analysis_kw = ["analyze", "分析", "compare", "比较", "report", "报告", "review", "审查", "evaluate", "评估", "check", "检查"]
+    writing_kw = ["translate", "翻译", "edit", "编辑", "format", "格式化", "document", "文档", "content", "内容", "article", "文章", "write", "撰写"]
+    scores = {"code": 0, "research": 0, "analysis": 0, "writing": 0}
+    for kw in code_kw:
+        if kw in tl:
+            scores["code"] += 1
+    for kw in research_kw:
+        if kw in tl:
+            scores["research"] += 1
+    for kw in analysis_kw:
+        if kw in tl:
+            scores["analysis"] += 1
+    for kw in writing_kw:
+        if kw in tl:
+            scores["writing"] += 1
+    best = max(scores, key=scores.get)
+    return best if scores[best] > 0 else "general"
+
+
+def _rule_extract_lesson(
     agent_name: str,
     iterations: int,
     max_iterations: int,
     task: str,
     result: str,
     used_shared: bool = False,
+    task_category: str = "general",
 ) -> dict | None:
+    ts = int(time.time())
     lesson = None
     if iterations >= max_iterations * 0.8:
         lesson = {
             "category": "failed_approach",
-            "key": f"lesson:{agent_name}:high_iterations",
+            "key": f"lesson:{agent_name}:rule:high_iterations:{ts}",
             "content": f"Task '{task[:80]}' used {iterations}/{max_iterations} iterations. Consider breaking complex tasks into smaller steps.",
             "importance": 0.6,
+            "source": "rule",
+            "task_category": task_category,
         }
     elif iterations <= max_iterations * 0.2 and result:
         lesson = {
             "category": "effective_strategy",
-            "key": f"lesson:{agent_name}:efficient",
+            "key": f"lesson:{agent_name}:rule:efficient:{ts}",
             "content": f"Task '{task[:80]}' completed efficiently in {iterations} steps.",
             "importance": 0.4,
+            "source": "rule",
+            "task_category": task_category,
         }
     if used_shared and result:
         lesson_tip = {
             "category": "tool_tip",
-            "key": f"lesson:{agent_name}:shared_workspace",
+            "key": f"lesson:{agent_name}:rule:shared:{ts}",
             "content": f"Agent {agent_name} successfully used shared workspace for coordination.",
             "importance": 0.3,
+            "source": "rule",
+            "task_category": task_category,
         }
         if lesson:
             return lesson
         return lesson_tip
     return lesson
+
+
+async def _llm_reflect_lesson(
+    agent_name: str,
+    task: str,
+    result: str,
+    task_category: str,
+    stats: dict,
+    model: str,
+    provider_name: str | None = None,
+) -> dict | None:
+    try:
+        import litellm
+
+        from crabagent.core.provider_store import get_default_provider, get_provider
+
+        prompt = (
+            f"You are agent '{agent_name}'. You just completed a task.\n\n"
+            f"Task: {task[:500]}\n"
+            f"Result: {result[:800]}\n"
+            f"Stats: {stats['iterations']} iterations, {stats['tokens']} tokens, "
+            f"{stats['elapsed']}s elapsed\n\n"
+            "Reflect on your performance. In Chinese, 1-2 sentences.\n"
+            "What did you learn? What worked well? What could improve?\n\n"
+            f"The keyword classifier guessed task category: {task_category}.\n"
+            "If wrong, correct it.\n\n"
+            "Output format:\n"
+            "类别: <code|research|analysis|writing|general>\n"
+            "反思: <your reflection>"
+        )
+
+        if provider_name:
+            provider = await get_provider(provider_name)
+        else:
+            provider = await get_default_provider()
+        if not provider:
+            return None
+
+        llm_params = {"api_key": provider.api_key}
+        if provider.base_url:
+            llm_params["api_base"] = provider.base_url
+
+        response = await litellm.acompletion(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=200,
+            temperature=0.3,
+            **llm_params,
+        )
+
+        text = response.choices[0].message.content.strip() if response.choices else ""
+
+        category = task_category
+        reflection = ""
+        for line in text.split("\n"):
+            line = line.strip()
+            if line.startswith("类别:") or line.startswith("category:"):
+                cat = line.split(":", 1)[1].strip().lower()
+                valid = {"code", "research", "analysis", "writing", "general"}
+                if cat in valid:
+                    category = cat
+            elif line.startswith("反思:") or line.startswith("reflection:"):
+                reflection = line.split(":", 1)[1].strip()
+
+        if not reflection:
+            reflection = text[:200]
+
+        if len(reflection) < 10:
+            return None
+
+        return {
+            "category": "effective_strategy",
+            "key": f"lesson:{agent_name}:llm:{int(time.time())}",
+            "content": reflection,
+            "importance": 0.7,
+            "source": "llm",
+            "task_category": category,
+        }
+    except Exception:
+        logger.debug("LLM reflection failed for %s", agent_name, exc_info=True)
+        return None
 
 
 async def spawn_sub_agent(
@@ -298,10 +410,22 @@ async def spawn_sub_agent(
         sub_context.metadata["session_id"] = session_id
 
     agent_lessons = []
+    task_category = _classify_task(task)
     if parent_user_id:
         try:
-            from crabagent.core.database import agent_memory_get_by_agent
+            from crabagent.core.database import agent_memory_get_by_agent, agent_memory_search
             agent_lessons = await agent_memory_get_by_agent(parent_user_id, agent_name, limit=5)
+            try:
+                similar = await agent_memory_search(
+                    parent_user_id, task_category,
+                    memory_type="agent_lesson", limit=3,
+                )
+                existing_keys = {item["key"] for item in agent_lessons}
+                for s in similar:
+                    if s["key"] not in existing_keys and s["agent_name"] == agent_name:
+                        agent_lessons.append(s)
+            except Exception:
+                pass
         except Exception:
             pass
 
@@ -428,26 +552,73 @@ async def spawn_sub_agent(
 
         if parent_user_id:
             try:
-                lesson = _extract_lesson(
+                from crabagent.core.database import agent_memory_upsert, task_record_create
+
+                stats = {
+                    "iterations": sub_context.iteration,
+                    "max_iterations": sub_context.max_iterations,
+                    "tokens": sub_context.total_tokens,
+                    "elapsed": elapsed,
+                }
+
+                rule_lesson = _rule_extract_lesson(
                     agent_name=agent_name,
                     iterations=sub_context.iteration,
                     max_iterations=sub_context.max_iterations,
                     task=task,
                     result=last_text,
                     used_shared=has_shared,
+                    task_category=task_category,
                 )
-                if lesson:
-                    from crabagent.core.database import agent_memory_upsert
+                if rule_lesson:
                     await agent_memory_upsert(
                         user_id=parent_user_id,
                         memory_type="agent_lesson",
                         agent_name=agent_name,
-                        category=lesson["category"],
-                        key=lesson["key"],
-                        content=lesson["content"],
-                        importance=lesson["importance"],
+                        category=rule_lesson["category"],
+                        key=rule_lesson["key"],
+                        content=rule_lesson["content"],
+                        importance=rule_lesson["importance"],
                         source_session=session_id,
+                        source=rule_lesson["source"],
+                        task_category=rule_lesson["task_category"],
                     )
+
+                reflect_model = agent_def.get("model") or parent_context.model or ""
+                reflect_provider = parent_context.provider_name
+                if reflect_model:
+                    llm_lesson = await _llm_reflect_lesson(
+                        agent_name=agent_name,
+                        task=task,
+                        result=last_text,
+                        task_category=task_category,
+                        stats=stats,
+                        model=reflect_model,
+                        provider_name=reflect_provider,
+                    )
+                    if llm_lesson:
+                        await agent_memory_upsert(
+                            user_id=parent_user_id,
+                            memory_type="agent_lesson",
+                            agent_name=agent_name,
+                            category=llm_lesson["category"],
+                            key=llm_lesson["key"],
+                            content=llm_lesson["content"],
+                            importance=llm_lesson["importance"],
+                            source_session=session_id,
+                            source=llm_lesson["source"],
+                            task_category=llm_lesson["task_category"],
+                        )
+
+                await task_record_create(
+                    user_id=parent_user_id,
+                    agent_name=agent_name,
+                    task_summary=task[:200],
+                    success=True,
+                    elapsed=elapsed,
+                    tokens=sub_context.total_tokens,
+                    iterations=sub_context.iteration,
+                )
             except Exception:
                 logger.debug("Failed to extract lesson for %s", agent_name)
 
@@ -485,6 +656,18 @@ async def spawn_sub_agent(
         return last_text or "(sub-agent produced no output)"
     except Exception as e:
         logger.exception("Sub-agent %s failed", agent_name)
+        if parent_context.metadata.get("user_id", 0):
+            try:
+                from crabagent.core.database import task_record_create
+                await task_record_create(
+                    user_id=parent_context.metadata["user_id"],
+                    agent_name=agent_name,
+                    task_summary=task[:200],
+                    success=False,
+                    elapsed=round(time.time() - t0, 1),
+                )
+            except Exception:
+                pass
         await parent_context.event_bus.emit(AgentEvent(
             type=EventType.SUB_AGENT_ERROR,
             data={

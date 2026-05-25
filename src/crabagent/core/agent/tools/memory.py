@@ -92,6 +92,8 @@ async def memory_save(
         importance=importance,
         confidence=confidence,
         source_session=session_id,
+        source="",
+        task_category="",
     )
     return f"Memory saved: [{memory_type}] {key}"
 
