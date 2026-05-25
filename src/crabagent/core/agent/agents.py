@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json as _json
 import logging
 import time
 
@@ -22,8 +23,15 @@ async def load_agent_registry() -> list[dict]:
             select(AgentProfile).where(AgentProfile.enabled.is_(True)).order_by(AgentProfile.name)
         )
         rows = result.scalars().all()
-        _registry_cache = [
-            {
+        _registry_cache = []
+        for r in rows:
+            tools_list = []
+            if r.tools:
+                try:
+                    tools_list = _json.loads(r.tools)
+                except Exception:
+                    pass
+            _registry_cache.append({
                 "name": r.name,
                 "display_name": r.display_name or r.name,
                 "role": r.role,
@@ -33,9 +41,8 @@ async def load_agent_registry() -> list[dict]:
                 "allow_delegation": r.allow_delegation,
                 "icon": r.icon or "",
                 "is_default": r.is_default,
-            }
-            for r in rows
-        ]
+                "tools": tools_list,
+            })
     _registry_loaded = True
     return _registry_cache
 
@@ -53,7 +60,18 @@ async def get_agent(name: str) -> dict | None:
     return None
 
 
-def _build_system_prompt(agent_def: dict) -> str:
+_SHARED_TOOLS = {"shared_get", "shared_put", "shared_list"}
+_DELEGATION_TOOLS = {
+    "delegate_task", "delegate_parallel", "list_agents",
+    "handoff_to", "ask_question", "request_help",
+}
+
+
+def _build_system_prompt(
+    agent_def: dict,
+    has_shared: bool = False,
+    can_request_help: bool = False,
+) -> str:
     parts = [
         f"Role: {agent_def['role']}",
         f"Goal: {agent_def['goal']}",
@@ -65,6 +83,20 @@ def _build_system_prompt(agent_def: dict) -> str:
         "Do NOT ask questions to the user — you must work independently. "
         "When you finish, provide a complete summary of your findings."
     )
+    if has_shared:
+        parts.append(
+            "You have access to a shared team workspace. "
+            "Use `shared_put(key, value)` to save important findings. "
+            "Other team members can read them with `shared_get(key)`. "
+            "Use `shared_list()` to see all shared notes. "
+            "Always save your key findings before finishing."
+        )
+    if can_request_help:
+        parts.append(
+            "If you encounter a task that requires different expertise, "
+            "you can use `request_help(agent_name, question)` "
+            "to ask another agent for assistance."
+        )
     return "\n".join(parts)
 
 
@@ -82,26 +114,55 @@ async def build_team_prompt() -> str:
         "",
     ]
     for a in agents:
-        lines.append(f"- **{a['display_name']}** (`{a['name']}`): {a['role']}. {a['goal']}")
+        tools_info = ""
+        if a.get("tools"):
+            tools_info = f" Tools: {', '.join(a['tools'])}"
+        lines.append(
+            f"- **{a['display_name']}** (`{a['name']}`): "
+            f"{a['role']}. {a['goal']}{tools_info}"
+        )
     lines.extend([
         "",
         "### Delegation Tools",
         "",
         "- `list_agents`: List all available agents with details",
         "- `delegate_task(agent_name, task)`: Delegate a task to a specific agent",
-        "- `delegate_parallel(tasks)`: Delegate different tasks to multiple agents simultaneously",
+        "- `delegate_parallel(tasks)`: Delegate tasks to multiple agents simultaneously",
         "- `handoff_to(agent_name, summary)`: Hand off work to another agent with context",
+        "- `run_pipeline(steps)`: Run a multi-step pipeline with agent dependencies",
+        "",
+        "### Shared Workspace",
+        "",
+        "- `shared_put(key, value)`: Save findings to shared workspace",
+        "- `shared_get(key)`: Read findings from other agents",
+        "- `shared_list()`: List all shared notes",
         "",
         "### When to Delegate",
         "",
-        "- Web research, searching, browsing → `researcher`",
-        "- Data analysis, comparison, report generation → `analyst`",
-        "- Code writing, debugging, refactoring → `coder`",
-        "- Content writing, editing, translation → `writer`",
-        "- Multiple independent subtasks → `delegate_parallel`",
-        "- Complex multi-step task → break down and delegate steps sequentially",
+        "- Web research, searching, browsing -> `researcher`",
+        "- Data analysis, comparison, report generation -> `analyst`",
+        "- Code writing, debugging, refactoring -> `coder`",
+        "- Content writing, editing, translation -> `writer`",
+        "- Multiple independent subtasks -> `delegate_parallel`",
+        "- Complex multi-step task with dependencies -> `run_pipeline`",
         "",
     ])
+    return "\n".join(lines)
+
+
+async def _load_shared_context(session_id: str) -> str:
+    if not session_id:
+        return ""
+    from crabagent.core.database import shared_memory_get_all
+    items = await shared_memory_get_all(session_id)
+    if not items:
+        return ""
+    lines = ["## Shared Team Knowledge", ""]
+    for item in items:
+        author_tag = f" (by {item['author']})" if item["author"] else ""
+        lines.append(f"### {item['key']}{author_tag}")
+        lines.append(item["value"])
+        lines.append("")
     return "\n".join(lines)
 
 
@@ -110,8 +171,8 @@ async def spawn_sub_agent(
     task: str,
     parent_context,
     include_history: bool = False,
+    max_depth: int = 1,
 ) -> str:
-    """Spawn a sub-agent and run it. Returns the result text."""
     from crabagent.core.agent.context import AgentContext
     from crabagent.core.agent.loop import run_agent
     from crabagent.core.agent.tools.registry import ToolRegistry
@@ -123,10 +184,31 @@ async def spawn_sub_agent(
 
     sub_registry = ToolRegistry()
 
-    for name, tool in parent_context.tool_registry._tools.items():
-        if name in ("delegate_task", "delegate_parallel", "list_agents", "handoff_to", "ask_question"):
-            continue
-        sub_registry._tools[name] = tool
+    agent_tools = agent_def.get("tools", [])
+    current_depth = parent_context.metadata.get("_sub_agent_depth", 0)
+    has_shared = False
+    can_request_help = False
+
+    if agent_tools:
+        allowed = set(agent_tools) | _SHARED_TOOLS
+        for name, tool in parent_context.tool_registry._tools.items():
+            if name in _DELEGATION_TOOLS:
+                continue
+            if name in allowed:
+                sub_registry._tools[name] = tool
+        has_shared = bool(_SHARED_TOOLS & allowed)
+    else:
+        for name, tool in parent_context.tool_registry._tools.items():
+            if name in _DELEGATION_TOOLS:
+                continue
+            sub_registry._tools[name] = tool
+        has_shared = True
+
+    if agent_def.get("allow_delegation") and current_depth < max_depth:
+        parent_tools = parent_context.tool_registry._tools
+        if "request_help" in parent_tools:
+            sub_registry._tools["request_help"] = parent_tools["request_help"]
+            can_request_help = True
 
     sub_context = AgentContext(
         workspace=parent_context.workspace,
@@ -134,10 +216,20 @@ async def spawn_sub_agent(
         max_iterations=min(parent_context.max_iterations, 50),
         model=agent_def["model"] or parent_context.model,
         provider_name=parent_context.provider_name,
-        system_prompt=_build_system_prompt(agent_def),
+        system_prompt=_build_system_prompt(
+            agent_def, has_shared=has_shared, can_request_help=can_request_help,
+        ),
     )
 
     sub_context.confirm_callback = None
+    sub_context.metadata["_sub_agent_name"] = agent_name
+    sub_context.metadata["_sub_agent_depth"] = current_depth + 1
+
+    session_id = parent_context.metadata.get("session_id", "")
+    if session_id:
+        sub_context.metadata["session_id"] = session_id
+
+    shared_context = await _load_shared_context(session_id)
 
     if include_history and parent_context.messages:
         recent = parent_context.messages[-20:]
@@ -150,9 +242,18 @@ async def spawn_sub_agent(
             elif role == "assistant" and content:
                 history_lines.append(f"Assistant: {content[:500]}")
         history_text = "\n".join(history_lines)
-        sub_context.messages = [{"role": "user", "content": f"{history_text}\n\n## Your Task\n{task}"}]
+        prompt_parts = [history_text]
+        if shared_context:
+            prompt_parts.append(shared_context)
+        prompt_parts.append(f"## Your Task\n{task}")
+        sub_context.messages = [
+            {"role": "user", "content": "\n\n".join(prompt_parts)}
+        ]
     else:
-        pass
+        if shared_context:
+            sub_context.messages = [
+                {"role": "user", "content": f"{shared_context}\n\n## Your Task\n{task}"}
+            ]
 
     import uuid as _uuid
     sub_id = f"{agent_name}_{_uuid.uuid4().hex[:8]}"
@@ -227,6 +328,21 @@ async def spawn_sub_agent(
                 last_text = msg["content"]
                 break
 
+        if session_id and last_text:
+            summary = last_text[:2000]
+            try:
+                from crabagent.core.database import shared_memory_put
+                await shared_memory_put(
+                    session_id,
+                    f"findings:{agent_name}",
+                    summary,
+                    author=agent_name,
+                )
+            except Exception:
+                logger.debug(
+                    "Failed to auto-save shared memory for %s", agent_name,
+                )
+
         await parent_context.event_bus.emit(AgentEvent(
             type=EventType.SUB_AGENT_END,
             data={
@@ -240,8 +356,6 @@ async def spawn_sub_agent(
             },
         ))
 
-        import json as _json
-
         sub_content = _json.dumps({
             "text": last_text,
             "agent_name": agent_name,
@@ -251,7 +365,9 @@ async def spawn_sub_agent(
             "iterations": sub_context.iteration,
         }, ensure_ascii=False)
 
-        pending = parent_context.metadata.setdefault("_pending_sub_agent_messages", [])
+        pending = parent_context.metadata.setdefault(
+            "_pending_sub_agent_messages", [],
+        )
         pending.append({
             "role": "sub_agent",
             "content": sub_content,
@@ -263,7 +379,11 @@ async def spawn_sub_agent(
         logger.exception("Sub-agent %s failed", agent_name)
         await parent_context.event_bus.emit(AgentEvent(
             type=EventType.SUB_AGENT_ERROR,
-            data={"sub_agent_id": sub_id, "agent_name": agent_name, "error": str(e)},
+            data={
+                "sub_agent_id": sub_id,
+                "agent_name": agent_name,
+                "error": str(e),
+            },
         ))
         return f"Error: sub-agent '{agent_name}' failed: {e}"
     finally:
