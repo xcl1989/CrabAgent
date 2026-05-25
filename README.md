@@ -151,11 +151,15 @@ def run(name: str) -> str:
 | `/clear` | Clear conversation context |
 | `/model [name]` | Switch model |
 | `/models` | List available models |
+| `/provider [cmd]` | Manage LLM providers (list/add/remove/set-default) |
 | `/sessions` | List recent sessions |
 | `/session [id]` | Load a session |
 | `/new` | Start new conversation |
+| `/agents [cmd]` | Agent team management (list/add/edit/toggle/rm) |
+| `/delegate [@agent] [task]` | Delegate task to agent(s) |
 | `/molt [cmd]` | Snapshot list/show/rollback |
 | `/todo [cmd]` | Manage task list |
+| `/export` | Export conversation to Markdown |
 | `/skills` | List available skills |
 | `/image <path> [msg]` | Send an image |
 

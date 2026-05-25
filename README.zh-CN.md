@@ -151,11 +151,15 @@ def run(name: str) -> str:
 | `/clear` | 清空对话上下文 |
 | `/model [name]` | 切换模型 |
 | `/models` | 列出可用模型 |
+| `/provider [cmd]` | 管理 LLM 提供商（list/add/remove/set-default） |
 | `/sessions` | 列出最近会话 |
 | `/session [id]` | 加载会话 |
 | `/new` | 新会话 |
+| `/agents [cmd]` | Agent 团队管理（list/add/edit/toggle/rm） |
+| `/delegate [@agent] [task]` | 委派任务给 Agent |
 | `/molt [cmd]` | 快照管理（列表/查看/回滚） |
 | `/todo [cmd]` | 待办管理 |
+| `/export` | 导出对话为 Markdown |
 | `/skills` | 列出技能 |
 | `/image <path> [msg]` | 发送图片 |
 
