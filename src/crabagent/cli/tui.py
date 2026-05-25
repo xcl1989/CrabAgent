@@ -33,6 +33,9 @@ SLASH_COMMANDS = [
     "/provider",
     "/agents",
     "/delegate",
+    "/new",
+    "/sessions",
+    "/session",
     "/skills",
     "/skill",
     "/export",
@@ -319,6 +322,7 @@ class TuiSession:
             self.console.print(
                 "/exit /quit  Exit\n/help  Help\n/clear  Clear\n"
                 "/history  Stats\n/model [n]  Switch\n/models  List\n"
+                "/new  New session\n/sessions  List\n/session [id]  Load\n"
                 "/export  \u2192 .md\n/provider  Manage\n"
                 "/agents  Agent team\n/delegate [@agent] [task]  Delegate\n"
             )
@@ -364,6 +368,12 @@ class TuiSession:
             await self._handle_agents_slash(arg)
         elif cmd == "/delegate":
             await self._handle_delegate_slash(arg)
+        elif cmd == "/new":
+            await self._handle_new_session()
+        elif cmd == "/sessions":
+            await self._handle_sessions_list()
+        elif cmd == "/session":
+            await self._handle_session_load(arg)
         else:
             self.console.print(f"[dim]Unknown: {cmd}[/dim]")
         return False
@@ -765,6 +775,130 @@ class TuiSession:
             self.console.print(f"\n[red]Error: {e}[/red]")
         self._stop_live()
         self._stop_tool_live()
+
+    async def _handle_new_session(self):
+        if getattr(self.args, "no_persist", False):
+            self.console.print("[dim]Persistence disabled.[/dim]")
+            return
+        if not self._user:
+            return
+        ws = (self.args.workspace or settings.workspace).resolve()
+        cv = await self._init_conv(
+            self._user.id, str(ws), self.agent_ctx.model if self.agent_ctx else ""
+        )
+        self._conversation_id = cv.id
+        self._session_id_str = cv.session_id
+        self._state = {"fm": [True]}
+        if self.agent_ctx:
+            self.agent_ctx.messages.clear()
+            self.agent_ctx.iteration = 0
+            self.agent_ctx.total_tokens = 0
+            self.agent_ctx.metadata["session_id"] = cv.session_id
+            self.agent_ctx.metadata["branch_id"] = "main"
+            self._replace_persistence_listener()
+        self.console.clear()
+        self._print_banner()
+        self.console.print(f"[dim]New session: {cv.session_id[:8]}[/dim]")
+
+    async def _handle_sessions_list(self):
+        if getattr(self.args, "no_persist", False):
+            self.console.print("[dim]Persistence disabled.[/dim]")
+            return
+        from crabagent.core.database import async_session_factory
+        from crabagent.serve.services.conversation import list_conversations
+
+        async with async_session_factory() as db:
+            convs = await list_conversations(db, self._user.id)
+        if not convs:
+            self.console.print("[dim]No sessions.[/dim]")
+            return
+        for i, c in enumerate(convs[:20], 1):
+            title = c.title or "(untitled)"
+            ts = c.updated_at.strftime("%m-%d %H:%M") if c.updated_at else ""
+            mark = " [bold]*[/bold]" if c.id == self._conversation_id else ""
+            self.console.print(f"  {i:>2}. {title}  [{ts}]{mark}")
+
+    async def _handle_session_load(self, arg: str):
+        if getattr(self.args, "no_persist", False):
+            self.console.print("[dim]Persistence disabled.[/dim]")
+            return
+        chosen_sid = arg.strip() if arg.strip() else None
+        if not chosen_sid:
+            from crabagent.core.database import async_session_factory
+            from crabagent.serve.services.conversation import list_conversations
+
+            async with async_session_factory() as db:
+                convs = await list_conversations(db, self._user.id)
+            if not convs:
+                self.console.print("[dim]No sessions.[/dim]")
+                return
+            recent = convs[:20]
+            for i, c in enumerate(recent, 1):
+                title = c.title or "(untitled)"
+                ts = c.updated_at.strftime("%m-%d %H:%M") if c.updated_at else ""
+                mark = " [bold]*[/bold]" if c.id == self._conversation_id else ""
+                self.console.print(f"  {i:>2}. {title}  [{ts}]{mark}")
+            try:
+                choice = await asyncio.get_event_loop().run_in_executor(
+                    None, lambda: input("Choice (# or session_id, Enter=cancel): ").strip()
+                )
+            except (EOFError, KeyboardInterrupt):
+                return
+            if not choice:
+                return
+            try:
+                idx = int(choice) - 1
+                if 0 <= idx < len(recent):
+                    chosen_sid = recent[idx].session_id
+                else:
+                    self.console.print("[dim]Invalid.[/dim]")
+                    return
+            except ValueError:
+                chosen_sid = choice
+
+        cv, hist, ms = await self._load_conv(chosen_sid, self._user.id)
+        if not cv:
+            self.console.print("[dim]Session not found.[/dim]")
+            return
+        self._conversation_id = cv.id
+        self._session_id_str = cv.session_id
+        self._state = {"fm": [False]}
+        if self.agent_ctx:
+            self.agent_ctx.messages = hist
+            self.agent_ctx.iteration = 0
+            self.agent_ctx.total_tokens = cv.tokens or 0
+            self.agent_ctx.metadata["session_id"] = cv.session_id
+            self.agent_ctx.metadata["branch_id"] = "main"
+            if cv.model:
+                self.agent_ctx.model = cv.model
+            self._replace_persistence_listener()
+        self.console.clear()
+        self._print_banner()
+        if hist:
+            for msg in hist:
+                role = msg.get("role", "")
+                content = msg.get("content", "")
+                if role == "user" and content:
+                    self.console.print(f"[dim]\u25b6 {content}[/dim]")
+                elif role == "assistant" and content:
+                    self.console.print(Markdown(content))
+                    self.console.print()
+        self.console.print(f"[dim]Loaded session {cv.session_id[:8]} ({len(hist)} messages)[/dim]")
+
+    def _replace_persistence_listener(self):
+        if not self.agent_ctx or not self._conversation_id:
+            return
+        from crabagent.serve.services.persistence import PersistenceListener
+
+        new_p = PersistenceListener(conversation_id=self._conversation_id)
+        new_p.sequence = len(self.agent_ctx.messages)
+        old_listeners = [
+            cb for cb in self.agent_ctx.event_bus._listeners
+            if isinstance(cb, PersistenceListener)
+        ]
+        for old in old_listeners:
+            self.agent_ctx.event_bus.unsubscribe(old)
+        self.agent_ctx.event_bus.subscribe(new_p)
 
     def _parse_agent_mentions(self, text: str) -> tuple[list[str], str]:
         import re
