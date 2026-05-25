@@ -1041,13 +1041,21 @@ class TuiSession:
         register_molt_tools(registry)
         register_todo_tools(registry)
         discover_and_register_tools(registry, ws)
+        base_prompt = f"You are CrabAgent. Today is {datetime.now(UTC).strftime('%Y-%m-%d %A')}. Working directory: {ws}. Be concise."
+        try:
+            from crabagent.core.agent.agents import build_team_prompt
+            team_prompt = await build_team_prompt()
+            if team_prompt:
+                base_prompt += "\n\n" + team_prompt
+        except Exception:
+            pass
         ctx = AgentContext(
             workspace=ws,
             tool_registry=registry,
             max_iterations=settings.max_iterations,
             model=getattr(self.args, "model", None),
             provider_name=getattr(self.args, "provider", None),
-            system_prompt=f"You are CrabAgent. Today is {datetime.now(UTC).strftime('%Y-%m-%d %A')}. Working directory: {ws}. Be concise.",
+            system_prompt=base_prompt,
         )
         if sid:
             ctx.metadata["session_id"] = sid

@@ -120,13 +120,22 @@ async def prompt_async(
     workspace = Path(conv.workspace) if conv.workspace else Path.cwd()
     workspace = workspace.resolve()
 
+    base_prompt = f"You are CrabAgent, an AI assistant. Today is {datetime.now(UTC).strftime('%Y-%m-%d %A')}. Working directory: {workspace}"
+    try:
+        from crabagent.core.agent.agents import build_team_prompt
+        team_prompt = await build_team_prompt()
+        if team_prompt:
+            base_prompt += "\n\n" + team_prompt
+    except Exception:
+        pass
+
     context = AgentContext(
         workspace=workspace,
         tool_registry=registry,
         max_iterations=settings.max_iterations,
         model=req.model or conv.model or None,
         provider_name=req.provider,
-        system_prompt=f"You are CrabAgent, an AI assistant. Today is {datetime.now(UTC).strftime('%Y-%m-%d %A')}. Working directory: {workspace}",
+        system_prompt=base_prompt,
     )
 
     if req.images:

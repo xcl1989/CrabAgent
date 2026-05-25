@@ -449,13 +449,22 @@ async def _setup_agent_context(args, conversation_id: int | None = None, history
     workspace = args.workspace or settings.workspace
     workspace = workspace.resolve()
 
+    base_prompt = f"You are CrabAgent, an AI assistant. Today is {datetime.now(UTC).strftime('%Y-%m-%d %A')}. Working directory: {workspace}"
+    try:
+        from crabagent.core.agent.agents import build_team_prompt
+        team_prompt = await build_team_prompt()
+        if team_prompt:
+            base_prompt += "\n\n" + team_prompt
+    except Exception:
+        pass
+
     context = AgentContext(
         workspace=workspace,
         tool_registry=_registry,
         max_iterations=args.max_iterations,
         model=getattr(args, "model", None),
         provider_name=args.provider,
-        system_prompt=f"You are CrabAgent, an AI assistant. Today is {datetime.now(UTC).strftime('%Y-%m-%d %A')}. Working directory: {workspace}",
+        system_prompt=base_prompt,
     )
 
     if history:

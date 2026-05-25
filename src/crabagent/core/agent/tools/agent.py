@@ -93,7 +93,7 @@ async def handoff_to(agent_name: str, summary: str, context=None) -> str:
     if context is None:
         return "Error: agent handoff requires an active session"
     from crabagent.core.agent.agents import spawn_sub_agent
-    return await spawn_sub_agent(agent_name, summary, context)
+    return await spawn_sub_agent(agent_name, summary, context, include_history=True)
 
 
 @registry.register(
