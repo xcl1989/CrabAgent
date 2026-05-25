@@ -1111,8 +1111,8 @@ class TuiSession:
     async def _load_conv(sid, uid):
         from sqlalchemy import select
 
-        from crabagent.core.database import Conversation, async_session_factory, message_to_dict
-        from crabagent.serve.services.message import get_messages
+        from crabagent.core.database import Conversation, async_session_factory
+        from crabagent.serve.services.message import get_messages, message_to_dict
 
         async with async_session_factory() as db:
             r = await db.execute(select(Conversation).where(Conversation.session_id == sid))
