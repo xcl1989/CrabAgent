@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 logging.getLogger("LiteLLM").setLevel(logging.WARNING)
 logging.getLogger("primp").setLevel(logging.WARNING)
+logging.getLogger("ddgs.ddgs").setLevel(logging.WARNING)
 
 
 @asynccontextmanager
@@ -56,7 +57,7 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     app = FastAPI(
         title="CrabAgent",
-        version="0.6.3",
+        version="0.6.4",
         lifespan=lifespan,
     )
     app.state.event_queues = {}
@@ -109,7 +110,7 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     async def health():
-        return {"status": "ok", "version": "0.6.3"}
+        return {"status": "ok", "version": "0.6.4"}
 
     _mount_spa(app)
 
