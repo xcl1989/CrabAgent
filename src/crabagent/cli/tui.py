@@ -248,17 +248,21 @@ class TuiSession:
             self._rendered_up_to = 0
             self._in_code_block = False
         elif event.type == EventType.TOOL_CALL:
-            cid = event.data.get("id", "")
-            source = event.data.get("source", "builtin")
-            display = self._fmt_tool(event.data.get("name", ""), event.data.get("arguments", {}))
-            self._tool_buffer[cid] = {
-                "display": display,
-                "status": "pending",
-                "result": "",
-                "source": source,
-            }
-            self._ensure_tool_live()
-            self._render_tools()
+            tool_name = event.data.get("name", "")
+            if tool_name in ("delegate_task", "delegate_parallel", "handoff_to", "list_agents"):
+                pass
+            else:
+                cid = event.data.get("id", "")
+                source = event.data.get("source", "builtin")
+                display = self._fmt_tool(tool_name, event.data.get("arguments", {}))
+                self._tool_buffer[cid] = {
+                    "display": display,
+                    "status": "pending",
+                    "result": "",
+                    "source": source,
+                }
+                self._ensure_tool_live()
+                self._render_tools()
         elif event.type == EventType.TOOL_RESULT:
             cid = event.data.get("id", "")
             if cid in self._tool_buffer:
@@ -304,15 +308,8 @@ class TuiSession:
                 self._sub_agent_tasks[sub_id]["text"] += text
         elif event.type == EventType.SUB_AGENT_TOOL_CALL:
             sub_id = event.data.get("sub_agent_id", "")
-            tool_name = event.data.get("name", "")
             if sub_id in self._sub_agent_tasks:
                 self._sub_agent_tasks[sub_id]["tools"] += 1
-                self._stop_live()
-                agent_name = self._sub_agent_tasks[sub_id].get("display_name", "")
-                self.console.print(
-                    f"    [dim]\u2192 {agent_name}: {tool_name}[/dim]"
-                )
-                self._start_spinner()
         elif event.type == EventType.SUB_AGENT_TOOL_RESULT:
             pass
         elif event.type == EventType.SUB_AGENT_END:
@@ -323,11 +320,12 @@ class TuiSession:
             tokens = event.data.get("tokens", 0)
             iterations = event.data.get("iterations", 0)
             result = event.data.get("result", "")
+            tools = self._sub_agent_tasks.get(sub_id, {}).get("tools", 0)
             if sub_id in self._sub_agent_tasks:
                 self._sub_agent_tasks[sub_id]["status"] = "done"
             tok_str = f"{tokens:,}" if tokens else "0"
             self.console.print(
-                f"  [bold green]\u2713 {display}[/bold green] [dim]done ({elapsed}s, {tok_str} tokens, {iterations} steps)[/dim]"
+                f"  [bold green]\u2713 {display}[/bold green] [dim]({elapsed}s, {tok_str} tok, {iterations} steps, {tools} tools)[/dim]"
             )
             if result:
                 self.console.print(Markdown(result))
