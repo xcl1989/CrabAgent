@@ -33,6 +33,7 @@ SLASH_COMMANDS = [
     "/provider",
     "/agents",
     "/delegate",
+    "/memory",
     "/new",
     "/sessions",
     "/session",
@@ -313,7 +314,7 @@ class TuiSession:
 
     def _print_banner(self):
         self.console.print(
-            f"[bold]CrabAgent v0.5.4[/bold]\n  provider: {self._provider_display}  model: {self.agent_ctx.model or 'default'}\n  workspace: {self.agent_ctx.workspace}\n"
+            f"[bold]CrabAgent v0.6.0[/bold]\n  provider: {self._provider_display}  model: {self.agent_ctx.model or 'default'}\n  workspace: {self.agent_ctx.workspace}\n"
         )
 
     async def _handle_slash(self, ui: str) -> bool:
@@ -329,6 +330,7 @@ class TuiSession:
                 "/new  New session\n/sessions  List\n/session [id]  Load\n"
                 "/export  \u2192 .md\n/provider  Manage\n"
                 "/agents  Agent team\n/delegate [@agent] [task]  Delegate\n"
+                "/memory [list|search|clear]  Team memory\n"
             )
         elif cmd == "/clear":
             if self.agent_ctx:
@@ -378,9 +380,54 @@ class TuiSession:
             await self._handle_sessions_list()
         elif cmd == "/session":
             await self._handle_session_load(arg)
+        elif cmd == "/memory":
+            await self._handle_memory_slash(arg)
         else:
             self.console.print(f"[dim]Unknown: {cmd}[/dim]")
         return False
+
+    async def _handle_memory_slash(self, arg: str):
+        uid = self._user.id if self._user else 0
+        if not uid:
+            self.console.print("[dim]No user.[/dim]")
+            return
+        sp = arg.split(maxsplit=1) if arg else []
+        sc = sp[0].lower() if sp else "list"
+        sa = sp[1].strip() if len(sp) > 1 else ""
+
+        if sc == "list":
+            from crabagent.core.database import agent_memory_list_all
+            items = await agent_memory_list_all(uid)
+            if not items:
+                self.console.print("[dim]No memories.[/dim]")
+                return
+            self.console.print(f"[bold]Memories ({len(items)})[/bold]\n")
+            for item in items:
+                mt = item["memory_type"]
+                agent_tag = f" [{item['agent_name']}]" if item["agent_name"] else ""
+                preview = item["content"]
+                if len(preview) > 100:
+                    preview = preview[:100] + "..."
+                self.console.print(
+                    f"  {item['key']} ({mt}{agent_tag}, imp={item['importance']:.1f}): {preview}"
+                )
+        elif sc in ("search", "find"):
+            if not sa:
+                self.console.print("[dim]/memory search <query>[/dim]")
+                return
+            from crabagent.core.database import agent_memory_search
+            results = await agent_memory_search(uid, sa)
+            if not results:
+                self.console.print(f"[dim]No results for '{sa}'.[/dim]")
+            else:
+                for r in results:
+                    self.console.print(f"  {r['key']}: {r['content'][:120]}")
+        elif sc == "clear":
+            from crabagent.core.database import agent_memory_clear
+            n = await agent_memory_clear(uid)
+            self.console.print(f"[dim]Cleared {n} memories.[/dim]")
+        else:
+            self.console.print("[dim]/memory {list|search|clear}[/dim]")
 
     async def _handle_export(self):
         if not self._conversation_id:
@@ -1092,6 +1139,13 @@ class TuiSession:
                 base_prompt += "\n\n" + team_prompt
         except Exception:
             pass
+        try:
+            from crabagent.core.agent.agents import build_memory_prompt
+            mem_prompt = await build_memory_prompt(self._user.id if self._user else 0)
+            if mem_prompt:
+                base_prompt += "\n\n" + mem_prompt
+        except Exception:
+            pass
         ctx = AgentContext(
             workspace=ws,
             tool_registry=registry,
@@ -1103,6 +1157,8 @@ class TuiSession:
         if sid:
             ctx.metadata["session_id"] = sid
             ctx.metadata["branch_id"] = "main"
+        if self._user and self._user.id:
+            ctx.metadata["user_id"] = self._user.id
         if cid and not getattr(self.args, "no_persist", False):
             from crabagent.serve.services.persistence import PersistenceListener
 

@@ -29,7 +29,8 @@ async def get_molt(
     db: AsyncSession = Depends(get_db),
 ):
     conv = await get_owned_conversation(db, session_id, user)
-    from crabagent.core.molt.store import get_molt as _get_molt, list_molt_files
+    from crabagent.core.molt.store import get_molt as _get_molt
+    from crabagent.core.molt.store import list_molt_files
 
     m = await _get_molt(db, molt_id)
     if not m:
@@ -45,8 +46,8 @@ async def get_molt_diff(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    from crabagent.core.molt.store import get_snapshot_content, get_current_content, list_molt_files
     from crabagent.core.config import settings
+    from crabagent.core.molt.store import get_current_content, get_snapshot_content, list_molt_files
 
     files = await list_molt_files(molt_id)
     if not files:
@@ -73,9 +74,9 @@ async def rollback_molt(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    from crabagent.core.molt.store import list_molt_files
-    from crabagent.core.molt.rollback import rollback as _rollback
     from crabagent.core.config import settings
+    from crabagent.core.molt.rollback import rollback as _rollback
+    from crabagent.core.molt.store import list_molt_files
 
     files = await list_molt_files(molt_id)
     if not files:

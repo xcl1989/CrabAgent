@@ -3,9 +3,9 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-from datetime import UTC, datetime
 import logging
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 from prompt_toolkit import PromptSession
@@ -150,6 +150,7 @@ async def _cmd_init():
 
 async def _ensure_cli_user():
     from sqlalchemy import select
+
     from crabagent.core.database import User, async_session_factory
 
     async with async_session_factory() as db:
@@ -424,7 +425,7 @@ def _replace_persistence_listener(context, conv_id: int, seq: int, args):
         context.event_bus.subscribe(persistence.on_event)
 
 
-async def _setup_agent_context(args, conversation_id: int | None = None, history: list[dict] | None = None, persistence_start_seq: int = 0, session_id_str: str | None = None):
+async def _setup_agent_context(args, conversation_id: int | None = None, history: list[dict] | None = None, persistence_start_seq: int = 0, session_id_str: str | None = None, user_id: int = 0):
     import crabagent.core.agent.tools.bash  # noqa: F401
     import crabagent.core.agent.tools.edit  # noqa: F401
     import crabagent.core.agent.tools.glob  # noqa: F401
@@ -458,6 +459,22 @@ async def _setup_agent_context(args, conversation_id: int | None = None, history
     except Exception:
         pass
 
+    try:
+        from crabagent.core.agent.agents import build_memory_prompt
+        mem_prompt = await build_memory_prompt(user_id)
+        if mem_prompt:
+            base_prompt += "\n\n" + mem_prompt
+    except Exception:
+        pass
+
+    try:
+        from crabagent.core.agent.agents import build_memory_prompt
+        mem_prompt = await build_memory_prompt(user_id if 'user_id' in dir() else 0)
+        if mem_prompt:
+            base_prompt += "\n\n" + mem_prompt
+    except Exception:
+        pass
+
     context = AgentContext(
         workspace=workspace,
         tool_registry=_registry,
@@ -469,6 +486,9 @@ async def _setup_agent_context(args, conversation_id: int | None = None, history
 
     if history:
         context.messages = list(history)
+
+    if user_id:
+        context.metadata["user_id"] = user_id
 
     if conversation_id and session_id_str:
         context.metadata["session_id"] = session_id_str
@@ -587,7 +607,7 @@ async def _run_single(args):
         history = None
         max_seq = 0
 
-    context = await _setup_agent_context(args, conversation_id=conversation_id, history=history, persistence_start_seq=max_seq, session_id_str=session_id_str)
+    context = await _setup_agent_context(args, conversation_id=conversation_id, history=history, persistence_start_seq=max_seq, session_id_str=session_id_str, user_id=user.id)
 
     try:
         await run_agent(context, args.query)
@@ -620,10 +640,10 @@ def _print_banner(context, provider: str, model: str):
         from rich.console import Console
         from rich.text import Text
         console = Console()
-        t = Text("CrabAgent v0.5.4", style="bold")
+        t = Text("CrabAgent v0.6.0", style="bold")
         console.print(t)
     except ImportError:
-        print("CrabAgent v0.5.4")
+        print("CrabAgent v0.6.0")
 
     print(f"  provider: {provider}  model: {model}")
     print(f"  workspace: {context.workspace}")
@@ -677,7 +697,7 @@ async def _ensure_provider_configured():
             print("Cannot continue without a provider.")
             return False
 
-        ptype = input(f"Provider type [deepseek]: ").strip().lower() or "deepseek"
+        ptype = input("Provider type [deepseek]: ").strip().lower() or "deepseek"
         catalog = PROVIDER_CATALOG.get(ptype)
         if not catalog:
             print(f"Unknown provider type '{ptype}'. Available: {', '.join(PROVIDER_CATALOG.keys())}")
@@ -750,7 +770,7 @@ async def _run_interactive(args):
             args.model = first_models[0]
             settings.save_last_model(args.model)
 
-    context = await _setup_agent_context(args, conversation_id=conversation_id[0], history=history, persistence_start_seq=max_seq, session_id_str=session_id_str[0])
+    context = await _setup_agent_context(args, conversation_id=conversation_id[0], history=history, persistence_start_seq=max_seq, session_id_str=session_id_str[0], user_id=user.id)
 
     provider_display = await _resolve_provider_display(args)
     model_display = args.model or "default"
@@ -1031,8 +1051,8 @@ async def _handle_slash_command(cmd: str, context, args, user, state: dict, cons
 
     elif command == "/molt":
         from crabagent.core.database import async_session_factory
-        from crabagent.core.molt.store import list_molts, get_molt as _get_molt, list_molt_files
         from crabagent.core.molt.rollback import rollback
+        from crabagent.core.molt.store import list_molt_files, list_molts
 
         parts = arg.split()
         subcmd = parts[0] if parts else "list"
@@ -1096,7 +1116,7 @@ async def _handle_slash_command(cmd: str, context, args, user, state: dict, cons
 
     elif command == "/todo":
         from crabagent.core.database import async_session_factory
-        from crabagent.core.todo.store import add_todo, list_todos, mark_done, delete_todo
+        from crabagent.core.todo.store import add_todo, delete_todo, list_todos, mark_done
 
         parts = arg.split()
         subcmd = parts[0] if parts else "list"

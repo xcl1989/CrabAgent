@@ -60,6 +60,7 @@ async def get_agent(name: str) -> dict | None:
     return None
 
 
+_MEMORY_TOOLS = {"memory_save", "memory_recall", "memory_replace", "memory_list", "memory_forget"}
 _SHARED_TOOLS = {"shared_get", "shared_put", "shared_list"}
 _DELEGATION_TOOLS = {
     "delegate_task", "delegate_parallel", "list_agents",
@@ -166,6 +167,65 @@ async def _load_shared_context(session_id: str) -> str:
     return "\n".join(lines)
 
 
+async def build_memory_prompt(user_id: int) -> str:
+    if not user_id:
+        return ""
+    from crabagent.core.database import agent_memory_get_by_type
+    team_memories = await agent_memory_get_by_type(user_id, "team_knowledge", limit=10)
+    if not team_memories:
+        return ""
+    total_chars = sum(len(m["content"]) for m in team_memories)
+    if total_chars > 3000:
+        team_memories = team_memories[:5]
+    lines = ["## Team Knowledge", ""]
+    for m in team_memories:
+        cat = m["category"]
+        lines.append(f"- **{m['key']}** ({cat}): {m['content']}")
+    lines.append("")
+    lines.append(
+        "You can save new knowledge with `memory_save(memory_type='team', ...)`. "
+        "When the user makes a choice or rejects an option, record it."
+    )
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _extract_lesson(
+    agent_name: str,
+    iterations: int,
+    max_iterations: int,
+    task: str,
+    result: str,
+    used_shared: bool = False,
+) -> dict | None:
+    lesson = None
+    if iterations >= max_iterations * 0.8:
+        lesson = {
+            "category": "failed_approach",
+            "key": f"lesson:{agent_name}:high_iterations",
+            "content": f"Task '{task[:80]}' used {iterations}/{max_iterations} iterations. Consider breaking complex tasks into smaller steps.",
+            "importance": 0.6,
+        }
+    elif iterations <= max_iterations * 0.2 and result:
+        lesson = {
+            "category": "effective_strategy",
+            "key": f"lesson:{agent_name}:efficient",
+            "content": f"Task '{task[:80]}' completed efficiently in {iterations} steps.",
+            "importance": 0.4,
+        }
+    if used_shared and result:
+        lesson_tip = {
+            "category": "tool_tip",
+            "key": f"lesson:{agent_name}:shared_workspace",
+            "content": f"Agent {agent_name} successfully used shared workspace for coordination.",
+            "importance": 0.3,
+        }
+        if lesson:
+            return lesson
+        return lesson_tip
+    return lesson
+
+
 async def spawn_sub_agent(
     agent_name: str,
     task: str,
@@ -204,6 +264,10 @@ async def spawn_sub_agent(
             sub_registry._tools[name] = tool
         has_shared = True
 
+    for mname, mtool in parent_context.tool_registry._tools.items():
+        if mname in _MEMORY_TOOLS and mname not in sub_registry._tools:
+            sub_registry._tools[mname] = mtool
+
     if agent_def.get("allow_delegation") and current_depth < max_depth:
         parent_tools = parent_context.tool_registry._tools
         if "request_help" in parent_tools:
@@ -225,9 +289,28 @@ async def spawn_sub_agent(
     sub_context.metadata["_sub_agent_name"] = agent_name
     sub_context.metadata["_sub_agent_depth"] = current_depth + 1
 
+    parent_user_id = parent_context.metadata.get("user_id", 0)
+    if parent_user_id:
+        sub_context.metadata["user_id"] = parent_user_id
+
     session_id = parent_context.metadata.get("session_id", "")
     if session_id:
         sub_context.metadata["session_id"] = session_id
+
+    agent_lessons = []
+    if parent_user_id:
+        try:
+            from crabagent.core.database import agent_memory_get_by_agent
+            agent_lessons = await agent_memory_get_by_agent(parent_user_id, agent_name, limit=5)
+        except Exception:
+            pass
+
+    if agent_lessons:
+        lesson_lines = ["## Your Past Lessons", ""]
+        for lesson in agent_lessons:
+            lesson_lines.append(f"- {lesson['content']}")
+        lesson_lines.append("")
+        sub_context.system_prompt += "\n\n" + "\n".join(lesson_lines)
 
     shared_context = await _load_shared_context(session_id)
 
@@ -342,6 +425,31 @@ async def spawn_sub_agent(
                 logger.debug(
                     "Failed to auto-save shared memory for %s", agent_name,
                 )
+
+        if parent_user_id:
+            try:
+                lesson = _extract_lesson(
+                    agent_name=agent_name,
+                    iterations=sub_context.iteration,
+                    max_iterations=sub_context.max_iterations,
+                    task=task,
+                    result=last_text,
+                    used_shared=has_shared,
+                )
+                if lesson:
+                    from crabagent.core.database import agent_memory_upsert
+                    await agent_memory_upsert(
+                        user_id=parent_user_id,
+                        memory_type="agent_lesson",
+                        agent_name=agent_name,
+                        category=lesson["category"],
+                        key=lesson["key"],
+                        content=lesson["content"],
+                        importance=lesson["importance"],
+                        source_session=session_id,
+                    )
+            except Exception:
+                logger.debug("Failed to extract lesson for %s", agent_name)
 
         await parent_context.event_bus.emit(AgentEvent(
             type=EventType.SUB_AGENT_END,

@@ -129,6 +129,14 @@ async def prompt_async(
     except Exception:
         pass
 
+    try:
+        from crabagent.core.agent.agents import build_memory_prompt
+        mem_prompt = await build_memory_prompt(user.id)
+        if mem_prompt:
+            base_prompt += "\n\n" + mem_prompt
+    except Exception:
+        pass
+
     context = AgentContext(
         workspace=workspace,
         tool_registry=registry,
@@ -172,6 +180,7 @@ async def prompt_async(
 
     context.metadata["session_id"] = session_id
     context.metadata["branch_id"] = active_branch
+    context.metadata["user_id"] = user.id
 
     for msg_record in history_msgs:
         if msg_record.role == "stats":
@@ -238,7 +247,7 @@ async def prompt_async(
             future = request_confirmation(context.event_bus, session_id, tool_name, args)
             try:
                 return await asyncio.wait_for(future, timeout=120.0)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 return False
 
         context.confirm_callback = _serve_confirm
@@ -249,7 +258,7 @@ async def prompt_async(
         future = request_user_input(context.event_bus, session_id, question, options=options)
         try:
             return await asyncio.wait_for(future, timeout=300.0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return ""
 
     context.ask_callback = _serve_ask

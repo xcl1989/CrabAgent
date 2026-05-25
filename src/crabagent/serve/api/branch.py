@@ -10,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from crabagent.core.database import Message, User, get_db
 from crabagent.serve.deps import get_current_user, get_owned_conversation
 from crabagent.serve.services import conversation as conv_svc
-from crabagent.serve.services.message import get_messages
 
 router = APIRouter(prefix="/sessions/{session_id}/branches", tags=["branches"])
 

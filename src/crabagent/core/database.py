@@ -3,7 +3,7 @@ from __future__ import annotations
 import datetime
 from collections.abc import AsyncGenerator
 
-from sqlalchemy import Boolean, DateTime, Integer, String, Text, text
+from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -185,6 +185,24 @@ class SharedMemory(Base):
     key: Mapped[str] = mapped_column(String(200), nullable=False)
     value: Mapped[str] = mapped_column(Text, default="")
     author: Mapped[str] = mapped_column(String(100), default="")
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class AgentMemory(Base):
+    __tablename__ = "agent_memory"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    memory_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    agent_name: Mapped[str] = mapped_column(String(100), default="")
+    category: Mapped[str] = mapped_column(String(50), default="")
+    key: Mapped[str] = mapped_column(String(200), nullable=False)
+    content: Mapped[str] = mapped_column(Text, default="")
+    importance: Mapped[float] = mapped_column(Float, default=0.5)
+    confidence: Mapped[float] = mapped_column(Float, default=1.0)
+    source_session: Mapped[str] = mapped_column(String(32), default="")
+    access_count: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
@@ -465,3 +483,254 @@ async def shared_memory_delete(session_id: str, key: str) -> None:
             )
         )
         await db.commit()
+
+
+async def agent_memory_upsert(
+    user_id: int,
+    memory_type: str,
+    agent_name: str,
+    category: str,
+    key: str,
+    content: str,
+    importance: float = 0.5,
+    confidence: float = 1.0,
+    source_session: str = "",
+) -> None:
+    from sqlalchemy import select
+
+    async with async_session_factory() as db:
+        result = await db.execute(
+            select(AgentMemory).where(
+                AgentMemory.user_id == user_id,
+                AgentMemory.key == key,
+            )
+        )
+        existing = result.scalar_one_or_none()
+        if existing:
+            existing.memory_type = memory_type
+            existing.agent_name = agent_name
+            existing.category = category
+            existing.content = content
+            existing.importance = importance
+            if confidence >= existing.confidence:
+                existing.confidence = confidence
+            existing.source_session = source_session
+            existing.updated_at = utcnow()
+        else:
+            db.add(AgentMemory(
+                user_id=user_id,
+                memory_type=memory_type,
+                agent_name=agent_name,
+                category=category,
+                key=key,
+                content=content,
+                importance=importance,
+                confidence=confidence,
+                source_session=source_session,
+            ))
+        await db.commit()
+
+
+async def agent_memory_get_by_type(
+    user_id: int,
+    memory_type: str,
+    limit: int = 15,
+) -> list[dict]:
+    from sqlalchemy import select
+
+    async with async_session_factory() as db:
+        result = await db.execute(
+            select(AgentMemory)
+            .where(AgentMemory.user_id == user_id, AgentMemory.memory_type == memory_type)
+            .order_by(AgentMemory.importance.desc())
+            .limit(limit)
+        )
+        return [
+            {
+                "id": r.id,
+                "memory_type": r.memory_type,
+                "agent_name": r.agent_name,
+                "category": r.category,
+                "key": r.key,
+                "content": r.content,
+                "importance": r.importance,
+                "confidence": r.confidence,
+                "access_count": r.access_count,
+            }
+            for r in result.scalars().all()
+        ]
+
+
+async def agent_memory_get_by_agent(
+    user_id: int,
+    agent_name: str,
+    limit: int = 5,
+) -> list[dict]:
+    from sqlalchemy import select
+
+    async with async_session_factory() as db:
+        result = await db.execute(
+            select(AgentMemory)
+            .where(
+                AgentMemory.user_id == user_id,
+                AgentMemory.memory_type == "agent_lesson",
+                AgentMemory.agent_name == agent_name,
+            )
+            .order_by(AgentMemory.importance.desc())
+            .limit(limit)
+        )
+        return [
+            {
+                "id": r.id,
+                "key": r.key,
+                "content": r.content,
+                "category": r.category,
+                "importance": r.importance,
+            }
+            for r in result.scalars().all()
+        ]
+
+
+async def agent_memory_search(
+    user_id: int,
+    query: str,
+    memory_type: str = "",
+    limit: int = 5,
+) -> list[dict]:
+    from sqlalchemy import or_, select
+
+    async with async_session_factory() as db:
+        conditions = [AgentMemory.user_id == user_id]
+        if memory_type:
+            conditions.append(AgentMemory.memory_type == memory_type)
+        terms = [t for t in query.split() if len(t) >= 2]
+        term_filters = []
+        if terms:
+            for term in terms:
+                like = f"%{term}%"
+                term_filters.append(AgentMemory.key.like(like))
+                term_filters.append(AgentMemory.content.like(like))
+        else:
+            like = f"%{query}%"
+            term_filters.append(AgentMemory.key.like(like))
+            term_filters.append(AgentMemory.content.like(like))
+        term_filters.append(AgentMemory.category == query)
+        conditions.append(or_(*term_filters))
+        result = await db.execute(
+            select(AgentMemory)
+            .where(*conditions)
+            .order_by(AgentMemory.importance.desc())
+            .limit(limit)
+        )
+        rows = result.scalars().all()
+        for r in rows:
+            r.access_count += 1
+        await db.commit()
+        return [
+            {
+                "id": r.id,
+                "memory_type": r.memory_type,
+                "agent_name": r.agent_name,
+                "category": r.category,
+                "key": r.key,
+                "content": r.content,
+                "importance": r.importance,
+                "confidence": r.confidence,
+            }
+            for r in rows
+        ]
+
+
+async def agent_memory_list_all(
+    user_id: int,
+    memory_type: str = "",
+    category: str = "",
+) -> list[dict]:
+    from sqlalchemy import select
+
+    async with async_session_factory() as db:
+        conditions = [AgentMemory.user_id == user_id]
+        if memory_type:
+            conditions.append(AgentMemory.memory_type == memory_type)
+        if category:
+            conditions.append(AgentMemory.category == category)
+        result = await db.execute(
+            select(AgentMemory)
+            .where(*conditions)
+            .order_by(AgentMemory.importance.desc())
+        )
+        return [
+            {
+                "id": r.id,
+                "memory_type": r.memory_type,
+                "agent_name": r.agent_name,
+                "category": r.category,
+                "key": r.key,
+                "content": r.content[:200],
+                "importance": r.importance,
+                "confidence": r.confidence,
+                "access_count": r.access_count,
+                "updated_at": r.updated_at.isoformat() if r.updated_at else "",
+            }
+            for r in result.scalars().all()
+        ]
+
+
+async def agent_memory_delete(user_id: int, key: str) -> bool:
+    from sqlalchemy import delete as sa_delete
+    from sqlalchemy import select
+
+    async with async_session_factory() as db:
+        result = await db.execute(
+            select(AgentMemory).where(
+                AgentMemory.user_id == user_id,
+                AgentMemory.key == key,
+            )
+        )
+        if not result.scalar_one_or_none():
+            return False
+        await db.execute(
+            sa_delete(AgentMemory).where(
+                AgentMemory.user_id == user_id,
+                AgentMemory.key == key,
+            )
+        )
+        await db.commit()
+        return True
+
+
+async def agent_memory_clear(user_id: int) -> int:
+    from sqlalchemy import delete as sa_delete
+    from sqlalchemy import func, select
+
+    async with async_session_factory() as db:
+        count_result = await db.execute(
+            select(func.count()).select_from(AgentMemory).where(AgentMemory.user_id == user_id)
+        )
+        count = count_result.scalar() or 0
+        await db.execute(sa_delete(AgentMemory).where(AgentMemory.user_id == user_id))
+        await db.commit()
+        return count
+
+
+async def agent_memory_replace(
+    user_id: int, key: str, old_text: str, new_text: str,
+) -> bool:
+    from sqlalchemy import select
+
+    async with async_session_factory() as db:
+        result = await db.execute(
+            select(AgentMemory).where(
+                AgentMemory.user_id == user_id,
+                AgentMemory.key == key,
+            )
+        )
+        row = result.scalar_one_or_none()
+        if not row:
+            return False
+        if old_text not in row.content:
+            return False
+        row.content = row.content.replace(old_text, new_text, 1)
+        row.updated_at = utcnow()
+        await db.commit()
+        return True

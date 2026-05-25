@@ -4,11 +4,11 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from crabagent.core.database import Molt
 from crabagent.core.config import settings
+from crabagent.core.database import Molt
 
 logger = logging.getLogger(__name__)
 

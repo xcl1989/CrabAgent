@@ -10,11 +10,9 @@ logger = logging.getLogger(__name__)
 
 
 async def _get_setting(key: str) -> str | None:
-    from crabagent.core.database import async_session_factory
-
     from sqlalchemy import select
 
-    from crabagent.core.database import AppSetting
+    from crabagent.core.database import AppSetting, async_session_factory
 
     async with async_session_factory() as db:
         result = await db.execute(select(AppSetting).where(AppSetting.key == key))

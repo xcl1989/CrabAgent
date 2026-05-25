@@ -2,6 +2,7 @@ import crabagent.core.agent.tools.bash  # noqa: F401
 import crabagent.core.agent.tools.edit  # noqa: F401
 import crabagent.core.agent.tools.glob  # noqa: F401
 import crabagent.core.agent.tools.grep  # noqa: F401
+import crabagent.core.agent.tools.memory  # noqa: F401
 import crabagent.core.agent.tools.read  # noqa: F401
 import crabagent.core.agent.tools.shared  # noqa: F401
 import crabagent.core.agent.tools.web  # noqa: F401

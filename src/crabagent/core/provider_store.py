@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 def _get_fernet():
     from cryptography.fernet import Fernet
+
     from crabagent.core.config import settings
     return Fernet(settings.get_encryption_key().encode())
 

@@ -6,7 +6,6 @@ import json
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from crabagent.core.database import Message, async_session_factory
 from crabagent.core.event import AgentEvent, EventType

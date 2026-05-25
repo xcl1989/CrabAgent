@@ -11,6 +11,7 @@ CrabAgent is a local-first AI agent platform. Run it from any project directory 
 | Feature | Description |
 |---------|-------------|
 | **🤖 AI Team** | Create custom agent profiles; delegate tasks to multiple agents in parallel; each agent can use its own model |
+| **🧠 Team Memory** | Persistent team knowledge + auto-extracted lessons; agents remember across sessions |
 | **📋 Task Board** | Real-time right-side panel showing each agent's status (running/done/error), progress, and tool calls |
 | **@mention Delegation** | Type `@researcher search for X` and CrabAgent auto-delegates, or click agents from the toolbar |
 | **🔀 Parallel Execution** | Multiple agents run simultaneously — researcher searches while coder debugs while analyst compares |
@@ -71,6 +72,26 @@ Built-in agents:
 | 📊 Analyst | Data analysis | Comparison, pattern detection, reports |
 | 💻 Coder | Code expert | Write, review, debug, refactor |
 | 📝 Writer | Content writer | Write, edit, translate, format |
+
+---
+
+## Team Memory
+
+Agents share persistent memory across sessions. Two types:
+
+| Type | Scope | Example |
+|------|-------|---------|
+| **Team Knowledge** (`team`) | All agents share | Tech stack, architecture decisions, user preferences |
+| **Agent Lessons** (`lesson`) | Specific agent | Effective strategies, failed approaches, tool tips |
+
+**How it works**:
+- Agents use `memory_save()` to store knowledge (e.g. user chooses a framework, records it)
+- `memory_recall(query)` searches by keywords — split-term matching finds partial hits
+- `memory_replace(key, old, new)` lets agents edit existing memories precisely
+- Top team knowledge is auto-injected into system prompts on startup
+- After sub-agent tasks complete, lessons are auto-extracted (high iterations → efficiency tip, etc.)
+
+CLI: `/memory list` · `/memory search <query>` · `/memory clear`
 
 ---
 
@@ -157,6 +178,7 @@ def run(name: str) -> str:
 | `/new` | Start new conversation |
 | `/agents [cmd]` | Agent team management (list/add/edit/toggle/rm) |
 | `/delegate [@agent] [task]` | Delegate task to agent(s) |
+| `/memory [cmd]` | Team memory (list/search/clear) |
 | `/molt [cmd]` | Snapshot list/show/rollback |
 | `/todo [cmd]` | Manage task list |
 | `/export` | Export conversation to Markdown |
