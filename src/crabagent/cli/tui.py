@@ -31,6 +31,8 @@ SLASH_COMMANDS = [
     "/model",
     "/models",
     "/provider",
+    "/agents",
+    "/delegate",
     "/skills",
     "/skill",
     "/export",
@@ -49,6 +51,7 @@ class TuiSession:
         self._thinking_active = False
         self._rendered_up_to = 0
         self._in_code_block = False
+        self._sub_agent_tasks: dict[str, dict] = {}
         self._provider_display = "default"
         self._conversation_id = None
         self._session_id_str = None
@@ -61,7 +64,7 @@ class TuiSession:
             return
         self._print_banner()
         self.agent_ctx.event_bus.subscribe(self._on_agent_event)
-        completer = WordCompleter(SLASH_COMMANDS, ignore_case=True, sentence=True)
+        completer = await self._build_completer()
         session = PromptSession(history=InMemoryHistory(), completer=completer, style=PROMPT_STYLE)
         while True:
             status = self._make_status_bar()
@@ -77,17 +80,25 @@ class TuiSession:
             if not ui:
                 continue
             if ui.startswith("/"):
+                if ui.startswith("/agents") or ui.startswith("/delegate"):
+                    completer = await self._build_completer()
+                    session.completer = completer
                 if await self._handle_slash(ui):
                     await self._cleanup()
                     break
                 continue
+            mentions, clean_text = self._parse_agent_mentions(ui)
+            if mentions:
+                await self._handle_mention_delegation(mentions, clean_text)
+                continue
             if self._conversation_id and not getattr(self.args, "no_persist", False):
                 await self._persist_user_message(ui)
-            self.console.print(f"\n[bold]▶ {ui}[/bold]")
+            self.console.print(f"\n[bold]\u25b6 {ui}[/bold]")
             self._stream = ""
             self._thinking_active = False
             self._rendered_up_to = 0
             self._in_code_block = False
+            self._sub_agent_tasks = {}
             try:
                 self.agent_ctx.iteration = 0
                 await run_agent(self.agent_ctx, ui)
@@ -268,6 +279,68 @@ class TuiSession:
             orig = event.data.get("original_count", "?")
             comp = event.data.get("compressed_count", "?")
             self.console.print(f"\n  [dim yellow]Context compressed: {orig} \u2192 {comp} messages[/dim yellow]")
+        elif event.type == EventType.SUB_AGENT_START:
+            self._stop_live()
+            sub_id = event.data.get("sub_agent_id", "")
+            agent_name = event.data.get("agent_name", "?")
+            display = event.data.get("display_name", agent_name)
+            task = event.data.get("task", "")
+            self._sub_agent_tasks[sub_id] = {
+                "agent_name": agent_name,
+                "display_name": display,
+                "task": task,
+                "status": "running",
+                "text": "",
+                "tools": 0,
+            }
+            self.console.print(
+                f"  [bold cyan]\u25b6 {display}[/bold cyan] [dim]starting: {task[:60]}[/dim]"
+            )
+            self._start_spinner()
+        elif event.type == EventType.SUB_AGENT_TEXT_DELTA:
+            sub_id = event.data.get("sub_agent_id", "")
+            text = event.data.get("text", "")
+            if sub_id in self._sub_agent_tasks:
+                self._sub_agent_tasks[sub_id]["text"] += text
+        elif event.type == EventType.SUB_AGENT_TOOL_CALL:
+            sub_id = event.data.get("sub_agent_id", "")
+            tool_name = event.data.get("name", "")
+            if sub_id in self._sub_agent_tasks:
+                self._sub_agent_tasks[sub_id]["tools"] += 1
+                self._stop_live()
+                agent_name = self._sub_agent_tasks[sub_id].get("display_name", "")
+                self.console.print(
+                    f"    [dim]\u2192 {agent_name}: {tool_name}[/dim]"
+                )
+                self._start_spinner()
+        elif event.type == EventType.SUB_AGENT_TOOL_RESULT:
+            pass
+        elif event.type == EventType.SUB_AGENT_END:
+            self._stop_live()
+            sub_id = event.data.get("sub_agent_id", "")
+            display = event.data.get("display_name", "?")
+            elapsed = event.data.get("elapsed", 0)
+            tokens = event.data.get("tokens", 0)
+            iterations = event.data.get("iterations", 0)
+            result = event.data.get("result", "")
+            if sub_id in self._sub_agent_tasks:
+                self._sub_agent_tasks[sub_id]["status"] = "done"
+            tok_str = f"{tokens:,}" if tokens else "0"
+            self.console.print(
+                f"  [bold green]\u2713 {display}[/bold green] [dim]done ({elapsed}s, {tok_str} tokens, {iterations} steps)[/dim]"
+            )
+            if result:
+                self.console.print(Markdown(result))
+        elif event.type == EventType.SUB_AGENT_ERROR:
+            self._stop_live()
+            sub_id = event.data.get("sub_agent_id", "")
+            agent_name = event.data.get("agent_name", "?")
+            error = event.data.get("error", "unknown error")
+            if sub_id in self._sub_agent_tasks:
+                self._sub_agent_tasks[sub_id]["status"] = "error"
+            self.console.print(
+                f"  [bold red]\u2717 {agent_name}[/bold red] [red]Error: {error}[/red]"
+            )
 
     def _fmt_tool(self, name: str, args: dict) -> str:
         if name == "read" and "file_path" in args:
@@ -295,7 +368,10 @@ class TuiSession:
             return True
         if cmd == "/help":
             self.console.print(
-                "/exit /quit  Exit\n/help  Help\n/clear  Clear\n/history  Stats\n/model [n]  Switch\n/models  List\n/export  → .md\n/provider  Manage\n"
+                "/exit /quit  Exit\n/help  Help\n/clear  Clear\n"
+                "/history  Stats\n/model [n]  Switch\n/models  List\n"
+                "/export  \u2192 .md\n/provider  Manage\n"
+                "/agents  Agent team\n/delegate [@agent] [task]  Delegate\n"
             )
         elif cmd == "/clear":
             if self.agent_ctx:
@@ -335,6 +411,10 @@ class TuiSession:
             await self._handle_export()
         elif cmd == "/provider":
             await self._handle_provider_slash(arg)
+        elif cmd == "/agents":
+            await self._handle_agents_slash(arg)
+        elif cmd == "/delegate":
+            await self._handle_delegate_slash(arg)
         else:
             self.console.print(f"[dim]Unknown: {cmd}[/dim]")
         return False
@@ -423,6 +503,355 @@ class TuiSession:
             self.console.print(f"[dim]Default: {sa}[/dim]")
         else:
             self.console.print("[dim]/provider {list|add|remove|set-default}[/dim]")
+
+    async def _fetch_all_agents(self):
+        from sqlalchemy import select
+
+        from crabagent.core.database import AgentProfile, async_session_factory
+
+        async with async_session_factory() as db:
+            result = await db.execute(select(AgentProfile).order_by(AgentProfile.name))
+            return result.scalars().all()
+
+    async def _handle_agents_slash(self, arg: str):
+        sp = arg.split(maxsplit=1) if arg else []
+        sc = sp[0].lower() if sp else "list"
+        sa = sp[1].strip() if len(sp) > 1 else ""
+
+        if sc == "list":
+            agents = await self._fetch_all_agents()
+            if not agents:
+                self.console.print("[dim]No agents. Use /agents add[/dim]")
+                return
+            enabled_count = sum(1 for a in agents if a.enabled)
+            self.console.print(f"[bold]Agent Team[/bold] ({enabled_count}/{len(agents)} active)\n")
+            for a in agents:
+                icon = a.icon or "🤖"
+                status = "[green]ON[/green]" if a.enabled else "[dim]OFF[/dim]"
+                default_tag = " [dim][default][/dim]" if a.is_default else ""
+                model_tag = f" [dim][{a.model}][/dim]" if a.model else ""
+                self.console.print(
+                    f"  {icon} [bold]{a.display_name or a.name}[/bold]{default_tag} {status}{model_tag}"
+                )
+                self.console.print(f"    [dim]Role: {a.role}[/dim]")
+                self.console.print(f"    [dim]Goal: {a.goal[:80]}[/dim]")
+
+        elif sc == "add":
+            name = input("Name (lowercase, no spaces): ").strip().lower().replace(" ", "_")
+            if not name:
+                self.console.print("[dim]Name required.[/dim]")
+                return
+            display_name = input("Display name: ").strip() or name
+            role = input("Role: ").strip()
+            if not role:
+                self.console.print("[dim]Role required.[/dim]")
+                return
+            goal = input("Goal: ").strip()
+            if not goal:
+                self.console.print("[dim]Goal required.[/dim]")
+                return
+            backstory = input("Backstory (opt): ").strip()
+            model = input("Model override (opt): ").strip()
+            icon = input("Icon emoji (opt): ").strip() or "🤖"
+
+            from sqlalchemy import select
+
+            from crabagent.core.agent.agents import invalidate_cache
+            from crabagent.core.database import AgentProfile, async_session_factory
+
+            try:
+                async with async_session_factory() as db:
+                    existing = await db.execute(
+                        select(AgentProfile).where(AgentProfile.name == name)
+                    )
+                    if existing.scalar_one_or_none():
+                        self.console.print(f"[dim]Agent '{name}' already exists.[/dim]")
+                        return
+                    profile = AgentProfile(
+                        user_id=self._user.id if self._user else 1,
+                        name=name,
+                        display_name=display_name,
+                        role=role,
+                        goal=goal,
+                        backstory=backstory,
+                        model=model,
+                        icon=icon,
+                        is_default=False,
+                    )
+                    db.add(profile)
+                    await db.commit()
+                invalidate_cache()
+                self.console.print(f"[dim]Agent '{name}' created.[/dim]")
+            except Exception as e:
+                self.console.print(f"[red]Error: {e}[/red]")
+
+        elif sc == "edit":
+            if not sa:
+                self.console.print("[dim]/agents edit <name>[/dim]")
+                return
+            from sqlalchemy import select
+
+            from crabagent.core.agent.agents import invalidate_cache
+            from crabagent.core.database import AgentProfile, async_session_factory
+
+            async with async_session_factory() as db:
+                result = await db.execute(
+                    select(AgentProfile).where(AgentProfile.name == sa)
+                )
+                profile = result.scalar_one_or_none()
+            if not profile:
+                self.console.print(f"[dim]Agent '{sa}' not found.[/dim]")
+                return
+            self.console.print(f"[bold]Editing: {profile.display_name or profile.name}[/bold]")
+            self.console.print("[dim]Press Enter to keep current value.[/dim]\n")
+            display_name = input(f"Display name [{profile.display_name or profile.name}]: ").strip()
+            role = input(f"Role [{profile.role}]: ").strip()
+            goal = input(f"Goal [{profile.goal[:60]}]: ").strip()
+            backstory = input(f"Backstory [{(profile.backstory or '')[:60]}]: ").strip()
+            model = input(f"Model [{profile.model or 'inherit'}]: ").strip()
+            icon = input(f"Icon [{profile.icon or '🤖'}]: ").strip()
+
+            async with async_session_factory() as db:
+                result = await db.execute(
+                    select(AgentProfile).where(AgentProfile.name == sa)
+                )
+                profile = result.scalar_one_or_none()
+                if not profile:
+                    return
+                if display_name:
+                    profile.display_name = display_name
+                if role:
+                    profile.role = role
+                if goal:
+                    profile.goal = goal
+                if backstory:
+                    profile.backstory = backstory
+                if model:
+                    profile.model = model
+                if icon:
+                    profile.icon = icon
+                await db.commit()
+            invalidate_cache()
+            self.console.print(f"[dim]Agent '{sa}' updated.[/dim]")
+
+        elif sc == "toggle":
+            if not sa:
+                self.console.print("[dim]/agents toggle <name>[/dim]")
+                return
+            from crabagent.core.agent.agents import invalidate_cache
+            from crabagent.core.database import AgentProfile, async_session_factory
+
+            async with async_session_factory() as db:
+                result = await db.execute(
+                    select(AgentProfile).where(AgentProfile.name == sa)
+                )
+                profile = result.scalar_one_or_none()
+                if not profile:
+                    self.console.print(f"[dim]Agent '{sa}' not found.[/dim]")
+                    return
+                profile.enabled = not profile.enabled
+                await db.commit()
+            invalidate_cache()
+            state = "enabled" if profile.enabled else "disabled"
+            self.console.print(f"[dim]Agent '{sa}' {state}.[/dim]")
+
+        elif sc in ("rm", "remove", "del", "delete"):
+            if not sa:
+                self.console.print("[dim]/agents rm <name>[/dim]")
+                return
+            from sqlalchemy import delete as sql_delete
+
+            from crabagent.core.agent.agents import invalidate_cache
+            from crabagent.core.database import AgentProfile, async_session_factory
+
+            async with async_session_factory() as db:
+                result = await db.execute(
+                    select(AgentProfile).where(AgentProfile.name == sa)
+                )
+                profile = result.scalar_one_or_none()
+                if not profile:
+                    self.console.print(f"[dim]Agent '{sa}' not found.[/dim]")
+                    return
+                if profile.is_default:
+                    self.console.print("[dim]Default agents cannot be deleted. Use /agents toggle to disable.[/dim]")
+                    return
+                await db.execute(sql_delete(AgentProfile).where(AgentProfile.name == sa))
+                await db.commit()
+            invalidate_cache()
+            self.console.print(f"[dim]Agent '{sa}' deleted.[/dim]")
+
+        else:
+            self.console.print("[dim]/agents {list|add|edit|toggle|rm}[/dim]")
+
+    async def _handle_delegate_slash(self, arg: str):
+        from crabagent.core.agent.agents import load_agent_registry
+
+        agents = await load_agent_registry()
+        if not agents:
+            self.console.print("[dim]No enabled agents. Use /agents add[/dim]")
+            return
+
+        if arg.strip():
+            parts = arg.split(maxsplit=1)
+            maybe_agent = parts[0].lstrip("@")
+            task = parts[1].strip() if len(parts) > 1 else ""
+            agent_names = [a["name"] for a in agents]
+            if maybe_agent in agent_names:
+                if not task:
+                    task = await asyncio.get_event_loop().run_in_executor(
+                        None, lambda: input(f"Task for @{maybe_agent}: ").strip()
+                    )
+                    if not task:
+                        self.console.print("[dim]No task.[/dim]")
+                        return
+                await self._run_delegation(maybe_agent, task)
+                return
+            task = arg
+            self.console.print("[bold]Select agent:[/bold]")
+            for i, a in enumerate(agents, 1):
+                self.console.print(f"  {i}. {a['icon']} {a['display_name']} ({a['name']})")
+            try:
+                choice = await asyncio.get_event_loop().run_in_executor(
+                    None, lambda: input("Agent # (or name): ").strip()
+                )
+            except (EOFError, KeyboardInterrupt):
+                return
+            if choice.isdigit():
+                idx = int(choice) - 1
+                if 0 <= idx < len(agents):
+                    await self._run_delegation(agents[idx]["name"], task)
+                else:
+                    self.console.print("[dim]Invalid.[/dim]")
+            elif choice in agent_names:
+                await self._run_delegation(choice, task)
+            else:
+                self.console.print("[dim]Invalid.[/dim]")
+            return
+
+        self.console.print("[bold]Select agent(s):[/bold]")
+        for i, a in enumerate(agents, 1):
+            self.console.print(f"  {i}. {a['icon']} {a['display_name']} ({a['name']})")
+        try:
+            choices = await asyncio.get_event_loop().run_in_executor(
+                None, lambda: input("Agent #s (comma-sep): ").strip()
+            )
+        except (EOFError, KeyboardInterrupt):
+            return
+        if not choices:
+            return
+        selected = []
+        agent_names = [a["name"] for a in agents]
+        for c in choices.split(","):
+            c = c.strip()
+            if c.isdigit():
+                idx = int(c) - 1
+                if 0 <= idx < len(agents):
+                    selected.append(agents[idx]["name"])
+            elif c in agent_names:
+                selected.append(c)
+        if not selected:
+            self.console.print("[dim]No agents selected.[/dim]")
+            return
+        try:
+            task = await asyncio.get_event_loop().run_in_executor(
+                None, lambda: input("Task: ").strip()
+            )
+        except (EOFError, KeyboardInterrupt):
+            return
+        if not task:
+            self.console.print("[dim]No task.[/dim]")
+            return
+        if len(selected) == 1:
+            await self._run_delegation(selected[0], task)
+        else:
+            await self._run_parallel_delegation(selected, task)
+
+    async def _run_delegation(self, agent_name: str, task: str):
+        prefix = f'[delegate_task] agent_name="{agent_name}" task="{task}"'
+        self.console.print(f"\n[bold]\u25b6 \u2192 @{agent_name} {task}[/bold]")
+        self._stream = ""
+        self._thinking_active = False
+        self._rendered_up_to = 0
+        self._in_code_block = False
+        self._sub_agent_tasks = {}
+        try:
+            self.agent_ctx.iteration = 0
+            await run_agent(self.agent_ctx, prefix)
+        except KeyboardInterrupt:
+            self._stop_live()
+            self._stop_tool_live()
+            self.console.print("\n[dim][interrupted][/dim]")
+        except Exception as e:
+            self._stop_live()
+            self._stop_tool_live()
+            self.console.print(f"\n[red]Error: {e}[/red]")
+        self._stop_live()
+        self._stop_tool_live()
+
+    async def _run_parallel_delegation(self, agent_names: list[str], task: str):
+        import json
+
+        tasks_json = json.dumps(
+            [{"agent_name": n, "task": task} for n in agent_names],
+            ensure_ascii=False,
+        )
+        prefix = f"[delegate_parallel] tasks={tasks_json}"
+        names_str = ", ".join(f"@{n}" for n in agent_names)
+        self.console.print(f"\n[bold]\u25b6 \u2192 {names_str} {task}[/bold]")
+        self._stream = ""
+        self._thinking_active = False
+        self._rendered_up_to = 0
+        self._in_code_block = False
+        self._sub_agent_tasks = {}
+        try:
+            self.agent_ctx.iteration = 0
+            await run_agent(self.agent_ctx, prefix)
+        except KeyboardInterrupt:
+            self._stop_live()
+            self._stop_tool_live()
+            self.console.print("\n[dim][interrupted][/dim]")
+        except Exception as e:
+            self._stop_live()
+            self._stop_tool_live()
+            self.console.print(f"\n[red]Error: {e}[/red]")
+        self._stop_live()
+        self._stop_tool_live()
+
+    def _parse_agent_mentions(self, text: str) -> tuple[list[str], str]:
+        import re
+
+        pattern = r"@(\w+)"
+        matches = re.findall(pattern, text)
+        clean = re.sub(r"@\w+\s*", "", text).strip()
+        return matches, clean
+
+    async def _handle_mention_delegation(self, mentions: list[str], task: str):
+        from crabagent.core.agent.agents import load_agent_registry
+
+        agents = await load_agent_registry()
+        agent_names = {a["name"] for a in agents}
+        valid = [m for m in mentions if m in agent_names]
+        if not valid:
+            self.console.print(f"[dim]Unknown agent(s): {', '.join(mentions)}[/dim]")
+            return
+        if not task:
+            task = "(execute assigned task)"
+        if len(valid) == 1:
+            await self._run_delegation(valid[0], task)
+        else:
+            await self._run_parallel_delegation(valid, task)
+
+    async def _build_completer(self):
+        words = list(SLASH_COMMANDS)
+        try:
+            from crabagent.core.agent.agents import load_agent_registry
+
+            agents = await load_agent_registry()
+            for a in agents:
+                words.append(f"@{a['name']}")
+        except Exception:
+            pass
+        return WordCompleter(words, ignore_case=True, sentence=True)
 
     async def _initialize(self):
         from crabagent.core.database import init_db
