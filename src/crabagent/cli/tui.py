@@ -1,9 +1,10 @@
-"""CrabAgent TUI — Rich Live streaming + Console.print final + prompt_toolkit input."""
+"""CrabAgent TUI — Chunked Live streaming with auto-commit for scrollable Markdown output."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import shutil
 from pathlib import Path
 
 from prompt_toolkit import PromptSession
@@ -13,6 +14,7 @@ from prompt_toolkit.styles import Style
 from rich.console import Console
 from rich.live import Live
 from rich.markdown import Markdown
+from rich.segment import Segment
 from rich.text import Text
 
 from crabagent.core.agent.context import AgentContext
@@ -34,6 +36,7 @@ SLASH_COMMANDS = [
     "/skill",
     "/export",
 ]
+_COMMIT_THRESHOLD = 0.7
 
 
 class TuiSession:
@@ -46,6 +49,8 @@ class TuiSession:
         self._tool_live: Live | None = None
         self._stream = ""
         self._thinking_active = False
+        self._rendered_up_to = 0
+        self._in_code_block = False
         self._provider_display = "default"
         self._conversation_id = None
         self._session_id_str = None
@@ -83,6 +88,8 @@ class TuiSession:
             self.console.print(f"\n[bold]▶ {ui}[/bold]")
             self._stream = ""
             self._thinking_active = False
+            self._rendered_up_to = 0
+            self._in_code_block = False
             try:
                 self.agent_ctx.iteration = 0
                 await run_agent(self.agent_ctx, ui)
@@ -117,10 +124,10 @@ class TuiSession:
             parts.append(f"Tools: {tp}")
         return f" [{self._provider_display}/{self.agent_ctx.model or '?'}] {' | '.join(parts)} "
 
-    def _start_live(self):
+    def _start_live(self, renderable=None):
         if not self._live:
             self._live = Live(
-                Markdown(""),
+                renderable or Markdown(""),
                 console=self.console,
                 refresh_per_second=12,
                 screen=False,
@@ -134,6 +141,65 @@ class TuiSession:
         if self._live:
             self._live.stop()
             self._live = None
+
+    def _term_height(self):
+        return shutil.get_terminal_size().lines - 6
+
+    def _measure_rendered_lines(self, text):
+        if not text.strip():
+            return 0
+        try:
+            segments = list(self.console.render(Markdown(text), self.console.options))
+            lines = list(Segment.split_lines(segments))
+            return len(lines)
+        except Exception:
+            return text.count("\n") + 1
+
+    def _find_safe_split(self, text, max_lines):
+        in_code = self._in_code_block
+        count = 0
+        best = 0
+        i = 0
+        while i < len(text):
+            if text[i:i + 3] == "```":
+                in_code = not in_code
+                i += 3
+                continue
+            if text[i] == "\n":
+                count += 1
+                if count >= max_lines:
+                    return best
+                if not in_code and text[i:i + 2] == "\n\n":
+                    best = i + 2
+                elif not in_code and best == 0:
+                    best = i + 1
+            i += 1
+        return 0
+
+    def _commit_rendered(self):
+        live_content = self._stream[self._rendered_up_to:]
+        if not live_content.strip():
+            return
+        term_h = self._term_height()
+        measured = self._measure_rendered_lines(live_content)
+        if measured < term_h:
+            return
+        threshold = max(1, int(term_h * _COMMIT_THRESHOLD))
+        split = self._find_safe_split(live_content, threshold)
+        if split <= 0:
+            return
+        to_commit = live_content[:split]
+        self._stop_live()
+        if to_commit.strip():
+            self.console.print(Markdown(to_commit))
+        toggle_count = to_commit.count("```")
+        if toggle_count % 2 == 1:
+            self._in_code_block = not self._in_code_block
+        self._rendered_up_to += split
+        remaining = self._stream[self._rendered_up_to:]
+        if remaining.strip():
+            self._start_live(Markdown(remaining))
+            self._live.update(Markdown(remaining), refresh=True)
 
     def _stop_tool_live(self):
         if self._tool_live:
@@ -187,16 +253,23 @@ class TuiSession:
                 self.console.print()
             self._stop_tool_live()
             self._stream += event.data.get("text", "")
-            self._start_live()
-            self._live.update(Markdown(self._stream), refresh=True)
-        elif event.type == EventType.TEXT_DONE:
-            if self._stream.strip():
-                self._stop_live()
-                self.console.print(Markdown(self._stream))
+            live_content = self._stream[self._rendered_up_to:]
+            self._commit_rendered()
+            live_content = self._stream[self._rendered_up_to:]
+            if self._live:
+                self._live.update(Markdown(live_content), refresh=True)
             else:
-                self._stop_live()
+                self._start_live(Markdown(live_content))
+        elif event.type == EventType.TEXT_DONE:
+            remaining = self._stream[self._rendered_up_to:]
+            self._stop_live()
+            if remaining.strip():
+                self.console.print(Markdown(remaining))
+            elif not self._stream.strip():
                 self.console.print()
             self._stream = ""
+            self._rendered_up_to = 0
+            self._in_code_block = False
         elif event.type == EventType.TOOL_CALL:
             cid = event.data.get("id", "")
             source = event.data.get("source", "builtin")
