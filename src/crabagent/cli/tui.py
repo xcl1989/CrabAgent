@@ -46,7 +46,6 @@ class TuiSession:
         self.console = Console()
         self._tool_buffer: dict[str, dict] = {}
         self._live: Live | None = None
-        self._tool_live: Live | None = None
         self._stream = ""
         self._thinking_active = False
         self._rendered_up_to = 0
@@ -184,41 +183,7 @@ class TuiSession:
             self._start_spinner()
 
     def _stop_tool_live(self):
-        if self._tool_live:
-            self._tool_live.stop()
-            self._tool_live = None
-            self._tool_buffer.clear()
-
-    def _ensure_tool_live(self):
-        if not self._tool_live:
-            self._tool_live = Live(
-                Text(""),
-                console=self.console,
-                refresh_per_second=12,
-                screen=False,
-                vertical_overflow="visible",
-                auto_refresh=False,
-            )
-            self._tool_live.start()
-
-    def _render_tools(self):
-        if not self._tool_live:
-            return
-        lines = Text()
-        for cid, t in self._tool_buffer.items():
-            source = t.get("source", "builtin")
-            prefix = "\U0001f50c " if source == "mcp" else ""
-            style = "bright_magenta" if source == "mcp" else "cyan"
-            lines.append(f"  {prefix}\u2192 {t['display']}\n", style=style)
-            if t["status"] == "done":
-                result_text = t["result"]
-                if len(result_text) > 300:
-                    result_text = result_text[:300] + "..."
-                lines.append(f"  \u2190 {result_text}\n", style="dim")
-            else:
-                lines.append("  \u2026\n", style="dim")
-            lines.append("\n")
-        self._tool_live.update(lines, refresh=True)
+        self._tool_buffer.clear()
 
     def _on_agent_event(self, event: AgentEvent):
         if event.type == EventType.THINKING_DELTA:
@@ -252,27 +217,13 @@ class TuiSession:
             if tool_name in ("delegate_task", "delegate_parallel", "handoff_to", "list_agents"):
                 pass
             else:
-                cid = event.data.get("id", "")
                 source = event.data.get("source", "builtin")
                 display = self._fmt_tool(tool_name, event.data.get("arguments", {}))
-                self._tool_buffer[cid] = {
-                    "display": display,
-                    "status": "pending",
-                    "result": "",
-                    "source": source,
-                }
-                self._ensure_tool_live()
-                self._render_tools()
+                style = "bright_magenta" if source == "mcp" else "dim"
+                self._stop_live()
+                self.console.print(Text(f"  → {display}", style=style))
         elif event.type == EventType.TOOL_RESULT:
-            cid = event.data.get("id", "")
-            if cid in self._tool_buffer:
-                result = event.data.get("result", "") or ""
-                first_line = result.split("\n")[0] if result else ""
-                self._tool_buffer[cid]["status"] = "done"
-                self._tool_buffer[cid]["result"] = first_line[:300]
-                self._render_tools()
-            if self._tool_buffer and all(t["status"] == "done" for t in self._tool_buffer.values()):
-                self._stop_tool_live()
+            pass
         elif event.type == EventType.AGENT_ERROR:
             self._stop_live()
             self._stop_tool_live()
