@@ -259,8 +259,11 @@ class TuiSession:
         elif event.type == EventType.SUB_AGENT_TEXT_DELTA:
             sub_id = event.data.get("sub_agent_id", "")
             text = event.data.get("text", "")
+            role = event.data.get("role", "")
             if sub_id in self._sub_agent_tasks:
                 self._sub_agent_tasks[sub_id]["text"] += text
+                if role == "thinking":
+                    self._sub_agent_tasks.setdefault(sub_id, {}).setdefault("_thinking", []).append(text)
         elif event.type == EventType.SUB_AGENT_TOOL_CALL:
             sub_id = event.data.get("sub_agent_id", "")
             if sub_id in self._sub_agent_tasks:

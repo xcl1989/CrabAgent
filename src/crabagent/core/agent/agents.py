@@ -194,6 +194,25 @@ async def spawn_sub_agent(
                     "result": event.data.get("result", "")[:500],
                 },
             ))
+        elif event.type in (EventType.THINKING_DELTA,):
+            await parent_context.event_bus.emit(AgentEvent(
+                type=EventType.SUB_AGENT_TEXT_DELTA,
+                data={
+                    "sub_agent_id": sub_id, "agent_name": agent_name,
+                    "text": event.data.get("text", ""),
+                    "role": "thinking",
+                },
+            ))
+        elif event.type in (EventType.THINKING_DONE,):
+            pass
+        elif event.type in (EventType.AGENT_ERROR,):
+            await parent_context.event_bus.emit(AgentEvent(
+                type=EventType.SUB_AGENT_ERROR,
+                data={
+                    "sub_agent_id": sub_id, "agent_name": agent_name,
+                    "error": event.data.get("error", "unknown error"),
+                },
+            ))
 
     sub_context.event_bus.subscribe(_bridge_events)
 
