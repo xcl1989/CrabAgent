@@ -875,6 +875,7 @@ class TuiSession:
         self.console.clear()
         self._print_banner()
         if hist:
+            import json as _json
             for msg in hist:
                 role = msg.get("role", "")
                 content = msg.get("content") or ""
@@ -884,18 +885,16 @@ class TuiSession:
                 elif role == "assistant":
                     if reasoning:
                         self.console.print(Text(f"Thinking: {reasoning[:200]}", style="dim"))
+                    tool_calls = msg.get("tool_calls") or []
+                    for tc in tool_calls:
+                        fn = tc.get("function", {})
+                        args_raw = fn.get("arguments", {})
+                        args = _json.loads(args_raw) if isinstance(args_raw, str) else args_raw
+                        display = self._fmt_tool(fn.get("name", ""), args)
+                        self.console.print(Text(f"  \u2192 {display}", style="cyan"))
                     if content:
                         self.console.print(Markdown(content))
                         self.console.print()
-                    tool_calls = msg.get("tool_calls") or []
-                    if tool_calls and not content:
-                        names = [tc.get("function", {}).get("name", "?") for tc in tool_calls]
-                        self.console.print(Text(f"  \u2192 {', '.join(names)}", style="cyan"))
-                elif role == "tool":
-                    tool_name = msg.get("name", "")
-                    result_preview = (content or "")[:120]
-                    if tool_name:
-                        self.console.print(Text(f"  \u2190 {tool_name}: {result_preview}", style="dim"))
         user_count = sum(1 for m in hist if m.get("role") == "user")
         self.console.print(
             f"[dim]Loaded session {cv.session_id[:8]} "
