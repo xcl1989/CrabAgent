@@ -877,13 +877,25 @@ class TuiSession:
         if hist:
             for msg in hist:
                 role = msg.get("role", "")
-                content = msg.get("content", "")
+                content = msg.get("content") or ""
+                reasoning = msg.get("reasoning_content") or ""
                 if role == "user" and content:
                     self.console.print(f"[dim]\u25b6 {content}[/dim]")
-                elif role == "assistant" and content:
-                    self.console.print(Markdown(content))
-                    self.console.print()
-        self.console.print(f"[dim]Loaded session {cv.session_id[:8]} ({len(hist)} messages)[/dim]")
+                elif role == "assistant":
+                    if reasoning:
+                        self.console.print(Text(f"Thinking: {reasoning[:200]}", style="dim"))
+                    if content:
+                        self.console.print(Markdown(content))
+                        self.console.print()
+                elif role == "tool":
+                    tool_name = msg.get("name", "")
+                    if tool_name:
+                        self.console.print(Text(f"  \u2192 {tool_name}", style="dim"))
+        user_count = sum(1 for m in hist if m.get("role") == "user")
+        self.console.print(
+            f"[dim]Loaded session {cv.session_id[:8]} "
+            f"({user_count} turns, {len(hist)} messages)[/dim]"
+        )
 
     def _replace_persistence_listener(self):
         if not self.agent_ctx or not self._conversation_id:
