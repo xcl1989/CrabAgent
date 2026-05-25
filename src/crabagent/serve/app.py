@@ -19,9 +19,6 @@ litellm.set_verbose = False
 
 
 @asynccontextmanager
-
-
-@asynccontextmanager
 async def lifespan(app: FastAPI):
     from crabagent.core.database import init_db
 
@@ -60,7 +57,7 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     app = FastAPI(
         title="CrabAgent",
-        version="0.6.5",
+        version="0.6.6",
         lifespan=lifespan,
     )
     app.state.event_queues = {}
@@ -113,7 +110,7 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     async def health():
-        return {"status": "ok", "version": "0.6.5"}
+        return {"status": "ok", "version": "0.6.6"}
 
     _mount_spa(app)
 
