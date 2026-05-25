@@ -313,7 +313,7 @@ class TuiSession:
 
     def _print_banner(self):
         self.console.print(
-            f"[bold]CrabAgent v0.5.2[/bold]\n  provider: {self._provider_display}  model: {self.agent_ctx.model or 'default'}\n  workspace: {self.agent_ctx.workspace}\n"
+            f"[bold]CrabAgent v0.5.3[/bold]\n  provider: {self._provider_display}  model: {self.agent_ctx.model or 'default'}\n  workspace: {self.agent_ctx.workspace}\n"
         )
 
     async def _handle_slash(self, ui: str) -> bool:
@@ -498,6 +498,19 @@ class TuiSession:
                 )
                 self.console.print(f"    [dim]Role: {a.role}[/dim]")
                 self.console.print(f"    [dim]Goal: {a.goal[:80]}[/dim]")
+                tools_val = getattr(a, "tools", None) or ""
+                if isinstance(tools_val, list):
+                    tools_str = ", ".join(tools_val) if tools_val else "(all)"
+                elif isinstance(tools_val, str) and tools_val:
+                    import json as _json
+                    try:
+                        tl = _json.loads(tools_val)
+                        tools_str = ", ".join(tl) if tl else "(all)"
+                    except Exception:
+                        tools_str = "(all)"
+                else:
+                    tools_str = "(all)"
+                self.console.print(f"    [dim]Tools: {tools_str}[/dim]")
 
         elif sc == "add":
             name = input("Name (lowercase, no spaces): ").strip().lower().replace(" ", "_")
@@ -516,6 +529,16 @@ class TuiSession:
             backstory = input("Backstory (opt): ").strip()
             model = input("Model override (opt): ").strip()
             icon = input("Icon emoji (opt): ").strip() or "🤖"
+            print("\nAvailable tools: bash, read, write, edit, glob, grep,")
+            print("  web_search, web_scrape, browser, sandbox,")
+            print("  shared_get, shared_put, shared_list")
+            tools_input = input("Tools (comma-separated, empty=all): ").strip()
+            import json as _json
+            tools_json = ""
+            if tools_input:
+                tools_list = [t.strip() for t in tools_input.split(",") if t.strip()]
+                if tools_list:
+                    tools_json = _json.dumps(tools_list)
 
             from sqlalchemy import select
 
@@ -540,6 +563,7 @@ class TuiSession:
                         model=model,
                         icon=icon,
                         is_default=False,
+                        tools=tools_json,
                     )
                     db.add(profile)
                     await db.commit()
@@ -552,6 +576,8 @@ class TuiSession:
             if not sa:
                 self.console.print("[dim]/agents edit <name>[/dim]")
                 return
+            import json as _json
+
             from sqlalchemy import select
 
             from crabagent.core.agent.agents import invalidate_cache
@@ -573,6 +599,17 @@ class TuiSession:
             backstory = input(f"Backstory [{(profile.backstory or '')[:60]}]: ").strip()
             model = input(f"Model [{profile.model or 'inherit'}]: ").strip()
             icon = input(f"Icon [{profile.icon or '🤖'}]: ").strip()
+            current_tools = []
+            if profile.tools:
+                try:
+                    current_tools = _json.loads(profile.tools)
+                except Exception:
+                    pass
+            current_tools_str = ", ".join(current_tools) if current_tools else "all"
+            print("\nAvailable tools: bash, read, write, edit, glob, grep,")
+            print("  web_search, web_scrape, browser, sandbox,")
+            print("  shared_get, shared_put, shared_list")
+            tools_input = input(f"Tools [{current_tools_str}]: ").strip()
 
             async with async_session_factory() as db:
                 result = await db.execute(
@@ -593,6 +630,9 @@ class TuiSession:
                     profile.model = model
                 if icon:
                     profile.icon = icon
+                if tools_input:
+                    tools_list = [t.strip() for t in tools_input.split(",") if t.strip()]
+                    profile.tools = _json.dumps(tools_list) if tools_list else ""
                 await db.commit()
             invalidate_cache()
             self.console.print(f"[dim]Agent '{sa}' updated.[/dim]")

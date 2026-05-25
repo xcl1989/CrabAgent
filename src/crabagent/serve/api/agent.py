@@ -26,6 +26,7 @@ class AgentProfileResponse(BaseModel):
     enabled: bool
     icon: str
     is_default: bool
+    tools: list[str]
     created_at: str
 
 
@@ -38,6 +39,7 @@ class CreateAgentRequest(BaseModel):
     model: str = ""
     icon: str = "🤖"
     allow_delegation: bool = True
+    tools: list[str] | None = None
 
 
 class UpdateAgentRequest(BaseModel):
@@ -49,9 +51,18 @@ class UpdateAgentRequest(BaseModel):
     icon: str | None = None
     allow_delegation: bool | None = None
     enabled: bool | None = None
+    tools: list[str] | None = None
 
 
 def _to_response(a: AgentProfile) -> AgentProfileResponse:
+    import json as _json
+
+    tools_list = []
+    if a.tools:
+        try:
+            tools_list = _json.loads(a.tools)
+        except Exception:
+            pass
     return AgentProfileResponse(
         id=a.id,
         name=a.name,
@@ -64,6 +75,7 @@ def _to_response(a: AgentProfile) -> AgentProfileResponse:
         enabled=a.enabled,
         icon=a.icon or "",
         is_default=a.is_default or False,
+        tools=tools_list,
         created_at=a.created_at.isoformat() if a.created_at else "",
     )
 
@@ -90,6 +102,8 @@ async def create_agent_profile(
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=409, detail=f"Agent '{name}' already exists")
 
+    import json as _json
+
     profile = AgentProfile(
         user_id=user.id,
         name=name,
@@ -101,6 +115,7 @@ async def create_agent_profile(
         icon=req.icon,
         allow_delegation=req.allow_delegation,
         is_default=False,
+        tools=_json.dumps(req.tools) if req.tools else "",
     )
     db.add(profile)
     await db.commit()
@@ -137,6 +152,9 @@ async def update_agent_profile(
         profile.allow_delegation = req.allow_delegation
     if req.enabled is not None:
         profile.enabled = req.enabled
+    if req.tools is not None:
+        import json as _json
+        profile.tools = _json.dumps(req.tools) if req.tools else ""
 
     await db.commit()
     await db.refresh(profile)

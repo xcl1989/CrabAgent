@@ -32,6 +32,10 @@ class EventType(StrEnum):
     SUB_AGENT_TEXT_DELTA = "sub_agent_text_delta"
     SUB_AGENT_TOOL_CALL = "sub_agent_tool_call"
     SUB_AGENT_TOOL_RESULT = "sub_agent_tool_result"
+    PIPELINE_START = "pipeline_start"
+    PIPELINE_STEP_START = "pipeline_step_start"
+    PIPELINE_STEP_END = "pipeline_step_end"
+    PIPELINE_END = "pipeline_end"
 
 
 @dataclass

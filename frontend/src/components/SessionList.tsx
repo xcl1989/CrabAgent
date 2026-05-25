@@ -8,14 +8,13 @@ interface Props {
   onSelect: (session: Session) => void;
   onNew: () => void;
   onDelete: (sessionId: string) => void;
-  onLogout: () => void;
   onOpenProviders: () => void;
   onOpenMcpServers: () => void;
   onOpenScheduledTasks: () => void;
   onOpenAgentTeam: () => void;
 }
 
-export default function SessionList({ sessions, activeId, onSelect, onNew, onDelete, onLogout, onOpenProviders, onOpenMcpServers, onOpenScheduledTasks, onOpenAgentTeam }: Props) {
+export default function SessionList({ sessions, activeId, onSelect, onNew, onDelete, onOpenProviders, onOpenMcpServers, onOpenScheduledTasks, onOpenAgentTeam }: Props) {
   const [collapsed, setCollapsed] = useState(false);
 
   if (collapsed) {
@@ -36,9 +35,6 @@ export default function SessionList({ sessions, activeId, onSelect, onNew, onDel
         </button>
         <button onClick={onOpenProviders} className="text-xs" style={{ color: "var(--text-secondary)" }} title="Providers">
           ⚙
-        </button>
-        <button onClick={onLogout} className="text-xs" style={{ color: "var(--text-secondary)" }} title="Logout">
-          ⏻
         </button>
       </div>
     );
@@ -101,41 +97,34 @@ export default function SessionList({ sessions, activeId, onSelect, onNew, onDel
         )}
       </div>
 
-      <div className="p-3 flex gap-2 border-t" style={{ borderTop: "1px solid var(--border)" }}>
+      <div className="p-2 flex gap-1.5 border-t" style={{ borderTop: "1px solid var(--border)" }}>
         <button
           onClick={onOpenMcpServers}
-          className="flex-1 text-xs py-2 rounded"
+          className="flex-1 text-[10px] py-1.5 rounded font-medium tracking-wide"
           style={{ background: "#2d1f5e", color: "#a78bfa" }}
         >
           MCP
         </button>
         <button
           onClick={onOpenScheduledTasks}
-          className="flex-1 text-xs py-2 rounded"
+          className="flex-1 text-[10px] py-1.5 rounded font-medium tracking-wide"
           style={{ background: "#2d1f5e", color: "#fbbf24" }}
         >
-          ⏱ Tasks
+          Tasks
         </button>
         <button
           onClick={onOpenAgentTeam}
-          className="flex-1 text-xs py-2 rounded"
+          className="flex-1 text-[10px] py-1.5 rounded font-medium tracking-wide"
           style={{ background: "#4c1d95", color: "#a78bfa" }}
         >
-          🤖 Team
+          Team
         </button>
         <button
           onClick={onOpenProviders}
-          className="flex-1 text-xs py-2 rounded"
+          className="flex-1 text-[10px] py-1.5 rounded font-medium tracking-wide"
           style={{ background: "var(--bg-tertiary)", color: "var(--text-secondary)" }}
         >
           Providers
-        </button>
-        <button
-          onClick={onLogout}
-          className="flex-1 text-xs py-2 rounded"
-          style={{ background: "var(--bg-tertiary)", color: "var(--text-secondary)" }}
-        >
-          Logout
         </button>
       </div>
     </div>

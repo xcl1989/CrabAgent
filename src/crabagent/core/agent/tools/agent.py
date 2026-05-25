@@ -146,3 +146,175 @@ async def delegate_parallel(tasks: list[dict], context=None) -> str:
             lines.append(f"**{agent}**:\n{r}")
         lines.append("")
     return "\n".join(lines)
+
+
+@registry.register(
+    name="request_help",
+    description=(
+        "Request help from another agent when you encounter something beyond your expertise. "
+        "Use this when your current task requires different skills. "
+        "The helper agent works independently and returns results to you."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "agent_name": {
+                "type": "string",
+                "description": "Name of the agent to ask for help",
+            },
+            "question": {
+                "type": "string",
+                "description": "Clear description of what you need help with",
+            },
+        },
+        "required": ["agent_name", "question"],
+    },
+    metadata={"source": "builtin", "category": "agent"},
+)
+async def request_help(agent_name: str, question: str, context=None) -> str:
+    if context is None:
+        return "Error: request_help requires an active session"
+    depth = context.metadata.get("_sub_agent_depth", 0)
+    if depth >= 1:
+        return "Error: cannot request help (maximum nesting depth reached)"
+    from crabagent.core.agent.agents import spawn_sub_agent
+    return await spawn_sub_agent(agent_name, question, context)
+
+
+@registry.register(
+    name="run_pipeline",
+    description=(
+        "Run a multi-step agent pipeline with dependencies between steps. "
+        "Steps without dependencies run in parallel; steps with depends_on wait for those to finish first. "
+        "Each step's result is automatically saved to shared workspace for subsequent steps. "
+        "Use for complex multi-step workflows that need coordinated execution."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "steps": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "id": {
+                            "type": "string",
+                            "description": "Unique identifier for this step, e.g. 'research', 'analyze', 'implement'",
+                        },
+                        "agent_name": {
+                            "type": "string",
+                            "description": "Name of the agent to run for this step",
+                        },
+                        "task": {
+                            "type": "string",
+                            "description": "Task description for this step",
+                        },
+                        "depends_on": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "List of step IDs that must complete before this step runs",
+                        },
+                    },
+                    "required": ["id", "agent_name", "task"],
+                },
+                "description": "Ordered list of pipeline steps with optional dependencies",
+            },
+        },
+        "required": ["steps"],
+    },
+    metadata={"source": "builtin", "category": "agent"},
+)
+async def run_pipeline(steps: list[dict], context=None) -> str:
+    if context is None:
+        return "Error: run_pipeline requires an active session"
+    if not steps:
+        return "Error: empty pipeline"
+
+    import asyncio
+
+    from crabagent.core.agent.agents import spawn_sub_agent
+    from crabagent.core.event import AgentEvent, EventType
+
+    step_map = {s["id"]: s for s in steps}
+    results: dict[str, str] = {}
+
+    deps: dict[str, set[str]] = {}
+    for s in steps:
+        sid = s["id"]
+        deps[sid] = set(s.get("depends_on") or [])
+
+    await context.event_bus.emit(AgentEvent(
+        type=EventType.PIPELINE_START,
+        data={"total_steps": len(steps), "step_ids": list(step_map.keys())},
+    ))
+
+    completed: set[str] = set()
+    failed: set[str] = set()
+
+    while len(completed) + len(failed) < len(steps):
+        ready = []
+        for sid in step_map:
+            if sid in completed or sid in failed:
+                continue
+            if deps[sid].issubset(completed):
+                ready.append(sid)
+
+        if not ready:
+            remaining = [sid for sid in step_map if sid not in completed and sid not in failed]
+            if remaining:
+                failed.update(remaining)
+                for sid in remaining:
+                    results[sid] = f"Error: unresolved dependencies (depends on {deps[sid] - completed})"
+            break
+
+        async def _run_step(sid: str) -> tuple[str, str]:
+            step = step_map[sid]
+            dep_context = ""
+            for dep_id in sorted(deps[sid]):
+                if dep_id in results:
+                    dep_context += f"\n### Result from step '{dep_id}':\n{results[dep_id][:1500]}\n"
+
+            task_text = step["task"]
+            if dep_context:
+                task_text = f"{task_text}\n\n## Dependency Results{dep_context}"
+
+            await context.event_bus.emit(AgentEvent(
+                type=EventType.PIPELINE_STEP_START,
+                data={"step_id": sid, "agent_name": step["agent_name"], "task": step["task"][:200]},
+            ))
+
+            result = await spawn_sub_agent(step["agent_name"], task_text, context)
+
+            await context.event_bus.emit(AgentEvent(
+                type=EventType.PIPELINE_STEP_END,
+                data={"step_id": sid, "agent_name": step["agent_name"], "result": result[:500]},
+            ))
+            return sid, result
+
+        coros = [_run_step(sid) for sid in ready]
+        step_results = await asyncio.gather(*coros, return_exceptions=True)
+
+        for sid, sr in zip(ready, step_results):
+            if isinstance(sr, Exception):
+                failed.add(sid)
+                results[sid] = f"Error: {sr}"
+            else:
+                _, result = sr
+                completed.add(sid)
+                results[sid] = result
+
+    await context.event_bus.emit(AgentEvent(
+        type=EventType.PIPELINE_END,
+        data={"completed": list(completed), "failed": list(failed), "total": len(steps)},
+    ))
+
+    lines = [f"# Pipeline Results ({len(completed)}/{len(steps)} succeeded)\n"]
+    for s in steps:
+        sid = s["id"]
+        status = "OK" if sid in completed else "FAIL"
+        lines.append(f"## Step: {sid} [{status}]")
+        lines.append(f"Agent: {s['agent_name']}")
+        if sid in results:
+            lines.append(results[sid])
+        lines.append("")
+    return "\n".join(lines)

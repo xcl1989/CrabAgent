@@ -12,6 +12,7 @@ export interface AgentProfile {
   enabled: boolean;
   icon: string;
   is_default: boolean;
+  tools: string[];
   created_at: string;
 }
 
@@ -24,6 +25,7 @@ export interface CreateAgentRequest {
   model?: string;
   icon?: string;
   allow_delegation?: boolean;
+  tools?: string[];
 }
 
 export interface UpdateAgentRequest {
@@ -35,6 +37,7 @@ export interface UpdateAgentRequest {
   icon?: string;
   allow_delegation?: boolean;
   enabled?: boolean;
+  tools?: string[];
 }
 
 export function listAgentProfiles(): Promise<AgentProfile[]> {

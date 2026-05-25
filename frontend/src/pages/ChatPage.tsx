@@ -779,7 +779,6 @@ export default function ChatPage({ onLogout }: Props) {
         onSelect={selectSession}
         onNew={newSession}
         onDelete={handleDeleteSession}
-        onLogout={onLogout}
         onOpenProviders={() => setShowProviders(true)}
         onOpenMcpServers={() => setShowMcpServers(true)}
         onOpenScheduledTasks={() => setShowScheduledTasks(true)}
@@ -816,6 +815,14 @@ export default function ChatPage({ onLogout }: Props) {
             title="Toggle file browser"
           >
             📁
+          </button>
+          <button
+            onClick={onLogout}
+            className="px-3 py-2 text-sm"
+            style={{ color: "var(--text-secondary)" }}
+            title="Logout"
+          >
+            ⏻
           </button>
         </div>
         {activeSession ? (

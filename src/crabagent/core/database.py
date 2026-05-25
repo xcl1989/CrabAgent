@@ -172,6 +172,19 @@ class AgentProfile(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     icon: Mapped[str] = mapped_column(String(10), default="")
     is_default: Mapped[bool] = mapped_column(Boolean, default=False)
+    tools: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class SharedMemory(Base):
+    __tablename__ = "shared_memory"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    key: Mapped[str] = mapped_column(String(200), nullable=False)
+    value: Mapped[str] = mapped_column(Text, default="")
+    author: Mapped[str] = mapped_column(String(100), default="")
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
@@ -261,6 +274,8 @@ async def init_db() -> None:
             await conn.execute(text("ALTER TABLE agent_profiles ADD COLUMN icon VARCHAR(10) DEFAULT ''"))
         if "is_default" not in columns:
             await conn.execute(text("ALTER TABLE agent_profiles ADD COLUMN is_default BOOLEAN DEFAULT 0"))
+        if "tools" not in columns:
+            await conn.execute(text("ALTER TABLE agent_profiles ADD COLUMN tools TEXT DEFAULT ''"))
 
     from crabagent.core.provider_store import migrate_plaintext_keys
     await migrate_plaintext_keys()
@@ -302,6 +317,11 @@ DEFAULT_AGENTS = [
             "in finding accurate and relevant information quickly."
         ),
         "icon": "🔍",
+        "tools": [
+            "web_search", "web_scrape", "browser",
+            "read", "glob", "grep",
+            "shared_get", "shared_put", "shared_list",
+        ],
     },
     {
         "name": "analyst",
@@ -316,6 +336,7 @@ DEFAULT_AGENTS = [
             "turning raw data into actionable insights."
         ),
         "icon": "📊",
+        "tools": ["bash", "read", "glob", "grep", "shared_get", "shared_put", "shared_list"],
     },
     {
         "name": "coder",
@@ -330,6 +351,7 @@ DEFAULT_AGENTS = [
             "across multiple programming languages and frameworks."
         ),
         "icon": "💻",
+        "tools": ["bash", "read", "write", "edit", "glob", "grep", "shared_get", "shared_put", "shared_list"],
     },
     {
         "name": "writer",
@@ -344,11 +366,14 @@ DEFAULT_AGENTS = [
             "complex information into clear, readable content."
         ),
         "icon": "📝",
+        "tools": ["read", "write", "edit", "glob", "grep", "web_search", "shared_get", "shared_put", "shared_list"],
     },
 ]
 
 
 async def _ensure_default_agents():
+    import json as _json
+
     from sqlalchemy import select
 
     async with async_session_factory() as db:
@@ -360,7 +385,9 @@ async def _ensure_default_agents():
             if existing:
                 if not existing.icon:
                     existing.icon = agent_data["icon"]
-                    existing.is_default = True
+                existing.is_default = True
+                if not existing.tools and agent_data.get("tools"):
+                    existing.tools = _json.dumps(agent_data["tools"])
                 continue
             db.add(AgentProfile(
                 user_id=1,
@@ -371,5 +398,70 @@ async def _ensure_default_agents():
                 backstory=agent_data["backstory"],
                 icon=agent_data["icon"],
                 is_default=True,
+                tools=_json.dumps(agent_data.get("tools", [])),
             ))
+        await db.commit()
+
+
+async def shared_memory_put(session_id: str, key: str, value: str, author: str = "") -> None:
+    from sqlalchemy import select
+
+    async with async_session_factory() as db:
+        result = await db.execute(
+            select(SharedMemory).where(
+                SharedMemory.session_id == session_id,
+                SharedMemory.key == key,
+            )
+        )
+        existing = result.scalar_one_or_none()
+        if existing:
+            existing.value = value
+            existing.author = author
+            existing.updated_at = utcnow()
+        else:
+            db.add(SharedMemory(
+                session_id=session_id, key=key, value=value, author=author,
+            ))
+        await db.commit()
+
+
+async def shared_memory_get(session_id: str, key: str) -> str | None:
+    from sqlalchemy import select
+
+    async with async_session_factory() as db:
+        result = await db.execute(
+            select(SharedMemory).where(
+                SharedMemory.session_id == session_id,
+                SharedMemory.key == key,
+            )
+        )
+        row = result.scalar_one_or_none()
+        return row.value if row else None
+
+
+async def shared_memory_get_all(session_id: str) -> list[dict]:
+    from sqlalchemy import select
+
+    async with async_session_factory() as db:
+        result = await db.execute(
+            select(SharedMemory)
+            .where(SharedMemory.session_id == session_id)
+            .order_by(SharedMemory.id)
+        )
+        return [
+            {"key": r.key, "value": r.value, "author": r.author}
+            for r in result.scalars().all()
+        ]
+
+
+async def shared_memory_delete(session_id: str, key: str) -> None:
+    from sqlalchemy import delete as sa_delete
+
+    async with async_session_factory() as db:
+        await db.execute(
+            sa_delete(SharedMemory).where(
+                SharedMemory.session_id == session_id,
+                SharedMemory.key == key,
+            )
+        )
         await db.commit()

@@ -12,6 +12,12 @@ const ICON_OPTIONS = [
   "⚙️", "🗂️", "📈", "🔬", "💡", "🎯", "🧪", "🏗️", "🌍", "🎭",
 ];
 
+const AVAILABLE_TOOLS = [
+  "bash", "read", "write", "edit", "glob", "grep",
+  "web_search", "web_scrape", "browser", "sandbox",
+  "shared_get", "shared_put", "shared_list",
+];
+
 interface Props {
   onClose: () => void;
 }
@@ -23,10 +29,11 @@ type FormState = {
   backstory: string;
   model: string;
   icon: string;
+  tools: string[];
 };
 
 const emptyForm: FormState = {
-  display_name: "", role: "", goal: "", backstory: "", model: "", icon: "🤖",
+  display_name: "", role: "", goal: "", backstory: "", model: "", icon: "🤖", tools: [],
 };
 
 export function AgentTeamPanel({ onClose }: Props) {
@@ -53,6 +60,7 @@ export function AgentTeamPanel({ onClose }: Props) {
       backstory: a.backstory || "",
       model: a.model || "",
       icon: a.icon || "🤖",
+      tools: a.tools || [],
     });
     setError("");
   };
@@ -94,6 +102,7 @@ export function AgentTeamPanel({ onClose }: Props) {
         backstory: form.backstory,
         model: form.model,
         icon: form.icon,
+        tools: form.tools,
       });
       await fetchAgents();
       setShowCreate(false);
@@ -175,6 +184,35 @@ export function AgentTeamPanel({ onClose }: Props) {
         <input value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })}
           className="w-full px-2.5 py-1.5 rounded-lg text-xs outline-none"
           style={{ background: "var(--bg-tertiary)", color: "var(--text-primary)", border: "1px solid var(--border)" }} placeholder="Leave empty to use default" />
+      </div>
+      <div>
+        <label className="block text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: "var(--text-secondary)" }}>
+          Tools {form.tools.length === 0 && <span style={{ color: "var(--text-secondary)", fontWeight: 400, textTransform: "none" }}>(all enabled)</span>}
+        </label>
+        <div className="flex flex-wrap gap-1">
+          {AVAILABLE_TOOLS.map((t) => {
+            const selected = form.tools.includes(t);
+            return (
+              <button key={t} type="button" onClick={() => {
+                setForm({ ...form, tools: selected ? form.tools.filter((x) => x !== t) : [...form.tools, t] });
+              }} className="text-[10px] px-1.5 py-0.5 rounded transition-all"
+                style={{
+                  background: selected ? "var(--accent)" : "var(--bg-tertiary)",
+                  color: selected ? "var(--text-on-accent)" : "var(--text-secondary)",
+                  border: `1px solid ${selected ? "var(--accent)" : "var(--border)"}`,
+                }}>
+                {t}
+              </button>
+            );
+          })}
+          {form.tools.length > 0 && (
+            <button type="button" onClick={() => setForm({ ...form, tools: [] })}
+              className="text-[10px] px-1.5 py-0.5 rounded transition-all"
+              style={{ background: "var(--bg-tertiary)", color: "var(--text-secondary)", border: "1px solid var(--border)" }}>
+              clear
+            </button>
+          )}
+        </div>
       </div>
       <div className="flex gap-2 pt-1">
         <button onClick={onSave} disabled={saving}
@@ -270,6 +308,16 @@ export function AgentTeamPanel({ onClose }: Props) {
                   <p className="text-xs leading-relaxed" style={{ color: "var(--text-secondary)" }}>
                     {a.role} — {a.goal}
                   </p>
+                  {a.tools && a.tools.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-1.5">
+                      {a.tools.map((t) => (
+                        <span key={t} className="text-[9px] px-1.5 py-0.5 rounded font-mono"
+                          style={{ background: "var(--bg-tertiary)", color: "var(--text-secondary)", border: "1px solid var(--border)" }}>
+                          {t}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
