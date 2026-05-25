@@ -219,7 +219,7 @@ class TuiSession:
             else:
                 source = event.data.get("source", "builtin")
                 display = self._fmt_tool(tool_name, event.data.get("arguments", {}))
-                style = "bright_magenta" if source == "mcp" else "dim"
+                style = "bright_magenta" if source == "mcp" else "cyan"
                 self._stop_live()
                 self.console.print(Text(f"  → {display}", style=style))
         elif event.type == EventType.TOOL_RESULT:
