@@ -51,6 +51,7 @@ class TuiSession:
         self.console = Console()
         self._tool_buffer: dict[str, dict] = {}
         self._live: Live | None = None
+        self._sub_live: Live | None = None
         self._stream = ""
         self._thinking_active = False
         self._rendered_up_to = 0
@@ -153,6 +154,9 @@ class TuiSession:
         if self._live:
             self._live.stop()
             self._live = None
+        if self._sub_live:
+            self._sub_live.stop()
+            self._sub_live = None
 
     def _find_paragraph_boundary(self, text):
         in_code = self._in_code_block
@@ -190,6 +194,30 @@ class TuiSession:
 
     def _stop_tool_live(self):
         self._tool_buffer.clear()
+
+    def _render_sub_live(self):
+        running = {k: v for k, v in self._sub_agent_tasks.items() if v.get("status") == "running"}
+        if not running:
+            if self._sub_live:
+                self._sub_live.stop()
+                self._sub_live = None
+            return
+        from rich.text import Text
+
+        text = Text()
+        for sub_id, t in running.items():
+            display = t["display_name"]
+            tools = t["tools"]
+            current = t.get("current", "...")
+            text.append(f"▶ {display}", style="bold cyan")
+            text.append(f"  [{tools} tools]  ", style="dim")
+            text.append(f"→ {current[:60]}", style="cyan")
+            text.append("\n")
+        if self._sub_live:
+            self._sub_live.update(text, refresh=True)
+        else:
+            self._sub_live = Live(text, console=self.console, refresh_per_second=8, screen=False, transient=True)
+            self._sub_live.start()
 
     def _on_agent_event(self, event: AgentEvent):
         if event.type == EventType.THINKING_DELTA:
@@ -251,46 +279,51 @@ class TuiSession:
                 "display_name": display,
                 "task": task,
                 "status": "running",
-                "text": "",
                 "tools": 0,
+                "current": "starting...",
             }
-            self.console.print(
-                f"  [bold cyan]\u25b6 {display}[/bold cyan] [dim]starting: {task[:60]}[/dim]"
-            )
-            self._start_spinner()
+            self._render_sub_live()
         elif event.type == EventType.SUB_AGENT_TEXT_DELTA:
             sub_id = event.data.get("sub_agent_id", "")
-            text = event.data.get("text", "")
-            role = event.data.get("role", "")
             if sub_id in self._sub_agent_tasks:
-                self._sub_agent_tasks[sub_id]["text"] += text
-                if role == "thinking":
-                    self._sub_agent_tasks.setdefault(sub_id, {}).setdefault("_thinking", []).append(text)
+                t = self._sub_agent_tasks[sub_id]
+                if t.get("current") == "starting...":
+                    t["current"] = "thinking..."
+                    self._render_sub_live()
         elif event.type == EventType.SUB_AGENT_TOOL_CALL:
             sub_id = event.data.get("sub_agent_id", "")
+            name = event.data.get("name", "")
+            args = event.data.get("arguments", {})
             if sub_id in self._sub_agent_tasks:
-                self._sub_agent_tasks[sub_id]["tools"] += 1
+                t = self._sub_agent_tasks[sub_id]
+                t["tools"] += 1
+                t["current"] = self._fmt_tool(name, args)
+                self._render_sub_live()
         elif event.type == EventType.SUB_AGENT_TOOL_RESULT:
             pass
         elif event.type == EventType.SUB_AGENT_END:
-            self._stop_live()
             sub_id = event.data.get("sub_agent_id", "")
             display = event.data.get("display_name", "?")
             elapsed = event.data.get("elapsed", 0)
             tokens = event.data.get("tokens", 0)
             iterations = event.data.get("iterations", 0)
-            result = event.data.get("result", "")
             tools = self._sub_agent_tasks.get(sub_id, {}).get("tools", 0)
             if sub_id in self._sub_agent_tasks:
                 self._sub_agent_tasks[sub_id]["status"] = "done"
+            if self._sub_live:
+                self._sub_live.stop()
+                self._sub_live = None
             tok_str = f"{tokens:,}" if tokens else "0"
             self.console.print(
                 f"  [bold green]\u2713 {display}[/bold green] [dim]({elapsed}s, {tok_str} tok, {iterations} steps, {tools} tools)[/dim]"
             )
-            if result:
-                self.console.print(Markdown(result))
+            still_running = any(t.get("status") == "running" for t in self._sub_agent_tasks.values())
+            if still_running:
+                self._render_sub_live()
         elif event.type == EventType.SUB_AGENT_ERROR:
-            self._stop_live()
+            if self._sub_live:
+                self._sub_live.stop()
+                self._sub_live = None
             sub_id = event.data.get("sub_agent_id", "")
             agent_name = event.data.get("agent_name", "?")
             error = event.data.get("error", "unknown error")
@@ -299,6 +332,9 @@ class TuiSession:
             self.console.print(
                 f"  [bold red]\u2717 {agent_name}[/bold red] [red]Error: {error}[/red]"
             )
+            still_running = any(t.get("status") == "running" for t in self._sub_agent_tasks.values())
+            if still_running:
+                self._render_sub_live()
 
     def _fmt_tool(self, name: str, args: dict) -> str:
         if name == "read" and "file_path" in args:
@@ -315,7 +351,7 @@ class TuiSession:
 
     def _print_banner(self):
         self.console.print(
-            f"[bold]CrabAgent v0.6.2[/bold]\n  provider: {self._provider_display}  model: {self.agent_ctx.model or 'default'}\n  workspace: {self.agent_ctx.workspace}\n"
+            f"[bold]CrabAgent v0.6.3[/bold]\n  provider: {self._provider_display}  model: {self.agent_ctx.model or 'default'}\n  workspace: {self.agent_ctx.workspace}\n"
         )
 
     async def _handle_slash(self, ui: str) -> bool:
@@ -1378,4 +1414,5 @@ class TuiSession:
 
 async def run_tui(args):
     logging.getLogger("LiteLLM").setLevel(logging.WARNING)
+    logging.getLogger("primp").setLevel(logging.WARNING)
     await TuiSession(args).run()
