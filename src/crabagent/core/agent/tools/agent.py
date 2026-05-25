@@ -318,3 +318,116 @@ async def run_pipeline(steps: list[dict], context=None) -> str:
             lines.append(results[sid])
         lines.append("")
     return "\n".join(lines)
+
+
+@registry.register(
+    name="plan_task",
+    description=(
+        "Analyze a complex task and produce an execution plan with agent assignments. "
+        "Does NOT execute anything — only returns a plan. "
+        "After getting the plan, use `run_pipeline` (or `delegate_parallel` for independent steps) to execute. "
+        "Use this when you're unsure which agents to involve or how to break down a complex task."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "task": {
+                "type": "string",
+                "description": "The complex task to plan. Be specific.",
+            },
+        },
+        "required": ["task"],
+    },
+    metadata={"source": "builtin", "category": "agent"},
+)
+async def plan_task(task: str, context=None) -> str:
+    if context is None:
+        return "Error: plan_task requires an active session"
+
+    import json as _json
+
+    from crabagent.core.agent.agents import load_agent_registry
+
+    agents = await load_agent_registry()
+    if not agents:
+        return "Error: no agents available. Use list_agents."
+
+    agent_lines = []
+    for a in agents:
+        tools_info = f" Tools: {', '.join(a.get('tools', []))}" if a.get("tools") else ""
+        agent_lines.append(
+            f"- **{a['display_name']}** (`{a['name']}`): {a['role']}. {a['goal']}{tools_info}"
+        )
+    agent_text = "\n".join(agent_lines)
+
+    plan_prompt = (
+        "You are a task planner. Break this task into steps for specialized agents.\n\n"
+        f"## Available Agents\n{agent_text}\n\n"
+        f"## Task\n{task}\n\n"
+        "Rules:\n"
+        "1. Each step uses one available agent\n"
+        "2. Independent steps run in parallel; use depends_on for ordering\n"
+        "3. Be specific in each step's task description\n"
+        "4. Use 1-5 steps\n\n"
+        'Output ONLY a JSON array:\n'
+        '[{"id":"s1","agent_name":"researcher","task":"search X","depends_on":[]}]\n'
+        "No other text before or after."
+    )
+
+    try:
+        import litellm
+
+        from crabagent.core.provider_store import get_default_provider, get_provider
+
+        if context.provider_name:
+            provider = await get_provider(context.provider_name)
+        else:
+            provider = await get_default_provider()
+        if not provider:
+            return "Error: no provider configured"
+
+        llm_params = {"api_key": provider.api_key}
+        if provider.base_url:
+            llm_params["api_base"] = provider.base_url
+
+        model = context.model or "gpt-4"
+
+        response = await litellm.acompletion(
+            model=model,
+            messages=[{"role": "user", "content": plan_prompt}],
+            max_tokens=1000,
+            temperature=0.3,
+            **llm_params,
+        )
+
+        text = response.choices[0].message.content.strip()
+
+        start = text.find("[")
+        end = text.rfind("]") + 1
+        if start >= 0 and end > start:
+            text = text[start:end]
+
+        steps = _json.loads(text)
+
+        agent_names = {a["name"] for a in agents}
+        plan_lines = ["# Task Plan\n"]
+        for i, s in enumerate(steps):
+            aname = s["agent_name"]
+            stask = s["task"]
+            deps = s.get("depends_on", [])
+
+            if aname not in agent_names:
+                return f"Error: unknown agent '{aname}'. Available: {', '.join(agent_names)}"
+
+            dep_str = f" (after: {', '.join(deps)})" if deps else ""
+            plan_lines.append(f"{i + 1}. **{aname}** → {stask}{dep_str}")
+
+        plan_lines.append("")
+        plan_lines.append("Execute with `run_pipeline`:")
+        plan_lines.append("```json")
+        plan_lines.append(_json.dumps({"steps": steps}, ensure_ascii=False, indent=2))
+        plan_lines.append("```")
+        return "\n".join(plan_lines)
+    except Exception as e:
+        logger.debug("plan_task failed: %s", e, exc_info=True)
+        return f"Error planning task: {e}"

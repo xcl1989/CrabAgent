@@ -127,6 +127,7 @@ async def build_team_prompt() -> str:
         "### Delegation Tools",
         "",
         "- `list_agents`: List all available agents with details",
+        "- `plan_task(task)`: Analyze a complex task and produce an execution plan (does not execute)",
         "- `delegate_task(agent_name, task)`: Delegate a task to a specific agent",
         "- `delegate_parallel(tasks)`: Delegate tasks to multiple agents simultaneously",
         "- `handoff_to(agent_name, summary)`: Hand off work to another agent with context",
