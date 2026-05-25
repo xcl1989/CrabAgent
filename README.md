@@ -1,27 +1,23 @@
 # 🦀 CrabAgent
 
-> **AI Team Command Center** — Build a team of specialized AI agents, delegate tasks in parallel, and watch them work in real-time. All from a local web dashboard.
+> **AI Team Command Center** — Build a team of specialized AI agents that learn and improve over time. Delegate, parallelize, and watch them work in real-time from terminal or browser.
 
 CrabAgent is a local-first AI agent platform. Run it from any project directory via CLI or browser. Your data stays local, your API keys are encrypted, and you pick any LLM provider.
 
 ---
 
-## What Makes It Different
+## Why CrabAgent
 
-| Feature | Description |
-|---------|-------------|
-| **🤖 AI Team** | Create custom agent profiles; delegate tasks to multiple agents in parallel; each agent can use its own model |
-| **🧠 Team Memory** | Persistent team knowledge + auto-extracted lessons; agents remember across sessions |
-| **📋 Task Board** | Real-time right-side panel showing each agent's status (running/done/error), progress, and tool calls |
-| **@mention Delegation** | Type `@researcher search for X` and CrabAgent auto-delegates, or click agents from the toolbar |
-| **🔀 Parallel Execution** | Multiple agents run simultaneously — researcher searches while coder debugs while analyst compares |
-| **📊 Result Compare** | Side-by-side view of all agent outputs, with one-click Markdown export |
-| **⏱ Scheduled Tasks** | Agents run autonomously on a cron schedule with push notifications |
-| **🌐 Browser Automation** | Playwright-powered headless browser — navigate, click, screenshot, extract |
-| **🖼️ Multimodal** | Paste, upload, or drag images directly into chat; auto-detects vision-capable models |
-| **🔌 MCP Client** | Connect external MCP servers (stdio + HTTP); tools auto-discover and prefix |
-| **🦀 Snapshots** | Auto-snapshot files before changes; rollback anytime without Git |
-| **🔒 Privacy** | All data stays local; API keys encrypted at rest; no telemetry |
+Unlike other agent platforms where agents are "temporary workers who forget everything," CrabAgent's agents **learn and evolve**:
+
+| Capability | What it means |
+|-----------|---------------|
+| **🧠 Self-Evolving Agents** | Agents auto-extract lessons from every task — rule engine catches patterns, LLM reflection analyzes strategies. The more you use them, the smarter they get. |
+| **🤖 AI Team** | Custom agent profiles with per-agent tool whitelists and model overrides. Delegate, parallelize, or run multi-step pipelines. |
+| **📊 Agent Growth Tracking** | View each agent's stats: task count, success rate, lessons learned, common task categories. `ctrl+space agent_stats` |
+| **⏱ Scheduled + Real-time** | Agents run on cron schedules or react to @mentions. Real-time streaming of every agent's output. |
+| **🦀 Snapshots** | Auto-snapshot files before changes. Roll back anytime without Git. |
+| **🔒 Local-first** | All data stays on your machine. API keys encrypted at rest. No telemetry. |
 
 ---
 
@@ -46,25 +42,50 @@ crabagent -p deepseek -m deepseek-chat "write a Python script"
 
 ---
 
-## AI Team — Your Local Command Center
+## Self-Evolving Agents
 
-**1. Build your team** — Sidebar → 🤖 Team → + New Agent. Define each agent's role, goal, backstory, and model override.
+This is CrabAgent's core differentiator. Agents don't just execute tasks — they **learn from every execution**.
 
-**2. Delegate tasks** — Three ways to delegate:
-- Type `@researcher find competitor pricing` in the chat — auto-detected and sent
-- Click the 🤖 button next to the input → select agents → enter task → send
-- Click an agent from the toolbar above the input to insert a `@mention`
+### How it works
 
-**3. Watch in real-time** — The right-side Task Board shows every agent's progress:
-- 🟣 **Running** — purple pulsing card with live step count and timer
-- 🟢 **Done** — green card with elapsed time, tokens, and iteration count
-- 🔴 **Error** — red card with error summary
+```
+Sub-agent completes task
+    │
+    ├─ Rule Engine (instant)
+    │   ├─ High iterations → "Consider breaking tasks into smaller steps"
+    │   ├─ Low iterations → "Efficient execution pattern recorded"
+    │   └─ Source: rule
+    │
+    └─ LLM Reflection (best-effort, ~1s)
+        ├─ Analyzes strategy: what worked, what didn't
+        ├─ Classifies task category: code / research / analysis / writing
+        └─ Source: llm
+```
 
-**4. Review results** — Click any card to open the agent's full output, or click 📋 in the top toolbar for a split-pane comparison view of all results. Export to Markdown with one click.
+### Knowledge persistence
 
-**5. Go parallel** — Use `delegate_parallel` to run multiple agents simultaneously, or the web delegation modal to assign different tasks to different agents.
+- **Team Knowledge**: Tech stack, architecture decisions, user preferences — auto-injected into every session
+- **Agent Lessons**: Per-agent behavioral patterns — loaded before similar tasks
+- **Task Records**: Every execution logged (success, elapsed time, tokens, iterations)
 
-Built-in agents:
+### Tracking growth
+
+```bash
+# TUI
+/agent_stats coder
+# → 总任务: 23  成功率: 91%  平均耗时: 14s
+# → lessons: 18 (规则: 7, LLM: 11)
+# → 常用类别: code(14), analysis(4)
+
+/memory list          # Browse all knowledge
+/memory search api    # Keyword search
+```
+
+---
+
+## AI Team
+
+### Built-in agents
 
 | Agent | Role | Best For |
 |-------|------|----------|
@@ -73,88 +94,55 @@ Built-in agents:
 | 💻 Coder | Code expert | Write, review, debug, refactor |
 | 📝 Writer | Content writer | Write, edit, translate, format |
 
----
+### Delegation
 
-## Team Memory
+- `@researcher find competitor pricing` — @mention auto-delegates
+- Click an agent from the toolbar to insert a mention
+- `/delegate` command for interactive agent selection
+- `delegate_parallel` runs multiple agents simultaneously
+- `run_pipeline` chains agents with dependencies
 
-Agents share persistent memory across sessions. Two types:
+### Real-time monitoring
 
-| Type | Scope | Example |
-|------|-------|---------|
-| **Team Knowledge** (`team`) | All agents share | Tech stack, architecture decisions, user preferences |
-| **Agent Lessons** (`lesson`) | Specific agent | Effective strategies, failed approaches, tool tips |
-
-**How it works**:
-- Agents use `memory_save()` to store knowledge (e.g. user chooses a framework, records it)
-- `memory_recall(query)` searches by keywords — split-term matching finds partial hits
-- `memory_replace(key, old, new)` lets agents edit existing memories precisely
-- Top team knowledge is auto-injected into system prompts on startup
-- After sub-agent tasks complete, lessons are auto-extracted (high iterations → efficiency tip, etc.)
-
-CLI: `/memory list` · `/memory search <query>` · `/memory clear`
+- 🟣 **Running** — live step count and timer
+- 🟢 **Done** — elapsed time, tokens, iterations
+- 🔴 **Error** — error summary
+- Web: right-side Task Board with split-pane result comparison
 
 ---
 
-## Scheduled Tasks
+## More Features
 
-Tasks run autonomously on a cron schedule. Define them via conversation or the ⏱ Tasks panel in the sidebar.
+### 🖼️ Multimodal
+Paste, upload, or drag images. Auto-detects vision models.
+
+### 🌐 Browser Automation
+`pip install 'crabagent[browser]'` + `playwright install chromium`
 
 ```
-> Remind me to drink water every day at 11:00
-> Check this product page every 30 minutes, notify me if price drops below 500
+> Open https://news.ycombinator.com and show top 5 stories
+> Search "Python async" on Google
 ```
 
-When a task completes, a notification appears in the bell icon. Click to jump to the execution's conversation — full message history, screenshots, and tool outputs are preserved.
+### 🔌 MCP Client
+Connect external MCP servers (stdio + HTTP). Tools auto-discover.
 
----
-
-## Browser Automation
-
-Controlled via Playwright. Install with `pip install 'crabagent[browser]'` then `playwright install chromium`.
-
-Available tools: `browser_navigate`, `browser_click`, `browser_type`, `browser_screenshot`, `browser_extract`, `browser_scroll`.
-
+### 📋 Scheduled Tasks
 ```
-> Open https://news.ycombinator.com and show me the top 5 stories
-> Search for "Python async" on Google and extract the results
+> Remind me every day at 11:00 to drink water
+> Check product page every 30 minutes, notify if price drops
 ```
 
-The browser starts lazily (first call only), shares one instance per conversation, and auto-closes on session end. Screenshots appear inline in the chat.
+### 🦀 Snapshots
+Auto-snapshot before file changes. Roll back with `/molt rollback <id>`.
 
----
-
-## Image / Multimodal Support
-
-Paste (`Ctrl+V`), upload, or drag images into the chat. CrabAgent auto-detects whether the current model supports vision — vision models get native multimodal content, non-vision models get a file-path placeholder.
-
-- Max 5 images per message, 5MB each
-- Supported: PNG, JPEG, GIF, WebP
-- CLI: `/image /path/to/image.png What's in this image?`
-
----
-
-## MCP Client
-
-Connect external MCP servers via stdio or HTTP. Tools auto-discover with the prefix `mcp__{server}__{tool}` and are visually distinguished in the chat.
-
-Manage servers from the MCP panel in the sidebar — add, connect, disconnect, view tool counts and connection status.
-
----
-
-## Web Search & Custom Plugins
-
-**Web Search**: Built-in `web_search` (DuckDuckGo, zero-config) and `web_scrape`. Optionally configure SearXNG for better results.
-
-**Custom Plugins**: Drop a `.py` file in `.crabagent/tools/`:
+### 🔧 Custom Plugins
+Drop a `.py` file in `.crabagent/tools/`:
 
 ```python
 name = "hello"
-description = "Say hello to someone"
-parameters = {
-    "type": "object",
-    "properties": {"name": {"type": "string", "description": "Name"}},
-    "required": ["name"],
-}
+description = "Say hello"
+parameters = {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}
 requires_permission = False
 
 def run(name: str) -> str:
@@ -163,33 +151,31 @@ def run(name: str) -> str:
 
 ---
 
-## CLI Commands
+## CLI / TUI Commands
 
 | Command | Description |
 |---------|-------------|
 | `/exit`, `/quit` | Exit |
 | `/help` | Show help |
-| `/clear` | Clear conversation context |
+| `/clear` | Clear context |
 | `/model [name]` | Switch model |
-| `/models` | List available models |
-| `/provider [cmd]` | Manage LLM providers (list/add/remove/set-default) |
-| `/sessions` | List recent sessions |
-| `/session [id]` | Load a session |
-| `/new` | Start new conversation |
-| `/agents [cmd]` | Agent team management (list/add/edit/toggle/rm) |
-| `/delegate [@agent] [task]` | Delegate task to agent(s) |
-| `/memory [cmd]` | Team memory (list/search/clear) |
-| `/molt [cmd]` | Snapshot list/show/rollback |
-| `/todo [cmd]` | Manage task list |
-| `/export` | Export conversation to Markdown |
-| `/skills` | List available skills |
-| `/image <path> [msg]` | Send an image |
+| `/models` | List models |
+| `/provider [cmd]` | Manage providers |
+| `/sessions` / `/session [id]` | List / load sessions |
+| `/new` | New conversation |
+| `/agents [cmd]` | Agent team management |
+| `/agent_stats <name>` | Agent growth stats |
+| `/delegate [@agent] [task]` | Delegate task |
+| `/memory [list\|search\|clear]` | Team memory |
+| `/skills` / `/skill <name>` | List / show skills |
+| `/molt [cmd]` | Snapshots |
+| `/todo [cmd]` | Task list |
+| `/export` | Export to Markdown |
+| `/image <path> [msg]` | Send image |
 
 ---
 
 ## Configuration
-
-Set via environment variables or `.env`:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -211,9 +197,12 @@ pip install 'crabagent[browser]'        # Browser automation
 pip install 'crabagent[dev]'            # Testing + linting
 ```
 
-Docker:
 ```bash
-docker compose up -d
+# Development
+make install            # Build frontend + install (editable)
+ruff check src/ tests/  # Lint
+ruff format src/ tests/ # Format
+pytest                   # Run tests
 ```
 
 ---
@@ -222,29 +211,13 @@ docker compose up -d
 
 ```
 CrabAgent/
-├── .crabagent/
-│   ├── skills/        # Domain skills (SKILL.md)
-│   ├── tools/         # Custom plugin tools
-│   └── molts/         # File snapshots
 ├── src/crabagent/
-│   ├── cli/           # CLI entrypoint
-│   ├── core/agent/    # Agent loop, tools, context, compression
+│   ├── cli/           # CLI entrypoint + TUI
+│   ├── core/agent/    # Agent loop, tools, compression, agents
 │   ├── core/mcp/      # MCP client manager
 │   └── serve/         # FastAPI + API + scheduler
 ├── frontend/          # React SPA
-├── crabagent.db       # SQLite database
-└── Makefile
-```
-
----
-
-## Development
-
-```bash
-make install            # Build frontend + install (editable)
-ruff check src/ tests/  # Lint
-ruff format src/ tests/ # Format
-pytest                   # Run tests
+└── crabagent.db       # SQLite database
 ```
 
 ---

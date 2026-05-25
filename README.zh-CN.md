@@ -1,26 +1,23 @@
 # 🦀 CrabAgent
 
-> **AI 团队指挥中心** — 组建一支专属 AI 专家团队，并行委派任务，实时看板监控进度。全部在本地 Web 控制台完成。
+> **AI 团队指挥中心** — 组建能持续学习和进化的 AI 专家团队。委派、并行、流水线，从终端或浏览器实时看板监控进度。
 
-CrabAgent 是一个本地优先的 AI Agent 平台。从任意项目目录启动，支持 CLI 终端和 Web 浏览器双模式。数据全在本地，API Key 加密存储，自由选择任意 LLM 提供商。
+CrabAgent 是一个本地优先的 AI Agent 平台。从任意项目目录启动，支持 CLI/TUI/Web 三种模式。数据全在本地，API Key 加密存储，自由选择任意 LLM 提供商。
 
 ---
 
 ## 为什么选 CrabAgent
 
-| 特性 | 说明 |
-|------|------|
-| **🤖 AI 团队** | 创建自定义 Agent 画像；并行委派多个 Agent；每个 Agent 可指定独立模型 |
-| **📋 实时看板** | 右侧面板实时显示每个 Agent 的状态（运行中/已完成/出错）、进度和工具调用 |
-| **@提及委派** | 输入 `@researcher 帮我搜索一下` 自动委派，也可点击工具栏的 Agent 头像 |
-| **🔀 并行执行** | 多个 Agent 同时运行 — 调研员搜资料，程序员修 bug，分析师做对比 |
-| **📊 结果对比** | 并排查看所有 Agent 的输出，一键导出 Markdown 报告 |
-| **⏱ 定时任务** | Agent 按 cron 表达式自主执行，完成后推送通知 |
-| **🌐 浏览器自动化** | Playwright 驱动的无头浏览器 — 导航、点击、截图、提取内容 |
-| **🖼️ 多模态** | 粘贴/上传/拖拽图片到对话；自动检测模型是否支持视觉 |
-| **🔌 MCP 客户端** | 连接外部 MCP 服务器（stdio + HTTP）；工具自动发现并加前缀 |
-| **🦀 快照回滚** | 修改文件前自动拍照，随时回滚，不依赖 Git |
-| **🔒 隐私安全** | 数据全在本地；API Key 加密存储；零遥测 |
+不同于其他 Agent 平台"用完即忘的临时工"，CrabAgent 的 Agent **会学习、会进化**：
+
+| 能力 | 说明 |
+|-----|------|
+| **🧠 自演化 Agent** | 每次任务完成后自动提取经验教训 — 规则引擎捕捉模式，LLM 反思分析策略。用得越多越聪明。 |
+| **🤖 AI 团队** | 自定义 Agent 画像，每个 Agent 可限制工具集、指定独立模型。委派、并行、流水线三种协作模式。 |
+| **📊 成长追踪** | 查看每个 Agent 的统计数据：任务数、成功率、经验数、常用类别。`ctrl+space agent_stats` |
+| **⏱ 定时 + 实时** | Agent 按 cron 表达式自主执行，也支持 @提及即时委派。所有 Agent 输出实时流式显示。 |
+| **🦀 快照回滚** | 修改文件前自动拍照，随时回滚，不依赖 Git。 |
+| **🔒 本地优先** | 数据全在本地，API Key 加密存储，零遥测。 |
 
 ---
 
@@ -45,25 +42,50 @@ crabagent -p deepseek -m deepseek-chat "写一个 Python 脚本"
 
 ---
 
-## AI 团队 — 本地指挥中心
+## 自演化 Agent — 核心差异化
 
-**1. 组建团队** — 侧边栏 → 🤖 Team → + New Agent。定义每个 Agent 的角色、目标、背景故事、指定模型。
+Agent 不只是执行任务，**每次执行都会学习成长**。
 
-**2. 委派任务** — 三种方式：
-- 输入框中输入 `@researcher 找一下竞品价格` — 自动识别并发送
-- 点击输入框旁的 🤖 按钮 → 选择 Agent → 输入任务 → 发送
-- 点击输入框上方的 Agent 头像栏，自动插入 `@提及`
+### 双引擎反思
 
-**3. 实时监控** — 右侧任务看板实时显示每个 Agent 的进度：
-- 🟣 **运行中** — 紫色脉冲卡片，显示实时步骤计数和计时
-- 🟢 **已完成** — 绿色卡片，显示耗时 / Token / 迭代次数
-- 🔴 **出错** — 红色卡片，显示错误信息
+```
+子 Agent 完成任务
+    │
+    ├─ 规则引擎（即时）
+    │   ├─ 迭代数过高 → "考虑将复杂任务拆分为更小的步骤"
+    │   ├─ 迭代数低效 → "高效执行模式已记录"
+    │   └─ 来源: rule
+    │
+    └─ LLM 反思（best-effort，约 1 秒）
+        ├─ 分析策略：哪里有效、哪里可改进
+        ├─ 任务归类：code / research / analysis / writing
+        └─ 来源: llm
+```
 
-**4. 查看结果** — 点击任意卡片打开该 Agent 的完整输出，或点击顶部工具栏的 📋 按钮，分栏对比所有结果。一键导出 Markdown。
+### 知识持久化
 
-**5. 并行执行** — 使用 `delegate_parallel` 工具并行运行多个 Agent，或通过 Web 委派弹窗为不同 Agent 分配不同任务。
+- **团队知识**：技术栈、架构决策、用户偏好 — 每次启动自动注入
+- **Agent 经验**：每个 Agent 的行为模式教训 — 执行同类任务前自动加载
+- **任务记录**：每次执行完整记录（成功/失败、耗时、Token 数、迭代数）
 
-内置 Agent：
+### 查看成长
+
+```bash
+# TUI 中
+/agent_stats coder
+# → 总任务: 23  成功率: 91%  平均耗时: 14s
+# → lessons: 18 (规则: 7, LLM: 11)
+# → 常用类别: code(14), analysis(4)
+
+/memory list          # 浏览所有记忆
+/memory search api    # 关键词搜索
+```
+
+---
+
+## AI 团队
+
+### 内置 Agent
 
 | Agent | 角色 | 适用场景 |
 |-------|------|----------|
@@ -72,68 +94,55 @@ crabagent -p deepseek -m deepseek-chat "写一个 Python 脚本"
 | 💻 Coder | 编程专家 | 编写、审查、调试、重构代码 |
 | 📝 Writer | 内容写手 | 写作、编辑、翻译、格式化 |
 
+### 委派方式
+
+- `@researcher 找一下竞品价格` — @提及自动委派
+- 点击工具栏 Agent 头像插入提及
+- `/delegate` 命令交互式选择 Agent
+- `delegate_parallel` 多 Agent 并行执行
+- `run_pipeline` 串联多个 Agent 按依赖执行
+
+### 实时监控
+
+- 🟣 **运行中** — 实时步骤计数和计时
+- 🟢 **已完成** — 耗时 / Token / 迭代次数
+- 🔴 **出错** — 错误摘要
+- Web 端：右侧任务看板，支持分栏结果对比
+
 ---
 
-## 定时任务
+## 更多功能
 
-Agent 按 cron 表达式自主执行。通过对话或侧边栏的 ⏱ Tasks 面板创建：
+### 🖼️ 多模态
+粘贴/上传/拖拽图片到对话，自动检测模型是否支持视觉。
 
-```
-> 每天早上9点打开 Hacker News 把前5条新闻截图给我
-> 每30分钟检查这个商品页面，价格低于500就通知我
-```
-
-任务完成后，铃铛图标出现通知。点击可跳转到执行结果的对话 — 完整消息历史、截图和工具输出均有保存。
-
----
-
-## 浏览器自动化
-
-基于 Playwright。安装：`pip install 'crabagent[browser]'` + `playwright install chromium`。
-
-可用工具：`browser_navigate`、`browser_click`、`browser_type`、`browser_screenshot`、`browser_extract`、`browser_scroll`。
+### 🌐 浏览器自动化
+`pip install 'crabagent[browser]'` + `playwright install chromium`
 
 ```
 > 打开 https://news.ycombinator.com 显示前 5 条新闻
 > 在 Google 搜索 "Python async" 提取结果
 ```
 
-浏览器惰性启动（首次调用才启动），每个会话共享一个实例，会话结束自动关闭。截图直接内嵌在对话中。
+### 🔌 MCP 客户端
+连接外部 MCP 服务器（stdio + HTTP），工具自动发现并加前缀。
 
----
+### 📋 定时任务
+```
+> 每天早上 9 点打开 Hacker News 把前 5 条新闻截图给我
+> 每 30 分钟检查商品页，价格低于 500 就通知我
+```
 
-## 图片 / 多模态支持
+### 🦀 快照回滚
+修改文件前自动拍照，`/molt rollback <id>` 即可回滚。
 
-粘贴（`Ctrl+V`）、上传或拖拽图片到对话。CrabAgent 自动检测当前模型是否支持视觉 — 视觉模型以原生多模态格式发送，非视觉模型发送文件路径占位符。
-
-- 每条消息最多 5 张，单张最大 5MB
-- 支持 PNG、JPEG、GIF、WebP
-- CLI：`/image /path/to/image.png 这张图片里有什么？`
-
----
-
-## MCP 客户端
-
-通过 stdio 或 HTTP 连接外部 MCP 服务器。工具自动发现并加前缀 `mcp__{server}__{tool}`，在聊天中有视觉区分。
-
-在侧边栏的 MCP 面板中管理 — 添加、连接、断开、查看工具数量和连接状态。
-
----
-
-## 网页搜索 & 自定义插件
-
-**网页搜索**：内置 `web_search`（DuckDuckGo，零配置）和 `web_scrape`。可配置 SearXNG 获得更好的搜索质量。
-
-**自定义插件**：在 `.crabagent/tools/` 下放 `.py` 文件即可：
+### 🔧 自定义插件
+在 `.crabagent/tools/` 下放 `.py` 文件即可：
 
 ```python
 name = "hello"
 description = "向某人打招呼"
-parameters = {
-    "type": "object",
-    "properties": {"name": {"type": "string", "description": "名字"}},
-    "required": ["name"],
-}
+parameters = {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}
 requires_permission = False
 
 def run(name: str) -> str:
@@ -142,32 +151,31 @@ def run(name: str) -> str:
 
 ---
 
-## CLI 命令
+## CLI / TUI 命令
 
 | 命令 | 说明 |
 |------|------|
 | `/exit`, `/quit` | 退出 |
 | `/help` | 帮助 |
-| `/clear` | 清空对话上下文 |
+| `/clear` | 清空上下文 |
 | `/model [name]` | 切换模型 |
-| `/models` | 列出可用模型 |
-| `/provider [cmd]` | 管理 LLM 提供商（list/add/remove/set-default） |
-| `/sessions` | 列出最近会话 |
-| `/session [id]` | 加载会话 |
+| `/models` | 列出模型 |
+| `/provider [cmd]` | 管理提供商 |
+| `/sessions` / `/session [id]` | 列出 / 加载会话 |
 | `/new` | 新会话 |
-| `/agents [cmd]` | Agent 团队管理（list/add/edit/toggle/rm） |
-| `/delegate [@agent] [task]` | 委派任务给 Agent |
-| `/molt [cmd]` | 快照管理（列表/查看/回滚） |
+| `/agents [cmd]` | Agent 团队管理 |
+| `/agent_stats <name>` | Agent 成长统计 |
+| `/delegate [@agent] [task]` | 委派任务 |
+| `/memory [list\|search\|clear]` | 团队记忆 |
+| `/skills` / `/skill <name>` | 列出 / 查看技能 |
+| `/molt [cmd]` | 快照管理 |
 | `/todo [cmd]` | 待办管理 |
-| `/export` | 导出对话为 Markdown |
-| `/skills` | 列出技能 |
+| `/export` | 导出 Markdown |
 | `/image <path> [msg]` | 发送图片 |
 
 ---
 
 ## 配置
-
-环境变量或 `.env` 文件：
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
@@ -189,9 +197,12 @@ pip install 'crabagent[browser]'        # 浏览器自动化
 pip install 'crabagent[dev]'            # 测试 + lint
 ```
 
-Docker：
 ```bash
-docker compose up -d
+# 开发模式
+make install            # 构建前端 + 安装（可编辑模式）
+ruff check src/ tests/  # 代码检查
+ruff format src/ tests/ # 代码格式化
+pytest                   # 运行测试
 ```
 
 ---
@@ -200,29 +211,13 @@ docker compose up -d
 
 ```
 CrabAgent/
-├── .crabagent/
-│   ├── skills/        # 领域技能（SKILL.md）
-│   ├── tools/         # 自定义插件工具
-│   └── molts/         # 文件快照
 ├── src/crabagent/
-│   ├── cli/           # CLI 入口
-│   ├── core/agent/    # Agent 循环、工具、上下文、压缩
+│   ├── cli/           # CLI 入口 + TUI
+│   ├── core/agent/    # Agent 循环、工具、压缩、agents
 │   ├── core/mcp/      # MCP 客户端管理器
 │   └── serve/         # FastAPI + API + 调度器
 ├── frontend/          # React SPA 前端
-├── crabagent.db       # SQLite 数据库
-└── Makefile
-```
-
----
-
-## 开发
-
-```bash
-make install            # 构建前端 + 安装（可编辑模式）
-ruff check src/ tests/  # 代码检查
-ruff format src/ tests/ # 代码格式化
-pytest                   # 运行测试
+└── crabagent.db       # SQLite 数据库
 ```
 
 ---
