@@ -95,7 +95,7 @@ class TuiSession:
                 continue
             if self._conversation_id and not getattr(self.args, "no_persist", False):
                 await self._persist_user_message(ui)
-            self.console.print(f"\n[bold]\u25b6 {ui}[/bold]")
+            self.console.print()
             self._stream = ""
             self._thinking_active = False
             self._rendered_up_to = 0
