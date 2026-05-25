@@ -351,7 +351,7 @@ class TuiSession:
 
     def _print_banner(self):
         self.console.print(
-            f"[bold]CrabAgent v0.6.4[/bold]\n  provider: {self._provider_display}  model: {self.agent_ctx.model or 'default'}\n  workspace: {self.agent_ctx.workspace}\n"
+            f"[bold]CrabAgent v0.6.5[/bold]\n  provider: {self._provider_display}  model: {self.agent_ctx.model or 'default'}\n  workspace: {self.agent_ctx.workspace}\n"
         )
 
     async def _handle_slash(self, ui: str) -> bool:
@@ -1416,4 +1416,7 @@ async def run_tui(args):
     logging.getLogger("LiteLLM").setLevel(logging.WARNING)
     logging.getLogger("primp").setLevel(logging.WARNING)
     logging.getLogger("ddgs.ddgs").setLevel(logging.WARNING)
+
+    import litellm
+    litellm.set_verbose = False
     await TuiSession(args).run()

@@ -59,6 +59,9 @@ def main():
     logging.getLogger("primp").setLevel(logging.WARNING)
     logging.getLogger("ddgs.ddgs").setLevel(logging.WARNING)
 
+    import litellm
+    litellm.set_verbose = False
+
     if args.serve:
         _run_serve(args)
         return
@@ -642,10 +645,10 @@ def _print_banner(context, provider: str, model: str):
         from rich.console import Console
         from rich.text import Text
         console = Console()
-        t = Text("CrabAgent v0.6.4", style="bold")
+        t = Text("CrabAgent v0.6.5", style="bold")
         console.print(t)
     except ImportError:
-        print("CrabAgent v0.6.4")
+        print("CrabAgent v0.6.5")
 
     print(f"  provider: {provider}  model: {model}")
     print(f"  workspace: {context.workspace}")
