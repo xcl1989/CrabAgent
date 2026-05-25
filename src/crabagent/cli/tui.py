@@ -887,10 +887,15 @@ class TuiSession:
                     if content:
                         self.console.print(Markdown(content))
                         self.console.print()
+                    tool_calls = msg.get("tool_calls") or []
+                    if tool_calls and not content:
+                        names = [tc.get("function", {}).get("name", "?") for tc in tool_calls]
+                        self.console.print(Text(f"  \u2192 {', '.join(names)}", style="cyan"))
                 elif role == "tool":
                     tool_name = msg.get("name", "")
+                    result_preview = (content or "")[:120]
                     if tool_name:
-                        self.console.print(Text(f"  \u2192 {tool_name}", style="dim"))
+                        self.console.print(Text(f"  \u2190 {tool_name}: {result_preview}", style="dim"))
         user_count = sum(1 for m in hist if m.get("role") == "user")
         self.console.print(
             f"[dim]Loaded session {cv.session_id[:8]} "
@@ -1132,9 +1137,16 @@ class TuiSession:
             if not cv or cv.user_id != uid:
                 return None, [], 0
             msgs = await get_messages(db, cv.id)
+            all_dicts = [message_to_dict(m) for m in msgs if m.role != "stats"]
+            user_indices = [i for i, m in enumerate(all_dicts) if m.get("role") == "user"]
+            if len(user_indices) > 20:
+                start = user_indices[-20]
+                trimmed = all_dicts[start:]
+            else:
+                trimmed = all_dicts
             return (
                 cv,
-                [message_to_dict(m) for m in msgs if m.role != "stats"],
+                trimmed,
                 max((m.sequence for m in msgs), default=0),
             )
 
