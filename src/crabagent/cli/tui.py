@@ -926,11 +926,11 @@ class TuiSession:
         new_p.sequence = len(self.agent_ctx.messages)
         old_listeners = [
             cb for cb in self.agent_ctx.event_bus._listeners
-            if isinstance(cb, PersistenceListener)
+            if hasattr(cb, "__self__") and isinstance(cb.__self__, PersistenceListener)
         ]
         for old in old_listeners:
             self.agent_ctx.event_bus.unsubscribe(old)
-        self.agent_ctx.event_bus.subscribe(new_p)
+        self.agent_ctx.event_bus.subscribe(new_p.on_event)
 
     def _parse_agent_mentions(self, text: str) -> tuple[list[str], str]:
         import re
