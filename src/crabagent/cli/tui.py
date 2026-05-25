@@ -93,6 +93,7 @@ class TuiSession:
             if mentions:
                 await self._handle_mention_delegation(mentions, clean_text)
                 continue
+            await self._ensure_conversation()
             if self._conversation_id and not getattr(self.args, "no_persist", False):
                 await self._persist_user_message(ui)
             self.console.print()
@@ -901,6 +902,21 @@ class TuiSession:
             f"({user_count} turns, {len(hist)} messages)[/dim]"
         )
 
+    async def _ensure_conversation(self):
+        if self._conversation_id or getattr(self.args, "no_persist", False):
+            return
+        ws = (self.args.workspace or settings.workspace).resolve()
+        cv = await self._init_conv(
+            self._user.id, str(ws), self.agent_ctx.model if self.agent_ctx else ""
+        )
+        self._conversation_id = cv.id
+        self._session_id_str = cv.session_id
+        self._state = {"fm": [True]}
+        if self.agent_ctx:
+            self.agent_ctx.metadata["session_id"] = cv.session_id
+            self.agent_ctx.metadata["branch_id"] = "main"
+            self._replace_persistence_listener()
+
     def _replace_persistence_listener(self):
         if not self.agent_ctx or not self._conversation_id:
             return
@@ -986,10 +1002,6 @@ class TuiSession:
                     ws = Path(cv.workspace).resolve()
                 if cv and cv.model:
                     self.args.model = cv.model
-            else:
-                cv = await self._init_conv(self._user.id, str(ws), self.args.model or "")
-                cid = cv.id
-                sid = cv.session_id
         if not getattr(self.args, "model", None):
             self.args.model = settings.load_last_model()
         if not self.args.model:
