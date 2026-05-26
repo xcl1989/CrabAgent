@@ -10,6 +10,7 @@ from crabagent.core.mcp.client import MCPClientManager
 def _sanitize(name: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_-]", "_", name)
 
+
 logger = logging.getLogger(__name__)
 
 

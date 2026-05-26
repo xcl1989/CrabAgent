@@ -163,7 +163,7 @@ class TuiSession:
         last_boundary = 0
         i = 0
         while i < len(text):
-            if text[i:i + 3] == "```":
+            if text[i : i + 3] == "```":
                 in_code = not in_code
                 i += 3
                 continue
@@ -175,7 +175,7 @@ class TuiSession:
         return last_boundary
 
     def _flush_completed_paragraphs(self):
-        content = self._stream[self._rendered_up_to:]
+        content = self._stream[self._rendered_up_to :]
         if not content.strip():
             return
         boundary = self._find_paragraph_boundary(content)
@@ -189,7 +189,7 @@ class TuiSession:
         if toggle_count % 2 == 1:
             self._in_code_block = not self._in_code_block
         self._rendered_up_to += boundary
-        if self._stream[self._rendered_up_to:]:
+        if self._stream[self._rendered_up_to :]:
             self._start_spinner()
 
     def _stop_tool_live(self):
@@ -237,7 +237,7 @@ class TuiSession:
             self._start_spinner()
             self._flush_completed_paragraphs()
         elif event.type == EventType.TEXT_DONE:
-            remaining = self._stream[self._rendered_up_to:]
+            remaining = self._stream[self._rendered_up_to :]
             self._stop_live()
             if remaining.strip():
                 self.console.print(Markdown(remaining))
@@ -315,7 +315,8 @@ class TuiSession:
                 self._sub_live = None
             tok_str = f"{tokens:,}" if tokens else "0"
             self.console.print(
-                f"  [bold green]\u2713 {display}[/bold green] [dim]({elapsed}s, {tok_str} tok, {iterations} steps, {tools} tools)[/dim]"
+                f"  [bold green]\u2713 {display}[/bold green] "
+                f"[dim]({elapsed}s, {tok_str} tok, {iterations} steps, {tools} tools)[/dim]"
             )
             still_running = any(t.get("status") == "running" for t in self._sub_agent_tasks.values())
             if still_running:
@@ -329,9 +330,7 @@ class TuiSession:
             error = event.data.get("error", "unknown error")
             if sub_id in self._sub_agent_tasks:
                 self._sub_agent_tasks[sub_id]["status"] = "error"
-            self.console.print(
-                f"  [bold red]\u2717 {agent_name}[/bold red] [red]Error: {error}[/red]"
-            )
+            self.console.print(f"  [bold red]\u2717 {agent_name}[/bold red] [red]Error: {error}[/red]")
             still_running = any(t.get("status") == "running" for t in self._sub_agent_tasks.values())
             if still_running:
                 self._render_sub_live()
@@ -351,7 +350,10 @@ class TuiSession:
 
     def _print_banner(self):
         self.console.print(
-            f"[bold]CrabAgent v0.6.6[/bold]\n  provider: {self._provider_display}  model: {self.agent_ctx.model or 'default'}\n  workspace: {self.agent_ctx.workspace}\n"
+            f"[bold]CrabAgent v0.6.6[/bold]\n"
+            f"  provider: {self._provider_display}  "
+            f"model: {self.agent_ctx.model or 'default'}\n"
+            f"  workspace: {self.agent_ctx.workspace}\n"
         )
 
     async def _handle_slash(self, ui: str) -> bool:
@@ -379,32 +381,50 @@ class TuiSession:
         elif cmd == "/history":
             if self.agent_ctx:
                 self.console.print(
-                    f"[dim]M: {len(self.agent_ctx.messages)} T: {self.agent_ctx.total_tokens or 0:,} I: {self.agent_ctx.iteration}[/dim]"
+                    f"[dim]M: {len(self.agent_ctx.messages)} "
+                    f"T: {self.agent_ctx.total_tokens or 0:,} "
+                    f"I: {self.agent_ctx.iteration}[/dim]"
                 )
         elif cmd == "/models":
             ms = await self._fetch_models()
             if ms:
                 for i, m in enumerate(ms, 1):
-                    self.console.print(
-                        f"  {i:>2}. {m}{' [bold]*[/bold]' if m == (self.agent_ctx.model if self.agent_ctx else None) else ''}"
-                    )
+                    is_current = m == (self.agent_ctx.model if self.agent_ctx else None)
+                    mark = " [bold]*[/bold]" if is_current else ""
+                    self.console.print(f"  {i:>2}. {m}{mark}")
             else:
                 self.console.print("[dim]No models.[/dim]")
         elif cmd == "/model":
-            if not arg:
+            chosen_model = arg.strip() if arg else None
+            if not chosen_model:
                 ms = await self._fetch_models()
-                if ms:
-                    for i, m in enumerate(ms, 1):
-                        self.console.print(
-                            f"  {i:>2}. {m}{' [bold]*[/bold]' if m == (self.agent_ctx.model if self.agent_ctx else None) else ''}"
-                        )
-                else:
+                if not ms:
                     self.console.print("[dim]No models.[/dim]")
-            else:
-                if self.agent_ctx:
-                    self.agent_ctx.model = arg
-                settings.save_last_model(arg)
-                self.console.print(f"[dim]Model: {arg}[/dim]")
+                    return
+                for i, m in enumerate(ms, 1):
+                    mark = " [bold]*[/bold]" if m == (self.agent_ctx.model if self.agent_ctx else None) else ""
+                    self.console.print(f"  {i:>2}. {m}{mark}")
+                try:
+                    choice = await asyncio.get_event_loop().run_in_executor(
+                        None, lambda: input("Choice (# or model_name, Enter=cancel): ").strip()
+                    )
+                except (EOFError, KeyboardInterrupt):
+                    return
+                if not choice:
+                    return
+                try:
+                    idx = int(choice) - 1
+                    if 0 <= idx < len(ms):
+                        chosen_model = ms[idx]
+                    else:
+                        self.console.print("[dim]Invalid.[/dim]")
+                        return
+                except ValueError:
+                    chosen_model = choice
+            if self.agent_ctx:
+                self.agent_ctx.model = chosen_model
+            settings.save_last_model(chosen_model)
+            self.console.print(f"[dim]Model: {chosen_model}[/dim]")
         elif cmd == "/export":
             await self._handle_export()
         elif cmd == "/provider":
@@ -469,6 +489,7 @@ class TuiSession:
 
         if sc == "list":
             from crabagent.core.database import agent_memory_list_all
+
             items = await agent_memory_list_all(uid)
             if not items:
                 self.console.print("[dim]No memories.[/dim]")
@@ -480,14 +501,13 @@ class TuiSession:
                 preview = item["content"]
                 if len(preview) > 100:
                     preview = preview[:100] + "..."
-                self.console.print(
-                    f"  {item['key']} ({mt}{agent_tag}, imp={item['importance']:.1f}): {preview}"
-                )
+                self.console.print(f"  {item['key']} ({mt}{agent_tag}, imp={item['importance']:.1f}): {preview}")
         elif sc in ("search", "find"):
             if not sa:
                 self.console.print("[dim]/memory search <query>[/dim]")
                 return
             from crabagent.core.database import agent_memory_search
+
             results = await agent_memory_search(uid, sa)
             if not results:
                 self.console.print(f"[dim]No results for '{sa}'.[/dim]")
@@ -496,6 +516,7 @@ class TuiSession:
                     self.console.print(f"  {r['key']}: {r['content'][:120]}")
         elif sc == "clear":
             from crabagent.core.database import agent_memory_clear
+
             n = await agent_memory_clear(uid)
             self.console.print(f"[dim]Cleared {n} memories.[/dim]")
         else:
@@ -579,9 +600,9 @@ class TuiSession:
                 return
             d = await get_default_provider()
             for p in ps:
-                self.console.print(
-                    f"  {p.name} ({p.display_name or p.name}){' [bold][default][/bold]' if d and p.name == d.name else ''}"
-                )
+                is_default = d and p.name == d.name
+                mark = " [bold][default][/bold]" if is_default else ""
+                self.console.print(f"  {p.name} ({p.display_name or p.name}){mark}")
         elif sc == "add":
             print("\nAvailable:")
             for k, v in PROVIDER_CATALOG.items():
@@ -648,9 +669,7 @@ class TuiSession:
                 status = "[green]ON[/green]" if a.enabled else "[dim]OFF[/dim]"
                 default_tag = " [dim][default][/dim]" if a.is_default else ""
                 model_tag = f" [dim][{a.model}][/dim]" if a.model else ""
-                self.console.print(
-                    f"  {icon} [bold]{a.display_name or a.name}[/bold]{default_tag} {status}{model_tag}"
-                )
+                self.console.print(f"  {icon} [bold]{a.display_name or a.name}[/bold]{default_tag} {status}{model_tag}")
                 self.console.print(f"    [dim]Role: {a.role}[/dim]")
                 self.console.print(f"    [dim]Goal: {a.goal[:80]}[/dim]")
                 tools_val = getattr(a, "tools", None) or ""
@@ -658,6 +677,7 @@ class TuiSession:
                     tools_str = ", ".join(tools_val) if tools_val else "(all)"
                 elif isinstance(tools_val, str) and tools_val:
                     import json as _json
+
                     try:
                         tl = _json.loads(tools_val)
                         tools_str = ", ".join(tl) if tl else "(all)"
@@ -689,6 +709,7 @@ class TuiSession:
             print("  shared_get, shared_put, shared_list")
             tools_input = input("Tools (comma-separated, empty=all): ").strip()
             import json as _json
+
             tools_json = ""
             if tools_input:
                 tools_list = [t.strip() for t in tools_input.split(",") if t.strip()]
@@ -702,9 +723,7 @@ class TuiSession:
 
             try:
                 async with async_session_factory() as db:
-                    existing = await db.execute(
-                        select(AgentProfile).where(AgentProfile.name == name)
-                    )
+                    existing = await db.execute(select(AgentProfile).where(AgentProfile.name == name))
                     if existing.scalar_one_or_none():
                         self.console.print(f"[dim]Agent '{name}' already exists.[/dim]")
                         return
@@ -739,9 +758,7 @@ class TuiSession:
             from crabagent.core.database import AgentProfile, async_session_factory
 
             async with async_session_factory() as db:
-                result = await db.execute(
-                    select(AgentProfile).where(AgentProfile.name == sa)
-                )
+                result = await db.execute(select(AgentProfile).where(AgentProfile.name == sa))
                 profile = result.scalar_one_or_none()
             if not profile:
                 self.console.print(f"[dim]Agent '{sa}' not found.[/dim]")
@@ -767,9 +784,7 @@ class TuiSession:
             tools_input = input(f"Tools [{current_tools_str}]: ").strip()
 
             async with async_session_factory() as db:
-                result = await db.execute(
-                    select(AgentProfile).where(AgentProfile.name == sa)
-                )
+                result = await db.execute(select(AgentProfile).where(AgentProfile.name == sa))
                 profile = result.scalar_one_or_none()
                 if not profile:
                     return
@@ -800,9 +815,7 @@ class TuiSession:
             from crabagent.core.database import AgentProfile, async_session_factory
 
             async with async_session_factory() as db:
-                result = await db.execute(
-                    select(AgentProfile).where(AgentProfile.name == sa)
-                )
+                result = await db.execute(select(AgentProfile).where(AgentProfile.name == sa))
                 profile = result.scalar_one_or_none()
                 if not profile:
                     self.console.print(f"[dim]Agent '{sa}' not found.[/dim]")
@@ -823,9 +836,7 @@ class TuiSession:
             from crabagent.core.database import AgentProfile, async_session_factory
 
             async with async_session_factory() as db:
-                result = await db.execute(
-                    select(AgentProfile).where(AgentProfile.name == sa)
-                )
+                result = await db.execute(select(AgentProfile).where(AgentProfile.name == sa))
                 profile = result.scalar_one_or_none()
                 if not profile:
                     self.console.print(f"[dim]Agent '{sa}' not found.[/dim]")
@@ -911,9 +922,7 @@ class TuiSession:
             self.console.print("[dim]No agents selected.[/dim]")
             return
         try:
-            task = await asyncio.get_event_loop().run_in_executor(
-                None, lambda: input("Task: ").strip()
-            )
+            task = await asyncio.get_event_loop().run_in_executor(None, lambda: input("Task: ").strip())
         except (EOFError, KeyboardInterrupt):
             return
         if not task:
@@ -982,9 +991,7 @@ class TuiSession:
         if not self._user:
             return
         ws = (self.args.workspace or settings.workspace).resolve()
-        cv = await self._init_conv(
-            self._user.id, str(ws), self.agent_ctx.model if self.agent_ctx else ""
-        )
+        cv = await self._init_conv(self._user.id, str(ws), self.agent_ctx.model if self.agent_ctx else "")
         self._conversation_id = cv.id
         self._session_id_str = cv.session_id
         self._state = {"fm": [True]}
@@ -1075,6 +1082,7 @@ class TuiSession:
         self._print_banner()
         if hist:
             import json as _json
+
             for msg in hist:
                 role = msg.get("role", "")
                 content = msg.get("content") or ""
@@ -1095,18 +1103,13 @@ class TuiSession:
                         self.console.print(Markdown(content))
                         self.console.print()
         user_count = sum(1 for m in hist if m.get("role") == "user")
-        self.console.print(
-            f"[dim]Loaded session {cv.session_id[:8]} "
-            f"({user_count} turns, {len(hist)} messages)[/dim]"
-        )
+        self.console.print(f"[dim]Loaded session {cv.session_id[:8]} ({user_count} turns, {len(hist)} messages)[/dim]")
 
     async def _ensure_conversation(self):
         if self._conversation_id or getattr(self.args, "no_persist", False):
             return
         ws = (self.args.workspace or settings.workspace).resolve()
-        cv = await self._init_conv(
-            self._user.id, str(ws), self.agent_ctx.model if self.agent_ctx else ""
-        )
+        cv = await self._init_conv(self._user.id, str(ws), self.agent_ctx.model if self.agent_ctx else "")
         self._conversation_id = cv.id
         self._session_id_str = cv.session_id
         self._state = {"fm": [True]}
@@ -1123,7 +1126,8 @@ class TuiSession:
         new_p = PersistenceListener(conversation_id=self._conversation_id)
         new_p.sequence = len(self.agent_ctx.messages)
         old_listeners = [
-            cb for cb in self.agent_ctx.event_bus._listeners
+            cb
+            for cb in self.agent_ctx.event_bus._listeners
             if hasattr(cb, "__self__") and isinstance(cb.__self__, PersistenceListener)
         ]
         for old in old_listeners:
@@ -1185,7 +1189,7 @@ class TuiSession:
                 await db.refresh(self._user)
         if not await self._epc():
             return
-        ws = (self.args.workspace or settings.workspace).resolve()
+        (self.args.workspace or settings.workspace).resolve()
         cid = None
         sid = None
         hist = None
@@ -1197,7 +1201,7 @@ class TuiSession:
                     cid = cv.id
                     sid = cv.session_id
                 if cv and cv.workspace:
-                    ws = Path(cv.workspace).resolve()
+                    Path(cv.workspace).resolve()
                 if cv and cv.model:
                     self.args.model = cv.model
         if not getattr(self.args, "model", None):
@@ -1239,9 +1243,14 @@ class TuiSession:
         register_molt_tools(registry)
         register_todo_tools(registry)
         discover_and_register_tools(registry, ws)
-        base_prompt = f"You are CrabAgent. Today is {datetime.now(UTC).strftime('%Y-%m-%d %A')}. Working directory: {ws}. Be concise."
+        base_prompt = (
+            f"You are CrabAgent. Today is "
+            f"{datetime.now(UTC).strftime('%Y-%m-%d %A')}. "
+            f"Working directory: {ws}. Be concise."
+        )
         try:
             from crabagent.core.agent.agents import build_team_prompt
+
             team_prompt = await build_team_prompt()
             if team_prompt:
                 base_prompt += "\n\n" + team_prompt
@@ -1249,6 +1258,7 @@ class TuiSession:
             pass
         try:
             from crabagent.core.agent.agents import build_memory_prompt
+
             mem_prompt = await build_memory_prompt(self._user.id if self._user else 0)
             if mem_prompt:
                 base_prompt += "\n\n" + mem_prompt
@@ -1418,5 +1428,6 @@ async def run_tui(args):
     logging.getLogger("ddgs.ddgs").setLevel(logging.WARNING)
 
     import litellm
+
     litellm.set_verbose = False
     await TuiSession(args).run()

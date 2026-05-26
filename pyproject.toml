@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "crabagent"
-version = "0.6.6"
+version = "0.7.0"
 description = "CrabAgent - AI Agent Platform with dual-mode (CLI + Serve)"
 readme = "README.md"
 license = {text = "Commercial"}
@@ -34,10 +34,9 @@ dependencies = [
     "aiosqlite>=0.20",
     "python-jose[cryptography]>=3.3",
     "passlib[bcrypt]>=1.7",
-    "bcrypt>=4.0,<4.1",
+    "bcrypt>=4.0,<5.0",
     "mcp>=1.0",
     "apscheduler>=3.10",
-    "textual>=8.0",
 ]
 
 [project.optional-dependencies]

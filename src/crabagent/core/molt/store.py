@@ -23,10 +23,7 @@ def snapshot_path(molt_id: str, filepath: str) -> Path:
 
 async def list_molts(db: AsyncSession, session_id: str, limit: int = 20) -> list[dict[str, Any]]:
     result = await db.execute(
-        select(Molt)
-        .where(Molt.session_id == session_id)
-        .order_by(Molt.created_at.desc())
-        .limit(limit)
+        select(Molt).where(Molt.session_id == session_id).order_by(Molt.created_at.desc()).limit(limit)
     )
     return [_molt_to_dict(m) for m in result.scalars().all()]
 
@@ -73,9 +70,7 @@ async def create_molt(
 
 
 async def count_molts(db: AsyncSession, session_id: str) -> int:
-    result = await db.execute(
-        select(Molt).where(Molt.session_id == session_id)
-    )
+    result = await db.execute(select(Molt).where(Molt.session_id == session_id))
     return len(result.scalars().all())
 
 
@@ -119,14 +114,13 @@ async def prune_molts() -> int:
     keep = settings.molt_keep_count
     pruned = 0
     async with async_session_factory() as db:
-        result = await db.execute(
-            select(Molt).order_by(Molt.created_at.desc()).offset(keep)
-        )
+        result = await db.execute(select(Molt).order_by(Molt.created_at.desc()).offset(keep))
         old_molts = result.scalars().all()
         for m in old_molts:
             md = molt_dir() / m.molt_id
             if md.exists():
                 import shutil
+
                 shutil.rmtree(str(md))
             await db.delete(m)
             pruned += 1

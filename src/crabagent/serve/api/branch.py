@@ -38,11 +38,7 @@ async def list_branches(
 ):
     conv = await get_owned_conversation(db, session_id, user)
 
-    stmt = (
-        select(Message.branch_id)
-        .where(Message.conversation_id == conv.id)
-        .distinct()
-    )
+    stmt = select(Message.branch_id).where(Message.conversation_id == conv.id).distinct()
     result = await db.execute(stmt)
     branch_ids = [row[0] for row in result.fetchall()]
 
@@ -58,12 +54,14 @@ async def list_branches(
         if not msgs:
             continue
         parent_msg_id = msgs[0].parent_id or msgs[0].id
-        branches.append(BranchInfo(
-            branch_id=bid,
-            name=bid,
-            message_count=len(msgs),
-            parent_message_id=parent_msg_id,
-        ))
+        branches.append(
+            BranchInfo(
+                branch_id=bid,
+                name=bid,
+                message_count=len(msgs),
+                parent_message_id=parent_msg_id,
+            )
+        )
 
     return branches
 
@@ -99,10 +97,7 @@ async def create_branch(
         source_msgs = [m for m in source_msgs if m.sequence < target.sequence]
 
     max_seq_result = await db.execute(
-        select(Message.sequence)
-        .where(Message.conversation_id == conv.id)
-        .order_by(Message.sequence.desc())
-        .limit(1)
+        select(Message.sequence).where(Message.conversation_id == conv.id).order_by(Message.sequence.desc()).limit(1)
     )
     max_seq_row = max_seq_result.first()
     next_seq = (max_seq_row[0] + 1) if max_seq_row else 1
@@ -143,11 +138,7 @@ async def switch_branch(
 ):
     conv = await get_owned_conversation(db, session_id, user)
 
-    stmt = (
-        select(Message.id)
-        .where(Message.conversation_id == conv.id, Message.branch_id == req.branch_id)
-        .limit(1)
-    )
+    stmt = select(Message.id).where(Message.conversation_id == conv.id, Message.branch_id == req.branch_id).limit(1)
     result = await db.execute(stmt)
     if not result.first():
         raise HTTPException(status_code=404, detail=f"Branch '{req.branch_id}' not found")

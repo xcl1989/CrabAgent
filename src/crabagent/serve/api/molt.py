@@ -15,7 +15,7 @@ async def list_molts(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    conv = await get_owned_conversation(db, session_id, user)
+    await get_owned_conversation(db, session_id, user)
     from crabagent.core.molt.store import list_molts as _list_molts
 
     return await _list_molts(db, session_id)
@@ -28,7 +28,7 @@ async def get_molt(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    conv = await get_owned_conversation(db, session_id, user)
+    await get_owned_conversation(db, session_id, user)
     from crabagent.core.molt.store import get_molt as _get_molt
     from crabagent.core.molt.store import list_molt_files
 
@@ -62,6 +62,7 @@ async def get_molt_diff(
         new = get_current_content(ws, fp)
         if old != new:
             from difflib import unified_diff
+
             diff = list(unified_diff(old.splitlines(), new.splitlines(), lineterm=""))
             diffs.append({"file": fp, "diff": "\n".join(diff)})
     return {"molt_id": molt_id, "diffs": diffs}

@@ -36,9 +36,7 @@ async def get_conversation(db: AsyncSession, session_id: str) -> Conversation | 
 
 async def list_conversations(db: AsyncSession, user_id: int) -> list[Conversation]:
     result = await db.execute(
-        select(Conversation)
-        .where(Conversation.user_id == user_id)
-        .order_by(Conversation.updated_at.desc())
+        select(Conversation).where(Conversation.user_id == user_id).order_by(Conversation.updated_at.desc())
     )
     return list(result.scalars().all())
 

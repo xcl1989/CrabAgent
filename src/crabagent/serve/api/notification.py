@@ -34,10 +34,7 @@ def _to_response(n: Notification) -> NotificationResponse:
 @router.get("", response_model=list[NotificationResponse])
 async def list_notifications(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     result = await db.execute(
-        select(Notification)
-        .where(Notification.user_id == user.id)
-        .order_by(Notification.created_at.desc())
-        .limit(50)
+        select(Notification).where(Notification.user_id == user.id).order_by(Notification.created_at.desc()).limit(50)
     )
     return [_to_response(r) for r in result.scalars().all()]
 
@@ -78,9 +75,7 @@ async def mark_all_read(user: User = Depends(get_current_user), db: AsyncSession
     from sqlalchemy import update
 
     await db.execute(
-        update(Notification)
-        .where(Notification.user_id == user.id, Notification.read.is_(False))
-        .values(read=True)
+        update(Notification).where(Notification.user_id == user.id, Notification.read.is_(False)).values(read=True)
     )
     await db.commit()
     return {"status": "ok"}

@@ -93,12 +93,8 @@ class McpConnection:
             args=self.config.args,
             env=self.config.env if self.config.env else None,
         )
-        read_stream, write_stream = await self._exit_stack.enter_async_context(
-            stdio_client(params)
-        )
-        self._session = await self._exit_stack.enter_async_context(
-            ClientSession(read_stream, write_stream)
-        )
+        read_stream, write_stream = await self._exit_stack.enter_async_context(stdio_client(params))
+        self._session = await self._exit_stack.enter_async_context(ClientSession(read_stream, write_stream))
         await self._session.initialize()
         return await self._discover_tools()
 
@@ -119,9 +115,7 @@ class McpConnection:
         streams = await self._exit_stack.enter_async_context(transport_ctx)
         read_stream, write_stream, _ = streams
 
-        self._session = await self._exit_stack.enter_async_context(
-            ClientSession(read_stream, write_stream)
-        )
+        self._session = await self._exit_stack.enter_async_context(ClientSession(read_stream, write_stream))
         await self._session.initialize()
         return await self._discover_tools()
 
@@ -179,8 +173,7 @@ class McpConnection:
             "status": self.status,
             "tool_count": len(self._tools),
             "tools": [
-                {"name": t.name, "description": t.description, "input_schema": t.input_schema}
-                for t in self._tools
+                {"name": t.name, "description": t.description, "input_schema": t.input_schema} for t in self._tools
             ],
             "error": self.last_error,
             "connected_at": self.connected_at,
@@ -250,9 +243,7 @@ async def load_enabled_servers() -> list[McpServerConfig]:
 
         from crabagent.core.database import McpServer
 
-        result = await db.execute(
-            select(McpServer).where(McpServer.enabled.is_(True)).order_by(McpServer.name)
-        )
+        result = await db.execute(select(McpServer).where(McpServer.enabled.is_(True)).order_by(McpServer.name))
         for row in result.scalars().all():
             configs.append(McpServerConfig.from_row(row))
     return configs

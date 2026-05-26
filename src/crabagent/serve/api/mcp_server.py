@@ -150,10 +150,7 @@ async def update_mcp_server(
 
     updates = req.model_dump(exclude_unset=True)
 
-    config_changed = any(
-        k in updates
-        for k in ("transport", "command", "args", "url", "env", "headers")
-    )
+    config_changed = any(k in updates for k in ("transport", "command", "args", "url", "env", "headers"))
 
     if "args" in updates and updates["args"] is not None:
         updates["args"] = json.dumps(updates["args"])
@@ -229,10 +226,7 @@ async def test_mcp_server(
         tools = await manager.start_server(config)
         return TestConnectionResponse(
             success=True,
-            tools=[
-                McpToolResponse(name=t.name, description=t.description, input_schema=t.input_schema)
-                for t in tools
-            ],
+            tools=[McpToolResponse(name=t.name, description=t.description, input_schema=t.input_schema) for t in tools],
         )
     except Exception as e:
         logger.warning("MCP test connection failed for '%s': %s", name, e)
@@ -257,17 +251,13 @@ async def get_mcp_server_tools(
     conn = manager.get_connection(name)
     if conn and conn.is_connected:
         return [
-            McpToolResponse(name=t.name, description=t.description, input_schema=t.input_schema)
-            for t in conn._tools
+            McpToolResponse(name=t.name, description=t.description, input_schema=t.input_schema) for t in conn._tools
         ]
 
     config = McpServerConfig.from_row(row)
     try:
         tools = await manager.start_server(config)
-        return [
-            McpToolResponse(name=t.name, description=t.description, input_schema=t.input_schema)
-            for t in tools
-        ]
+        return [McpToolResponse(name=t.name, description=t.description, input_schema=t.input_schema) for t in tools]
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Failed to connect: {e}")
 

@@ -16,7 +16,12 @@ router = APIRouter(prefix="/sessions/{session_id}", tags=["input"])
 _pending_inputs: dict[str, asyncio.Future[str]] = {}
 
 
-def request_user_input(event_bus: EventBus, session_id: str, question: str, options: list[str] | None = None) -> asyncio.Future[str]:
+def request_user_input(
+    event_bus: EventBus,
+    session_id: str,
+    question: str,
+    options: list[str] | None = None,
+) -> asyncio.Future[str]:
     input_id = uuid.uuid4().hex[:12]
     future: asyncio.Future[str] = asyncio.Future()
     _pending_inputs[input_id] = future

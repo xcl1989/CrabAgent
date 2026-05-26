@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import inspect
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -72,6 +74,7 @@ class ToolRegistry:
             return
         try:
             from pathlib import Path as _Path
+
             resolved = _Path(raw).resolve()
             ws = context.workspace.resolve()
             rel = resolved.relative_to(ws)
@@ -103,9 +106,13 @@ class ToolRegistry:
             pass
 
     async def execute(self, name: str, arguments: dict[str, Any], context: Any = None) -> str:
+        import time as _t
+
         tool = self._tools.get(name)
         if not tool:
             return f"Error: unknown tool '{name}'"
+
+        _t0 = _t.monotonic()
 
         if context is not None:
             await self._take_molt_snapshot(name, arguments, context)
@@ -123,9 +130,20 @@ class ToolRegistry:
             kwargs = dict(arguments)
             if "context" in sig.parameters and context is not None:
                 kwargs["context"] = context
-            result = tool.handler(**kwargs)
-            if inspect.isawaitable(result):
-                result = await result
+            _t1 = _t.monotonic()
+            if _t1 - _t0 > 0.1:
+                logging.getLogger(__name__).info(
+                    "tool %s: pre-exec took %.1fms", name, (_t1 - _t0) * 1000
+                )
+            if inspect.iscoroutinefunction(tool.handler):
+                result = await tool.handler(**kwargs)
+            else:
+                result = await asyncio.to_thread(tool.handler, **kwargs)
+            _elapsed = _t.monotonic() - _t0
+            if _elapsed > 0.5:
+                logging.getLogger(__name__).warning(
+                    "tool %s SLOW %.1fs", name, _elapsed
+                )
             return str(result)
         except Exception as e:
             return f"Error executing {name}: {e}"

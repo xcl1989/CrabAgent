@@ -16,8 +16,7 @@ from crabagent.core.agent.tools.registry import registry
             "key": {
                 "type": "string",
                 "description": (
-                    "A descriptive key for this note, "
-                    "e.g. 'research_findings', 'api_endpoints', 'decisions'"
+                    "A descriptive key for this note, e.g. 'research_findings', 'api_endpoints', 'decisions'"
                 ),
             },
             "value": {
@@ -39,6 +38,7 @@ async def shared_put(key: str, value: str, context=None) -> str:
         value = value[:10000]
     author = context.metadata.get("_sub_agent_name", "main")
     from crabagent.core.database import shared_memory_put as _put
+
     await _put(session_id, key, value, author)
     return f"Saved to shared workspace: {key}"
 
@@ -46,8 +46,7 @@ async def shared_put(key: str, value: str, context=None) -> str:
 @registry.register(
     name="shared_get",
     description=(
-        "Read a note from the shared team workspace. "
-        "Returns the value saved by any team member for the given key."
+        "Read a note from the shared team workspace. Returns the value saved by any team member for the given key."
     ),
     parameters={
         "type": "object",
@@ -68,6 +67,7 @@ async def shared_get(key: str, context=None) -> str:
     if not session_id:
         return "Error: no active session for shared workspace"
     from crabagent.core.database import shared_memory_get as _get
+
     value = await _get(session_id, key)
     if value is None:
         return f"(not found: {key})"
@@ -76,10 +76,7 @@ async def shared_get(key: str, context=None) -> str:
 
 @registry.register(
     name="shared_list",
-    description=(
-        "List all notes in the shared team workspace. "
-        "Shows keys, authors, and a preview of each note."
-    ),
+    description=("List all notes in the shared team workspace. Shows keys, authors, and a preview of each note."),
     parameters={
         "type": "object",
         "properties": {},
@@ -93,6 +90,7 @@ async def shared_list(context=None) -> str:
     if not session_id:
         return "Error: no active session for shared workspace"
     from crabagent.core.database import shared_memory_get_all as _get_all
+
     items = await _get_all(session_id)
     if not items:
         return "Shared workspace is empty."

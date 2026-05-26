@@ -28,14 +28,24 @@ class Settings(BaseSettings):
     serve_host: str = "0.0.0.0"
     serve_port: int = 5210
 
+    web_proxy: str = ""
+
     encryption_key: str = ""
 
     auto_approve_tools: bool = False
 
     bash_blocked_patterns: list[str] = [
-        "rm -rf /", "rm -rf /*", "mkfs", "dd if=", "dd of=/dev/",
-        "shutdown", "reboot", "init 0", "init 6",
-        ":(){ :|:& };:", "fork bomb",
+        "rm -rf /",
+        "rm -rf /*",
+        "mkfs",
+        "dd if=",
+        "dd of=/dev/",
+        "shutdown",
+        "reboot",
+        "init 0",
+        "init 6",
+        ":(){ :|:& };:",
+        "fork bomb",
     ]
     bash_block_privilege_escalation: bool = True
     bash_max_output_length: int = 50000
@@ -61,6 +71,7 @@ class Settings(BaseSettings):
         if key_path.exists():
             return key_path.read_text().strip()
         from cryptography.fernet import Fernet
+
         key = Fernet.generate_key().decode()
         key_path.write_text(key)
         return key

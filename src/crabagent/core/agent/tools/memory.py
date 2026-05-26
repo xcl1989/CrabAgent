@@ -2,10 +2,7 @@ from __future__ import annotations
 
 from crabagent.core.agent.tools.registry import registry
 
-_MEMORY_TYPE_DESC = (
-    '"team" for project knowledge shared by all agents, '
-    '"lesson" for behavioral patterns and experience'
-)
+_MEMORY_TYPE_DESC = '"team" for project knowledge shared by all agents, "lesson" for behavioral patterns and experience'
 
 _CATEGORY_DESC = (
     "team: tech_stack, architecture, convention, api, dependency, decision, user_preference. "
@@ -82,6 +79,7 @@ async def memory_save(
     agent_name = context.metadata.get("_sub_agent_name", "")
     session_id = context.metadata.get("session_id", "")
     from crabagent.core.database import agent_memory_upsert
+
     await agent_memory_upsert(
         user_id=user_id,
         memory_type=memory_type,
@@ -137,6 +135,7 @@ async def memory_recall(
     if not user_id:
         return "Error: no user_id in context"
     from crabagent.core.database import agent_memory_search
+
     results = await agent_memory_search(user_id, query, memory_type=memory_type, limit=limit)
     if not results:
         return f"No memories found for '{query}'."
@@ -144,10 +143,7 @@ async def memory_recall(
     for r in results:
         type_tag = r["memory_type"]
         agent_tag = f" [{r['agent_name']}]" if r["agent_name"] else ""
-        lines.append(
-            f"- **{r['key']}** ({type_tag}{agent_tag}, "
-            f"importance={r['importance']:.1f}): {r['content']}"
-        )
+        lines.append(f"- **{r['key']}** ({type_tag}{agent_tag}, importance={r['importance']:.1f}): {r['content']}")
     return "\n".join(lines)
 
 
@@ -184,6 +180,7 @@ async def memory_replace(key: str, old_text: str, new_text: str, context=None) -
     if not user_id:
         return "Error: no user_id in context"
     from crabagent.core.database import agent_memory_replace as _replace
+
     ok = await _replace(user_id, key, old_text, new_text)
     if ok:
         return f"Memory updated: {key}"
@@ -215,6 +212,7 @@ async def memory_list(memory_type: str = "", category: str = "", context=None) -
     if not user_id:
         return "Error: no user_id in context"
     from crabagent.core.database import agent_memory_list_all
+
     items = await agent_memory_list_all(user_id, memory_type=memory_type, category=category)
     if not items:
         return "No memories stored yet."
@@ -224,10 +222,7 @@ async def memory_list(memory_type: str = "", category: str = "", context=None) -
         preview = item["content"]
         if len(preview) > 120:
             preview = preview[:120] + "..."
-        lines.append(
-            f"- **{item['key']}** ({item['memory_type']}{agent_tag}, "
-            f"imp={item['importance']:.1f}): {preview}"
-        )
+        lines.append(f"- **{item['key']}** ({item['memory_type']}{agent_tag}, imp={item['importance']:.1f}): {preview}")
     return "\n".join(lines)
 
 
@@ -253,6 +248,7 @@ async def memory_forget(key: str, context=None) -> str:
     if not user_id:
         return "Error: no user_id in context"
     from crabagent.core.database import agent_memory_delete
+
     ok = await agent_memory_delete(user_id, key)
     if ok:
         return f"Memory deleted: {key}"

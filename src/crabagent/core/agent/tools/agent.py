@@ -39,6 +39,7 @@ async def delegate_task(agent_name: str, task: str, context=None) -> str:
     if context is None:
         return "Error: agent delegation requires an active session"
     from crabagent.core.agent.agents import spawn_sub_agent
+
     return await spawn_sub_agent(agent_name, task, context)
 
 
@@ -93,6 +94,7 @@ async def handoff_to(agent_name: str, summary: str, context=None) -> str:
     if context is None:
         return "Error: agent handoff requires an active session"
     from crabagent.core.agent.agents import spawn_sub_agent
+
     return await spawn_sub_agent(agent_name, summary, context, include_history=True)
 
 
@@ -178,6 +180,7 @@ async def request_help(agent_name: str, question: str, context=None) -> str:
     if depth >= 1:
         return "Error: cannot request help (maximum nesting depth reached)"
     from crabagent.core.agent.agents import spawn_sub_agent
+
     return await spawn_sub_agent(agent_name, question, context)
 
 
@@ -243,10 +246,12 @@ async def run_pipeline(steps: list[dict], context=None) -> str:
         sid = s["id"]
         deps[sid] = set(s.get("depends_on") or [])
 
-    await context.event_bus.emit(AgentEvent(
-        type=EventType.PIPELINE_START,
-        data={"total_steps": len(steps), "step_ids": list(step_map.keys())},
-    ))
+    await context.event_bus.emit(
+        AgentEvent(
+            type=EventType.PIPELINE_START,
+            data={"total_steps": len(steps), "step_ids": list(step_map.keys())},
+        )
+    )
 
     completed: set[str] = set()
     failed: set[str] = set()
@@ -278,17 +283,21 @@ async def run_pipeline(steps: list[dict], context=None) -> str:
             if dep_context:
                 task_text = f"{task_text}\n\n## Dependency Results{dep_context}"
 
-            await context.event_bus.emit(AgentEvent(
-                type=EventType.PIPELINE_STEP_START,
-                data={"step_id": sid, "agent_name": step["agent_name"], "task": step["task"][:200]},
-            ))
+            await context.event_bus.emit(
+                AgentEvent(
+                    type=EventType.PIPELINE_STEP_START,
+                    data={"step_id": sid, "agent_name": step["agent_name"], "task": step["task"][:200]},
+                )
+            )
 
             result = await spawn_sub_agent(step["agent_name"], task_text, context)
 
-            await context.event_bus.emit(AgentEvent(
-                type=EventType.PIPELINE_STEP_END,
-                data={"step_id": sid, "agent_name": step["agent_name"], "result": result[:500]},
-            ))
+            await context.event_bus.emit(
+                AgentEvent(
+                    type=EventType.PIPELINE_STEP_END,
+                    data={"step_id": sid, "agent_name": step["agent_name"], "result": result[:500]},
+                )
+            )
             return sid, result
 
         coros = [_run_step(sid) for sid in ready]
@@ -303,10 +312,12 @@ async def run_pipeline(steps: list[dict], context=None) -> str:
                 completed.add(sid)
                 results[sid] = result
 
-    await context.event_bus.emit(AgentEvent(
-        type=EventType.PIPELINE_END,
-        data={"completed": list(completed), "failed": list(failed), "total": len(steps)},
-    ))
+    await context.event_bus.emit(
+        AgentEvent(
+            type=EventType.PIPELINE_END,
+            data={"completed": list(completed), "failed": list(failed), "total": len(steps)},
+        )
+    )
 
     lines = [f"# Pipeline Results ({len(completed)}/{len(steps)} succeeded)\n"]
     for s in steps:
@@ -355,9 +366,7 @@ async def plan_task(task: str, context=None) -> str:
     agent_lines = []
     for a in agents:
         tools_info = f" Tools: {', '.join(a.get('tools', []))}" if a.get("tools") else ""
-        agent_lines.append(
-            f"- **{a['display_name']}** (`{a['name']}`): {a['role']}. {a['goal']}{tools_info}"
-        )
+        agent_lines.append(f"- **{a['display_name']}** (`{a['name']}`): {a['role']}. {a['goal']}{tools_info}")
     agent_text = "\n".join(agent_lines)
 
     plan_prompt = (
@@ -369,7 +378,7 @@ async def plan_task(task: str, context=None) -> str:
         "2. Independent steps run in parallel; use depends_on for ordering\n"
         "3. Be specific in each step's task description\n"
         "4. Use 1-5 steps\n\n"
-        'Output ONLY a JSON array:\n'
+        "Output ONLY a JSON array:\n"
         '[{"id":"s1","agent_name":"researcher","task":"search X","depends_on":[]}]\n'
         "No other text before or after."
     )
@@ -389,6 +398,7 @@ async def plan_task(task: str, context=None) -> str:
         llm_params = {"api_key": provider.api_key}
         if provider.base_url:
             llm_params["api_base"] = provider.base_url
+            llm_params["custom_llm_provider"] = "openai"
 
         model = context.model or "gpt-4"
 
@@ -400,7 +410,16 @@ async def plan_task(task: str, context=None) -> str:
             **llm_params,
         )
 
-        text = response.choices[0].message.content.strip()
+        text = ""
+        if response.choices:
+            msg = response.choices[0].message
+            text = (msg.content or "").strip()
+            if not text:
+                reasoning = getattr(msg, "reasoning_content", None)
+                if reasoning:
+                    text = reasoning.strip()
+                    if " response" in text:
+                        text = text.rsplit(" response", 1)[-1].strip()
 
         start = text.find("[")
         end = text.rfind("]") + 1

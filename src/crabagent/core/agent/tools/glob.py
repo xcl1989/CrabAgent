@@ -1,5 +1,22 @@
 from crabagent.core.agent.tools.registry import registry
 
+_GLOB_EXCLUDE_DIRS = {
+    ".git",
+    "__pycache__",
+    ".pytest_cache",
+    ".ruff_cache",
+    "node_modules",
+    ".venv",
+    "venv",
+    ".eggs",
+    "dist",
+    "build",
+    ".opencode",
+    ".crabagent",
+}
+
+_GLOB_MAX_RESULTS = 500
+
 
 @registry.register(
     name="glob",
@@ -22,7 +39,7 @@ from crabagent.core.agent.tools.registry import registry
 def glob_files(pattern: str, path: str = ".") -> str:
     from pathlib import Path
 
-    root = Path(path)
+    root = Path(path).resolve()
     if not root.exists():
         return f"Error: path does not exist: {path}"
 
@@ -32,6 +49,15 @@ def glob_files(pattern: str, path: str = ".") -> str:
 
     lines = []
     for m in matches:
+        parts = set(m.relative_to(root).parts) if m.is_relative_to(root) else set(m.parts)
+        if parts & _GLOB_EXCLUDE_DIRS:
+            continue
         rel = m.relative_to(root) if m.is_relative_to(root) else m
         lines.append(str(rel))
+        if len(lines) >= _GLOB_MAX_RESULTS:
+            lines.append(f"\n... [truncated: {len(matches) - _GLOB_MAX_RESULTS} more files hidden]")
+            break
+
+    if not lines:
+        return "No files found (all in excluded dirs)."
     return "\n".join(lines)

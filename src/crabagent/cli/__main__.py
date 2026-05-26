@@ -19,15 +19,30 @@ from crabagent.core.config import settings
 from crabagent.core.event import AgentEvent, EventType
 
 SLASH_COMMANDS = [
-    "/exit", "/quit", "/help", "/clear", "/history",
-    "/model", "/models", "/provider", "/skills", "/skill",
-    "/sessions", "/session", "/new", "/molt", "/todo", "/image",
+    "/exit",
+    "/quit",
+    "/help",
+    "/clear",
+    "/history",
+    "/model",
+    "/models",
+    "/provider",
+    "/skills",
+    "/skill",
+    "/sessions",
+    "/session",
+    "/new",
+    "/molt",
+    "/todo",
+    "/image",
 ]
 PROVIDER_SUB = ["add", "list", "remove", "set-default"]
-PROMPT_STYLE = Style.from_dict({
-    "status": "#888888",
-    "toolbar": "bg:#1a1a2e #888888",
-})
+PROMPT_STYLE = Style.from_dict(
+    {
+        "status": "#888888",
+        "toolbar": "bg:#1a1a2e #888888",
+    }
+)
 CLI_USERNAME = "__cli__"
 
 
@@ -60,6 +75,7 @@ def main():
     logging.getLogger("ddgs.ddgs").setLevel(logging.WARNING)
 
     import litellm
+
     litellm.set_verbose = False
 
     if args.serve:
@@ -72,6 +88,7 @@ def main():
 
     if not args.query:
         from crabagent.cli.tui import run_tui
+
         asyncio.run(run_tui(args))
     else:
         asyncio.run(_run_single(args))
@@ -92,6 +109,7 @@ def _dispatch_subcommand(args):
 
 def _dispatch_provider(argv: list[str]):
     from crabagent.cli.provider import main as provider_main
+
     provider_main(argv)
 
 
@@ -127,6 +145,7 @@ async def _cmd_skill(args):
             print(f"Skill '{args.name}' not found. Available: {names}")
             return
         from crabagent.core.agent.skill.loader import format_skill_content
+
         print(format_skill_content(skill))
     else:
         print("Usage: crabagent skill {list|show}")
@@ -134,11 +153,13 @@ async def _cmd_skill(args):
 
 async def _cmd_models():
     from crabagent.core.provider_store import get_default_provider
+
     provider = await get_default_provider()
     if not provider:
         print("No default provider configured.")
         return
     from crabagent.core.provider_store import fetch_models
+
     try:
         models = await fetch_models(provider.name)
         for m in models:
@@ -149,6 +170,7 @@ async def _cmd_models():
 
 async def _cmd_init():
     from crabagent.core.database import init_db
+
     await init_db()
     print("CrabAgent initialized.")
 
@@ -214,13 +236,22 @@ def _make_cli_event_handler(console):
         if console and not live[0]:
             from rich.live import Live
             from rich.markdown import Markdown
-            live[0] = Live(Markdown(""), console=console, refresh_per_second=20, auto_refresh=False, vertical_overflow="visible", screen=False)
+
+            live[0] = Live(
+                Markdown(""),
+                console=console,
+                refresh_per_second=20,
+                auto_refresh=False,
+                vertical_overflow="visible",
+                screen=False,
+            )
             live[0].start()
 
     def _update_live(text: str):
         if not live[0]:
             return
         from rich.markdown import Markdown
+
         live[0].update(Markdown(text), refresh=True)
 
     def _stop_live():
@@ -232,7 +263,15 @@ def _make_cli_event_handler(console):
         if console and not tool_live[0]:
             from rich.live import Live
             from rich.text import Text
-            tool_live[0] = Live(Text(""), console=console, refresh_per_second=20, auto_refresh=False, vertical_overflow="visible", screen=False)
+
+            tool_live[0] = Live(
+                Text(""),
+                console=console,
+                refresh_per_second=20,
+                auto_refresh=False,
+                vertical_overflow="visible",
+                screen=False,
+            )
             tool_live[0].start()
 
     def _stop_tool_live():
@@ -245,6 +284,7 @@ def _make_cli_event_handler(console):
         if not tool_live[0]:
             return
         from rich.text import Text
+
         lines = Text()
         for cid, t in tool_buffer.items():
             name = t["display"]
@@ -331,8 +371,11 @@ def _make_cli_event_handler(console):
             server = event.data.get("server_name", "")
             display = _format_tool_display(name, call_args)
             tool_buffer[call_id] = {
-                "display": display, "status": "pending",
-                "result": "", "source": source, "server": server,
+                "display": display,
+                "status": "pending",
+                "result": "",
+                "source": source,
+                "server": server,
             }
             _ensure_tool_live()
             _render_tools()
@@ -379,12 +422,14 @@ def _make_cli_confirm_callback(console):
             print(f"  {args_str}")
         try:
             from prompt_toolkit import prompt as pt_prompt
+
             answer = await asyncio.get_event_loop().run_in_executor(
                 None, lambda: pt_prompt("  Allow? [y/N]: ").strip().lower()
             )
         except (EOFError, KeyboardInterrupt):
             return False
         return answer in ("y", "yes")
+
     return confirm
 
 
@@ -396,9 +441,7 @@ def _make_cli_ask_callback(console):
                 for i, opt in enumerate(options, 1):
                     print(f"    {i}. {opt}")
                 print(f"  Choice (1-{len(options)} or custom): ", end="", flush=True)
-                answer = await asyncio.get_event_loop().run_in_executor(
-                    None, lambda: input().strip()
-                )
+                answer = await asyncio.get_event_loop().run_in_executor(None, lambda: input().strip())
                 try:
                     idx = int(answer) - 1
                     if 0 <= idx < len(options):
@@ -408,12 +451,14 @@ def _make_cli_ask_callback(console):
                 return answer
             else:
                 from prompt_toolkit import prompt as pt_prompt
+
                 answer = await asyncio.get_event_loop().run_in_executor(
                     None, lambda: pt_prompt(f"  {question}: ").strip()
                 )
                 return answer
         except (EOFError, KeyboardInterrupt):
             return ""
+
     return ask
 
 
@@ -430,7 +475,14 @@ def _replace_persistence_listener(context, conv_id: int, seq: int, args):
         context.event_bus.subscribe(persistence.on_event)
 
 
-async def _setup_agent_context(args, conversation_id: int | None = None, history: list[dict] | None = None, persistence_start_seq: int = 0, session_id_str: str | None = None, user_id: int = 0):
+async def _setup_agent_context(
+    args,
+    conversation_id: int | None = None,
+    history: list[dict] | None = None,
+    persistence_start_seq: int = 0,
+    session_id_str: str | None = None,
+    user_id: int = 0,
+):
     import crabagent.core.agent.tools.bash  # noqa: F401
     import crabagent.core.agent.tools.edit  # noqa: F401
     import crabagent.core.agent.tools.glob  # noqa: F401
@@ -438,6 +490,7 @@ async def _setup_agent_context(args, conversation_id: int | None = None, history
     import crabagent.core.agent.tools.read  # noqa: F401
     import crabagent.core.agent.tools.web  # noqa: F401
     import crabagent.core.agent.tools.write  # noqa: F401
+
     try:
         import crabagent.core.agent.tools.browser  # noqa: F401
     except Exception:
@@ -455,9 +508,14 @@ async def _setup_agent_context(args, conversation_id: int | None = None, history
     workspace = args.workspace or settings.workspace
     workspace = workspace.resolve()
 
-    base_prompt = f"You are CrabAgent, an AI assistant. Today is {datetime.now(UTC).strftime('%Y-%m-%d %A')}. Working directory: {workspace}"
+    base_prompt = (
+        f"You are CrabAgent, an AI assistant. "
+        f"Today is {datetime.now(UTC).strftime('%Y-%m-%d %A')}. "
+        f"Working directory: {workspace}"
+    )
     try:
         from crabagent.core.agent.agents import build_team_prompt
+
         team_prompt = await build_team_prompt()
         if team_prompt:
             base_prompt += "\n\n" + team_prompt
@@ -466,6 +524,7 @@ async def _setup_agent_context(args, conversation_id: int | None = None, history
 
     try:
         from crabagent.core.agent.agents import build_memory_prompt
+
         mem_prompt = await build_memory_prompt(user_id)
         if mem_prompt:
             base_prompt += "\n\n" + mem_prompt
@@ -474,7 +533,8 @@ async def _setup_agent_context(args, conversation_id: int | None = None, history
 
     try:
         from crabagent.core.agent.agents import build_memory_prompt
-        mem_prompt = await build_memory_prompt(user_id if 'user_id' in dir() else 0)
+
+        mem_prompt = await build_memory_prompt(user_id if "user_id" in dir() else 0)
         if mem_prompt:
             base_prompt += "\n\n" + mem_prompt
     except Exception:
@@ -508,12 +568,15 @@ async def _setup_agent_context(args, conversation_id: int | None = None, history
     context.metadata["_skills"] = skills
 
     from crabagent.core.molt.tools import register_molt_tools
+
     register_molt_tools(context.tool_registry)
 
     from crabagent.core.todo.tools import register_todo_tools
+
     register_todo_tools(context.tool_registry)
 
     from crabagent.core.tool_loader import discover_and_register_tools
+
     discover_and_register_tools(context.tool_registry, workspace)
 
     from crabagent.core.mcp.client import MCPClientManager
@@ -534,6 +597,7 @@ async def _setup_agent_context(args, conversation_id: int | None = None, history
 
     try:
         from rich.console import Console
+
         console = Console()
     except ImportError:
         console = None
@@ -547,7 +611,11 @@ async def _setup_agent_context(args, conversation_id: int | None = None, history
 
     @context.tool_registry.register(
         name="ask_question",
-        description="Ask the user a question and get their response. Use when you need clarification, more information, or a decision from the user before proceeding.",
+        description=(
+            "Ask the user a question and get their response. "
+            "Use when you need clarification, more information, "
+            "or a decision from the user before proceeding."
+        ),
         parameters={
             "type": "object",
             "properties": {
@@ -602,8 +670,12 @@ async def _run_single(args):
         else:
             workspace = args.workspace or settings.workspace
             workspace = workspace.resolve()
-            conv = await _init_conversation(user.id, workspace=str(workspace), model=args.model or "",
-                                            title=args.query[:50] if len(args.query) > 50 else args.query)
+            conv = await _init_conversation(
+                user.id,
+                workspace=str(workspace),
+                model=args.model or "",
+                title=args.query[:50] if len(args.query) > 50 else args.query,
+            )
             conversation_id = conv.id
             session_id_str = conv.session_id
             history = None
@@ -612,7 +684,14 @@ async def _run_single(args):
         history = None
         max_seq = 0
 
-    context = await _setup_agent_context(args, conversation_id=conversation_id, history=history, persistence_start_seq=max_seq, session_id_str=session_id_str, user_id=user.id)
+    context = await _setup_agent_context(
+        args,
+        conversation_id=conversation_id,
+        history=history,
+        persistence_start_seq=max_seq,
+        session_id_str=session_id_str,
+        user_id=user.id,
+    )
 
     try:
         await run_agent(context, args.query)
@@ -644,11 +723,12 @@ def _print_banner(context, provider: str, model: str):
     try:
         from rich.console import Console
         from rich.text import Text
+
         console = Console()
-        t = Text("CrabAgent v0.6.6", style="bold")
+        t = Text("CrabAgent v0.7.0", style="bold")
         console.print(t)
     except ImportError:
-        print("CrabAgent v0.6.6")
+        print("CrabAgent v0.7.0")
 
     print(f"  provider: {provider}  model: {model}")
     print(f"  workspace: {context.workspace}")
@@ -775,7 +855,14 @@ async def _run_interactive(args):
             args.model = first_models[0]
             settings.save_last_model(args.model)
 
-    context = await _setup_agent_context(args, conversation_id=conversation_id[0], history=history, persistence_start_seq=max_seq, session_id_str=session_id_str[0], user_id=user.id)
+    context = await _setup_agent_context(
+        args,
+        conversation_id=conversation_id[0],
+        history=history,
+        persistence_start_seq=max_seq,
+        session_id_str=session_id_str[0],
+        user_id=user.id,
+    )
 
     provider_display = await _resolve_provider_display(args)
     model_display = args.model or "default"
@@ -825,6 +912,7 @@ async def _run_interactive(args):
 
         if user_input.startswith("/"):
             from rich.console import Console as _cli_console
+
             cli_console = _cli_console()
             should_exit = await _handle_slash_command(user_input, context, args, user, state, cli_console)
             if should_exit:
@@ -849,7 +937,13 @@ async def _run_interactive(args):
 
             seq = len(context.messages) + 1
             async with async_session_factory() as db:
-                await save_message(db, conversation_id=conversation_id[0], sequence=seq, role="user", content=user_input)
+                await save_message(
+                    db,
+                    conversation_id=conversation_id[0],
+                    sequence=seq,
+                    role="user",
+                    content=user_input,
+                )
 
             if first_message[0]:
                 first_message[0] = False
@@ -1032,8 +1126,10 @@ async def _handle_slash_command(cmd: str, context, args, user, state: dict, cons
         first_message[0] = False
         _replace_persistence_listener(context, conversation_id[0], max_seq, args)
         import os as _os
+
         _os.system("clear" if _os.name == "posix" else "cls")
         from rich.markdown import Markdown
+
         for msg in history:
             role = msg.get("role", "")
             content = msg.get("content", "")
@@ -1072,7 +1168,8 @@ async def _handle_slash_command(cmd: str, context, args, user, state: dict, cons
                 print("  " + "-" * 70)
                 for i, m in enumerate(molts, 1):
                     ts = m["created_at"][:16] if m["created_at"] else ""
-                    print(f"  {i:>3}  {m['molt_id']:<14} {ts:<10} {m['method']:<6} {m['file_count']:<5}  {m['description']}")
+                    desc = m["description"]
+                    print(f"  {i:>3}  {m['molt_id']:<14} {ts:<10} {m['method']:<6} {m['file_count']:<5}  {desc}")
 
         elif subcmd == "show":
             molt_id = parts[1] if len(parts) > 1 else ""
@@ -1113,6 +1210,7 @@ async def _handle_slash_command(cmd: str, context, args, user, state: dict, cons
 
         elif subcmd == "prune":
             from crabagent.core.molt.store import prune_molts
+
             n = await prune_molts()
             print(f"Pruned {n} old molts.")
 
@@ -1254,6 +1352,7 @@ async def _handle_slash_command(cmd: str, context, args, user, state: dict, cons
         first_message[0] = True
         _replace_persistence_listener(context, conv.id, 0, args)
         import os as _os
+
         _os.system("clear" if _os.name == "posix" else "cls")
         console.print(f"[dim]New session: {conv.session_id}[/dim]")
 
@@ -1309,8 +1408,10 @@ async def _handle_provider_slash(arg: str, context):
             existing = await list_providers()
             is_first = len(existing) == 0
             await create_provider(
-                name=name, display_name=display or name,
-                provider_type=ptype, api_key=api_key,
+                name=name,
+                display_name=display or name,
+                provider_type=ptype,
+                api_key=api_key,
                 base_url=base_url or "",
                 is_default=is_first,
             )

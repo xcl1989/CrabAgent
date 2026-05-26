@@ -5,6 +5,12 @@ import {
   createAgentProfile,
   updateAgentProfile,
   deleteAgentProfile,
+  listLearningAgents,
+  listAgentMemory,
+  deleteAgentMemory,
+  getAgentStats,
+  AgentMemoryItem,
+  AgentTaskStats,
 } from "../api/agents";
 
 const ICON_OPTIONS = [
@@ -45,11 +51,46 @@ export function AgentTeamPanel({ onClose }: Props) {
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
+  const [learningAgents, setLearningAgents] = useState<string[]>([]);
+  const [selectedLearnAgent, setSelectedLearnAgent] = useState("");
+  const [agentStats, setAgentStats] = useState<AgentTaskStats | null>(null);
+  const [agentMemories, setAgentMemories] = useState<AgentMemoryItem[]>([]);
+  const [loadingLearn, setLoadingLearn] = useState(false);
+
   const fetchAgents = async () => {
     try { setAgents(await listAgentProfiles()); } catch { /* ignore */ }
   };
 
   useEffect(() => { fetchAgents(); }, []);
+
+  useEffect(() => {
+    listLearningAgents().then(setLearningAgents).catch(() => {});
+  }, []);
+
+  const loadLearning = async (agentName: string) => {
+    setSelectedLearnAgent(agentName);
+    setLoadingLearn(true);
+    try {
+      const [stats, memories] = await Promise.all([
+        getAgentStats(agentName),
+        listAgentMemory(agentName, 20),
+      ]);
+      setAgentStats(stats);
+      setAgentMemories(memories);
+    } catch {
+      setAgentStats(null);
+      setAgentMemories([]);
+    } finally {
+      setLoadingLearn(false);
+    }
+  };
+
+  const handleDeleteMemory = async (key: string) => {
+    try {
+      await deleteAgentMemory(key);
+      setAgentMemories((prev) => prev.filter((m) => m.key !== key));
+    } catch { /* ignore */ }
+  };
 
   const startEdit = (a: AgentProfile) => {
     setEditing(a.name);
@@ -326,6 +367,76 @@ export function AgentTeamPanel({ onClose }: Props) {
           {agents.length === 0 && !showCreate && (
             <div className="text-center py-8">
               <p className="text-sm" style={{ color: "var(--text-secondary)" }}>No agents yet</p>
+            </div>
+          )}
+
+          {learningAgents.length > 0 && (
+            <div className="rounded-xl p-3.5" style={{ background: "var(--bg-primary)", border: "1px solid var(--border)" }}>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-sm">🧠</span>
+                <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--text-secondary)" }}>
+                  Learning Stats
+                </span>
+              </div>
+              <div className="flex gap-2 mb-2">
+                {learningAgents.map((name) => (
+                  <button
+                    key={name}
+                    onClick={() => loadLearning(name)}
+                    className="text-[10px] px-2 py-1 rounded-md font-mono transition-all"
+                    style={{
+                      background: selectedLearnAgent === name ? "var(--accent)" : "var(--bg-tertiary)",
+                      color: selectedLearnAgent === name ? "var(--text-on-accent)" : "var(--text-primary)",
+                    }}
+                  >
+                    {name}
+                  </button>
+                ))}
+              </div>
+              {loadingLearn && (
+                <p className="text-[10px]" style={{ color: "var(--text-secondary)" }}>Loading...</p>
+              )}
+              {agentStats && !loadingLearn && (
+                <div className="space-y-2">
+                  <div className="flex gap-3 text-[10px] font-mono" style={{ color: "var(--text-secondary)" }}>
+                    <span>Tasks: <b style={{ color: "var(--text-primary)" }}>{agentStats.total}</b></span>
+                    <span>Success: <b style={{ color: "#34d399" }}>{agentStats.success_rate}%</b></span>
+                    <span>Avg: <b style={{ color: "var(--text-primary)" }}>{agentStats.avg_elapsed}s</b></span>
+                    <span>Tokens: <b style={{ color: "var(--text-primary)" }}>{agentStats.avg_tokens}</b></span>
+                  </div>
+                  {agentMemories.length > 0 && (
+                    <div className="space-y-1 max-h-40 overflow-y-auto">
+                      {agentMemories.map((m) => (
+                        <div key={m.key} className="flex items-start gap-1.5 group">
+                          <span
+                            className="text-[9px] px-1 py-0.5 rounded shrink-0 font-mono"
+                            style={{
+                              background: m.source === "llm" ? "var(--accent-bg)" : "var(--bg-tertiary)",
+                              color: m.source === "llm" ? "var(--accent)" : "var(--text-secondary)",
+                            }}
+                          >
+                            {m.source || "rule"}
+                          </span>
+                          <span className="text-[10px] flex-1 leading-relaxed truncate" style={{ color: "var(--text-secondary)" }}>
+                            {m.content}
+                          </span>
+                          <button
+                            onClick={() => handleDeleteMemory(m.key)}
+                            className="text-[9px] opacity-0 group-hover:opacity-60 hover:!opacity-100 shrink-0"
+                            style={{ color: "#f87171" }}
+                            title="Delete"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+              {!agentStats && !loadingLearn && selectedLearnAgent && (
+                <p className="text-[10px]" style={{ color: "var(--text-secondary)" }}>No data for {selectedLearnAgent}</p>
+              )}
             </div>
           )}
         </div>

@@ -52,20 +52,21 @@ This is CrabAgent's core differentiator. Agents don't just execute tasks — the
 Sub-agent completes task
     │
     ├─ Rule Engine (instant)
-    │   ├─ High iterations → "Consider breaking tasks into smaller steps"
-    │   ├─ Low iterations → "Efficient execution pattern recorded"
-    │   └─ Source: rule
+    │   └─ High iterations (>80% max) → "Decompose complex tasks, use fewer tools per step"
     │
-    └─ LLM Reflection (best-effort, ~1s)
-        ├─ Analyzes strategy: what worked, what didn't
-        ├─ Classifies task category: code / research / analysis / writing
+    └─ LLM Reflection (~1-3s)
+        ├─ Extracts concrete, actionable insights:
+        │   "When searching Chinese news, use English keywords on DuckDuckGo for better results"
+        │   "For error-prone sites, prefer web_scrape with direct URLs over web_search"
+        ├─ Auto-filters generic/noise responses ("completed in X steps")
+        ├─ Also learns from failures: captures what went wrong and how to avoid it
         └─ Source: llm
 ```
 
 ### Knowledge persistence
 
 - **Team Knowledge**: Tech stack, architecture decisions, user preferences — auto-injected into every session
-- **Agent Lessons**: Per-agent behavioral patterns — loaded before similar tasks
+- **Agent Lessons**: Per-agent concrete insights grouped by category (Pitfalls / What Worked) — loaded before similar tasks
 - **Task Records**: Every execution logged (success, elapsed time, tokens, iterations)
 
 ### Tracking growth
@@ -74,12 +75,10 @@ Sub-agent completes task
 # TUI
 /agent_stats coder
 # → 总任务: 23  成功率: 91%  平均耗时: 14s
-# → lessons: 18 (规则: 7, LLM: 11)
-# → 常用类别: code(14), analysis(4)
+# → lessons: 18 (规则: 3, LLM: 15)
 
-/memory list          # Browse all knowledge
-/memory search api    # Keyword search
-```
+# Web UI
+# → Agent Team → Learning Stats: click agent name to see stats + all lessons
 
 ---
 
@@ -186,6 +185,13 @@ def run(name: str) -> str:
 | `CRAB_MAX_ITERATIONS` | `50` | Max agent iterations |
 | `CRAB_MAX_TOKENS` | `4096` | Max response tokens |
 | `CRAB_BROWSER_HEADLESS` | `true` | Browser headless mode |
+| `CRAB_WEB_PROXY` | (empty) | HTTP proxy for web_search & web_scrape |
+
+**v0.7.0 Highlights**
+- 🧠 **Learning quality overhaul** — LLM reflection now extracts **actionable insights** (tool tricks, pitfalls, domain tips), no more "completed in X steps" noise. Failure learning added — agents learn from mistakes too.
+- 🌐 **Web proxy support** — `CRAB_WEB_PROXY=http://127.0.0.1:7890` for web_search/web_scrape (critical for users behind firewalls).
+- 📊 **Learning Dashboard** — View each agent's task stats and past lessons directly in the Web UI Agent Team panel.
+- 📡 **Sub-agent persistence** — Completed sub-agents stay visible in the Dashboard for 30 minutes after finishing.
 
 ---
 

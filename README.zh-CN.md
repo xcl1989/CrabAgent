@@ -52,15 +52,15 @@ Agent 不只是执行任务，**每次执行都会学习成长**。
 子 Agent 完成任务
     │
     ├─ 规则引擎（即时）
-    │   ├─ 迭代数过高 → "考虑将复杂任务拆分为更小的步骤"
-    │   ├─ 迭代数低效 → "高效执行模式已记录"
-    │   └─ 来源: rule
+    │   └─ 迭代数过高 (>80%) → "将复杂任务拆分为更小步骤，减少每次迭代使用的工具数"
     │
-    └─ LLM 反思（best-effort，约 1 秒）
-        ├─ 分析策略：哪里有效、哪里可改进
-        ├─ 任务归类：code / research / analysis / writing
+    └─ LLM 反思（1-3 秒）
+        ├─ 提取具体的、可复用的经验：
+        │   "DuckDuckGo 搜中文内容结果较少，改用英文关键词可获得更全面的结果"
+        │   "对于不稳定的网站，优先使用 web_scrape 直接抓取而不是 web_search"
+        ├─ 自动过滤泛化废话回复（"completed in X steps"）
+        ├─ 失败也能学习——捕获错误原因及预防方法
         └─ 来源: llm
-```
 
 ### 知识持久化
 
@@ -74,12 +74,10 @@ Agent 不只是执行任务，**每次执行都会学习成长**。
 # TUI 中
 /agent_stats coder
 # → 总任务: 23  成功率: 91%  平均耗时: 14s
-# → lessons: 18 (规则: 7, LLM: 11)
-# → 常用类别: code(14), analysis(4)
+# → lessons: 18 (规则: 3, LLM: 15)
 
-/memory list          # 浏览所有记忆
-/memory search api    # 关键词搜索
-```
+# Web UI
+# → Agent Team → 学习统计：点击 Agent 名称查看任务统计和所有经验
 
 ---
 
@@ -186,6 +184,13 @@ def run(name: str) -> str:
 | `CRAB_MAX_ITERATIONS` | `50` | Agent 最大迭代次数 |
 | `CRAB_MAX_TOKENS` | `4096` | 最大响应 Token 数 |
 | `CRAB_BROWSER_HEADLESS` | `true` | 浏览器无头模式 |
+| `CRAB_WEB_PROXY` | （空） | web_search / web_scrape 的 HTTP 代理 |
+
+**v0.7.0 更新亮点**
+- 🧠 **学习品质升级** — LLM 反思改为提取**可执行的具体洞察**（工具技巧、踩坑经验、领域提示），不再有"completed in X steps"之类的废话。新增失败学习 — Agent 也能从错误中成长。
+- 🌐 **Web 代理支持** — `CRAB_WEB_PROXY=http://127.0.0.1:7890` 解决防火墙环境下的搜索问题。
+- 📊 **学习看板** — Web UI Agent Team 面板直接查看每个 Agent 的任务统计和历史经验。
+- 📡 **子 Agent 持久化** — 已完成的子 Agent 在 Dashboard 中保留显示 30 分钟。
 
 ---
 

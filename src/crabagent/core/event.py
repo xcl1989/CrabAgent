@@ -56,8 +56,11 @@ class AgentEvent:
 
 
 class EventBus:
-    def __init__(self):
+    def __init__(self, name: str = ""):
         self._listeners: list = []
+        self._name = name
+        self._emit_count = 0
+        self._emit_warn_threshold = 0.01
 
     def subscribe(self, callback) -> None:
         self._listeners.append(callback)
@@ -69,11 +72,47 @@ class EventBus:
             pass
 
     async def emit(self, event: AgentEvent) -> None:
+        import time as _t
+        t0 = _t.monotonic()
         for callback in self._listeners:
             result = callback(event)
             if hasattr(result, "__await__"):
                 await result
+        elapsed = _t.monotonic() - t0
+        if elapsed > 0.05:
+            import logging
+            logging.getLogger(__name__).warning(
+                "[%s] emit SLOW %.1fms listeners=%d event=%s",
+                self._name,
+                elapsed * 1000,
+                len(self._listeners),
+                event.type,
+            )
 
     def emit_sync(self, event: AgentEvent) -> None:
+        import logging
+        import time
+
+        self._emit_count += 1
+        t0 = time.monotonic()
         for callback in self._listeners:
-            callback(event)
+            try:
+                callback(event)
+            except Exception:
+                logging.getLogger(__name__).warning(
+                    "[%s] emit_sync listener %s raised on %s",
+                    self._name,
+                    getattr(callback, "__name__", callback),
+                    event.type,
+                    exc_info=True,
+                )
+        elapsed = time.monotonic() - t0
+        if elapsed > self._emit_warn_threshold:
+            logging.getLogger(__name__).warning(
+                "[%s] emit_sync SLOW %.3fms listeners=%d event=%s (#%d)",
+                self._name,
+                elapsed * 1000,
+                len(self._listeners),
+                event.type,
+                self._emit_count,
+            )

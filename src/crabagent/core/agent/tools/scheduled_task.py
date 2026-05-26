@@ -40,7 +40,11 @@ async def _tasks_to_str(tasks: list, show_all: bool = False) -> str:
     name="scheduled_task_create",
     description=(
         "创建定时任务。将一个问题按 cron 表达式定时发送给 AI 执行。"
-        "参数: name(任务名称), question(要发送给AI的问题), cron_expression(APScheduler标准cron，5段空格分隔：分 时 日 月 周，*表示任意值，如 '0 9 * * *' 表示每天9点，'0 5 16 4 *' 表示4月16日5点，'*/30 * * * *' 表示每30分钟), model(可选，指定模型ID)"
+        "参数: name(任务名称), question(要发送给AI的问题), "
+        "cron_expression(APScheduler标准cron，5段空格分隔：分 时 日 月 周，"
+        "*表示任意值，如 '0 9 * * *' 表示每天9点，"
+        "'0 5 16 4 *' 表示4月16日5点，'*/30 * * * *' 表示每30分钟), "
+        "model(可选，指定模型ID)"
     ),
     parameters={
         "type": "object",
@@ -55,7 +59,13 @@ async def _tasks_to_str(tasks: list, show_all: bool = False) -> str:
             },
             "cron_expression": {
                 "type": "string",
-                "description": "APScheduler cron 表达式，5个字段用空格分隔：分(0-59) 时(0-23) 日(1-31) 月(1-12) 周(0-6)。例如 '0 9 * * *' 每天9点，'0 5 1 * *' 每月1日5点，'0 9 * * 1-5' 工作日9点，'*/30 * * * *' 每30分钟。必须是5个字段，多填或少填都会导致任务无法执行。",
+                "description": (
+                    "APScheduler cron 表达式，5个字段用空格分隔："
+                    "分(0-59) 时(0-23) 日(1-31) 月(1-12) 周(0-6)。"
+                    "例如 '0 9 * * *' 每天9点，'0 5 1 * *' 每月1日5点，"
+                    "'0 9 * * 1-5' 工作日9点，'*/30 * * * *' 每30分钟。"
+                    "必须是5个字段，多填或少填都会导致任务无法执行。"
+                ),
             },
             "model": {
                 "type": "string",
@@ -67,8 +77,11 @@ async def _tasks_to_str(tasks: list, show_all: bool = False) -> str:
     metadata={"source": "builtin", "category": "scheduled"},
 )
 async def scheduled_task_create(
-    name: str, question: str, cron_expression: str,
-    model: str | None = None, context=None,
+    name: str,
+    question: str,
+    cron_expression: str,
+    model: str | None = None,
+    context=None,
 ) -> str:
     from sqlalchemy import select
 
@@ -80,6 +93,7 @@ async def scheduled_task_create(
         if context and context.metadata:
             try:
                 from crabagent.core.database import async_session_factory as _asf
+
                 async with _asf() as _s:
                     r = await _s.execute(select(User).where(User.username == "admin"))
                     u = r.scalar_one_or_none()
@@ -109,6 +123,7 @@ async def scheduled_task_create(
         await db.refresh(task)
 
         from crabagent.serve.scheduler import get_scheduler
+
         await get_scheduler().add_task(task)
 
         model_str = f" (模型: {resolved_model})" if resolved_model else " (默认模型)"
@@ -147,7 +162,11 @@ async def scheduled_task_list(context=None) -> str:
 
 @registry.register(
     name="scheduled_task_update",
-    description="修改已有定时任务的名称、问题或执行时间。只需传入要修改的字段。参数: task_id(任务ID), name(可选), question(可选), cron_expression(可选)",
+    description=(
+        "修改已有定时任务的名称、问题或执行时间。只需传入要修改的字段。"
+        "参数: task_id(任务ID), name(可选), question(可选), "
+        "cron_expression(可选)"
+    ),
     parameters={
         "type": "object",
         "properties": {
@@ -173,8 +192,11 @@ async def scheduled_task_list(context=None) -> str:
     metadata={"source": "builtin", "category": "scheduled"},
 )
 async def scheduled_task_update(
-    task_id: int, name: str | None = None,
-    question: str | None = None, cron_expression: str | None = None, context=None,
+    task_id: int,
+    name: str | None = None,
+    question: str | None = None,
+    cron_expression: str | None = None,
+    context=None,
 ) -> str:
     from sqlalchemy import select
 

@@ -193,7 +193,12 @@ async def prompt_async(
 
     queues = request.app.state.event_queues
 
+    _fwd_count = 0
+    _fwd_last_log = time.time()
+
     def _sse_forward(event: AgentEvent):
+        nonlocal _fwd_count, _fwd_last_log
+        _fwd_count += 1
         now = time.time()
         stale = []
         for qid, entry in list(queues.items()):
@@ -206,10 +211,53 @@ async def prompt_async(
                 stale.append(qid)
                 continue
             if sid == session_id:
-                queue.put_nowait(event)
+                try:
+                    queue.put_nowait(event)
+                except asyncio.QueueFull:
+                    try:
+                        queue.get_nowait()
+                    except asyncio.QueueEmpty:
+                        pass
+                    try:
+                        queue.put_nowait(event)
+                    except asyncio.QueueFull:
+                        pass
                 queues[qid] = (sid, queue, now)
         for qid in stale:
             queues.pop(qid, None)
+
+        global_queues = getattr(request.app.state, "global_event_queues", {})
+        gstale = []
+        for gqid, (gq, gts) in list(global_queues.items()):
+            if now - gts > 120:
+                gstale.append(gqid)
+                continue
+            global_event = AgentEvent(
+                type=event.type,
+                data={
+                    **event.data,
+                    "session_id": event.data.get("sub_agent_id", session_id),
+                },
+                timestamp=event.timestamp,
+            )
+            try:
+                gq.put_nowait(global_event)
+            except asyncio.QueueFull:
+                pass
+        for gqid in gstale:
+            global_queues.pop(gqid, None)
+        if now - _fwd_last_log > 5:
+            qsizes = [q.qsize() for sid, q, *_ in queues.values() if sid == session_id]
+            logger.info(
+                "_sse_forward: %d events in %.0fs session=%s queues=%d qsizes=%s",
+                _fwd_count,
+                now - _fwd_last_log,
+                session_id[:8],
+                sum(1 for s, *_ in queues.values() if s == session_id),
+                qsizes,
+            )
+            _fwd_count = 0
+            _fwd_last_log = now
 
     context.event_bus.subscribe(_sse_forward)
 
@@ -356,8 +404,11 @@ async def prompt_async(
                 )
             )
 
+            await persistence.finalize()
+
             _tasks.pop(session_id, None)
             _session_locks.pop(session_id, None)
+            request.app.state.active_agents.pop(session_id, None)
 
             try:
                 async with async_session_factory() as update_db:
@@ -367,6 +418,13 @@ async def prompt_async(
 
     task = asyncio.create_task(_run())
     _tasks[session_id] = task
+
+    request.app.state.active_agents[session_id] = {
+        "user_id": user.id,
+        "model": req.model or conv.model or "",
+        "status": "running",
+        "started_at": time.time(),
+    }
 
     return {"status": "processing", "session_id": session_id}
 

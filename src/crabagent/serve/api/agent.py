@@ -1,15 +1,26 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+import logging
+import time
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from crabagent.core.agent.agents import invalidate_cache
-from crabagent.core.database import AgentProfile, User, get_db
+from crabagent.core.database import (
+    AgentProfile,
+    User,
+    get_db,
+    agent_memory_get_by_agent,
+    agent_memory_delete,
+    task_record_stats,
+)
 from crabagent.serve.deps import get_current_user
 
 router = APIRouter(prefix="/agents", tags=["agents"])
+logger = logging.getLogger(__name__)
 
 DEFAULT_AGENT_NAMES = {"researcher", "analyst", "coder", "writer"}
 
@@ -154,6 +165,7 @@ async def update_agent_profile(
         profile.enabled = req.enabled
     if req.tools is not None:
         import json as _json
+
         profile.tools = _json.dumps(req.tools) if req.tools else ""
 
     await db.commit()
@@ -176,7 +188,117 @@ async def delete_agent_profile(
         raise HTTPException(status_code=403, detail="Default agents cannot be deleted. Disable them instead.")
 
     from sqlalchemy import delete
+
     await db.execute(delete(AgentProfile).where(AgentProfile.name == agent_name))
     await db.commit()
     invalidate_cache()
     return {"status": "deleted", "name": agent_name}
+
+
+@router.get("/monitor")
+async def monitor_agents(
+    request: Request,
+    user: User = Depends(get_current_user),
+):
+    logger.info("monitor_agents ENTER")
+    active_agents = getattr(request.app.state, "active_agents", {})
+    result = []
+    now = time.time()
+
+    from crabagent.core.agent.agents import get_all_session_subs
+
+    for sid, info in active_agents.items():
+        if info.get("user_id") != user.id:
+            continue
+        result.append(
+            {
+                "session_id": sid,
+                "model": info.get("model", ""),
+                "status": info.get("status", "unknown"),
+                "started_at": info.get("started_at", 0),
+                "elapsed": round(now - info.get("started_at", now), 1),
+            }
+        )
+
+        for sub_id, sub_info in get_all_session_subs(sid).items():
+            sub_status = sub_info.get("status", "running")
+            if sub_info.get("completed_at"):
+                sub_elapsed = sub_info.get("elapsed", 0)
+            else:
+                sub_elapsed = round(now - sub_info.get("started_at", now), 1)
+            result.append(
+                {
+                    "session_id": sub_id,
+                    "model": sub_info.get("agent_name", ""),
+                    "status": sub_status,
+                    "started_at": sub_info.get("started_at", 0),
+                    "elapsed": sub_elapsed,
+                }
+            )
+
+    logger.info("monitor_agents EXIT %d agents", len(result))
+    return result
+
+
+@router.get("/memory")
+async def list_agent_memory(
+    agent_name: str = Query(..., description="Agent name"),
+    limit: int = Query(20, ge=1, le=100),
+    user: User = Depends(get_current_user),
+):
+    memories = await agent_memory_get_by_agent(user.id, agent_name, limit=limit)
+    return [
+        {
+            "key": m["key"],
+            "category": m["category"],
+            "source": m["source"],
+            "content": m["content"],
+            "importance": m["importance"],
+            "task_category": m["task_category"],
+            "access_count": m["access_count"],
+            "created_at": m["created_at"].isoformat() if m["created_at"] else None,
+        }
+        for m in memories
+    ]
+
+
+@router.delete("/memory/{key:path}")
+async def delete_agent_memory(
+    key: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    deleted = await agent_memory_delete(user.id, key)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Memory record not found")
+    return {"status": "deleted", "key": key}
+
+
+@router.get("/stats")
+async def list_agent_stats(
+    agent_name: str = Query(..., description="Agent name"),
+    user: User = Depends(get_current_user),
+):
+    stats = await task_record_stats(user.id, agent_name=agent_name)
+    return stats
+
+
+@router.get("/learning-agents")
+async def list_learning_agents(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from sqlalchemy import distinct
+
+    from crabagent.core.database import AgentMemory, TaskRecord
+
+    mem_result = await db.execute(
+        select(distinct(AgentMemory.agent_name))
+        .where(AgentMemory.user_id == user.id)
+    )
+    task_result = await db.execute(
+        select(distinct(TaskRecord.agent_name))
+        .where(TaskRecord.user_id == user.id)
+    )
+    agent_names = set(mem_result.scalars().all()) | set(task_result.scalars().all())
+    return sorted(agent_names)

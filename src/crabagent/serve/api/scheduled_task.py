@@ -65,9 +65,7 @@ def _to_response(t: ScheduledTask) -> ScheduledTaskResponse:
 
 @router.get("", response_model=list[ScheduledTaskResponse])
 async def list_tasks(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    result = await db.execute(
-        select(ScheduledTask).order_by(ScheduledTask.created_at.desc())
-    )
+    result = await db.execute(select(ScheduledTask).order_by(ScheduledTask.created_at.desc()))
     return [_to_response(r) for r in result.scalars().all()]
 
 
@@ -143,8 +141,12 @@ async def update_task(
             parts = task.cron_expression.strip().split()
             tz = datetime.now().astimezone().tzinfo
             trigger = CronTrigger(
-                minute=parts[0], hour=parts[1], day=parts[2],
-                month=parts[3], day_of_week=parts[4], timezone=tz,
+                minute=parts[0],
+                hour=parts[1],
+                day=parts[2],
+                month=parts[3],
+                day_of_week=parts[4],
+                timezone=tz,
             )
             next_time = trigger.get_next_fire_time(None, datetime.now(tz=tz))
             if next_time:

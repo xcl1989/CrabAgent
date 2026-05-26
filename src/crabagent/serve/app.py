@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import asyncio
 import importlib.resources
 import logging
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import litellm
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+litellm.set_verbose = False
 
 logger = logging.getLogger(__name__)
 
@@ -14,8 +19,14 @@ logging.getLogger("LiteLLM").setLevel(logging.WARNING)
 logging.getLogger("primp").setLevel(logging.WARNING)
 logging.getLogger("ddgs.ddgs").setLevel(logging.WARNING)
 
-import litellm
-litellm.set_verbose = False
+
+async def _loop_monitor():
+    while True:
+        t0 = time.monotonic()
+        await asyncio.sleep(1)
+        delay = time.monotonic() - t0 - 1.0
+        if delay > 0.5:
+            logger.warning("event loop stall: %.1fms", delay * 1000)
 
 
 @asynccontextmanager
@@ -24,6 +35,8 @@ async def lifespan(app: FastAPI):
 
     await init_db()
     logger.info("Database initialized")
+
+    monitor_task = asyncio.create_task(_loop_monitor())
 
     from crabagent.core.mcp.client import MCPClientManager
 
@@ -45,6 +58,7 @@ async def lifespan(app: FastAPI):
 
     yield
 
+    monitor_task.cancel()
     await manager.stop_all()
     logger.info("MCP servers stopped")
 
@@ -57,10 +71,17 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     app = FastAPI(
         title="CrabAgent",
-        version="0.6.6",
+        version="0.7.0",
         lifespan=lifespan,
     )
     app.state.event_queues = {}
+    app.state.active_agents = {}
+    app.state.active_sub_agents = {}
+
+    from crabagent.core.event import EventBus
+
+    app.state.global_event_bus = EventBus(name="global")
+    logger.info("Global event bus initialized")
 
     app.add_middleware(
         CORSMiddleware,
@@ -110,7 +131,7 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     async def health():
-        return {"status": "ok", "version": "0.6.6"}
+        return {"status": "ok", "version": "0.7.0"}
 
     _mount_spa(app)
 

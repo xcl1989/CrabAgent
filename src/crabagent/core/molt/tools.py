@@ -10,7 +10,11 @@ def register_molt_tools(registry):
 
     @registry.register(
         name="molt_diff",
-        description="Show the diff between the current file state and a previous molt snapshot. Use when the user asks 'what changed', 'show diff', or references a specific molt ID.",
+        description=(
+            "Show the diff between the current file state and a previous "
+            "molt snapshot. Use when the user asks 'what changed', 'show diff', "
+            "or references a specific molt ID."
+        ),
         parameters={
             "type": "object",
             "properties": {
@@ -39,6 +43,7 @@ def register_molt_tools(registry):
                 old_lines = old.splitlines()
                 new_lines = new.splitlines()
                 from difflib import unified_diff
+
                 diff = list(unified_diff(old_lines, new_lines, lineterm=""))
                 parts.extend(diff)
             else:
@@ -47,7 +52,11 @@ def register_molt_tools(registry):
 
     @registry.register(
         name="molt_rollback",
-        description="Roll back files to a previous molt snapshot. Use when the user says 'undo', 'revert', 'go back', or references rolling back to a specific molt.",
+        description=(
+            "Roll back files to a previous molt snapshot. Use when the user "
+            "says 'undo', 'revert', 'go back', or references rolling back "
+            "to a specific molt."
+        ),
         parameters={
             "type": "object",
             "properties": {

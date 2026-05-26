@@ -46,10 +46,7 @@ async def get_messages(
     offset: int = 0,
     branch_id: str | None = None,
 ) -> list[Message]:
-    stmt = (
-        select(Message)
-        .where(Message.conversation_id == conversation_id)
-    )
+    stmt = select(Message).where(Message.conversation_id == conversation_id)
     if branch_id is not None:
         stmt = stmt.where(Message.branch_id == branch_id)
     stmt = stmt.order_by(Message.sequence.asc(), Message.id.asc())

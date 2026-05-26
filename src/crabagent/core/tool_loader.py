@@ -71,7 +71,7 @@ def _load_tool_file(path: Path, registry) -> None:
 def _make_tool_handler(run_fn):
     import inspect
 
-    sig = inspect.signature(run_fn)
+    inspect.signature(run_fn)
     is_async = inspect.iscoroutinefunction(run_fn)
 
     if is_async:

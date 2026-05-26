@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import shutil
 
@@ -33,13 +34,19 @@ async def take_snapshot(context, filepaths: list[str], description: str = "") ->
                 target = workspace / fp
                 if not target.exists():
                     continue
-                import subprocess
-                result = subprocess.run(
-                    ["git", "diff", "--", fp],
-                    capture_output=True, text=True, cwd=str(workspace), timeout=10,
+
+                proc = await asyncio.create_subprocess_exec(
+                    "git", "diff", "--", fp,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    cwd=str(workspace),
                 )
-                if result.stdout.strip():
-                    diff_lines.append(f"--- {fp}\n{result.stdout}")
+                try:
+                    stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
+                    if stdout and stdout.strip():
+                        diff_lines.append(f"--- {fp}\n{stdout.decode('utf-8', errors='replace')}")
+                except TimeoutError:
+                    proc.kill()
 
             if diff_lines:
                 method = "git"

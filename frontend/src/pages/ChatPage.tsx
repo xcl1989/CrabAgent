@@ -1,12 +1,10 @@
-import { useState, useRef, useEffect, useCallback } from "react";
-import { useSSE } from "../hooks/useSSE";
-import { SSEEvent } from "../api/events";
+import { useState, useEffect, useCallback } from "react";
 import * as sessionsApi from "../api/sessions";
-import { Session, Message } from "../api/sessions";
 import * as providersApi from "../api/providers";
-import { Provider, CatalogEntry, ModelInfo } from "../api/providers";
 import * as mcpServersApi from "../api/mcpServers";
 import { McpServer, McpServerStatus } from "../api/mcpServers";
+import { Session } from "../api/sessions";
+import { AgentProfile as AgentProfileType, listAgentProfiles } from "../api/agents";
 import SessionList from "../components/SessionList";
 import ChatPanel from "../components/ChatPanel";
 import ProviderPanel from "../components/ProviderPanel";
@@ -19,489 +17,63 @@ import { NotificationBell } from "../components/NotificationBell";
 import { ScheduledTaskPanel } from "../components/ScheduledTaskPanel";
 import { AgentTeamPanel } from "../components/AgentTeamPanel";
 import { TaskBoard } from "../components/TaskBoard";
-import { TaskInfo } from "../components/TaskBoard.types";
 import { AgentBar } from "../components/AgentBar";
 import { DelegateModal } from "../components/DelegateModal";
 import { ResultCompare } from "../components/ResultCompare";
-import { AgentProfile as AgentProfileType, listAgentProfiles } from "../api/agents";
-
-interface ChatMessage {
-  id: string;
-  role: string;
-  content: string;
-  reasoning_content?: string;
-  tool_calls?: unknown[];
-  isStreaming?: boolean;
-  stats?: { elapsed: number; model: string; tokens: number; iterations: number };
-  confirm_id?: string;
-  tool_name?: string;
-  args_summary?: string;
-  confirmed?: boolean;
-  options?: string[];
-  source?: "builtin" | "mcp";
-  server_name?: string;
-  images?: string[];
-  sub_agent_id?: string;
-  sub_agent_name?: string;
-  sub_agent_display?: string;
-  sub_agent_elapsed?: number;
-  sub_agent_tokens?: number;
-  sub_agent_iterations?: number;
-}
-
-function sseEventToMessages(event: SSEEvent, messages: ChatMessage[]): ChatMessage[] {
-  const updated = [...messages];
-
-  if (event.type === "text_delta") {
-    const last = updated[updated.length - 1];
-    if (last?.role === "assistant" && last.isStreaming) {
-      last.content += event.data.text as string || "";
-      return updated;
-    }
-    updated.push({ id: `s-${Date.now()}`, role: (event.data.role as string) || "assistant", content: event.data.text as string || "", isStreaming: true });
-    return updated;
-  }
-
-  if (event.type === "thinking_delta") {
-    const last = updated[updated.length - 1];
-    if (last?.role === "thinking") {
-      last.content += event.data.text as string || "";
-      return updated;
-    }
-    updated.push({ id: `t-${Date.now()}`, role: "thinking", content: event.data.text as string || "" });
-    return updated;
-  }
-
-  if (event.type === "text_done") {
-    return updated.map((m) => (m.isStreaming ? { ...m, isStreaming: false } : m));
-  }
-
-  if (event.type === "tool_call") {
-    const callId = event.data.id as string;
-    if (callId && messages.some(m => m.id === `tc-${callId}`)) {
-      return messages;
-    }
-    updated.push({
-      id: callId ? `tc-${callId}` : `tc-${Date.now()}`,
-      role: "tool_call",
-      content: JSON.stringify({ name: event.data.name, arguments: event.data.arguments }),
-      source: (event.data.source as "builtin" | "mcp") || "builtin",
-      server_name: (event.data.server_name as string) || undefined,
-    });
-    return updated;
-  }
-
-  if (event.type === "tool_result") {
-    const callId = event.data.id as string;
-    if (callId && messages.some(m => m.id === `tr-${callId}`)) {
-      return messages;
-    }
-    updated.push({
-      id: callId ? `tr-${callId}` : `tr-${Date.now()}`,
-      role: "tool_result",
-      content: (event.data.result as string) || "",
-      source: (event.data.source as "builtin" | "mcp") || "builtin",
-      server_name: (event.data.server_name as string) || undefined,
-    });
-    return updated;
-  }
-
-  if (event.type === "agent_error") {
-    updated.push({ id: `e-${Date.now()}`, role: "error", content: (event.data.error as string) || "Unknown error" });
-    return updated;
-  }
-
-  if (event.type === "tool_confirm_request") {
-    updated.push({
-      id: `cf-${event.data.confirm_id}`,
-      role: "tool_confirm",
-      content: "",
-      confirm_id: event.data.confirm_id as string,
-      tool_name: event.data.tool_name as string,
-      args_summary: event.data.args_summary as string,
-    });
-    return updated;
-  }
-
-  if (event.type === "user_input_request") {
-    const opts = event.data.options as string[] | undefined;
-    console.log("USER_INPUT_REQUEST", event.data.input_id, event.data.question, opts);
-    updated.push({
-      id: `in-${event.data.input_id}`,
-      role: "user_input",
-      content: event.data.question as string || "",
-      confirm_id: event.data.input_id as string,
-      options: opts && opts.length > 0 ? opts : undefined,
-    });
-    return updated;
-  }
-
-  if (event.type === "context_compressed") {
-    const orig = event.data.original_count as number;
-    const comp = event.data.compressed_count as number;
-    updated.push({
-      id: `cc-${Date.now()}`,
-      role: "notice",
-      content: `Context compressed: ${orig} → ${comp} messages`,
-    });
-    return updated;
-  }
-
-  if (event.type === "screenshot") {
-    updated.push({
-      id: `ss-${Date.now()}`,
-      role: "screenshot",
-      content: "",
-      images: [event.data.image as string || ""],
-    });
-    return updated;
-  }
-
-  if (event.type === "sub_agent_start") {
-    const subId = event.data.sub_agent_id as string || "";
-    if (updated.some(m => m.sub_agent_id === subId)) return updated;
-    const name = event.data.agent_name as string || "";
-    return [...updated, {
-      id: `sa-${subId}`,
-      role: "sub_agent" as const,
-      content: "",
-      sub_agent_id: subId,
-      sub_agent_name: name,
-      sub_agent_display: (event.data.display_name as string) || name,
-    }];
-  }
-
-  if (event.type === "sub_agent_text_delta") {
-    const subId = event.data.sub_agent_id as string || "";
-    const text = (event.data.text as string) || "";
-    return updated.map(m =>
-      m.sub_agent_id === subId && m.role === "sub_agent"
-        ? { ...m, content: m.content + text }
-        : m
-    );
-  }
-
-  if (event.type === "sub_agent_tool_call") {
-    const subId = event.data.sub_agent_id as string || "";
-    const name = event.data.name as string || "";
-    const args = JSON.stringify(event.data.arguments || {});
-    return updated.map(m =>
-      m.sub_agent_id === subId && m.role === "sub_agent"
-        ? { ...m, content: m.content + `\n→ ${name}(${args.slice(0, 120)})\n` }
-        : m
-    );
-  }
-
-  if (event.type === "sub_agent_tool_result") {
-    const subId = event.data.sub_agent_id as string || "";
-    const name = event.data.name as string || "";
-    const result = (event.data.result as string) || "";
-    return updated.map(m =>
-      m.sub_agent_id === subId && m.role === "sub_agent"
-        ? { ...m, content: m.content + `\n← ${name}: ${result.slice(0, 200)}${result.length > 200 ? "..." : ""}\n` }
-        : m
-    );
-  }
-
-  if (event.type === "sub_agent_end") {
-    const subId = event.data.sub_agent_id as string || "";
-    const resultText = (event.data.result as string) || "";
-    return updated.map(m =>
-      m.sub_agent_id === subId && m.role === "sub_agent"
-        ? {
-            ...m,
-            content: resultText || m.content || "(sub-agent produced no output)",
-            sub_agent_elapsed: event.data.elapsed as number,
-            sub_agent_tokens: event.data.tokens as number,
-            sub_agent_iterations: event.data.iterations as number,
-          }
-        : m
-    );
-  }
-
-  return updated;
-}
-
-function dbMessagesToChat(msgs: Message[]): ChatMessage[] {
-  const result: ChatMessage[] = [];
-  const pendingToolCalls: { id: string; name: string; args: any }[] = [];
-
-  for (const m of msgs) {
-    if (m.role === "stats" && m.content) {
-      try {
-        const raw = JSON.parse(m.content);
-        result.push({
-          id: `db-${m.id}`,
-          role: "stats",
-          content: "",
-          stats: {
-            elapsed: raw.elapsed_seconds ?? raw.elapsed ?? 0,
-            model: raw.model ?? "",
-            tokens: raw.tokens ?? 0,
-            iterations: raw.iterations ?? 0,
-          },
-        });
-      } catch { /* ignore */ }
-      continue;
-    }
-
-    if (m.role === "tool") {
-      const tcId = m.tool_call_id as string | undefined;
-      const matched = tcId ? pendingToolCalls.findIndex(tc => tc.id === tcId) : -1;
-      if (matched >= 0) {
-        const tc = pendingToolCalls.splice(matched, 1)[0];
-        result.push({
-          id: `db-${m.id}-tc`,
-          role: "tool_call",
-          content: JSON.stringify({ name: tc.name, arguments: tc.args }),
-        });
-      }
-      result.push({
-        id: `db-${m.id}`,
-        role: "tool_result",
-        content: m.content || "",
-      });
-      continue;
-    }
-
-    if (m.role === "assistant" && m.tool_calls) {
-      const tc = typeof m.tool_calls === "string" ? JSON.parse(m.tool_calls) : m.tool_calls;
-      if (m.content || m.reasoning_content) {
-        const base: ChatMessage = { id: `db-${m.id}-text`, role: "assistant", content: m.content || "" };
-        if (m.reasoning_content) base.reasoning_content = m.reasoning_content;
-        result.push(base);
-      }
-      for (const tcItem of tc as any[]) {
-        const fn = tcItem.function || {};
-        let args = fn.arguments;
-        if (typeof args === "string") { try { args = JSON.parse(args); } catch { /* keep string */ } }
-        pendingToolCalls.push({ id: tcItem.id, name: fn.name || "", args: args || {} });
-      }
-      continue;
-    }
-
-    if (m.role === "sub_agent" && m.content) {
-      try {
-        const data = JSON.parse(m.content);
-        if (typeof data.text === "string") {
-          result.push({
-            id: `db-${m.id}`,
-            role: "sub_agent",
-            content: data.text,
-            sub_agent_name: data.agent_name || m.name || "",
-            sub_agent_display: data.display_name || data.agent_name || m.name || "",
-            sub_agent_elapsed: data.elapsed,
-            sub_agent_tokens: data.tokens,
-            sub_agent_iterations: data.iterations,
-          });
-        }
-      } catch {
-        result.push({
-          id: `db-${m.id}`,
-          role: "sub_agent",
-          content: m.content,
-          sub_agent_name: m.name || "",
-          sub_agent_display: m.name || "",
-        });
-      }
-      continue;
-    }
-
-    const base: ChatMessage = { id: `db-${m.id}`, role: m.role, content: m.content || "" };
-    if (m.reasoning_content) base.reasoning_content = m.reasoning_content;
-    if (m.role === "user" && m.content && m.content.startsWith("[{")) {
-      try {
-        const blocks = JSON.parse(m.content);
-        if (Array.isArray(blocks)) {
-          const textBlock = blocks.find((b: any) => b.type === "text");
-          const imageBlocks = blocks.filter((b: any) => b.type === "image_url");
-          if (textBlock) base.content = textBlock.text || "";
-          if (imageBlocks.length > 0) base.images = imageBlocks.map((b: any) => b.image_url?.url || "");
-        }
-      } catch { /* keep original content */ }
-    }
-    result.push(base);
-  }
-
-  return result;
-}
+import { useChatState } from "../hooks/useChatState";
+import { useTaskBoard } from "../hooks/useTaskBoard";
+import { useModelSelector } from "../hooks/useModelSelector";
 
 interface Props {
   onLogout: () => void;
 }
 
 export default function ChatPage({ onLogout }: Props) {
-  const [sessions, setSessions] = useState<Session[]>([]);
-  const [activeSession, setActiveSession] = useState<Session | null>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [input, setInput] = useState("");
-  const [sending, setSending] = useState(false);
+  const { taskBoardTasks, handleTaskBoardEvent, clearTaskBoard } = useTaskBoard();
+
+  const {
+    sessions,
+    setSessions,
+    activeSession,
+    messages,
+    setMessages,
+    sending,
+    setSending,
+    connected,
+    activeBranch,
+    replaying,
+    replayProgress,
+    todoRefreshKey,
+    bottomRef,
+    selectSession,
+    newSession,
+    selectSessionById,
+    startReplay,
+    handleSSEEvent,
+    handleSwitchBranch,
+    handleBranch,
+    handleAbort,
+    handleDeleteSession,
+    getSubAgentContent,
+  } = useChatState(handleTaskBoardEvent);
+
+  const { providers, catalog, models, providersLoading, selectedModel, setSelectedModel, setProviders, setProvidersLoading } = useModelSelector();
+
   const [showProviders, setShowProviders] = useState(false);
   const [showMcpServers, setShowMcpServers] = useState(false);
   const [showScheduledTasks, setShowScheduledTasks] = useState(false);
   const [showAgentTeam, setShowAgentTeam] = useState(false);
-  const [taskBoardTasks, setTaskBoardTasks] = useState<TaskInfo[]>([]);
   const [viewingSubAgent, setViewingSubAgent] = useState<string | null>(null);
   const [showDelegate, setShowDelegate] = useState(false);
   const [showResultCompare, setShowResultCompare] = useState(false);
+  const [showFiles, setShowFiles] = useState(false);
+  const [input, setInput] = useState("");
+  const [pendingImages, setPendingImages] = useState<string[]>([]);
   const [agentProfiles, setAgentProfiles] = useState<AgentProfileType[]>([]);
   const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
   const [mcpStatus, setMcpStatus] = useState<McpServerStatus[]>([]);
-  const [providers, setProviders] = useState<Provider[]>([]);
-  const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
-  const [models, setModels] = useState<ModelInfo[]>([]);
-  const [providersLoading, setProvidersLoading] = useState(true);
-  const [selectedModel, setSelectedModel] = useState<string>("");
-  const [activeBranch, setActiveBranch] = useState<string>("main");
-  const [replaying, setReplaying] = useState(false);
-  const [replayProgress, setReplayProgress] = useState({ current: 0, total: 0 });
-  const [showFiles, setShowFiles] = useState(false);
-  const [todoRefreshKey, setTodoRefreshKey] = useState(0);
-  const [pendingImages, setPendingImages] = useState<string[]>([]);
-  const activeSessionRef = useRef<Session | null>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
-  const prevMsgCountRef = useRef(0);
 
   useEffect(() => {
-    activeSessionRef.current = activeSession;
-  }, [activeSession]);
-
-  useEffect(() => {
-    sessionsApi.listSessions().then(setSessions);
-  }, []);
-
-  const handleSSEEvent = useCallback((event: SSEEvent) => {
-    if (event.type === "tool_result") {
-      const name = event.data.name as string;
-      if (name === "todo_add" || name === "todo_done" || name === "todo_delete") {
-        setTimeout(() => setTodoRefreshKey(k => k + 1), 300);
-      }
-    }
-
-    if (event.type === "sub_agent_start") {
-      const subId = event.data.sub_agent_id as string || "";
-      const name = event.data.agent_name as string || "";
-      setTaskBoardTasks((prev) => {
-        if (prev.some((t) => t.subId === subId)) return prev;
-        return [...prev, {
-          subId,
-          agentName: name,
-          displayName: (event.data.display_name as string) || name,
-          icon: "",
-          status: "running" as const,
-          task: (event.data.task as string) || "",
-          content: "",
-          toolCalls: 0,
-          startedAt: Date.now(),
-        }];
-      });
-    }
-
-    if (event.type === "sub_agent_tool_call") {
-      const subId = event.data.sub_agent_id as string || "";
-      setTaskBoardTasks((prev) =>
-        prev.map((t) => t.subId === subId ? { ...t, toolCalls: t.toolCalls + 1 } : t)
-      );
-    }
-
-    if (event.type === "sub_agent_text_delta") {
-      const subId = event.data.sub_agent_id as string || "";
-      const text = (event.data.text as string) || "";
-      setTaskBoardTasks((prev) =>
-        prev.map((t) => t.subId === subId ? { ...t, content: t.content + text } : t)
-      );
-    }
-
-    if (event.type === "sub_agent_end") {
-      const subId = event.data.sub_agent_id as string || "";
-      setTaskBoardTasks((prev) =>
-        prev.map((t) => t.subId === subId ? {
-          ...t,
-          status: "done" as const,
-          content: (event.data.result as string) || t.content,
-          elapsed: event.data.elapsed as number,
-          tokens: event.data.tokens as number,
-          iterations: event.data.iterations as number,
-        } : t)
-      );
-    }
-
-    if (event.type === "sub_agent_error") {
-      const subId = event.data.sub_agent_id as string || "";
-      setTaskBoardTasks((prev) =>
-        prev.map((t) => t.subId === subId ? {
-          ...t,
-          status: "error" as const,
-          error: (event.data.error as string) || "Unknown error",
-        } : t)
-      );
-    }
-    if (event.type === "agent_start" && event.data.replay) {
-      setReplaying(true);
-      setReplayProgress({ current: 0, total: (event.data.total as number) || 0 });
-      setMessages([]);
-      return;
-    }
-    if (event.type === "iteration_start" && event.data.replay_progress) {
-      setReplayProgress({
-        current: event.data.replay_progress as number,
-        total: event.data.replay_total as number,
-      });
-      return;
-    }
-    if (event.type === "agent_end" && event.data.replay) {
-      setReplaying(false);
-      setReplayProgress({ current: 0, total: 0 });
-      setTimeout(() => {
-        sessionsApi.listSessions().then(setSessions);
-      }, 500);
-      return;
-    }
-    if (event.type === "text_delta" || event.type === "tool_call" || event.type === "thinking_delta" || event.type === "iteration_start") {
-      setSending(true);
-    }
-    if (event.type === "agent_end") {
-      setSending(false);
-      const stats = {
-        elapsed: (event.data.elapsed_seconds as number) || 0,
-        model: (event.data.model as string) || "",
-        tokens: (event.data.tokens as number) || 0,
-        iterations: (event.data.iterations as number) || 0,
-      };
-      setMessages((prev) => [
-        ...prev,
-        { id: `stats-${Date.now()}`, role: "stats", content: "", stats },
-      ]);
-      setTimeout(() => {
-        sessionsApi.listSessions().then(setSessions);
-      }, 500);
-      const sid = activeSessionRef.current?.session_id;
-      if (sid) {
-        setTimeout(async () => {
-          const msgs = await sessionsApi.getMessages(sid);
-          const dbMsgs = dbMessagesToChat(msgs);
-          setMessages((prev) => (dbMsgs.length > prev.length ? dbMsgs : prev));
-        }, 800);
-      }
-    }
-    setMessages((prev) => sseEventToMessages(event, prev));
-  }, []);
-
-  const { connected } = useSSE(activeSession?.session_id || null, handleSSEEvent);
-
-  useEffect(() => {
-    if (messages.length > prevMsgCountRef.current) {
-      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-    }
-    prevMsgCountRef.current = messages.length;
-  }, [messages]);
-
-  useEffect(() => {
-    providersApi.listProviders().then((p) => {
-      setProviders(p);
-      setProvidersLoading(false);
-    });
-    providersApi.getCatalog().then(setCatalog);
     mcpServersApi.listMcpServers().then(setMcpServers);
     mcpServersApi.getMcpStatus().then(setMcpStatus);
     listAgentProfiles().then(setAgentProfiles).catch(() => {});
@@ -514,49 +86,85 @@ export default function ChatPage({ onLogout }: Props) {
     return () => clearInterval(interval);
   }, []);
 
-  useEffect(() => {
-    const defaultProvider = providers.find((p) => p.is_default);
-    if (defaultProvider) {
-      providersApi.getProviderModels(defaultProvider.name).then((m) => {
-        setModels(m);
-        if (m.length > 0 && !selectedModel) {
-          setSelectedModel(m[0].id);
-        }
-      }).catch(() => {});
-    }
-  }, [providers]);
+  const onSelectSession = useCallback(
+    async (session: Session) => {
+      const model = await selectSession(session, selectedModel, models);
+      setSelectedModel(model);
+      clearTaskBoard();
+    },
+    [selectSession, selectedModel, models, setSelectedModel, clearTaskBoard]
+  );
 
-  const selectSession = async (session: Session) => {
-    setSending(false);
-    setActiveSession(session);
-    setTaskBoardTasks([]);
-    const branch = session.active_branch || "main";
-    setActiveBranch(branch);
-    const msgs = await sessionsApi.getMessages(session.session_id);
-    setMessages(dbMessagesToChat(msgs));
-    setSelectedModel(session.model || (models.length > 0 ? models[0].id : ""));
+  const onNewSession = useCallback(async () => {
+    const model = await newSession(selectedModel, models);
+    setSelectedModel(model);
+    clearTaskBoard();
+  }, [newSession, selectedModel, models, setSelectedModel, clearTaskBoard]);
+
+  const onSelectSessionById = useCallback(
+    async (sessionId: string) => {
+      const model = await selectSessionById(sessionId, selectedModel, models);
+      setSelectedModel(model);
+    },
+    [selectSessionById, selectedModel, models, setSelectedModel]
+  );
+
+  const processImageFile = (file: File) => {
+    if (pendingImages.length >= 5) return;
+    if (file.size > 5 * 1024 * 1024) return;
+    if (!file.type.startsWith("image/")) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const dataUrl = e.target?.result as string;
+      if (dataUrl) setPendingImages((prev) => [...prev, dataUrl]);
+    };
+    reader.readAsDataURL(file);
   };
 
-  const newSession = async () => {
-    setSending(false);
-    const s = await sessionsApi.createSession();
-    setSessions((prev) => [s, ...prev]);
-    setActiveSession(s);
-    setMessages([]);
-    setSelectedModel(models.length > 0 ? models[0].id : "");
-  };
-
-  const selectSessionById = async (sessionId: string) => {
-    try {
-      const s = await sessionsApi.getSession(sessionId);
-      if (s) {
-        setSessions((prev) => {
-          if (prev.some((x) => x.session_id === s.session_id)) return prev;
-          return [s, ...prev];
-        });
-        selectSession(s);
+  const handleImagePaste = (e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (const item of Array.from(items)) {
+      if (item.type.startsWith("image/")) {
+        e.preventDefault();
+        const file = item.getAsFile();
+        if (file) processImageFile(file);
+        return;
       }
-    } catch { /* ignore */ }
+    }
+  };
+
+  const handleImageUpload = () => {
+    const el = document.createElement("input");
+    el.type = "file";
+    el.accept = "image/*";
+    el.multiple = true;
+    el.onchange = (e) => {
+      const files = (e.target as HTMLInputElement).files;
+      if (files) Array.from(files).forEach(processImageFile);
+    };
+    el.click();
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    const files = e.dataTransfer?.files;
+    if (files) Array.from(files).forEach(processImageFile);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+  };
+
+  const parseAgentMentions = (text: string, profiles: AgentProfileType[]) => {
+    const enabled = profiles.filter((p) => p.enabled);
+    const matches: AgentProfileType[] = [];
+    for (const p of enabled) {
+      if (text.includes(`@${p.name}`)) {
+        matches.push(p);
+      }
+    }
+    return matches;
   };
 
   const handleSend = async () => {
@@ -588,60 +196,9 @@ export default function ChatPage({ onLogout }: Props) {
     }
   };
 
-  const processImageFile = (file: File) => {
-    if (pendingImages.length >= 5) return;
-    if (file.size > 5 * 1024 * 1024) return;
-    if (!file.type.startsWith("image/")) return;
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const dataUrl = e.target?.result as string;
-      if (dataUrl) setPendingImages((prev) => [...prev, dataUrl]);
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const handleImagePaste = (e: React.ClipboardEvent) => {
-    const items = e.clipboardData?.items;
-    if (!items) return;
-    for (const item of Array.from(items)) {
-      if (item.type.startsWith("image/")) {
-        e.preventDefault();
-        const file = item.getAsFile();
-        if (file) processImageFile(file);
-        return;
-      }
-    }
-  };
-
-  const handleImageUpload = () => {
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = "image/*";
-    input.multiple = true;
-    input.onchange = (e) => {
-      const files = (e.target as HTMLInputElement).files;
-      if (files) Array.from(files).forEach(processImageFile);
-    };
-    input.click();
-  };
-
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    const files = e.dataTransfer?.files;
-    if (files) Array.from(files).forEach(processImageFile);
-  };
-
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-  };
-
   const handleToolConfirm = async (confirmId: string, approved: boolean) => {
     if (!activeSession) return;
-    setMessages((prev) =>
-      prev.map((m) =>
-        m.confirm_id === confirmId ? { ...m, confirmed: approved } : m
-      )
-    );
+    setMessages((prev) => prev.map((m) => (m.confirm_id === confirmId ? { ...m, confirmed: approved } : m)));
     try {
       await sessionsApi.confirmTool(activeSession.session_id, confirmId, approved);
     } catch {
@@ -651,73 +208,12 @@ export default function ChatPage({ onLogout }: Props) {
 
   const handleUserInput = async (inputId: string, answer: string) => {
     if (!activeSession) return;
-    setMessages((prev) =>
-      prev.map((m) =>
-        m.confirm_id === inputId ? { ...m, confirmed: true, content: answer } : m
-      )
-    );
+    setMessages((prev) => prev.map((m) => (m.confirm_id === inputId ? { ...m, confirmed: true, content: answer } : m)));
     try {
       await sessionsApi.submitInput(activeSession.session_id, inputId, answer);
     } catch {
       // ignore
     }
-  };
-
-  const handleSwitchBranch = async (branchId: string) => {
-    if (!activeSession) return;
-    await sessionsApi.switchBranch(activeSession.session_id, branchId);
-    setActiveBranch(branchId);
-    setActiveSession({ ...activeSession, active_branch: branchId });
-    const msgs = await sessionsApi.getMessages(activeSession.session_id);
-    setMessages(dbMessagesToChat(msgs));
-  };
-
-  const handleBranch = async (msgId: string) => {
-    if (!activeSession) return;
-    const dbId = parseInt(msgId.replace("db-", ""), 10);
-    if (isNaN(dbId)) return;
-    const result = await sessionsApi.createBranch(activeSession.session_id, dbId);
-    setActiveBranch(result.branch_id);
-    setActiveSession({ ...activeSession, active_branch: result.branch_id });
-    const msgs = await sessionsApi.getMessages(activeSession.session_id);
-    setMessages(dbMessagesToChat(msgs));
-  };
-
-  const startReplay = (branchId: string) => {
-    if (!activeSession || replaying) return;
-    const sid = activeSession.session_id;
-    const token = localStorage.getItem("crab_token") || "";
-    const url = `/api/sessions/${encodeURIComponent(sid)}/replay?branch=${encodeURIComponent(branchId)}&token=${encodeURIComponent(token)}&speed=1`;
-    const es = new EventSource(url);
-    es.onmessage = (e) => {
-      try {
-        const event = JSON.parse(e.data) as SSEEvent;
-        handleSSEEvent(event);
-      } catch { /* ignore */ }
-    };
-    es.onerror = () => {
-      setReplaying(false);
-      es.close();
-    };
-    setReplaying(true);
-  };
-
-  const handleAbort = async () => {
-    if (activeSession) {
-      await sessionsApi.abortSession(activeSession.session_id);
-      setSending(false);
-    }
-  };
-
-  const parseAgentMentions = (text: string, profiles: AgentProfileType[]) => {
-    const enabled = profiles.filter((p) => p.enabled);
-    const matches: AgentProfileType[] = [];
-    for (const p of enabled) {
-      if (text.includes(`@${p.name}`)) {
-        matches.push(p);
-      }
-    }
-    return matches;
   };
 
   const handleDelegateFromModal = async (tasks: { agent_name: string; task: string }[]) => {
@@ -762,22 +258,13 @@ export default function ChatPage({ onLogout }: Props) {
     URL.revokeObjectURL(url);
   };
 
-  const handleDeleteSession = async (sessionId: string) => {
-    await sessionsApi.deleteSession(sessionId);
-    setSessions((prev) => prev.filter((s) => s.session_id !== sessionId));
-    if (activeSession?.session_id === sessionId) {
-      setActiveSession(null);
-      setMessages([]);
-    }
-  };
-
   return (
-    <div className="flex h-screen">
+    <div className="flex h-full overflow-hidden">
       <SessionList
         sessions={sessions}
         activeId={activeSession?.session_id || null}
-        onSelect={selectSession}
-        onNew={newSession}
+        onSelect={onSelectSession}
+        onNew={onNewSession}
         onDelete={handleDeleteSession}
         onOpenProviders={() => setShowProviders(true)}
         onOpenMcpServers={() => setShowMcpServers(true)}
@@ -797,7 +284,7 @@ export default function ChatPage({ onLogout }: Props) {
               />
             )}
           </div>
-          <NotificationBell onSwitchSession={selectSessionById} />
+          <NotificationBell onSwitchSession={onSelectSessionById} />
           {taskBoardTasks.filter((t) => t.status === "done").length > 0 && (
             <button
               onClick={() => setShowResultCompare(true)}
@@ -847,7 +334,7 @@ export default function ChatPage({ onLogout }: Props) {
               </div>
             )}
             <ChatPanel ref={bottomRef} messages={messages} connected={connected} onToolConfirm={handleToolConfirm} onUserInput={handleUserInput} onBranch={handleBranch} replaying={replaying}
-              externalSubAgentId={viewingSubAgent} onSubAgentModalClose={() => setViewingSubAgent(null)} />
+              externalSubAgentId={viewingSubAgent} onSubAgentModalClose={() => setViewingSubAgent(null)} getSubAgentContent={getSubAgentContent} />
 
             <McpStatusBar status={mcpStatus} />
 
@@ -999,7 +486,7 @@ export default function ChatPage({ onLogout }: Props) {
       {showScheduledTasks && (
         <ScheduledTaskPanel
           onClose={() => setShowScheduledTasks(false)}
-          onSwitchSession={selectSessionById}
+          onSwitchSession={onSelectSessionById}
         />
       )}
 

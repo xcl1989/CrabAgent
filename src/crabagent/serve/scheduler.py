@@ -40,9 +40,7 @@ class SchedulerService:
 
     async def _load_tasks(self) -> list[ScheduledTask]:
         async with async_session_factory() as db:
-            result = await db.execute(
-                select(ScheduledTask).where(ScheduledTask.enabled.is_(True))
-            )
+            result = await db.execute(select(ScheduledTask).where(ScheduledTask.enabled.is_(True)))
             return list(result.scalars().all())
 
     def _parse_cron(self, expression: str) -> CronTrigger:
@@ -107,10 +105,9 @@ class SchedulerService:
 
         try:
             import asyncio
+
             logger.info("[ST] Task #%d: calling _run_agent", task_id)
-            session_id = await asyncio.wait_for(
-                self._run_agent(task), timeout=600
-            )
+            session_id = await asyncio.wait_for(self._run_agent(task), timeout=600)
             logger.info("[ST] Task #%d: _run_agent returned, session_id=%s", task_id, session_id)
         except TimeoutError:
             logger.error("[ST] Task #%d: _run_agent timed out (600s)", task_id)
@@ -127,11 +124,7 @@ class SchedulerService:
 
         workspace = Path.cwd().resolve()
         model = task.model or ""
-        system_prompt = (
-            f"你正在执行一个定时任务：{task.name}。"
-            "请完成任务后输出简要的完成说明。"
-            f"工作目录: {workspace}"
-        )
+        system_prompt = f"你正在执行一个定时任务：{task.name}。请完成任务后输出简要的完成说明。工作目录: {workspace}"
 
         context = AgentContext(
             workspace=workspace,
@@ -142,18 +135,22 @@ class SchedulerService:
         )
 
         from crabagent.core.agent.skill.loader import discover_skills, register_skill_tool
+
         skill_dirs = settings.skill_discovery_dirs()
         skills = discover_skills(skill_dirs)
         if skills:
             register_skill_tool(context.tool_registry, skills)
 
         from crabagent.core.molt.tools import register_molt_tools
+
         register_molt_tools(context.tool_registry)
 
         from crabagent.core.todo.tools import register_todo_tools
+
         register_todo_tools(context.tool_registry)
 
         from crabagent.core.tool_loader import discover_and_register_tools
+
         discover_and_register_tools(context.tool_registry, workspace)
 
         try:
@@ -196,16 +193,12 @@ class SchedulerService:
 
         if agent_error:
             try:
-                await self._create_notification(
-                    task.user_id, task.name, f"执行失败: {str(agent_error)[:200]}", ""
-                )
+                await self._create_notification(task.user_id, task.name, f"执行失败: {str(agent_error)[:200]}", "")
             except Exception:
                 pass
         else:
             try:
-                await self._create_notification(
-                    task.user_id, task.name, "任务执行完成", ctx_conv_id
-                )
+                await self._create_notification(task.user_id, task.name, "任务执行完成", ctx_conv_id)
             except Exception:
                 pass
 
@@ -219,6 +212,7 @@ class SchedulerService:
         if mcp_mgr:
             try:
                 import asyncio as _asyncio
+
                 await _asyncio.wait_for(mcp_mgr.stop_all(), timeout=10)
             except Exception:
                 pass
@@ -281,20 +275,24 @@ class SchedulerService:
 
 def utcnow():
     from datetime import datetime
+
     return datetime.now()
 
 
 def _get_local_tz():
     try:
         import tzlocal
+
         return tzlocal.get_localzone()
     except Exception:
         from datetime import datetime
+
         return datetime.now().astimezone().tzinfo
 
 
 def _generate_session_id() -> str:
     import secrets
+
     return secrets.token_hex(16)
 
 

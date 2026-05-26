@@ -9,6 +9,8 @@ build/
 .venv/
 venv/
 *.db
+*.db-shm
+*.db-wal
 *.sqlite3
 .pytest_cache/
 .ruff_cache/

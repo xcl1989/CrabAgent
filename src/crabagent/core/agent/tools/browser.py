@@ -340,8 +340,7 @@ if PLAYWRIGHT_AVAILABLE:
     @registry.register(
         name="browser_extract",
         description=(
-            "Extract text content from the current page. "
-            "Optionally target a specific element using a CSS selector."
+            "Extract text content from the current page. Optionally target a specific element using a CSS selector."
         ),
         parameters={
             "type": "object",
@@ -410,8 +409,7 @@ if PLAYWRIGHT_AVAILABLE:
     @registry.register(
         name="browser_close",
         description=(
-            "Close the browser and release all resources. "
-            "Use when done with browser automation to free memory."
+            "Close the browser and release all resources. Use when done with browser automation to free memory."
         ),
         parameters={"type": "object", "properties": {}},
         metadata={"source": "builtin", "category": "browser"},

@@ -1,4 +1,4 @@
-import { forwardRef, useState } from "react";
+import { forwardRef, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -35,6 +35,7 @@ interface Props {
   replaying?: boolean;
   externalSubAgentId?: string | null;
   onSubAgentModalClose?: () => void;
+  getSubAgentContent?: (subId: string) => string;
 }
 
 function getToolSummary(content: string): { name: string; summary: string } {
@@ -191,12 +192,45 @@ function parseSubAgentContent(raw: string): SubAgentSegment[] {
   return segments;
 }
 
-const ChatPanel = forwardRef<HTMLDivElement, Props>(({ messages, connected, onToolConfirm, onUserInput, onBranch, replaying, externalSubAgentId, onSubAgentModalClose }, bottomRef) => {
+const ChatPanel = forwardRef<HTMLDivElement, Props>(({ messages, connected, onToolConfirm, onUserInput, onBranch, replaying, externalSubAgentId, onSubAgentModalClose, getSubAgentContent }, bottomRef) => {
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [activeSubAgentId, setActiveSubAgentId] = useState<string | null>(null);
+  const [modalContent, setModalContent] = useState("");
+  const modalContentRef = useRef("");
+  const modalTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const resolvedSubAgentId = externalSubAgentId ?? activeSubAgentId;
-  const closeSubAgent = onSubAgentModalClose ?? (() => setActiveSubAgentId(null));
+  const closeSubAgent = () => {
+    setActiveSubAgentId(null);
+    setModalContent("");
+    modalContentRef.current = "";
+    onSubAgentModalClose?.();
+  };
+
+  useEffect(() => {
+    if (!resolvedSubAgentId || !getSubAgentContent) return;
+    const newContent = getSubAgentContent(resolvedSubAgentId);
+    if (!newContent || newContent === modalContentRef.current) return;
+    modalContentRef.current = newContent;
+    if (!modalTimerRef.current) {
+      setModalContent(newContent);
+      modalTimerRef.current = setTimeout(() => {
+        modalTimerRef.current = null;
+        if (!resolvedSubAgentId || !getSubAgentContent) return;
+        const c = getSubAgentContent(resolvedSubAgentId);
+        if (c && c !== modalContentRef.current) {
+          modalContentRef.current = c;
+          setModalContent(c);
+        }
+      }, 500);
+    }
+  }, [resolvedSubAgentId, getSubAgentContent]);
+
+  useEffect(() => {
+    return () => {
+      if (modalTimerRef.current) clearTimeout(modalTimerRef.current);
+    };
+  }, []);
   const grouped: (ChatMessage | ChatMessage[])[] = [];
   let i = 0;
   while (i < messages.length) {
@@ -712,7 +746,7 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(({ messages, connected, onTo
               </div>
               <div className="flex-1 overflow-y-auto px-4 py-4" style={{ background: "#131325" }}>
                 {(() => {
-                  const segments = parseSubAgentContent(agent.content || "");
+                  const segments = parseSubAgentContent(modalContent);
                   if (segments.length === 0) {
                     return (
                       <span className="text-sm" style={{ color: "var(--text-secondary)" }}>
@@ -727,23 +761,10 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(({ messages, connected, onTo
                           return (
                             <div
                               key={i}
-                              className="prose prose-invert prose-sm max-w-none
-                                [&_p]:my-1.5 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0
-                                [&_h1]:text-base [&_h1]:font-bold [&_h1]:mt-3 [&_h1]:mb-1.5 [&_h1]:text-white
-                                [&_h2]:text-sm [&_h2]:font-bold [&_h2]:mt-2 [&_h2]:mb-1 [&_h2]:text-white
-                                [&_h3]:text-sm [&_h3]:font-semibold [&_h3]:mt-2 [&_h3]:mb-1 [&_h3]:text-white
-                                [&_ul]:my-1 [&_ul]:pl-5 [&_ol]:my-1 [&_ol]:pl-5
-                                [&_li]:my-0.5
-                                [&_pre]:my-1.5 [&_pre]:rounded-lg [&_pre]:overflow-hidden
-                                [&_code]:text-[13px]
-                                [&_a]:text-blue-400 [&_a]:no-underline [&_a:hover]:underline
-                                [&_blockquote]:border-l-2 [&_blockquote]:border-gray-600 [&_blockquote]:pl-3 [&_blockquote]:text-gray-400
-                                [&_strong]:text-white [&_em]:text-gray-300
-                                [&_hr]:border-gray-700 [&_hr]:my-2
-                                [&_table]:text-xs [&_th]:px-2 [&_th]:py-1 [&_td]:px-2 [&_td]:py-1 [&_th]:bg-[#1a1a2e]
-                              "
+                              className="text-sm whitespace-pre-wrap leading-relaxed"
+                              style={{ color: "var(--text-primary)" }}
                             >
-                              <ReactMarkdown remarkPlugins={[remarkGfm]}>{seg.content}</ReactMarkdown>
+                              {seg.content}
                             </div>
                           );
                         }

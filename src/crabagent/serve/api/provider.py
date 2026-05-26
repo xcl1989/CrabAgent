@@ -106,9 +106,7 @@ async def create_provider_endpoint(req: CreateProviderRequest, user: User = Depe
 
 
 @router.patch("/{name}", response_model=ProviderResponse)
-async def update_provider_endpoint(
-    name: str, req: UpdateProviderRequest, user: User = Depends(get_current_user)
-):
+async def update_provider_endpoint(name: str, req: UpdateProviderRequest, user: User = Depends(get_current_user)):
     existing = await get_provider(name)
     if not existing:
         raise HTTPException(status_code=404, detail="Provider not found")

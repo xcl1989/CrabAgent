@@ -16,6 +16,7 @@ def _get_fernet():
     from cryptography.fernet import Fernet
 
     from crabagent.core.config import settings
+
     return Fernet(settings.get_encryption_key().encode())
 
 
@@ -146,9 +147,7 @@ async def set_default_provider(name: str) -> bool:
         if not row:
             return False
         await session.execute(_no_default_rows())
-        await session.execute(
-            update(ProviderConfig).where(ProviderConfig.name == name).values(is_default=True)
-        )
+        await session.execute(update(ProviderConfig).where(ProviderConfig.name == name).values(is_default=True))
         await session.commit()
         return True
 
@@ -203,6 +202,7 @@ async def fetch_models(provider_name: str) -> list[str]:
     base = p.base_url.rstrip("/")
     try:
         import httpx
+
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.get(
                 f"{base}/models",

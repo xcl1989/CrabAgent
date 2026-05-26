@@ -10,11 +10,13 @@ from crabagent.core.event import AgentEvent, EventType
 
 logger = logging.getLogger(__name__)
 
-_SUMMARY_PROMPT = """Summarize the following conversation history concisely. Preserve key facts, decisions, file paths, and any important context that would be needed to continue the conversation. Write in English. Be thorough but concise (aim for 200-500 words).
-
-Conversation to summarize:
-{history}
-"""
+_SUMMARY_PROMPT = (
+    "Summarize the following conversation history concisely. "
+    "Preserve key facts, decisions, file paths, and any important context "
+    "that would be needed to continue the conversation. "
+    "Write in English. Be thorough but concise (aim for 200-500 words).\n\n"
+    "Conversation to summarize:\n{history}"
+)
 
 
 async def compress_context(context: AgentContext, llm_params: dict, model: str) -> None:
@@ -41,7 +43,14 @@ async def compress_context(context: AgentContext, llm_params: dict, model: str) 
             max_tokens=1024,
             stream=False,
         )
-        summary = response.choices[0].message.content or ""
+        summary = ""
+        if response.choices:
+            msg = response.choices[0].message
+            summary = (msg.content or "").strip()
+            if not summary:
+                reasoning = getattr(msg, "reasoning_content", None)
+                if reasoning:
+                    summary = reasoning.strip()
     except Exception as e:
         logger.warning("Context compression failed, keeping original: %s", e)
         return

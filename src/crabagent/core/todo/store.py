@@ -17,17 +17,15 @@ async def add_todo(db: AsyncSession, session_id: str, task: str) -> dict:
 async def list_todos(db: AsyncSession, session_id: str, filter_: str = "all") -> list[dict]:
     stmt = select(Todo).where(Todo.session_id == session_id).order_by(Todo.created_at.desc())
     if filter_ == "pending":
-        stmt = stmt.where(Todo.done == False)
+        stmt = stmt.where(not Todo.done)
     elif filter_ == "done":
-        stmt = stmt.where(Todo.done == True)
+        stmt = stmt.where(Todo.done)
     result = await db.execute(stmt)
     return [_todo_to_dict(t) for t in result.scalars().all()]
 
 
 async def mark_done(db: AsyncSession, todo_id: int, session_id: str) -> bool:
-    result = await db.execute(
-        select(Todo).where(Todo.id == todo_id, Todo.session_id == session_id)
-    )
+    result = await db.execute(select(Todo).where(Todo.id == todo_id, Todo.session_id == session_id))
     t = result.scalar_one_or_none()
     if not t:
         return False
@@ -37,9 +35,7 @@ async def mark_done(db: AsyncSession, todo_id: int, session_id: str) -> bool:
 
 
 async def delete_todo(db: AsyncSession, todo_id: int, session_id: str) -> bool:
-    result = await db.execute(
-        select(Todo).where(Todo.id == todo_id, Todo.session_id == session_id)
-    )
+    result = await db.execute(select(Todo).where(Todo.id == todo_id, Todo.session_id == session_id))
     t = result.scalar_one_or_none()
     if not t:
         return False

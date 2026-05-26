@@ -112,11 +112,7 @@ async def get_session_report(
     db: AsyncSession = Depends(get_db),
 ):
     conv = await get_owned_conversation(db, session_id, user)
-    result = await db.execute(
-        select(Message)
-        .where(Message.conversation_id == conv.id)
-        .order_by(Message.id)
-    )
+    result = await db.execute(select(Message).where(Message.conversation_id == conv.id).order_by(Message.id))
     msgs = result.scalars().all()
 
     lines = [f"# {conv.title or 'Conversation Report'}\n"]

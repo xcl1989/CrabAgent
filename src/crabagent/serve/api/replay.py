@@ -71,21 +71,13 @@ async def replay_branch(
             yield progress.to_sse()
 
             if msg.role == "user":
-                yield AgentEvent(
-                    type=EventType.TEXT_DELTA, data={"text": msg.content or "", "role": "user"}
-                ).to_sse()
-                yield AgentEvent(
-                    type=EventType.TEXT_DONE, data={"text": msg.content or "", "role": "user"}
-                ).to_sse()
+                yield AgentEvent(type=EventType.TEXT_DELTA, data={"text": msg.content or "", "role": "user"}).to_sse()
+                yield AgentEvent(type=EventType.TEXT_DONE, data={"text": msg.content or "", "role": "user"}).to_sse()
 
             elif msg.role == "assistant":
                 if msg.reasoning_content:
-                    yield AgentEvent(
-                        type=EventType.THINKING_DELTA, data={"text": msg.reasoning_content}
-                    ).to_sse()
-                    yield AgentEvent(
-                        type=EventType.THINKING_DONE, data={"text": msg.reasoning_content}
-                    ).to_sse()
+                    yield AgentEvent(type=EventType.THINKING_DELTA, data={"text": msg.reasoning_content}).to_sse()
+                    yield AgentEvent(type=EventType.THINKING_DONE, data={"text": msg.reasoning_content}).to_sse()
 
                 if msg.tool_calls:
                     try:
@@ -108,9 +100,7 @@ async def replay_branch(
                     yield AgentEvent(
                         type=EventType.TEXT_DELTA, data={"text": msg.content, "role": "assistant"}
                     ).to_sse()
-                    yield AgentEvent(
-                        type=EventType.TEXT_DONE, data={"text": msg.content, "role": "assistant"}
-                    ).to_sse()
+                    yield AgentEvent(type=EventType.TEXT_DONE, data={"text": msg.content, "role": "assistant"}).to_sse()
 
             elif msg.role == "tool":
                 yield AgentEvent(

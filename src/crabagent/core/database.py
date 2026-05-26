@@ -223,7 +223,7 @@ class TaskRecord(Base):
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
 
 
-engine = create_async_engine(settings.db_url, echo=False)
+engine = create_async_engine(settings.db_url, echo=False, connect_args={"check_same_thread": False})
 async_session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
@@ -257,17 +257,17 @@ def _ensure_workspace_dirs():
         sample.write_text(
             'name = "hello"\n'
             'description = "Say hello — a sample custom tool. Edit or remove this file to add your own tools."\n'
-            'parameters = {\n'
+            "parameters = {\n"
             '    "type": "object",\n'
             '    "properties": {\n'
             '        "name": {"type": "string", "description": "Name to greet"},\n'
-            '    },\n'
+            "    },\n"
             '    "required": ["name"],\n'
-            '}\n'
-            'requires_permission = True  # set to False to skip confirmation\n'
-            '\n'
-            '\n'
-            'def run(name: str) -> str:\n'
+            "}\n"
+            "requires_permission = True  # set to False to skip confirmation\n"
+            "\n"
+            "\n"
+            "def run(name: str) -> str:\n"
             '    return f"Hello, {name}! Welcome to CrabAgent."\n'
         )
 
@@ -276,6 +276,7 @@ async def init_db() -> None:
     _ensure_workspace_dirs()
 
     async with engine.begin() as conn:
+        await conn.execute(text("PRAGMA journal_mode=WAL"))
         await conn.run_sync(Base.metadata.create_all)
 
         result = await conn.execute(text("PRAGMA table_info(conversations)"))
@@ -319,6 +320,7 @@ async def init_db() -> None:
             await conn.execute(text("ALTER TABLE agent_memory ADD COLUMN task_category VARCHAR(50) DEFAULT ''"))
 
     from crabagent.core.provider_store import migrate_plaintext_keys
+
     await migrate_plaintext_keys()
 
     await _ensure_default_admin()
@@ -350,18 +352,22 @@ DEFAULT_AGENTS = [
         "display_name": "Web Researcher",
         "role": "Web Researcher",
         "goal": (
-            "Find, collect, and summarize information from the web "
-            "using browser and search tools. Always cite sources."
+            "Find, collect, and summarize information from the web using browser and search tools. Always cite sources."
         ),
         "backstory": (
-            "You are an experienced web researcher with expertise "
-            "in finding accurate and relevant information quickly."
+            "You are an experienced web researcher with expertise in finding accurate and relevant information quickly."
         ),
         "icon": "🔍",
         "tools": [
-            "web_search", "web_scrape", "browser",
-            "read", "glob", "grep",
-            "shared_get", "shared_put", "shared_list",
+            "web_search",
+            "web_scrape",
+            "browser",
+            "read",
+            "glob",
+            "grep",
+            "shared_get",
+            "shared_put",
+            "shared_list",
         ],
     },
     {
@@ -369,13 +375,9 @@ DEFAULT_AGENTS = [
         "display_name": "Data Analyst",
         "role": "Data Analyst",
         "goal": (
-            "Analyze data, compare findings, identify patterns, "
-            "and generate structured reports with clear conclusions."
+            "Analyze data, compare findings, identify patterns, and generate structured reports with clear conclusions."
         ),
-        "backstory": (
-            "You are a meticulous data analyst who excels at "
-            "turning raw data into actionable insights."
-        ),
+        "backstory": ("You are a meticulous data analyst who excels at turning raw data into actionable insights."),
         "icon": "📊",
         "tools": ["bash", "read", "glob", "grep", "shared_get", "shared_put", "shared_list"],
     },
@@ -383,10 +385,7 @@ DEFAULT_AGENTS = [
         "name": "coder",
         "display_name": "Code Expert",
         "role": "Code Expert",
-        "goal": (
-            "Write, review, debug, optimize, and refactor code. "
-            "Generate clean, well-documented solutions."
-        ),
+        "goal": ("Write, review, debug, optimize, and refactor code. Generate clean, well-documented solutions."),
         "backstory": (
             "You are a senior software engineer with deep expertise "
             "across multiple programming languages and frameworks."
@@ -398,13 +397,9 @@ DEFAULT_AGENTS = [
         "name": "writer",
         "display_name": "Content Writer",
         "role": "Content Writer",
-        "goal": (
-            "Write, edit, translate, and format content. "
-            "Produce clear, engaging, and well-structured documents."
-        ),
+        "goal": ("Write, edit, translate, and format content. Produce clear, engaging, and well-structured documents."),
         "backstory": (
-            "You are a professional writer skilled at transforming "
-            "complex information into clear, readable content."
+            "You are a professional writer skilled at transforming complex information into clear, readable content."
         ),
         "icon": "📝",
         "tools": ["read", "write", "edit", "glob", "grep", "web_search", "shared_get", "shared_put", "shared_list"],
@@ -419,9 +414,7 @@ async def _ensure_default_agents():
 
     async with async_session_factory() as db:
         for agent_data in DEFAULT_AGENTS:
-            result = await db.execute(
-                select(AgentProfile).where(AgentProfile.name == agent_data["name"])
-            )
+            result = await db.execute(select(AgentProfile).where(AgentProfile.name == agent_data["name"]))
             existing = result.scalar_one_or_none()
             if existing:
                 if not existing.icon:
@@ -430,17 +423,19 @@ async def _ensure_default_agents():
                 if not existing.tools and agent_data.get("tools"):
                     existing.tools = _json.dumps(agent_data["tools"])
                 continue
-            db.add(AgentProfile(
-                user_id=1,
-                name=agent_data["name"],
-                display_name=agent_data["display_name"],
-                role=agent_data["role"],
-                goal=agent_data["goal"],
-                backstory=agent_data["backstory"],
-                icon=agent_data["icon"],
-                is_default=True,
-                tools=_json.dumps(agent_data.get("tools", [])),
-            ))
+            db.add(
+                AgentProfile(
+                    user_id=1,
+                    name=agent_data["name"],
+                    display_name=agent_data["display_name"],
+                    role=agent_data["role"],
+                    goal=agent_data["goal"],
+                    backstory=agent_data["backstory"],
+                    icon=agent_data["icon"],
+                    is_default=True,
+                    tools=_json.dumps(agent_data.get("tools", [])),
+                )
+            )
         await db.commit()
 
 
@@ -460,9 +455,14 @@ async def shared_memory_put(session_id: str, key: str, value: str, author: str =
             existing.author = author
             existing.updated_at = utcnow()
         else:
-            db.add(SharedMemory(
-                session_id=session_id, key=key, value=value, author=author,
-            ))
+            db.add(
+                SharedMemory(
+                    session_id=session_id,
+                    key=key,
+                    value=value,
+                    author=author,
+                )
+            )
         await db.commit()
 
 
@@ -485,14 +485,9 @@ async def shared_memory_get_all(session_id: str) -> list[dict]:
 
     async with async_session_factory() as db:
         result = await db.execute(
-            select(SharedMemory)
-            .where(SharedMemory.session_id == session_id)
-            .order_by(SharedMemory.id)
+            select(SharedMemory).where(SharedMemory.session_id == session_id).order_by(SharedMemory.id)
         )
-        return [
-            {"key": r.key, "value": r.value, "author": r.author}
-            for r in result.scalars().all()
-        ]
+        return [{"key": r.key, "value": r.value, "author": r.author} for r in result.scalars().all()]
 
 
 async def shared_memory_delete(session_id: str, key: str) -> None:
@@ -546,19 +541,21 @@ async def agent_memory_upsert(
                 existing.task_category = task_category
             existing.updated_at = utcnow()
         else:
-            db.add(AgentMemory(
-                user_id=user_id,
-                memory_type=memory_type,
-                agent_name=agent_name,
-                category=category,
-                key=key,
-                content=content,
-                importance=importance,
-                confidence=confidence,
-                source_session=source_session,
-                source=source,
-                task_category=task_category,
-            ))
+            db.add(
+                AgentMemory(
+                    user_id=user_id,
+                    memory_type=memory_type,
+                    agent_name=agent_name,
+                    category=category,
+                    key=key,
+                    content=content,
+                    importance=importance,
+                    confidence=confidence,
+                    source_session=source_session,
+                    source=source,
+                    task_category=task_category,
+                )
+            )
         await db.commit()
 
 
@@ -617,6 +614,10 @@ async def agent_memory_get_by_agent(
                 "content": r.content,
                 "category": r.category,
                 "importance": r.importance,
+                "source": r.source or "",
+                "task_category": r.task_category or "",
+                "access_count": r.access_count or 0,
+                "created_at": r.created_at,
             }
             for r in result.scalars().all()
         ]
@@ -648,10 +649,7 @@ async def agent_memory_search(
         term_filters.append(AgentMemory.category == query)
         conditions.append(or_(*term_filters))
         result = await db.execute(
-            select(AgentMemory)
-            .where(*conditions)
-            .order_by(AgentMemory.importance.desc())
-            .limit(limit)
+            select(AgentMemory).where(*conditions).order_by(AgentMemory.importance.desc()).limit(limit)
         )
         rows = result.scalars().all()
         for r in rows:
@@ -685,11 +683,7 @@ async def agent_memory_list_all(
             conditions.append(AgentMemory.memory_type == memory_type)
         if category:
             conditions.append(AgentMemory.category == category)
-        result = await db.execute(
-            select(AgentMemory)
-            .where(*conditions)
-            .order_by(AgentMemory.importance.desc())
-        )
+        result = await db.execute(select(AgentMemory).where(*conditions).order_by(AgentMemory.importance.desc()))
         return [
             {
                 "id": r.id,
@@ -745,7 +739,10 @@ async def agent_memory_clear(user_id: int) -> int:
 
 
 async def agent_memory_replace(
-    user_id: int, key: str, old_text: str, new_text: str,
+    user_id: int,
+    key: str,
+    old_text: str,
+    new_text: str,
 ) -> bool:
     from sqlalchemy import select
 
@@ -777,15 +774,17 @@ async def task_record_create(
     iterations: int = 0,
 ) -> None:
     async with async_session_factory() as db:
-        db.add(TaskRecord(
-            user_id=user_id,
-            agent_name=agent_name,
-            task_summary=task_summary[:200],
-            success=success,
-            elapsed=elapsed,
-            tokens=tokens,
-            iterations=iterations,
-        ))
+        db.add(
+            TaskRecord(
+                user_id=user_id,
+                agent_name=agent_name,
+                task_summary=task_summary[:200],
+                success=success,
+                elapsed=elapsed,
+                tokens=tokens,
+                iterations=iterations,
+            )
+        )
         await db.commit()
 
 
@@ -794,14 +793,18 @@ async def task_record_stats(user_id: int, agent_name: str) -> dict:
 
     async with async_session_factory() as db:
         total = await db.execute(
-            select(func.count()).select_from(TaskRecord).where(
+            select(func.count())
+            .select_from(TaskRecord)
+            .where(
                 TaskRecord.user_id == user_id,
                 TaskRecord.agent_name == agent_name,
             )
         )
         total_count = total.scalar() or 0
         success_count_result = await db.execute(
-            select(func.count()).select_from(TaskRecord).where(
+            select(func.count())
+            .select_from(TaskRecord)
+            .where(
                 TaskRecord.user_id == user_id,
                 TaskRecord.agent_name == agent_name,
                 TaskRecord.success.is_(True),
@@ -809,14 +812,18 @@ async def task_record_stats(user_id: int, agent_name: str) -> dict:
         )
         success_count = success_count_result.scalar() or 0
         avg_elapsed_result = await db.execute(
-            select(func.avg(TaskRecord.elapsed)).select_from(TaskRecord).where(
+            select(func.avg(TaskRecord.elapsed))
+            .select_from(TaskRecord)
+            .where(
                 TaskRecord.user_id == user_id,
                 TaskRecord.agent_name == agent_name,
             )
         )
         avg_elapsed = avg_elapsed_result.scalar() or 0.0
         avg_tokens_result = await db.execute(
-            select(func.avg(TaskRecord.tokens)).select_from(TaskRecord).where(
+            select(func.avg(TaskRecord.tokens))
+            .select_from(TaskRecord)
+            .where(
                 TaskRecord.user_id == user_id,
                 TaskRecord.agent_name == agent_name,
             )

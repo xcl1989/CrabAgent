@@ -29,7 +29,7 @@ def parse_skill_md(path: Path) -> SkillInfo | None:
         return None
 
     frontmatter = match.group(1)
-    body = text[match.end():]
+    body = text[match.end() :]
 
     name = ""
     description = ""
@@ -86,7 +86,7 @@ def discover_skills(directories: list[Path]) -> dict[str, SkillInfo]:
 
 def format_skill_content(skill: SkillInfo) -> str:
     parts = [
-        f"<skill_content name=\"{skill.name}\">\n",
+        f'<skill_content name="{skill.name}">\n',
         f"# Skill: {skill.name}\n\n",
         skill.content,
     ]

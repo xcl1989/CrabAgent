@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 
 import litellm
 
@@ -31,7 +32,11 @@ def _litellm_params(provider: ProviderInfo) -> dict:
     params: dict = {"api_key": provider.api_key}
     if provider.base_url:
         params["api_base"] = provider.base_url
+        params["custom_llm_provider"] = "openai"
     return params
+
+
+_MAX_TOOL_RESULT_CHARS = 20_000
 
 
 async def run_agent(
@@ -51,9 +56,10 @@ async def run_agent(
         {"name": s["name"], "status": s["status"], "tool_count": s["tool_count"]}
         for s in context.metadata.get("mcp_status", [])
     ]
-    await context.event_bus.emit(
-        AgentEvent(type=EventType.AGENT_START, data={"mcp_servers": mcp_summary})
-    )
+    await context.event_bus.emit(AgentEvent(type=EventType.AGENT_START, data={"mcp_servers": mcp_summary}))
+
+    _stream_retries = 0
+    _max_stream_retries = 2
 
     while not context.budget_exhausted:
         context.iteration += 1
@@ -70,6 +76,7 @@ async def run_agent(
             reasoning_text = ""
             tool_calls_list: list[dict] = []
 
+            _llm_t0 = time.time()
             response = await litellm.acompletion(
                 model=model,
                 **llm,
@@ -130,21 +137,22 @@ async def run_agent(
                 "role": "assistant",
                 "content": full_text or "",
             }
+
+            _llm_elapsed = time.time() - _llm_t0
+            if _llm_elapsed > 10:
+                logger.info("litellm call took %.1fs", _llm_elapsed)
+
             if tool_calls_list:
                 assistant_msg["tool_calls"] = tool_calls_list
             if reasoning_text:
                 assistant_msg["reasoning_content"] = reasoning_text
 
             if reasoning_text:
-                await context.event_bus.emit(
-                    AgentEvent(type=EventType.THINKING_DONE, data={"text": reasoning_text})
-                )
+                await context.event_bus.emit(AgentEvent(type=EventType.THINKING_DONE, data={"text": reasoning_text}))
 
             context.messages.append(assistant_msg)
 
-            await context.event_bus.emit(
-                AgentEvent(type=EventType.MESSAGE_CREATED, data={"message": assistant_msg})
-            )
+            await context.event_bus.emit(AgentEvent(type=EventType.MESSAGE_CREATED, data={"message": assistant_msg}))
 
             await context.event_bus.emit(AgentEvent(type=EventType.TEXT_DONE, data={"text": full_text}))
 
@@ -162,10 +170,15 @@ async def run_agent(
                 tool_info = context.tool_registry.get(tool_name)
                 tool_source = tool_info.metadata.get("source", "builtin") if tool_info else "builtin"
                 tool_server = tool_info.metadata.get("server_name", "") if tool_info else ""
-                tool_metas.append({
-                    "tc": tc, "name": tool_name, "args": args,
-                    "source": tool_source, "server": tool_server,
-                })
+                tool_metas.append(
+                    {
+                        "tc": tc,
+                        "name": tool_name,
+                        "args": args,
+                        "source": tool_source,
+                        "server": tool_server,
+                    }
+                )
 
             for meta in tool_metas:
                 await context.event_bus.emit(
@@ -182,9 +195,7 @@ async def run_agent(
                 )
 
             async def _run_and_emit(meta: dict):
-                result = await context.tool_registry.execute(
-                    meta["name"], meta["args"], context=context
-                )
+                result = await context.tool_registry.execute(meta["name"], meta["args"], context=context)
                 await context.event_bus.emit(
                     AgentEvent(
                         type=EventType.TOOL_RESULT,
@@ -202,6 +213,11 @@ async def run_agent(
             gathered = await asyncio.gather(*[_run_and_emit(m) for m in tool_metas])
 
             for meta, result in gathered:
+                orig_len = len(result)
+                if orig_len > _MAX_TOOL_RESULT_CHARS:
+                    result = result[:_MAX_TOOL_RESULT_CHARS] + (
+                        f"\n\n... [truncated {orig_len - _MAX_TOOL_RESULT_CHARS} chars]"
+                    )
                 tool_msg = {
                     "role": "tool",
                     "content": result,
@@ -209,20 +225,21 @@ async def run_agent(
                 }
                 context.messages.append(tool_msg)
 
-                await context.event_bus.emit(
-                    AgentEvent(type=EventType.MESSAGE_CREATED, data={"message": tool_msg})
-                )
+                await context.event_bus.emit(AgentEvent(type=EventType.MESSAGE_CREATED, data={"message": tool_msg}))
 
             for msg in context.metadata.pop("_pending_sub_agent_messages", []):
-                await context.event_bus.emit(
-                    AgentEvent(type=EventType.MESSAGE_CREATED, data={"message": msg})
-                )
+                await context.event_bus.emit(AgentEvent(type=EventType.MESSAGE_CREATED, data={"message": msg}))
 
             await context.event_bus.emit(
                 AgentEvent(type=EventType.ITERATION_END, data={"iteration": context.iteration})
             )
 
         except Exception as e:
+            err_name = type(e).__name__
+            if _stream_retries < _max_stream_retries and "MidStreamFallback" in err_name:
+                _stream_retries += 1
+                logger.warning("Stream error (retry %d/%d): %s", _stream_retries, _max_stream_retries, e)
+                continue
             logger.error(f"Agent loop error: {e}", exc_info=True)
             await context.event_bus.emit(AgentEvent(type=EventType.AGENT_ERROR, data={"error": str(e)}))
             break
@@ -238,6 +255,7 @@ async def run_agent(
 
 async def _grace_call(context: AgentContext, llm: dict, model: str):
     try:
+        _g0 = time.time()
         context.messages.append(
             {
                 "role": "user",
@@ -254,6 +272,9 @@ async def _grace_call(context: AgentContext, llm: dict, model: str):
             max_tokens=1024,
         )
         content = response.choices[0].message.content or ""
+        _gelapsed = time.time() - _g0
+        if _gelapsed > 5:
+            logger.info("_grace_call took %.1fs", _gelapsed)
         context.messages.append({"role": "assistant", "content": content})
         await context.event_bus.emit(AgentEvent(type=EventType.TEXT_DONE, data={"text": content}))
     except Exception as e:

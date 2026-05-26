@@ -35,8 +35,24 @@ def read_file(file_path: str, offset: int = 1, limit: int = 2000) -> str:
         return f"Error: path does not exist: {file_path}"
 
     if path.is_dir():
+        _SKIP_DIRS = {
+            ".git",
+            "__pycache__",
+            ".pytest_cache",
+            ".ruff_cache",
+            "node_modules",
+            ".venv",
+            "venv",
+            ".eggs",
+            "dist",
+            "build",
+            ".opencode",
+            ".crabagent",
+        }
         entries = []
         for entry in sorted(path.iterdir()):
+            if entry.name.startswith(".") or entry.name in _SKIP_DIRS:
+                continue
             suffix = "/" if entry.is_dir() else ""
             entries.append(entry.name + suffix)
         return "\n".join(entries)

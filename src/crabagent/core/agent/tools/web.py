@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 from urllib.parse import quote_plus
 
 from crabagent.core.agent.tools.registry import registry
+from crabagent.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +44,10 @@ async def _search_searxng(query: str, limit: int, searxng_url: str) -> list[dict
     import httpx
 
     url = f"{searxng_url.rstrip('/')}/search?q={quote_plus(query)}&format=json&categories=general"
-    async with httpx.AsyncClient(timeout=15.0) as client:
+    client_kwargs = {"timeout": 15.0}
+    if settings.web_proxy:
+        client_kwargs["proxy"] = settings.web_proxy
+    async with httpx.AsyncClient(**client_kwargs) as client:
         resp = await client.get(url)
         resp.raise_for_status()
         data = resp.json()
@@ -54,22 +59,52 @@ async def _search_searxng(query: str, limit: int, searxng_url: str) -> list[dict
 
 
 async def _search_duckduckgo(query: str, limit: int) -> list[dict]:
-    from ddgs import DDGS
+    import asyncio
 
-    results = []
-    with DDGS() as ddgs:
-        for r in ddgs.text(query, max_results=limit):
-            results.append({
-                "title": r.get("title", ""),
-                "url": r.get("href", ""),
-                "snippet": r.get("body", ""),
-            })
-    return results
+    def _do_search():
+        from ddgs import DDGS
+
+        results = []
+        t0 = time.time()
+        kwargs = {}
+        if settings.web_proxy:
+            kwargs["proxy"] = settings.web_proxy
+        ddgs = DDGS(**kwargs)
+        try:
+            it = ddgs.text(query, max_results=limit)
+            for r in it:
+                if time.time() - t0 > 18.0:
+                    break
+                results.append(
+                    {
+                        "title": r.get("title", ""),
+                        "url": r.get("href", ""),
+                        "snippet": r.get("body", ""),
+                    }
+                )
+        finally:
+            try:
+                ddgs.close()
+            except Exception:
+                pass
+        return results
+
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(_do_search), timeout=20.0
+        )
+    except TimeoutError:
+        logger.info("DuckDuckGo search timed out for query: %s", query[:50])
+        return []
 
 
 @registry.register(
     name="web_search",
-    description="Search the web. Returns a list of results with titles, URLs, and snippets. Uses SearXNG if configured, otherwise falls back to DuckDuckGo (no API key needed).",
+    description=(
+        "Search the web. Returns a list of results with titles, URLs, "
+        "and snippets. Uses SearXNG if configured, otherwise falls back "
+        "to DuckDuckGo (no API key needed)."
+    ),
     parameters={
         "type": "object",
         "properties": {
@@ -79,14 +114,14 @@ async def _search_duckduckgo(query: str, limit: int) -> list[dict]:
             },
             "limit": {
                 "type": "integer",
-                "description": "Maximum number of results to return. Default: 10.",
-                "default": 10,
+                "description": "Maximum number of results. Default 5, max 10.",
+                "default": 5,
             },
         },
         "required": ["query"],
     },
 )
-async def web_search(query: str, limit: int = 10) -> str:
+async def web_search(query: str, limit: int = 5) -> str:
     searxng_url = await _get_setting("searxng_url")
 
     if searxng_url:
@@ -105,7 +140,9 @@ async def web_search(query: str, limit: int = 10) -> str:
 
 @registry.register(
     name="web_scrape",
-    description="Fetch and extract the main text content from a web page URL. Returns the page content in a readable format.",
+    description=(
+        "Fetch and extract the main text content from a web page URL. Returns the page content in a readable format."
+    ),
     parameters={
         "type": "object",
         "properties": {
@@ -126,14 +163,17 @@ async def web_scrape(url: str, max_length: int = 10000) -> str:
     import httpx
 
     try:
-        async with httpx.AsyncClient(
-            timeout=15.0,
-            follow_redirects=True,
-            headers={
+        client_kwargs = {
+            "timeout": 15.0,
+            "follow_redirects": True,
+            "headers": {
                 "User-Agent": "Mozilla/5.0 (compatible; CrabAgent/1.0)",
                 "Accept": "text/html,application/xhtml+xml",
             },
-        ) as client:
+        }
+        if settings.web_proxy:
+            client_kwargs["proxy"] = settings.web_proxy
+        async with httpx.AsyncClient(**client_kwargs) as client:
             resp = await client.get(url)
             resp.raise_for_status()
             html = resp.text[:200000]

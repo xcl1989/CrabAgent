@@ -4,7 +4,10 @@ from __future__ import annotations
 def register_todo_tools(registry):
     @registry.register(
         name="todo_add",
-        description="Add a task to the todo list. Use when the user asks to remember something, add a task, or create a todo item.",
+        description=(
+            "Add a task to the todo list. Use when the user asks to "
+            "remember something, add a task, or create a todo item."
+        ),
         parameters={
             "type": "object",
             "properties": {
@@ -24,7 +27,9 @@ def register_todo_tools(registry):
 
     @registry.register(
         name="todo_list",
-        description="List todo items. Use when the user asks 'what do I need to do', 'show my tasks', or 'what's pending'.",
+        description=(
+            "List todo items. Use when the user asks 'what do I need to do', 'show my tasks', or 'what's pending'."
+        ),
         parameters={
             "type": "object",
             "properties": {
