@@ -73,14 +73,16 @@ class EventBus:
 
     async def emit(self, event: AgentEvent) -> None:
         import time as _t
+
         t0 = _t.monotonic()
         for callback in self._listeners:
             result = callback(event)
             if hasattr(result, "__await__"):
                 await result
         elapsed = _t.monotonic() - t0
-        if elapsed > 0.05:
+        if elapsed > 0.2:
             import logging
+
             logging.getLogger(__name__).warning(
                 "[%s] emit SLOW %.1fms listeners=%d event=%s",
                 self._name,

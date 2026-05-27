@@ -11,10 +11,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from crabagent.core.agent.agents import invalidate_cache
 from crabagent.core.database import (
     AgentProfile,
+    AgentRun,
     User,
-    get_db,
-    agent_memory_get_by_agent,
     agent_memory_delete,
+    agent_memory_get_by_agent,
+    get_db,
+    run_record_get,
+    run_record_growth,
+    run_record_list,
     task_record_stats,
 )
 from crabagent.serve.deps import get_current_user
@@ -292,13 +296,81 @@ async def list_learning_agents(
 
     from crabagent.core.database import AgentMemory, TaskRecord
 
-    mem_result = await db.execute(
-        select(distinct(AgentMemory.agent_name))
-        .where(AgentMemory.user_id == user.id)
-    )
-    task_result = await db.execute(
-        select(distinct(TaskRecord.agent_name))
-        .where(TaskRecord.user_id == user.id)
-    )
+    mem_result = await db.execute(select(distinct(AgentMemory.agent_name)).where(AgentMemory.user_id == user.id))
+    task_result = await db.execute(select(distinct(TaskRecord.agent_name)).where(TaskRecord.user_id == user.id))
     agent_names = set(mem_result.scalars().all()) | set(task_result.scalars().all())
     return sorted(agent_names)
+
+
+@router.get("/runs")
+async def list_agent_runs(
+    agent_name: str | None = Query(None, description="Filter by agent name"),
+    status: str | None = Query(None, description="Filter by status (running/completed/failed)"),
+    session_id: str | None = Query(None, description="Filter by session ID"),
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    user: User = Depends(get_current_user),
+):
+    runs = await run_record_list(
+        user_id=user.id,
+        agent_name=agent_name or "",
+        status=status or "",
+        session_id=session_id or "",
+        limit=limit,
+        offset=offset,
+    )
+    return runs
+
+
+@router.get("/runs/{run_id}")
+async def get_agent_run(
+    run_id: int,
+    user: User = Depends(get_current_user),
+):
+    run = await run_record_get(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if run.get("user_id") != user.id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    return run
+
+
+@router.get("/pipelines/history")
+async def get_pipeline_history(
+    limit: int = Query(10, ge=1, le=50),
+    user: User = Depends(get_current_user),
+):
+    from crabagent.core.database import _run_to_dict, async_session_factory
+
+    async with async_session_factory() as db:
+        pipelines = (
+            await db.execute(
+                select(AgentRun)
+                .where(AgentRun.user_id == user.id, AgentRun.agent_name == "pipeline")
+                .order_by(AgentRun.id.desc())
+                .limit(limit)
+            )
+        ).scalars().all()
+        result = []
+        for p in pipelines:
+            pd = _run_to_dict(p)
+            steps = (
+                await db.execute(
+                    select(AgentRun)
+                    .where(AgentRun.parent_run_id == p.id)
+                    .order_by(AgentRun.id.asc())
+                )
+            ).scalars().all()
+            pd["steps"] = [_run_to_dict(s) for s in steps]
+            result.append(pd)
+        return result
+
+
+@router.get("/{agent_name}/growth")
+async def get_agent_growth(
+    agent_name: str,
+    days: int = Query(30, ge=1, le=365),
+    user: User = Depends(get_current_user),
+):
+    data = await run_record_growth(user.id, agent_name, days=days)
+    return data

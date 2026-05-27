@@ -36,7 +36,10 @@ async def take_snapshot(context, filepaths: list[str], description: str = "") ->
                     continue
 
                 proc = await asyncio.create_subprocess_exec(
-                    "git", "diff", "--", fp,
+                    "git",
+                    "diff",
+                    "--",
+                    fp,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                     cwd=str(workspace),

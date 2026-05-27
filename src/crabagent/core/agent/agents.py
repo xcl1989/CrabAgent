@@ -133,9 +133,10 @@ async def build_team_prompt() -> str:
             "- `list_agents`: List all available agents with details",
             "- `plan_task(task)`: Analyze a complex task and produce an execution plan (does not execute)",
             "- `delegate_task(agent_name, task)`: Delegate a task to a specific agent",
-            "- `delegate_parallel(tasks)`: Delegate tasks to multiple agents simultaneously",
+            "- `delegate_parallel(tasks)`: Run multiple independent agent tasks simultaneously (no ordering)",
             "- `handoff_to(agent_name, summary)`: Hand off work to another agent with context",
-            "- `run_pipeline(steps)`: Run a multi-step pipeline with agent dependencies",
+            "- `run_pipeline(steps)`: Multi-step workflow with dependencies. "
+            "Steps without depends_on run in parallel. Prefer for complex workflows.",
             "",
             "### Shared Workspace",
             "",
@@ -149,8 +150,10 @@ async def build_team_prompt() -> str:
             "- Data analysis, comparison, report generation -> `analyst`",
             "- Code writing, debugging, refactoring -> `coder`",
             "- Content writing, editing, translation -> `writer`",
-            "- Multiple independent subtasks -> `delegate_parallel`",
-            "- Complex multi-step task with dependencies -> `run_pipeline`",
+            "- Multiple independent subtasks (no ordering needed) -> `delegate_parallel`",
+            "- Multi-step workflow with ordering or data flow (e.g., research -> analyze -> write) -> `run_pipeline`",
+            "- User asks for multiple sub-agents or parallel execution -> "
+            "use `delegate_parallel` or `run_pipeline`, not sequential `delegate_task`",
             "",
         ]
     )
@@ -350,7 +353,11 @@ async def _llm_reflect_lesson(
 
         logger.info(
             "_llm_reflect_lesson for %s: model=%s provider=%s task_cat=%s error=%s",
-            agent_name, model, provider.name, task_category, bool(error_msg),
+            agent_name,
+            model,
+            provider.name,
+            task_category,
+            bool(error_msg),
         )
 
         llm_params = {"api_key": provider.api_key}
@@ -399,9 +406,19 @@ async def _llm_reflect_lesson(
         if not insight:
             insight = text[:250]
 
-        bad_words = ["completed efficiently", "completed in", "did a good", "well done", "great job",
-                      "successfully completed", "完成任务", "完成得很好", "做得很好", "顺利完成",
-                      "completed the task"]
+        bad_words = [
+            "completed efficiently",
+            "completed in",
+            "did a good",
+            "well done",
+            "great job",
+            "successfully completed",
+            "完成任务",
+            "完成得很好",
+            "做得很好",
+            "顺利完成",
+            "completed the task",
+        ]
         tl = insight.lower()
         if any(bw in tl for bw in bad_words):
             logger.debug("_llm_reflect_lesson for %s: insight too generic, skipping", agent_name)
@@ -410,7 +427,9 @@ async def _llm_reflect_lesson(
         if len(insight) < 10:
             logger.warning(
                 "_llm_reflect_lesson for %s: insight too short (%d chars): %s",
-                agent_name, len(insight), text[:100],
+                agent_name,
+                len(insight),
+                text[:100],
             )
             return None
 
@@ -465,6 +484,8 @@ async def spawn_sub_agent(
     parent_context,
     include_history: bool = False,
     max_depth: int = 1,
+    pipeline_run_id: int | None = None,
+    pipeline_step_id: str | None = None,
 ) -> str:
     from crabagent.core.agent.context import AgentContext
     from crabagent.core.agent.loop import run_agent
@@ -611,6 +632,10 @@ async def spawn_sub_agent(
                 "agent_name": agent_name,
                 "display_name": agent_def["display_name"],
                 "task": task[:200],
+                "model": agent_def.get("model") or parent_context.model,
+                "session_id": session_id,
+                "pipeline_run_id": pipeline_run_id,
+                "pipeline_step_id": pipeline_step_id,
             },
         )
     )

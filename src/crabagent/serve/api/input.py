@@ -16,7 +16,7 @@ router = APIRouter(prefix="/sessions/{session_id}", tags=["input"])
 _pending_inputs: dict[str, asyncio.Future[str]] = {}
 
 
-def request_user_input(
+async def request_user_input(
     event_bus: EventBus,
     session_id: str,
     question: str,
@@ -32,7 +32,7 @@ def request_user_input(
     }
     if options:
         data["options"] = options
-    event_bus.emit_sync(
+    await event_bus.emit(
         AgentEvent(
             type=EventType.USER_INPUT_REQUEST,
             data=data,

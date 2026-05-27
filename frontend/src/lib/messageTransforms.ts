@@ -26,7 +26,10 @@ export function sseEventToMessages(event: SSEEvent, messages: ChatMessage[]): Ch
   }
 
   if (event.type === "text_done") {
-    return updated.map((m) => (m.isStreaming ? { ...m, isStreaming: false } : m));
+    const fullText = (event.data.text as string) || "";
+    return updated.map((m) =>
+      m.isStreaming ? { ...m, content: fullText || m.content, isStreaming: false } : m
+    );
   }
 
   if (event.type === "tool_call") {

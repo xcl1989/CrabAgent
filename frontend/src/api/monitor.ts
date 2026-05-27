@@ -18,6 +18,37 @@ export interface GlobalSSEEvent {
   timestamp: number;
 }
 
+export interface PipelineStartData {
+  total_steps: number;
+  step_ids: string[];
+  step_agents: Record<string, string>;
+  step_tasks: Record<string, string>;
+  pipeline_run_id?: number;
+}
+
+export interface PipelineStepData {
+  step_id: string;
+  agent_name: string;
+  task?: string;
+  result?: string;
+  elapsed?: number;
+}
+
+export interface PipelineEndData {
+  completed: string[];
+  failed: string[];
+  total: number;
+  total_elapsed?: number;
+  success_count?: number;
+  fail_count?: number;
+}
+
+export type PipelineSSEEvent =
+  | { type: "pipeline_start"; data: PipelineStartData; timestamp: number }
+  | { type: "pipeline_step_start"; data: PipelineStepData; timestamp: number }
+  | { type: "pipeline_step_end"; data: PipelineStepData; timestamp: number }
+  | { type: "pipeline_end"; data: PipelineEndData; timestamp: number };
+
 export function connectGlobalSSE(onEvent: (event: GlobalSSEEvent) => void): EventSource {
   const token = localStorage.getItem("crab_token") || "";
   const url = `/api/events/global?token=${encodeURIComponent(token)}`;

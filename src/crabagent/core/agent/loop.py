@@ -140,7 +140,7 @@ async def run_agent(
 
             _llm_elapsed = time.time() - _llm_t0
             if _llm_elapsed > 10:
-                logger.info("litellm call took %.1fs", _llm_elapsed)
+                logger.debug("litellm call took %.1fs", _llm_elapsed)
 
             if tool_calls_list:
                 assistant_msg["tool_calls"] = tool_calls_list

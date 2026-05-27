@@ -89,3 +89,80 @@ export function deleteAgentMemory(key: string): Promise<void> {
 export function getAgentStats(agent_name: string): Promise<AgentTaskStats> {
   return api.get(`/agents/stats?agent_name=${encodeURIComponent(agent_name)}`);
 }
+
+export interface AgentRunSummary {
+  id: number;
+  user_id: number;
+  session_id: string;
+  parent_run_id: number | null;
+  agent_name: string;
+  model: string | null;
+  task_summary: string;
+  status: string;
+  started_at: number;
+  finished_at: number | null;
+  elapsed: number;
+  tokens_used: number;
+  iterations: number;
+  tool_calls_count: number;
+  result_summary: string | null;
+  error: string | null;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export interface ToolCallEntry {
+  name: string;
+  args: unknown;
+  started_at: number;
+  result_summary: string | null;
+  elapsed: number;
+}
+
+export interface AgentRunDetail extends AgentRunSummary {
+  tool_calls: ToolCallEntry[] | null;
+}
+
+export interface GrowthPoint {
+  date: string;
+  total: number;
+  success_count: number;
+  success_rate: number;
+  avg_elapsed: number;
+  avg_tokens: number;
+}
+
+export interface AgentRunsParams {
+  agent_name?: string;
+  status?: string;
+  session_id?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export function listAgentRuns(params?: AgentRunsParams): Promise<AgentRunSummary[]> {
+  const search = new URLSearchParams();
+  if (params?.agent_name) search.set("agent_name", params.agent_name);
+  if (params?.status) search.set("status", params.status);
+  if (params?.session_id) search.set("session_id", params.session_id);
+  if (params?.limit !== undefined) search.set("limit", String(params.limit));
+  if (params?.offset !== undefined) search.set("offset", String(params.offset));
+  const qs = search.toString();
+  return api.get(`/agents/runs${qs ? `?${qs}` : ""}`);
+}
+
+export function getAgentRun(runId: number): Promise<AgentRunDetail> {
+  return api.get(`/agents/runs/${runId}`);
+}
+
+export function getAgentGrowth(agentName: string, days = 30): Promise<GrowthPoint[]> {
+  return api.get(`/agents/${encodeURIComponent(agentName)}/growth?days=${days}`);
+}
+
+export interface PipelineHistoryItem extends AgentRunDetail {
+  steps: AgentRunSummary[];
+}
+
+export function getPipelineHistory(limit = 10): Promise<PipelineHistoryItem[]> {
+  return api.get(`/agents/pipelines/history?limit=${limit}`);
+}

@@ -19,7 +19,7 @@ class ToolConfirmRequest(BaseModel):
     approved: bool
 
 
-def request_confirmation(event_bus, session_id: str, tool_name: str, args: dict) -> asyncio.Future[bool]:
+async def request_confirmation(event_bus, session_id: str, tool_name: str, args: dict) -> asyncio.Future[bool]:
     from crabagent.core.event import AgentEvent, EventType
 
     confirm_id = uuid.uuid4().hex[:12]
@@ -33,7 +33,7 @@ def request_confirmation(event_bus, session_id: str, tool_name: str, args: dict)
     if len(args_summary) > 200:
         args_summary = args_summary[:200] + "..."
 
-    event_bus.emit_sync(
+    await event_bus.emit(
         AgentEvent(
             type=EventType.TOOL_CONFIRM_REQUEST,
             data={

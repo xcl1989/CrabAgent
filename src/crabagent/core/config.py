@@ -49,7 +49,7 @@ class Settings(BaseSettings):
     ]
     bash_block_privilege_escalation: bool = True
     bash_max_output_length: int = 50000
-    bash_block_background: bool = True
+    bash_block_background: bool = False
 
     model_token_limits: dict[str, int] = {}
     context_compression_threshold: float = 0.8

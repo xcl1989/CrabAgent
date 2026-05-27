@@ -94,16 +94,19 @@ async def prompt_async(
 
     if req.images:
         import json as _json
+
         content_blocks = [{"type": "text", "text": req.message}]
         for img in req.images:
             meta = _save_image_temp(img)
-            content_blocks.append({
-                "type": "image_url",
-                "image_url": {"url": img},
-                "file_path": meta["file_path"],
-                "mime": meta["mime"],
-                "size_kb": meta["size_kb"],
-            })
+            content_blocks.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": img},
+                    "file_path": meta["file_path"],
+                    "mime": meta["mime"],
+                    "size_kb": meta["size_kb"],
+                }
+            )
         db_content = _json.dumps(content_blocks)
     else:
         db_content = req.message
@@ -123,6 +126,7 @@ async def prompt_async(
     base_prompt = f"You are CrabAgent, an AI assistant. Today is {datetime.now(UTC).strftime('%Y-%m-%d %A')}. Working directory: {workspace}"
     try:
         from crabagent.core.agent.agents import build_team_prompt
+
         team_prompt = await build_team_prompt()
         if team_prompt:
             base_prompt += "\n\n" + team_prompt
@@ -131,6 +135,7 @@ async def prompt_async(
 
     try:
         from crabagent.core.agent.agents import build_memory_prompt
+
         mem_prompt = await build_memory_prompt(user.id)
         if mem_prompt:
             base_prompt += "\n\n" + mem_prompt
@@ -148,6 +153,7 @@ async def prompt_async(
 
     if req.images:
         from crabagent.core.agent.token_limits import is_vision_model
+
         resolved = req.model or conv.model or ""
         if not is_vision_model(resolved):
             context.system_prompt += (
@@ -164,12 +170,15 @@ async def prompt_async(
         register_skill_tool(context.tool_registry, skills)
 
     from crabagent.core.molt.tools import register_molt_tools
+
     register_molt_tools(context.tool_registry)
 
     from crabagent.core.todo.tools import register_todo_tools
+
     register_todo_tools(context.tool_registry)
 
     from crabagent.core.tool_loader import discover_and_register_tools
+
     discover_and_register_tools(context.tool_registry, workspace)
 
     from crabagent.core.mcp.tools import register_mcp_tools
@@ -191,15 +200,34 @@ async def prompt_async(
     persistence.sequence = user_msg_seq
     context.event_bus.subscribe(persistence.on_event)
 
+    from crabagent.core.agent.run_recorder import RunRecorder
+
+    resolved_model = req.model or conv.model or ""
+    run_recorder = RunRecorder(user_id=user.id, session_id=session_id, model=resolved_model)
+    context.event_bus.subscribe(run_recorder.on_event)
+
     queues = request.app.state.event_queues
 
     _fwd_count = 0
     _fwd_last_log = time.time()
+    _throttle_until: dict[str, float] = {}
+    _THROTTLE_INTERVAL = 0.1
+    _THROTTLED_EVENTS: set[str] = set()
+    _SKIP_GLOBAL_EVENTS: set[str] = set()
+    _last_stale_cleanup = time.time()
 
-    def _sse_forward(event: AgentEvent):
-        nonlocal _fwd_count, _fwd_last_log
+    async def _sse_forward(event: AgentEvent):
+        nonlocal _fwd_count, _fwd_last_log, _last_stale_cleanup
         _fwd_count += 1
         now = time.time()
+
+        if event.type in _THROTTLED_EVENTS:
+            if now < _throttle_until.get(event.type, 0):
+                return
+            _throttle_until[event.type] = now + _THROTTLE_INTERVAL
+
+        forward_to_global = event.type not in _SKIP_GLOBAL_EVENTS
+
         stale = []
         for qid, entry in list(queues.items()):
             if len(entry) == 2:
@@ -207,7 +235,7 @@ async def prompt_async(
                 ts = now
             else:
                 sid, queue, ts = entry
-            if now - ts > 300:
+            if now - ts > 60:
                 stale.append(qid)
                 continue
             if sid == session_id:
@@ -226,26 +254,28 @@ async def prompt_async(
         for qid in stale:
             queues.pop(qid, None)
 
-        global_queues = getattr(request.app.state, "global_event_queues", {})
-        gstale = []
-        for gqid, (gq, gts) in list(global_queues.items()):
-            if now - gts > 120:
-                gstale.append(gqid)
-                continue
-            global_event = AgentEvent(
-                type=event.type,
-                data={
-                    **event.data,
-                    "session_id": event.data.get("sub_agent_id", session_id),
-                },
-                timestamp=event.timestamp,
-            )
-            try:
-                gq.put_nowait(global_event)
-            except asyncio.QueueFull:
-                pass
-        for gqid in gstale:
-            global_queues.pop(gqid, None)
+        if forward_to_global:
+            global_queues = getattr(request.app.state, "global_event_queues", {})
+            gstale = []
+            for gqid, (gq, gts) in list(global_queues.items()):
+                if now - gts > 120:
+                    gstale.append(gqid)
+                    continue
+                global_event = AgentEvent(
+                    type=event.type,
+                    data={
+                        **event.data,
+                        "session_id": event.data.get("sub_agent_id", session_id),
+                    },
+                    timestamp=event.timestamp,
+                )
+                try:
+                    gq.put_nowait(global_event)
+                except asyncio.QueueFull:
+                    pass
+            for gqid in gstale:
+                global_queues.pop(gqid, None)
+
         if now - _fwd_last_log > 5:
             qsizes = [q.qsize() for sid, q, *_ in queues.values() if sid == session_id]
             logger.info(
@@ -258,6 +288,10 @@ async def prompt_async(
             )
             _fwd_count = 0
             _fwd_last_log = now
+
+        if now - _last_stale_cleanup > 30:
+            _last_stale_cleanup = now
+            await asyncio.sleep(0)
 
     context.event_bus.subscribe(_sse_forward)
 
@@ -281,10 +315,12 @@ async def prompt_async(
             data_url = f"data:image/png;base64,{b64}"
         except Exception:
             return
-        await context.event_bus.emit(AgentEvent(
-            type=EventType.SCREENSHOT,
-            data={"image": data_url, "tool": name},
-        ))
+        await context.event_bus.emit(
+            AgentEvent(
+                type=EventType.SCREENSHOT,
+                data={"image": data_url, "tool": name},
+            )
+        )
 
     context.event_bus.subscribe(_on_browser_screenshot)
 
@@ -292,7 +328,7 @@ async def prompt_async(
         from crabagent.serve.api.confirm import request_confirmation
 
         async def _serve_confirm(tool_name: str, args: dict) -> bool:
-            future = request_confirmation(context.event_bus, session_id, tool_name, args)
+            future = await request_confirmation(context.event_bus, session_id, tool_name, args)
             try:
                 return await asyncio.wait_for(future, timeout=120.0)
             except TimeoutError:
@@ -303,7 +339,7 @@ async def prompt_async(
     from crabagent.serve.api.input import request_user_input
 
     async def _serve_ask(question: str, options: list[str] | None = None) -> str:
-        future = request_user_input(context.event_bus, session_id, question, options=options)
+        future = await request_user_input(context.event_bus, session_id, question, options=options)
         try:
             return await asyncio.wait_for(future, timeout=300.0)
         except TimeoutError:
@@ -351,13 +387,15 @@ async def prompt_async(
                 agent_query = [{"type": "text", "text": req.message}]
                 for img in req.images:
                     meta = _save_image_temp(img)
-                    agent_query.append({
-                        "type": "image_url",
-                        "image_url": {"url": img},
-                        "file_path": meta["file_path"],
-                        "mime": meta["mime"],
-                        "size_kb": meta["size_kb"],
-                    })
+                    agent_query.append(
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": img},
+                            "file_path": meta["file_path"],
+                            "mime": meta["mime"],
+                            "size_kb": meta["size_kb"],
+                        }
+                    )
             else:
                 agent_query = req.message
             await run_agent(context, agent_query)

@@ -90,9 +90,7 @@ async def _search_duckduckgo(query: str, limit: int) -> list[dict]:
         return results
 
     try:
-        return await asyncio.wait_for(
-            asyncio.to_thread(_do_search), timeout=20.0
-        )
+        return await asyncio.wait_for(asyncio.to_thread(_do_search), timeout=20.0)
     except TimeoutError:
         logger.info("DuckDuckGo search timed out for query: %s", query[:50])
         return []

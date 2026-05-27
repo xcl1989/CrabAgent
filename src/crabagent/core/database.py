@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import datetime
+import time as _time
 from collections.abc import AsyncGenerator
 
-from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text, text
+from sqlalchemy import JSON, Boolean, DateTime, Float, Integer, String, Text, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -223,6 +224,29 @@ class TaskRecord(Base):
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
 
 
+class AgentRun(Base):
+    __tablename__ = "agent_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    session_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    parent_run_id: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
+    agent_name: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    model: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    task_summary: Mapped[str] = mapped_column(String(200), default="")
+    status: Mapped[str] = mapped_column(String(20), default="running")
+    started_at: Mapped[float] = mapped_column(Float, default=_time.time)
+    finished_at: Mapped[float | None] = mapped_column(Float, nullable=True)
+    elapsed: Mapped[float] = mapped_column(Float, default=0.0)
+    tokens_used: Mapped[int] = mapped_column(Integer, default=0)
+    iterations: Mapped[int] = mapped_column(Integer, default=0)
+    tool_calls: Mapped[str | None] = mapped_column(JSON, nullable=True)
+    result_summary: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    metadata_: Mapped[str | None] = mapped_column("metadata", JSON, nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
+
+
 engine = create_async_engine(settings.db_url, echo=False, connect_args={"check_same_thread": False})
 async_session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
@@ -325,6 +349,15 @@ async def init_db() -> None:
 
     await _ensure_default_admin()
     await _ensure_default_agents()
+
+    try:
+        migrated = await migrate_task_records_to_agent_runs()
+        if migrated > 0:
+            import logging
+
+            logging.getLogger(__name__).info("Migrated %d task_records to agent_runs", migrated)
+    except Exception:
+        pass
 
 
 async def _ensure_default_admin():
@@ -835,3 +868,208 @@ async def task_record_stats(user_id: int, agent_name: str) -> dict:
             "avg_elapsed": round(avg_elapsed, 1),
             "avg_tokens": int(avg_tokens),
         }
+
+
+async def run_record_create(
+    user_id: int,
+    agent_name: str,
+    model: str = "",
+    session_id: str = "",
+    parent_run_id: int | None = None,
+    task_summary: str = "",
+    metadata: dict | None = None,
+) -> int:
+    async with async_session_factory() as db:
+        run = AgentRun(
+            user_id=user_id,
+            agent_name=agent_name,
+            model=model,
+            session_id=session_id,
+            parent_run_id=parent_run_id,
+            task_summary=task_summary[:200],
+            metadata_=metadata,
+            started_at=_time.time(),
+        )
+        db.add(run)
+        await db.commit()
+        await db.refresh(run)
+        return run.id
+
+
+async def run_record_update(run_id: int, **kwargs) -> None:
+    from sqlalchemy import update as sa_update
+
+    async with async_session_factory() as db:
+        await db.execute(sa_update(AgentRun).where(AgentRun.id == run_id).values(**kwargs))
+        await db.commit()
+
+
+async def run_record_finalize(
+    run_id: int,
+    status: str,
+    elapsed: float,
+    tokens_used: int = 0,
+    iterations: int = 0,
+    tool_calls: list[dict] | None = None,
+    result_summary: str = "",
+    error: str = "",
+) -> None:
+    from sqlalchemy import update as sa_update
+
+    async with async_session_factory() as db:
+        values = {
+            "status": status,
+            "elapsed": elapsed,
+            "tokens_used": tokens_used,
+            "iterations": iterations,
+            "finished_at": _time.time(),
+        }
+        if tool_calls:
+            values["tool_calls"] = tool_calls
+        if result_summary:
+            values["result_summary"] = result_summary[:1000]
+        if error:
+            values["error"] = error[:500]
+        stmt = sa_update(AgentRun).where(AgentRun.id == run_id).values(**values)
+        await db.execute(stmt)
+        await db.commit()
+
+
+async def run_record_get(run_id: int) -> dict | None:
+    from sqlalchemy import select
+
+    async with async_session_factory() as db:
+        result = await db.execute(select(AgentRun).where(AgentRun.id == run_id))
+        run = result.scalar_one_or_none()
+        if not run:
+            return None
+        return _run_to_dict(run)
+
+
+async def run_record_list(
+    user_id: int,
+    agent_name: str = "",
+    status: str = "",
+    session_id: str = "",
+    limit: int = 20,
+    offset: int = 0,
+) -> list[dict]:
+    from sqlalchemy import select
+
+    conditions = [AgentRun.user_id == user_id]
+    if agent_name:
+        conditions.append(AgentRun.agent_name == agent_name)
+    if status:
+        conditions.append(AgentRun.status == status)
+    if session_id:
+        conditions.append(AgentRun.session_id == session_id)
+    async with async_session_factory() as db:
+        result = await db.execute(
+            select(AgentRun).where(*conditions).order_by(AgentRun.id.desc()).offset(offset).limit(limit)
+        )
+        return [_run_to_dict(r) for r in result.scalars().all()]
+
+
+async def run_record_growth(
+    user_id: int,
+    agent_name: str,
+    days: int = 30,
+) -> list[dict]:
+    from sqlalchemy import select
+
+    async with async_session_factory() as db:
+        cutoff = _time.time() - days * 86400
+        result = await db.execute(
+            select(AgentRun)
+            .where(
+                AgentRun.user_id == user_id,
+                AgentRun.agent_name == agent_name,
+                AgentRun.started_at >= cutoff,
+            )
+            .order_by(AgentRun.started_at.asc())
+        )
+        rows = result.scalars().all()
+        by_date: dict[str, dict] = {}
+        for row in rows:
+            dt = datetime.datetime.fromtimestamp(row.started_at)
+            date_key = dt.strftime("%Y-%m-%d")
+            if date_key not in by_date:
+                by_date[date_key] = {
+                    "date": date_key,
+                    "total": 0,
+                    "success_count": 0,
+                    "avg_elapsed": 0.0,
+                    "avg_tokens": 0,
+                    "elapsed_sum": 0.0,
+                    "tokens_sum": 0,
+                }
+            entry = by_date[date_key]
+            entry["total"] += 1
+            if row.status == "completed":
+                entry["success_count"] += 1
+            entry["elapsed_sum"] += row.elapsed or 0
+            entry["tokens_sum"] += row.tokens_used or 0
+        growth = []
+        for k, v in by_date.items():
+            total = v["total"]
+            v["success_rate"] = round(v["success_count"] / total * 100, 1) if total else 0
+            v["avg_elapsed"] = round(v["elapsed_sum"] / total, 1) if total else 0
+            v["avg_tokens"] = int(v["tokens_sum"] / total) if total else 0
+            del v["elapsed_sum"]
+            del v["tokens_sum"]
+            growth.append(v)
+        return growth
+
+
+async def migrate_task_records_to_agent_runs() -> int:
+    from sqlalchemy import func, select
+
+    async with async_session_factory() as db:
+        existing = await db.execute(select(func.count()).select_from(AgentRun))
+        if (existing.scalar() or 0) > 0:
+            return 0
+        records_result = await db.execute(select(TaskRecord).order_by(TaskRecord.id))
+        records = records_result.scalars().all()
+        count = 0
+        for r in records:
+            db.add(
+                AgentRun(
+                    user_id=r.user_id,
+                    agent_name=r.agent_name,
+                    task_summary=r.task_summary,
+                    status="completed" if r.success else "failed",
+                    elapsed=r.elapsed,
+                    tokens_used=r.tokens,
+                    iterations=r.iterations,
+                    finished_at=r.created_at.timestamp(),
+                    started_at=r.created_at.timestamp() - (r.elapsed or 0),
+                    created_at=r.created_at,
+                )
+            )
+            count += 1
+        await db.commit()
+        return count
+
+
+def _run_to_dict(run) -> dict:
+    return {
+        "id": run.id,
+        "user_id": run.user_id,
+        "session_id": run.session_id,
+        "parent_run_id": run.parent_run_id,
+        "agent_name": run.agent_name,
+        "model": run.model,
+        "task_summary": run.task_summary,
+        "status": run.status,
+        "started_at": run.started_at,
+        "finished_at": run.finished_at,
+        "elapsed": run.elapsed,
+        "tokens_used": run.tokens_used,
+        "iterations": run.iterations,
+        "tool_calls": run.tool_calls,
+        "tool_calls_count": len(run.tool_calls) if run.tool_calls else 0,
+        "result_summary": run.result_summary,
+        "error": run.error,
+        "metadata": run.metadata_,
+        "created_at": run.created_at.isoformat() if run.created_at else "",
+    }

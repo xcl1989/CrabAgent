@@ -121,7 +121,11 @@ export function useChatState(onEvent?: (event: SSEEvent) => void) {
           setTimeout(async () => {
             const msgs = await sessionsApi.getMessages(sid);
             const dbMsgs = dbMessagesToChat(msgs);
-            setMessages((prev) => (dbMsgs.length > prev.length ? dbMsgs : prev));
+            setMessages((prev) => {
+              const dbTotal = dbMsgs.reduce((s, m) => s + (m.content?.length || 0), 0);
+              const prevTotal = prev.reduce((s, m) => s + (m.content?.length || 0), 0);
+              return dbTotal >= prevTotal ? dbMsgs : prev;
+            });
           }, 800);
         }
       }

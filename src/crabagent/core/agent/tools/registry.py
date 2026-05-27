@@ -132,18 +132,14 @@ class ToolRegistry:
                 kwargs["context"] = context
             _t1 = _t.monotonic()
             if _t1 - _t0 > 0.1:
-                logging.getLogger(__name__).info(
-                    "tool %s: pre-exec took %.1fms", name, (_t1 - _t0) * 1000
-                )
+                logging.getLogger(__name__).info("tool %s: pre-exec took %.1fms", name, (_t1 - _t0) * 1000)
             if inspect.iscoroutinefunction(tool.handler):
                 result = await tool.handler(**kwargs)
             else:
                 result = await asyncio.to_thread(tool.handler, **kwargs)
             _elapsed = _t.monotonic() - _t0
             if _elapsed > 0.5:
-                logging.getLogger(__name__).warning(
-                    "tool %s SLOW %.1fs", name, _elapsed
-                )
+                logging.getLogger(__name__).warning("tool %s SLOW %.1fs", name, _elapsed)
             return str(result)
         except Exception as e:
             return f"Error executing {name}: {e}"

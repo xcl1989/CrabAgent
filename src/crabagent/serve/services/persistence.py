@@ -54,17 +54,19 @@ class PersistenceListener:
         name = msg.get("name")
         reasoning_content = msg.get("reasoning_content")
 
-        self._buffer.append({
-            "conversation_id": self.conversation_id,
-            "sequence": self.sequence,
-            "role": role,
-            "content": content,
-            "tool_calls": tool_calls,
-            "tool_call_id": tool_call_id,
-            "name": name,
-            "reasoning_content": reasoning_content,
-            "branch_id": self.branch_id,
-        })
+        self._buffer.append(
+            {
+                "conversation_id": self.conversation_id,
+                "sequence": self.sequence,
+                "role": role,
+                "content": content,
+                "tool_calls": tool_calls,
+                "tool_call_id": tool_call_id,
+                "name": name,
+                "reasoning_content": reasoning_content,
+                "branch_id": self.branch_id,
+            }
+        )
         self._schedule_flush()
 
     async def finalize(self):

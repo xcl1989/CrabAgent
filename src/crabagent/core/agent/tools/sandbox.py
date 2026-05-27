@@ -44,8 +44,6 @@ _PRIVILEGE_CMDS = (
 )
 
 _BACKGROUND_PATTERNS = (
-    re.compile(r"[^\n]\s+&\s*$"),
-    re.compile(r"\bnohup\b"),
     re.compile(r"\bscreen\b"),
     re.compile(r"\btmux\b"),
     re.compile(r"\bdisown\b"),

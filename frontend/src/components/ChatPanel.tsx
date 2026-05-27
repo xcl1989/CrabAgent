@@ -44,7 +44,11 @@ function getToolSummary(content: string): { name: string; summary: string } {
     const name = data.name || "unknown";
     const args = data.arguments || {};
     const firstKey = Object.keys(args)[0];
-    const summary = firstKey ? String(args[firstKey]).slice(0, 80) : "";
+    let summary = "";
+    if (firstKey) {
+      const val = args[firstKey];
+      summary = typeof val === "string" ? val.slice(0, 80) : JSON.stringify(val).slice(0, 80);
+    }
     return { name, summary };
   } catch {
     return { name: "unknown", summary: content.slice(0, 80) };

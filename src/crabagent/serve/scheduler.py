@@ -180,6 +180,11 @@ class SchedulerService:
         context.event_bus.subscribe(persistence.on_event)
         logger.info("[ST] PersistenceListener subscribed")
 
+        from crabagent.core.agent.run_recorder import RunRecorder
+
+        run_recorder = RunRecorder(user_id=task.user_id, session_id=ctx_conv_id, model=model)
+        context.event_bus.subscribe(run_recorder.on_event)
+
         agent_error = None
         try:
             logger.info("[ST] calling run_agent, prompt=%.100s", task.prompt[:100])

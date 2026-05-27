@@ -13,7 +13,7 @@ from crabagent.core.event import EventBus
 class AgentContext:
     workspace: Path
     messages: list[dict[str, Any]] = field(default_factory=list)
-    event_bus: EventBus = field(default_factory=EventBus)
+    event_bus: EventBus = field(default_factory=lambda: EventBus(name="agent"))
     tool_registry: ToolRegistry = field(default_factory=ToolRegistry)
     iteration: int = 0
     max_iterations: int = 50

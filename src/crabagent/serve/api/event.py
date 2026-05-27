@@ -48,6 +48,7 @@ async def event_stream(
     user = await _verify_sse_token(token, session_id)
     if not user:
         from fastapi import HTTPException
+
         raise HTTPException(status_code=401, detail="Invalid token or unauthorized")
 
     queue: asyncio.Queue[AgentEvent] = asyncio.Queue(maxsize=50)
@@ -146,6 +147,7 @@ async def global_event_stream(
     user = await _verify_global_token(token)
     if not user:
         from fastapi import HTTPException
+
         raise HTTPException(status_code=401, detail="Invalid token or unauthorized")
 
     queue: asyncio.Queue[AgentEvent] = asyncio.Queue(maxsize=500)

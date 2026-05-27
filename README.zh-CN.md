@@ -186,6 +186,13 @@ def run(name: str) -> str:
 | `CRAB_BROWSER_HEADLESS` | `true` | 浏览器无头模式 |
 | `CRAB_WEB_PROXY` | （空） | web_search / web_scrape 的 HTTP 代理 |
 
+**v0.7.1 更新亮点**
+- 📊 **Pipeline 可视化看板** — 实时展示 Pipeline 执行进度：活跃 Pipeline 步骤进度环、Agent 卡片运行计数、成长趋势图表。历史 Pipeline 自动折叠。
+- 🔄 **AgentRun 持久化** — 新增 `agent_runs` 表，完整记录每次 Agent/Pipeline 执行的元数据（工具调用、耗时、Token、迭代数）。提供运行历史和 Agent 成长统计 API。
+- 🐛 **流式输出修复** — `TEXT_DELTA` 和 `THINKING_DELTA` 事件不再被 SSE 转发器节流丢弃。`TEXT_DONE` 处理器使用后端完整文本，确保消息显示完整。
+- 🛠 **工具参数显示修复** — `delegate_parallel` 嵌套对象参数不再显示 `[object Object]`。
+- 📡 **RunRecorder** — EventBus 订阅器，实时为 Pipeline、主代理和子代理执行创建 `agent_runs` 记录。
+
 **v0.7.0 更新亮点**
 - 🧠 **学习品质升级** — LLM 反思改为提取**可执行的具体洞察**（工具技巧、踩坑经验、领域提示），不再有"completed in X steps"之类的废话。新增失败学习 — Agent 也能从错误中成长。
 - 🌐 **Web 代理支持** — `CRAB_WEB_PROXY=http://127.0.0.1:7890` 解决防火墙环境下的搜索问题。

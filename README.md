@@ -187,6 +187,13 @@ def run(name: str) -> str:
 | `CRAB_BROWSER_HEADLESS` | `true` | Browser headless mode |
 | `CRAB_WEB_PROXY` | (empty) | HTTP proxy for web_search & web_scrape |
 
+**v0.7.1 Highlights**
+- 📊 **Pipeline Dashboard** — Real-time pipeline visualization: see active pipelines with step progress, agent cards with running counts, and growth charts. History pipelines auto-collapsed.
+- 🔄 **AgentRun Persistence** — New `agent_runs` table tracks every agent/pipeline execution with full metadata (tool calls, elapsed time, tokens, iterations). API endpoints for run history and per-agent growth stats.
+- 🐛 **Streaming Fix** — `TEXT_DELTA` and `THINKING_DELTA` events are no longer throttled/dropped by SSE forwarder. `TEXT_DONE` handler now uses full text from backend to ensure complete message display.
+- 🛠 **Tool Display Fix** — `delegate_parallel` arguments with nested objects no longer show `[object Object]` in the UI.
+- 📡 **RunRecorder** — EventBus subscriber that creates `agent_runs` records for pipeline, main, and sub-agent executions in real-time.
+
 **v0.7.0 Highlights**
 - 🧠 **Learning quality overhaul** — LLM reflection now extracts **actionable insights** (tool tricks, pitfalls, domain tips), no more "completed in X steps" noise. Failure learning added — agents learn from mistakes too.
 - 🌐 **Web proxy support** — `CRAB_WEB_PROXY=http://127.0.0.1:7890` for web_search/web_scrape (critical for users behind firewalls).
