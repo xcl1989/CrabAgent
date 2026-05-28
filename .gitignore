@@ -25,3 +25,4 @@ frontend/dist/
 .opencode/
 AGENT.md
 ROADMAP.md
+docs/mode_design.md

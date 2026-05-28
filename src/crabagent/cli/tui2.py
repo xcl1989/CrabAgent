@@ -18,6 +18,7 @@ import logging
 import os
 import re
 import subprocess
+import sys
 from collections import deque
 
 from prompt_toolkit.application import Application
@@ -1322,6 +1323,21 @@ class DualPanelTui(TuiSession):
 
 
 async def run_dual_tui(args):
+    # Redirect all logging to a file so it doesn't corrupt the prompt_toolkit TUI display
+    root_logger = logging.getLogger()
+    for handler in list(root_logger.handlers):
+        if isinstance(handler, logging.StreamHandler) and handler.stream in (
+            sys.stdout,
+            sys.stderr,
+        ):
+            root_logger.removeHandler(handler)
+    if not any(isinstance(h, logging.FileHandler) for h in root_logger.handlers):
+        fh = logging.FileHandler("/tmp/crabagent.log", mode="a")
+        fh.setFormatter(
+            logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+        )
+        root_logger.addHandler(fh)
+
     logging.getLogger("LiteLLM").setLevel(logging.WARNING)
     logging.getLogger("primp").setLevel(logging.WARNING)
     logging.getLogger("ddgs.ddgs").setLevel(logging.WARNING)
