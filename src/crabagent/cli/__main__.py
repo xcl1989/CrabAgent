@@ -62,6 +62,7 @@ def main():
     parser.add_argument("--port", type=int, default=settings.serve_port, help="Serve port")
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
     parser.add_argument("--no-persist", action="store_true", help="Disable conversation persistence")
+    parser.add_argument("--old", action="store_true", help="Use legacy single-panel TUI")
 
     args = parser.parse_args()
     subcmd_words = {"init", "provider", "skill", "models"}
@@ -87,9 +88,14 @@ def main():
         return
 
     if not args.query:
-        from crabagent.cli.tui import run_tui
+        if getattr(args, "old", False):
+            from crabagent.cli.tui import run_tui
 
-        asyncio.run(run_tui(args))
+            asyncio.run(run_tui(args))
+        else:
+            from crabagent.cli.tui2 import run_dual_tui
+
+            asyncio.run(run_dual_tui(args))
     else:
         asyncio.run(_run_single(args))
 
@@ -725,10 +731,10 @@ def _print_banner(context, provider: str, model: str):
         from rich.text import Text
 
         console = Console()
-        t = Text("CrabAgent v0.7.1", style="bold")
+        t = Text("CrabAgent v0.7.2", style="bold")
         console.print(t)
     except ImportError:
-        print("CrabAgent v0.7.1")
+        print("CrabAgent v0.7.2")
 
     print(f"  provider: {provider}  model: {model}")
     print(f"  workspace: {context.workspace}")

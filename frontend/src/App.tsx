@@ -4,6 +4,7 @@ import { api } from "./api/client";
 import LoginPage from "./pages/LoginPage";
 import ChatPage from "./pages/ChatPage";
 import DashboardPage from "./pages/DashboardPage";
+import AgentsPage from "./pages/AgentsPage";
 import { NavBar } from "./components/NavBar";
 
 function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
@@ -13,6 +14,7 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
       <Routes>
         <Route path="/chat" element={<ChatPage onLogout={onLogout} />} />
         <Route path="/dashboard" element={<DashboardPage />} />
+        <Route path="/agents" element={<AgentsPage />} />
         <Route path="*" element={<Navigate to="/chat" replace />} />
       </Routes>
     </div>

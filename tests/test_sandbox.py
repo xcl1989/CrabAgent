@@ -1,5 +1,4 @@
-import pytest
-from crabagent.core.agent.tools.sandbox import validate_command, truncate_output
+from crabagent.core.agent.tools.sandbox import truncate_output, validate_command
 
 
 class TestSandbox:

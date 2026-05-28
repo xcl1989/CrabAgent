@@ -1,4 +1,4 @@
-from crabagent.core.agent.token_limits import get_model_token_limit, DEFAULT_MODEL_TOKEN_LIMITS
+from crabagent.core.agent.token_limits import DEFAULT_MODEL_TOKEN_LIMITS, get_model_token_limit
 
 
 class TestTokenLimits:

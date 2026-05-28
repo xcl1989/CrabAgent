@@ -23,24 +23,9 @@ from crabagent.core.event import AgentEvent, EventType
 
 PROMPT_STYLE = Style.from_dict({"toolbar": "bg:#161b22 #8b949e"})
 SLASH_COMMANDS = [
-    "/exit",
-    "/quit",
-    "/help",
-    "/clear",
-    "/history",
-    "/model",
-    "/models",
-    "/provider",
-    "/agents",
-    "/agent_stats",
-    "/delegate",
-    "/memory",
-    "/new",
-    "/sessions",
-    "/session",
-    "/skills",
-    "/skill",
-    "/export",
+    "/exit", "/quit", "/help", "/clear", "/history", "/model", "/models",
+    "/provider", "/agents", "/agent_stats", "/delegate", "/memory", "/new",
+    "/sessions", "/session", "/skills", "/skill", "/export", "/abort",
 ]
 
 
@@ -62,8 +47,16 @@ class TuiSession:
         self._session_id_str = None
         self._user = None
         self._state = {}
+        self._agent_running = False
+        self._pending_inputs: list[str] = []
+        self._stdin_queue = None
+        self._raw_input_active = False
 
     async def run(self):
+        import queue as thread_queue
+        import sys as _sys
+        import threading as _threading
+
         await self._initialize()
         if not self.agent_ctx:
             return
@@ -71,17 +64,61 @@ class TuiSession:
         self.agent_ctx.event_bus.subscribe(self._on_agent_event)
         completer = await self._build_completer()
         session = PromptSession(history=InMemoryHistory(), completer=completer, style=PROMPT_STYLE)
+        self._stdin_queue = thread_queue.Queue(maxsize=10)
+
+        # Persistent raw stdin reader — only active when _raw_input_active is True
+        def _read_stdin():
+            import time as _t
+            buf = ""
+            while True:
+                if not self._raw_input_active:
+                    _t.sleep(0.1)
+                    buf = ""
+                    continue
+                try:
+                    ch = _sys.stdin.read(1)
+                    if not ch:
+                        break
+                    if not self._raw_input_active:
+                        buf = ""
+                        continue
+                    if ch in ("\n", "\r"):
+                        if buf.strip():
+                            try:
+                                self._stdin_queue.put_nowait(buf)
+                            except thread_queue.Full:
+                                pass
+                        buf = ""
+                    elif ch == "\x03":
+                        try:
+                            self._stdin_queue.put_nowait("/abort")
+                        except thread_queue.Full:
+                            pass
+                        buf = ""
+                    elif ch and 32 <= ord(ch) <= 126:
+                        buf += ch
+                except Exception:
+                    break
+        _stdin_thread = _threading.Thread(target=_read_stdin, daemon=True)
+        _stdin_thread.start()
+
         while True:
-            status = self._make_status_bar()
-            try:
-                ui = await asyncio.get_event_loop().run_in_executor(
-                    None, lambda: session.prompt([("class:toolbar", status), ("", "\n> ")], multiline=False)
-                )
-            except (EOFError, KeyboardInterrupt):
-                await self._cleanup()
-                self.console.print("\n[dim]Bye![/dim]")
-                break
-            ui = ui.strip()
+            if self._pending_inputs:
+                ui = self._pending_inputs.pop(0)
+                if self._pending_inputs:
+                    self.console.print(f"[dim]Processing queued ({len(self._pending_inputs)} remaining)...[/dim]")
+            else:
+                status = self._make_status_bar()
+                try:
+                    ui = await asyncio.get_event_loop().run_in_executor(
+                        None, lambda: session.prompt([("class:toolbar", status), ("", "\n> ")], multiline=False)
+                    )
+                except (EOFError, KeyboardInterrupt):
+                    await self._cleanup()
+                    self.console.print("\n[dim]Bye![/dim]")
+                    break
+                ui = ui.strip()
+
             if not ui:
                 continue
             if ui.startswith("/"):
@@ -92,40 +129,25 @@ class TuiSession:
                     await self._cleanup()
                     break
                 continue
+
             mentions, clean_text = self._parse_agent_mentions(ui)
             if mentions:
                 await self._handle_mention_delegation(mentions, clean_text)
                 continue
-            await self._ensure_conversation()
-            if self._conversation_id and not getattr(self.args, "no_persist", False):
-                await self._persist_user_message(ui)
-            self.console.print()
-            self._stream = ""
-            self._thinking_active = False
-            self._rendered_up_to = 0
-            self._in_code_block = False
-            self._sub_agent_tasks = {}
-            try:
-                self.agent_ctx.iteration = 0
-                await run_agent(self.agent_ctx, ui)
-            except KeyboardInterrupt:
-                self._stop_live()
-                self._stop_tool_live()
-                self.console.print("\n[dim][interrupted][/dim]")
-                continue
-            except Exception as e:
-                self._stop_live()
-                self._stop_tool_live()
-                self.console.print(f"\n[red]Error: {e}[/red]")
-                continue
-            self._stop_live()
-            self._stop_tool_live()
-            if self._conversation_id:
-                from crabagent.core.database import async_session_factory
-                from crabagent.serve.services.conversation import update_conversation
 
-                async with async_session_factory() as db:
-                    await update_conversation(db, self._session_id_str, tokens=self.agent_ctx.total_tokens)
+            await self._execute_agent(clean_text or ui)
+
+            # Process any queued input accumulated during execution
+            while self._pending_inputs:
+                next_ui = self._pending_inputs.pop(0)
+                self.console.print(f"\n[dim]Processing queued ({len(self._pending_inputs)} remaining)...[/dim]")
+                mentions, clean_text = self._parse_agent_mentions(next_ui)
+                if mentions:
+                    await self._handle_mention_delegation(mentions, clean_text)
+                else:
+                    await self._execute_agent(clean_text or next_ui)
+
+            self.console.print()
 
     def _make_status_bar(self) -> str:
         if not self.agent_ctx:
@@ -194,6 +216,74 @@ class TuiSession:
 
     def _stop_tool_live(self):
         self._tool_buffer.clear()
+
+    def _drain_stdin_queue(self):
+        import queue as thread_queue
+        try:
+            while True:
+                self._stdin_queue.get_nowait()
+        except thread_queue.Empty:
+            pass
+
+    async def _execute_agent(self, ui: str):
+        """Run agent with raw input collection for queuing."""
+        import queue as thread_queue
+
+        await self._ensure_conversation()
+        if self._conversation_id and not getattr(self.args, "no_persist", False):
+            await self._persist_user_message(ui)
+        self.console.print()
+        self._stream = ""
+        self._thinking_active = False
+        self._rendered_up_to = 0
+        self._in_code_block = False
+        self._sub_agent_tasks = {}
+
+        self._agent_running = True
+        self._raw_input_active = True
+        await asyncio.sleep(0.05)  # let prompt_toolkit finish releasing stdin
+        # Drain any stale characters from the queue
+        self._drain_stdin_queue()
+
+        try:
+            self.agent_ctx.iteration = 0
+            agent_task = asyncio.create_task(run_agent(self.agent_ctx, ui))
+
+            while not agent_task.done():
+                try:
+                    item = self._stdin_queue.get_nowait()
+                    if item in ("/abort", "/exit", "/quit"):
+                        agent_task.cancel()
+                        self.console.print("\n[dim][aborted by user][/dim]")
+                        break
+                    if len(self._pending_inputs) >= 5:
+                        self.console.print("[dim]Queue full — wait for agent to finish[/dim]")
+                    else:
+                        self._pending_inputs.append(item)
+                        self.console.print(f"[dim]Queued ({len(self._pending_inputs)}/5): {item[:60]}...[/dim]")
+                except thread_queue.Empty:
+                    await asyncio.sleep(0.3)
+
+            if agent_task.done() and not agent_task.cancelled():
+                await agent_task
+
+        except KeyboardInterrupt:
+            self.console.print("\n[dim][interrupted][/dim]")
+        except Exception as e:
+            self.console.print(f"\n[red]Error: {e}[/red]")
+        finally:
+            self._agent_running = False
+            self._raw_input_active = False
+            self._drain_stdin_queue()
+            self._stop_live()
+            self._stop_tool_live()
+
+        if self._conversation_id:
+            from crabagent.core.database import async_session_factory
+            from crabagent.serve.services.conversation import update_conversation
+
+            async with async_session_factory() as db:
+                await update_conversation(db, self._session_id_str, tokens=self.agent_ctx.total_tokens)
 
     def _render_sub_live(self):
         running = {k: v for k, v in self._sub_agent_tasks.items() if v.get("status") == "running"}
@@ -350,7 +440,7 @@ class TuiSession:
 
     def _print_banner(self):
         self.console.print(
-            f"[bold]CrabAgent v0.7.1[/bold]\n"
+            f"[bold]CrabAgent v0.7.2[/bold]\n"
             f"  provider: {self._provider_display}  "
             f"model: {self.agent_ctx.model or 'default'}\n"
             f"  workspace: {self.agent_ctx.workspace}\n"
@@ -362,6 +452,16 @@ class TuiSession:
         arg = p[1].strip() if len(p) > 1 else ""
         if cmd in ("/exit", "/quit"):
             return True
+        if cmd == "/abort":
+            if self._agent_running:
+                self.console.print("[dim]Aborting current agent...[/dim]")
+                try:
+                    self._stdin_queue.put_nowait("/abort")
+                except Exception:
+                    pass
+            else:
+                self.console.print("[dim]No agent running.[/dim]")
+            return False
         if cmd == "/help":
             self.console.print(
                 "/exit /quit  Exit\n/help  Help\n/clear  Clear\n"
@@ -372,6 +472,7 @@ class TuiSession:
                 "/agent_stats <name>  Agent stats\n"
                 "/memory [list|search|clear]  Team memory\n"
                 "/skills  List skills\n/skill <name>  Show skill\n"
+                "/abort  Abort running agent\n"
             )
         elif cmd == "/clear":
             if self.agent_ctx:

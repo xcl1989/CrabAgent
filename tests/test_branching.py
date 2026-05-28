@@ -1,8 +1,8 @@
 import pytest
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from crabagent.core.database import Base, Message, Conversation
+from crabagent.core.database import Base, Conversation, Message
 
 
 @pytest.fixture

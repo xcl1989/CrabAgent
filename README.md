@@ -31,6 +31,9 @@ crabagent init
 # TUI — interactive REPL with slash commands
 crabagent
 
+# TUI (legacy single-panel)
+crabagent --old
+
 # Web UI
 crabagent --serve          # → http://localhost:5210
                            # Default login: admin / xcl1989
@@ -171,6 +174,8 @@ def run(name: str) -> str:
 | `/todo [cmd]` | Task list |
 | `/export` | Export to Markdown |
 | `/image <path> [msg]` | Send image |
+| `/runs [agent]` | View agent run history |
+| `/abort` | Abort current agent (Ctrl+C) |
 
 ---
 
@@ -186,6 +191,13 @@ def run(name: str) -> str:
 | `CRAB_MAX_TOKENS` | `4096` | Max response tokens |
 | `CRAB_BROWSER_HEADLESS` | `true` | Browser headless mode |
 | `CRAB_WEB_PROXY` | (empty) | HTTP proxy for web_search & web_scrape |
+
+**v0.7.2 Highlights**
+- 🖥️ **Dual-Panel TUI** — New prompt_toolkit-based full-screen TUI: scrollable output panel (mouse wheel + PageUp/Down/Home/End), persistent input area that auto-grows with content, and real-time status bar. Default mode (`crabagent`), use `--old` for legacy TUI.
+- 🖱️ **Mouse Text Selection** — Hold Shift + mouse drag to select text in the output area. Ctrl+C copies to clipboard (macOS pbcopy / Linux xclip).
+- 💬 **Interactive Popup Menus** — `/model`, `/sessions`, `/provider` now show scrolling selection popups with arrow key navigation, instead of printing long lists.
+- 🧠 **Streaming Thinking** — Agent reasoning (`THINKING_DELTA`) streams in real-time to the output panel, dim italic style.
+- 💡 **Completions Menu** — Slash command autocomplete appears as a floating completions menu above the input area.
 
 **v0.7.1 Highlights**
 - 📊 **Pipeline Dashboard** — Real-time pipeline visualization: see active pipelines with step progress, agent cards with running counts, and growth charts. History pipelines auto-collapsed.

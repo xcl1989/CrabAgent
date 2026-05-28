@@ -28,8 +28,11 @@ pip install 'crabagent[serve]'
 
 crabagent init
 
-# TUI — 交互式终端模式（支持斜杠命令）
+# TUI — 双面板交互模式（支持斜杠命令）
 crabagent
+
+# TUI (旧版单面板)
+crabagent --old
 
 # Web UI
 crabagent --serve          # → http://localhost:5210
@@ -170,6 +173,8 @@ def run(name: str) -> str:
 | `/todo [cmd]` | 待办管理 |
 | `/export` | 导出 Markdown |
 | `/image <path> [msg]` | 发送图片 |
+| `/runs [agent]` | 查看运行记录 |
+| `/abort` | 中断执行 |
 
 ---
 
@@ -185,6 +190,13 @@ def run(name: str) -> str:
 | `CRAB_MAX_TOKENS` | `4096` | 最大响应 Token 数 |
 | `CRAB_BROWSER_HEADLESS` | `true` | 浏览器无头模式 |
 | `CRAB_WEB_PROXY` | （空） | web_search / web_scrape 的 HTTP 代理 |
+
+**v0.7.2 更新亮点**
+- 🖥️ **双面板 TUI** — 全新基于 prompt_toolkit 的全屏 TUI：可滚动输出区域（鼠标滚轮 + PageUp/Down/Home/End）、自适应高度的输入框、实时状态栏。默认模式（`crabagent`），`--old` 回退旧版。
+- 🖱️ **鼠标文本选择** — 按住 Shift + 鼠标拖动选中输出区域的文本，Ctrl+C 复制（macOS pbcopy / Linux xclip）。
+- 💬 **交互式浮窗菜单** — `/model`、`/sessions`、`/provider` 改为方向键导航的滚动选择弹窗，不再打印长列表。
+- 🧠 **流式 Thinking** — Agent 推理过程 (`THINKING_DELTA`) 实时流式输出到面板，灰色斜体样式。
+- 💡 **补全菜单** — 斜杠命令自动补全以浮窗形式显示在输入框上方。
 
 **v0.7.1 更新亮点**
 - 📊 **Pipeline 可视化看板** — 实时展示 Pipeline 执行进度：活跃 Pipeline 步骤进度环、Agent 卡片运行计数、成长趋势图表。历史 Pipeline 自动折叠。
