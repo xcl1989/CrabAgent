@@ -23,9 +23,25 @@ from crabagent.core.event import AgentEvent, EventType
 
 PROMPT_STYLE = Style.from_dict({"toolbar": "bg:#161b22 #8b949e"})
 SLASH_COMMANDS = [
-    "/exit", "/quit", "/help", "/clear", "/history", "/model", "/models",
-    "/provider", "/agents", "/agent_stats", "/delegate", "/memory", "/new",
-    "/sessions", "/session", "/skills", "/skill", "/export", "/abort",
+    "/exit",
+    "/quit",
+    "/help",
+    "/clear",
+    "/history",
+    "/model",
+    "/models",
+    "/provider",
+    "/agents",
+    "/agent_stats",
+    "/delegate",
+    "/memory",
+    "/new",
+    "/sessions",
+    "/session",
+    "/skills",
+    "/skill",
+    "/export",
+    "/abort",
 ]
 
 
@@ -69,6 +85,7 @@ class TuiSession:
         # Persistent raw stdin reader — only active when _raw_input_active is True
         def _read_stdin():
             import time as _t
+
             buf = ""
             while True:
                 if not self._raw_input_active:
@@ -99,6 +116,7 @@ class TuiSession:
                         buf += ch
                 except Exception:
                     break
+
         _stdin_thread = _threading.Thread(target=_read_stdin, daemon=True)
         _stdin_thread.start()
 
@@ -219,6 +237,7 @@ class TuiSession:
 
     def _drain_stdin_queue(self):
         import queue as thread_queue
+
         try:
             while True:
                 self._stdin_queue.get_nowait()
@@ -284,6 +303,12 @@ class TuiSession:
 
             async with async_session_factory() as db:
                 await update_conversation(db, self._session_id_str, tokens=self.agent_ctx.total_tokens)
+
+        from crabagent.serve.services.persistence import PersistenceListener
+
+        for cb in self.agent_ctx.event_bus._listeners:
+            if hasattr(cb, "__self__") and isinstance(cb.__self__, PersistenceListener):
+                await cb.__self__.finalize()
 
     def _render_sub_live(self):
         running = {k: v for k, v in self._sub_agent_tasks.items() if v.get("status") == "running"}
@@ -440,7 +465,7 @@ class TuiSession:
 
     def _print_banner(self):
         self.console.print(
-            f"[bold]CrabAgent v0.7.2[/bold]\n"
+            f"[bold]CrabAgent v0.7.3[/bold]\n"
             f"  provider: {self._provider_display}  "
             f"model: {self.agent_ctx.model or 'default'}\n"
             f"  workspace: {self.agent_ctx.workspace}\n"
@@ -1102,7 +1127,7 @@ class TuiSession:
             self.agent_ctx.total_tokens = 0
             self.agent_ctx.metadata["session_id"] = cv.session_id
             self.agent_ctx.metadata["branch_id"] = "main"
-            self._replace_persistence_listener()
+            await self._replace_persistence_listener()
         self.console.clear()
         self._print_banner()
         self.console.print(f"[dim]New session: {cv.session_id[:8]}[/dim]")
@@ -1178,7 +1203,7 @@ class TuiSession:
             self.agent_ctx.metadata["branch_id"] = "main"
             if cv.model:
                 self.agent_ctx.model = cv.model
-            self._replace_persistence_listener()
+            await self._replace_persistence_listener()
         self.console.clear()
         self._print_banner()
         if hist:
@@ -1217,9 +1242,9 @@ class TuiSession:
         if self.agent_ctx:
             self.agent_ctx.metadata["session_id"] = cv.session_id
             self.agent_ctx.metadata["branch_id"] = "main"
-            self._replace_persistence_listener()
+            await self._replace_persistence_listener()
 
-    def _replace_persistence_listener(self):
+    async def _replace_persistence_listener(self):
         if not self.agent_ctx or not self._conversation_id:
             return
         from crabagent.serve.services.persistence import PersistenceListener
@@ -1232,6 +1257,7 @@ class TuiSession:
             if hasattr(cb, "__self__") and isinstance(cb.__self__, PersistenceListener)
         ]
         for old in old_listeners:
+            await old.__self__.finalize()
             self.agent_ctx.event_bus.unsubscribe(old)
         self.agent_ctx.event_bus.subscribe(new_p.on_event)
 
@@ -1323,7 +1349,7 @@ class TuiSession:
     async def _setup_ctx(self, cid, hist, ms, sid):
         for m in ["bash", "edit", "glob", "grep", "read", "web", "write"]:
             __import__(f"crabagent.core.agent.tools.{m}")
-        for m in ["browser", "scheduled_task", "agent"]:
+        for m in ["browser", "scheduled_task", "agent", "custom_tool"]:
             try:
                 __import__(f"crabagent.core.agent.tools.{m}")
             except Exception:

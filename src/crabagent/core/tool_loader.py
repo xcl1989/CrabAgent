@@ -77,6 +77,7 @@ def _make_tool_handler(run_fn):
     if is_async:
 
         async def handler(**kwargs: Any) -> str:
+            kwargs.pop("context", None)
             try:
                 result = run_fn(**kwargs)
                 if inspect.isawaitable(result):
@@ -87,6 +88,7 @@ def _make_tool_handler(run_fn):
     else:
 
         def handler(**kwargs: Any) -> str:
+            kwargs.pop("context", None)
             try:
                 return str(run_fn(**kwargs))
             except Exception as e:

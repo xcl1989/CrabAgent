@@ -313,7 +313,7 @@ class DualPanelTui(TuiSession):
 
         self.agent_ctx.event_bus.subscribe(self._on_agent_event)
 
-        self._append_md(f"**CrabAgent v0.7.2**\n\n  workspace: `{self.agent_ctx.workspace}`\n")
+        self._append_md(f"**CrabAgent v0.7.3**\n\n  workspace: `{self.agent_ctx.workspace}`\n")
 
         app = self._build_application()
         self._app = app
@@ -784,6 +784,8 @@ class DualPanelTui(TuiSession):
                 results = await loop.run_in_executor(None, self._render_batch_sync, items)
                 for action in results:
                     action()
+                for _ in items:
+                    self._render_queue.task_done()
                 self._cache_dirty = True
                 self._sel_dirty = True
                 if self._app:
@@ -960,6 +962,14 @@ class DualPanelTui(TuiSession):
 
             async with async_session_factory() as db:
                 await update_conversation(db, self._session_id_str, tokens=self.agent_ctx.total_tokens)
+
+        from crabagent.serve.services.persistence import PersistenceListener
+
+        for cb in self.agent_ctx.event_bus._listeners:
+            if hasattr(cb, "__self__") and isinstance(cb.__self__, PersistenceListener):
+                await cb.__self__.finalize()
+
+        await self._render_queue.join()
 
         while self._pending_inputs:
             next_ui = self._pending_inputs.pop(0)
@@ -1165,7 +1175,7 @@ class DualPanelTui(TuiSession):
             self.agent_ctx.total_tokens = 0
             self.agent_ctx.metadata["session_id"] = cv.session_id
             self.agent_ctx.metadata["branch_id"] = "main"
-            self._replace_persistence_listener()
+            await self._replace_persistence_listener()
         self._append_dim(f"New session: {cv.session_id[:8]}")
 
     async def _handle_slash(self, ui: str) -> bool:
@@ -1195,7 +1205,7 @@ class DualPanelTui(TuiSession):
             if self.agent_ctx:
                 self.agent_ctx.messages.clear()
             self._reset_output()
-            self._append_md("**CrabAgent v0.7.2**\n")
+            self._append_md("**CrabAgent v0.7.3**\n")
         elif cmd == "/history":
             if self.agent_ctx:
                 self._append_md(
@@ -1271,7 +1281,7 @@ class DualPanelTui(TuiSession):
         elif cmd == "/new":
             await self._handle_new_session()
             self._reset_output()
-            self._append_md("**CrabAgent v0.7.2**\n")
+            self._append_md("**CrabAgent v0.7.3**\n")
         elif cmd == "/sessions":
             await self._handle_sessions_popup()
         elif cmd == "/session":
@@ -1501,7 +1511,7 @@ class DualPanelTui(TuiSession):
             self.agent_ctx.metadata["branch_id"] = "main"
             if cv.model:
                 self.agent_ctx.model = cv.model
-            self._replace_persistence_listener()
+            await self._replace_persistence_listener()
         self._reset_output()
         self._append_dim(f"Loaded session {cv.session_id[:8]} ({len(hist)} messages)")
         self._invalidate()
