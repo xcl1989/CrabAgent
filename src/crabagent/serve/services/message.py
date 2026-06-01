@@ -49,7 +49,7 @@ async def get_messages(
     stmt = select(Message).where(Message.conversation_id == conversation_id)
     if branch_id is not None:
         stmt = stmt.where(Message.branch_id == branch_id)
-    stmt = stmt.order_by(Message.sequence.asc(), Message.id.asc())
+    stmt = stmt.order_by(Message.id.asc())
     if offset:
         stmt = stmt.offset(offset)
     if limit:

@@ -240,6 +240,9 @@ class DualPanelTui(TuiSession):
         self._render_worker_task: asyncio.Task | None = None
         self._flush_task: asyncio.Task | None = None
 
+        self._copy_msg = ""
+        self._copy_msg_until = 0.0
+
         self._selection_popup = _SelectionPopup()
 
     def _r2a(self, *rich_objects, **kwargs) -> str:
@@ -520,7 +523,7 @@ class DualPanelTui(TuiSession):
             self._cache_dirty = True
 
         if self._cache_dirty:
-            if self._cached_seg_count == 0:
+            if self._cached_seg_count == 0 or self._cached_seg_count == current_len:
                 self._cached_fragments = []
                 self._cached_line_count = 1
                 for idx, ansi_text in enumerate(self._ansi_segments):
@@ -696,6 +699,8 @@ class DualPanelTui(TuiSession):
         selected = "".join(parts)
         if not selected.strip():
             return
+        n_lines = selected.count("\n") + 1
+        copied = False
         try:
             proc = await asyncio.create_subprocess_exec(
                 "pbcopy",
@@ -704,6 +709,7 @@ class DualPanelTui(TuiSession):
                 stderr=asyncio.subprocess.DEVNULL,
             )
             await proc.communicate(selected.encode())
+            copied = True
         except Exception:
             try:
                 proc = await asyncio.create_subprocess_exec(
@@ -715,8 +721,14 @@ class DualPanelTui(TuiSession):
                     stderr=asyncio.subprocess.DEVNULL,
                 )
                 await proc.communicate(selected.encode())
+                copied = True
             except Exception:
                 pass
+        if copied:
+            self._copy_msg = f"Copied ({n_lines} lines)"
+            self._copy_msg_until = time.monotonic() + 2.0
+            if self._app:
+                self._app.invalidate()
 
     def _get_status_ft(self) -> FormattedText:
         if not self.agent_ctx:
@@ -737,6 +749,10 @@ class DualPanelTui(TuiSession):
             parts.append(("class:status-bar", "  idle"))
         if self._pending_inputs:
             parts.append(("class:status-queue", f"  Queue:{len(self._pending_inputs)}"))
+        if self._copy_msg and time.monotonic() < self._copy_msg_until:
+            parts.append(("class:status-running", f"  {self._copy_msg}"))
+        else:
+            self._copy_msg = ""
         return FormattedText(parts)
 
     async def _render_worker(self):
@@ -804,7 +820,7 @@ class DualPanelTui(TuiSession):
                     seg_idx = item[2]
                     full_text = "".join(chunks)
                     if full_text:
-                        ansi = _r2a_static(console, Text(full_text, style="dim italic"))
+                        ansi = _r2a_static(console, Text("Thinking: " + full_text, style="dim italic"))
                         if ansi and seg_idx is not None and seg_idx < len(self._ansi_segments):
                             results.append(lambda a=ansi, si=seg_idx: self._ansi_segments.__setitem__(si, a))
 
@@ -960,8 +976,8 @@ class DualPanelTui(TuiSession):
             if not self._thinking_active:
                 self._thinking_active = True
                 self._thinking_chunks = []
-                self._thinking_seg_idx = len(self._ansi_segments)
                 self._append_rich(Text("Thinking: ", style="dim italic"))
+                self._thinking_seg_idx = len(self._ansi_segments) - 1
             self._thinking_chunks.append(chunk)
 
         elif event.type == EventType.THINKING_DONE:
@@ -970,7 +986,9 @@ class DualPanelTui(TuiSession):
                 full_text = "".join(self._thinking_chunks)
                 if full_text.strip():
                     if self._thinking_seg_idx is not None:
-                        await self._render_queue.put(("thinking_flush", self._thinking_chunks, self._thinking_seg_idx))
+                        await self._render_queue.put(
+                            ("thinking_flush", list(self._thinking_chunks), self._thinking_seg_idx)
+                        )
                     self._append_ansi("")
                 else:
                     if self._thinking_seg_idx is not None:
@@ -985,7 +1003,9 @@ class DualPanelTui(TuiSession):
                 full_text = "".join(self._thinking_chunks)
                 if full_text.strip():
                     if self._thinking_seg_idx is not None:
-                        await self._render_queue.put(("thinking_flush", self._thinking_chunks, self._thinking_seg_idx))
+                        await self._render_queue.put(
+                            ("thinking_flush", list(self._thinking_chunks), self._thinking_seg_idx)
+                        )
                     self._append_ansi("")
                 else:
                     if self._thinking_seg_idx is not None:
