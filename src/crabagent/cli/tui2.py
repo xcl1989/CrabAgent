@@ -17,8 +17,8 @@ import asyncio
 import logging
 import os
 import re
-import subprocess
 import sys
+import time
 from collections import deque
 
 from prompt_toolkit.application import Application
@@ -42,8 +42,7 @@ from crabagent.cli.tui import SLASH_COMMANDS, TuiSession
 from crabagent.core.agent.loop import run_agent
 from crabagent.core.event import AgentEvent, EventType
 
-_MAX_SEGMENTS = 5000
-
+_MAX_SEGMENTS = 2000
 
 _PT_STYLE = PtStyle.from_dict(
     {
@@ -166,6 +165,18 @@ def _fix_dim_to_gray(ansi: str) -> str:
     return _DIM_RE.sub(_replace, ansi)
 
 
+def _r2a_static(console: Console, *rich_objects, **kwargs) -> str:
+    with console.capture() as cap:
+        console.print(*rich_objects, **kwargs)
+    return _fix_dim_to_gray(cap.get().rstrip("\n"))
+
+
+def _md2a_static(console: Console, text: str) -> str:
+    if not text.strip():
+        return ""
+    return _r2a_static(console, Markdown(text))
+
+
 class _CapturingConsole(Console):
     """Console that captures print output to the dual-panel TUI output buffer."""
 
@@ -182,6 +193,9 @@ class _CapturingConsole(Console):
             self._tui._cache_dirty = True
 
 
+_MOUSE_THROTTLE_SEC = 1 / 60
+
+
 class DualPanelTui(TuiSession):
     def __init__(self, args):
         super().__init__(args)
@@ -192,10 +206,9 @@ class DualPanelTui(TuiSession):
             complete_while_typing=True,
         )
         self._ansi_segments: deque[str] = deque(maxlen=_MAX_SEGMENTS)
-        self._rendered_cache: FormattedText = FormattedText([("", "")])
         self._cache_dirty = True
         self._agent_task: asyncio.Task | None = None
-        self._thinking_buf = ""
+        self._thinking_chunks: list[str] = []
         self._thinking_active = False
         self._thinking_seg_idx: int | None = None
         tw = max(80, os.get_terminal_size().columns - 2) if os.isatty(1) else 80
@@ -205,24 +218,43 @@ class DualPanelTui(TuiSession):
         self._scroll_y = 0
         self._output_line_count = 0
         self._output_window: Window | None = None
+
         self._sel_frag_start: int | None = None
         self._sel_frag_end: int | None = None
         self._sel_dragging = False
+        self._sel_dirty = True
+        self._last_mouse_time: float = 0.0
+
         self._output_plain_text = ""
         self._split_plain: list[str] = []
+
+        self._cached_width = tw
+        self._cached_seg_count = 0
+        self._cached_fragments: list[tuple[str, str]] = []
+        self._cached_merged: list[tuple[str, str]] = []
+        self._cached_handlers: list = []
+        self._cached_line_count = 0
+        self._rendered_cache: FormattedText = FormattedText([("", "")])
+
+        self._render_queue: asyncio.Queue = asyncio.Queue()
+        self._render_worker_task: asyncio.Task | None = None
+        self._flush_task: asyncio.Task | None = None
 
         self._selection_popup = _SelectionPopup()
 
     def _r2a(self, *rich_objects, **kwargs) -> str:
-        with self._render_console.capture() as cap:
-            self._render_console.print(*rich_objects, **kwargs)
-        return _fix_dim_to_gray(cap.get().rstrip("\n"))
+        return _r2a_static(self._render_console, *rich_objects, **kwargs)
+
+    async def _r2a_async(self, *rich_objects, **kwargs) -> str:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, _r2a_static, self._render_console, *rich_objects, **kwargs)
 
     def _md2a(self, text: str) -> str:
-        """Render Markdown text to ANSI string."""
-        if not text.strip():
-            return ""
-        return self._r2a(Markdown(text))
+        return _md2a_static(self._render_console, text)
+
+    async def _md2a_async(self, text: str) -> str:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, _md2a_static, self._render_console, text)
 
     def _append_ansi(self, ansi: str):
         if ansi:
@@ -241,8 +273,12 @@ class DualPanelTui(TuiSession):
             self._ansi_segments.append(ansi)
             self._cache_dirty = True
 
+    def _append_dim(self, text: str):
+        self._append_rich(Text(text, style="dim"))
+
     def _invalidate(self):
         self._cache_dirty = True
+        self._sel_dirty = True
         if self._app:
             self._app.invalidate()
 
@@ -279,17 +315,25 @@ class DualPanelTui(TuiSession):
         app = self._build_application()
         self._app = app
         self._selection_popup._app = app
+
+        self._render_worker_task = asyncio.create_task(self._render_worker())
+        self._flush_task = asyncio.create_task(self._periodic_stream_flush())
         try:
             await app.run_async()
         except KeyboardInterrupt:
             pass
         finally:
+            if self._render_worker_task:
+                self._render_worker_task.cancel()
+            if self._flush_task:
+                self._flush_task.cancel()
             await self._cleanup()
 
     def _build_application(self) -> Application:
         kb = KeyBindings()
         buf = self._input_buffer
         popup = self._selection_popup
+        tui = self
 
         @kb.add("up")
         def _on_popup_up(event):
@@ -320,14 +364,14 @@ class DualPanelTui(TuiSession):
             if text == "/abort":
                 if self._agent_running and self._agent_task and not self._agent_task.done():
                     self._agent_task.cancel()
-                    self._append_md("[dim][aborted by user][/dim]")
+                    self._append_dim("[aborted by user]")
                 else:
-                    self._append_md("[dim]No agent running.[/dim]")
+                    self._append_dim("No agent running.")
                 event.app.invalidate()
                 return
             if self._agent_running:
                 if len(self._pending_inputs) >= 5:
-                    self._append_md("[dim]Queue full (5 max)[/dim]")
+                    self._append_dim("Queue full (5 max)")
                 else:
                     self._pending_inputs.append(text)
                 event.app.invalidate()
@@ -339,7 +383,7 @@ class DualPanelTui(TuiSession):
         def _on_ctrl_c(event):
             if self._agent_running and self._agent_task and not self._agent_task.done():
                 self._agent_task.cancel()
-                self._append_md("[dim][aborted by user][/dim]")
+                self._append_dim("[aborted by user]")
                 event.app.invalidate()
             else:
                 event.app.exit()
@@ -350,102 +394,73 @@ class DualPanelTui(TuiSession):
 
         @kb.add("pageup")
         def _on_pageup(event):
-            if self._auto_scroll:
-                self._auto_scroll = False
-                ri = self._output_window.render_info if self._output_window else None
-                self._scroll_y = ri.vertical_scroll if ri else 0
+            if tui._auto_scroll:
+                tui._auto_scroll = False
+                ri = tui._output_window.render_info if tui._output_window else None
+                tui._scroll_y = ri.vertical_scroll if ri else 0
             try:
                 rows = max(5, os.get_terminal_size().lines - 4)
             except Exception:
                 rows = 20
-            self._scroll_y = max(0, self._scroll_y - rows)
+            tui._scroll_y = max(0, tui._scroll_y - rows)
             event.app.invalidate()
 
         @kb.add("pagedown")
         def _on_pagedown(event):
-            if self._auto_scroll:
-                self._auto_scroll = False
-                ri = self._output_window.render_info if self._output_window else None
-                self._scroll_y = ri.vertical_scroll if ri else 0
+            if tui._auto_scroll:
+                tui._auto_scroll = False
+                ri = tui._output_window.render_info if tui._output_window else None
+                tui._scroll_y = ri.vertical_scroll if ri else 0
             try:
                 rows = max(5, os.get_terminal_size().lines - 4)
             except Exception:
                 rows = 20
-            self._scroll_y += rows
-            ri = self._output_window.render_info if self._output_window else None
+            tui._scroll_y += rows
+            ri = tui._output_window.render_info if tui._output_window else None
             wh = ri.window_height if ri else 20
-            max_y = max(0, self._output_line_count - wh)
-            if self._scroll_y >= max_y:
-                self._scroll_y = max_y
-                self._auto_scroll = True
+            max_y = max(0, tui._output_line_count - wh)
+            if tui._scroll_y >= max_y:
+                tui._scroll_y = max_y
+                tui._auto_scroll = True
             event.app.invalidate()
 
         @kb.add("home")
         def _on_home(event):
-            self._auto_scroll = False
-            self._scroll_y = 0
+            tui._auto_scroll = False
+            tui._scroll_y = 0
             event.app.invalidate()
 
         @kb.add("end")
         def _on_end(event):
-            self._auto_scroll = True
+            tui._auto_scroll = True
             event.app.invalidate()
 
         output_ctrl = FormattedTextControl(
-            text=self._get_output_ft,
+            text=tui._get_output_ft,
             focusable=False,
-            get_cursor_position=self._get_output_cursor_pos,
+            get_cursor_position=tui._get_output_cursor_pos,
         )
         status_ctrl = FormattedTextControl(
-            text=self._get_status_ft,
+            text=tui._get_status_ft,
             focusable=False,
         )
 
-        self._output_window = Window(
+        tui._output_window = Window(
             content=output_ctrl,
             wrap_lines=False,
             height=Dimension(min=3, weight=1),
-            get_vertical_scroll=self._get_vertical_scroll_cb,
+            get_vertical_scroll=tui._get_vertical_scroll_cb,
         )
-
-        _orig_scroll_up = Window._scroll_up
-        _orig_scroll_down = Window._scroll_down
-
-        def _patched_scroll_up(window_self):
-            if window_self is self._output_window:
-                if self._auto_scroll:
-                    self._auto_scroll = False
-                self._scroll_y = max(0, self._scroll_y - 3)
-                if self._app:
-                    self._app.invalidate()
-                return
-            _orig_scroll_up(window_self)
-
-        def _patched_scroll_down(window_self):
-            if window_self is self._output_window:
-                ri = window_self.render_info
-                wh = ri.window_height if ri else 20
-                max_y = max(0, self._output_line_count - wh)
-                self._scroll_y = min(self._scroll_y + 3, max_y)
-                if self._scroll_y >= max_y:
-                    self._auto_scroll = True
-                if self._app:
-                    self._app.invalidate()
-                return
-            _orig_scroll_down(window_self)
-
-        Window._scroll_up = _patched_scroll_up
-        Window._scroll_down = _patched_scroll_down
 
         from prompt_toolkit.filters import Condition
         from prompt_toolkit.layout import ConditionalContainer
 
-        popup_visible = Condition(lambda: self._selection_popup.visible)
+        popup_visible = Condition(lambda: tui._selection_popup.visible)
 
         root = FloatContainer(
             content=HSplit(
                 [
-                    self._output_window,
+                    tui._output_window,
                     Window(height=1, char="─", style="class:separator"),
                     Window(content=status_ctrl, height=1, style="class:status-bar"),
                     Window(
@@ -467,7 +482,7 @@ class DualPanelTui(TuiSession):
                     left=2,
                     bottom=3,
                     content=ConditionalContainer(
-                        content=self._selection_popup.window,
+                        content=tui._selection_popup.window,
                         filter=popup_visible,
                     ),
                 ),
@@ -484,30 +499,78 @@ class DualPanelTui(TuiSession):
         )
 
     def _get_output_ft(self):
-        if not self._cache_dirty:
-            return self._rendered_cache
-        self._cache_dirty = False
         try:
-            full_ansi = "\n".join(self._ansi_segments)
-            raw_ft = to_formatted_text(ANSI(full_ansi))
-            wrapped_ft = self._wrap_ft(raw_ft, self._render_console.width)
-            line_count = 1
-            for _, text in wrapped_ft:
-                line_count += text.count("\n")
-            self._output_line_count = line_count
-            self._output_plain_text = self._ft_to_plain(wrapped_ft)
-            result = self._build_ft_with_selection(wrapped_ft)
-            self._rendered_cache = result
+            current_width = os.get_terminal_size().columns
         except Exception:
-            self._rendered_cache = FormattedText([("", "[render error]")])
-            self._output_line_count = 1
-            self._output_plain_text = ""
-            self._split_plain = []
-        return self._rendered_cache
+            current_width = self._cached_width
 
-    @staticmethod
-    def _ft_to_plain(ft):
-        return "".join(text for _, text in ft)
+        width_changed = current_width != self._cached_width
+        if width_changed:
+            self._cached_width = max(80, current_width)
+            self._render_console = Console(force_terminal=True, width=self._cached_width, color_system="truecolor")
+            self._cached_seg_count = 0
+            self._cached_fragments.clear()
+            self._cache_dirty = True
+
+        current_len = len(self._ansi_segments)
+
+        if current_len < self._cached_seg_count:
+            self._cached_seg_count = 0
+            self._cached_fragments.clear()
+            self._cache_dirty = True
+
+        if self._cache_dirty:
+            if self._cached_seg_count == 0:
+                self._cached_fragments = []
+                self._cached_line_count = 1
+                for idx, ansi_text in enumerate(self._ansi_segments):
+                    if idx > 0:
+                        self._cached_fragments.append(("", "\n"))
+                        self._cached_line_count += 1
+                    raw_ft = to_formatted_text(ANSI(ansi_text))
+                    wrapped = self._wrap_ft(raw_ft, self._cached_width)
+                    self._cached_line_count += sum(t.count("\n") for _, t in wrapped)
+                    self._cached_fragments.extend(wrapped)
+            else:
+                while self._cached_seg_count < current_len:
+                    idx = self._cached_seg_count
+                    ansi_text = self._ansi_segments[idx]
+                    if idx > 0:
+                        self._cached_fragments.append(("", "\n"))
+                        self._cached_line_count += 1
+                    raw_ft = to_formatted_text(ANSI(ansi_text))
+                    wrapped = self._wrap_ft(raw_ft, self._cached_width)
+                    self._cached_line_count += sum(t.count("\n") for _, t in wrapped)
+                    self._cached_fragments.extend(wrapped)
+                    self._cached_seg_count += 1
+            self._cached_seg_count = current_len
+            self._cache_dirty = False
+            self._rebuild_merged_cache()
+            self._output_line_count = self._cached_line_count
+            self._sel_dirty = True
+
+        if not self._sel_dirty:
+            return self._rendered_cache
+
+        result = self._build_ft_with_selection()
+        self._sel_dirty = False
+        self._rendered_cache = result
+        return result
+
+    def _rebuild_merged_cache(self):
+        merged = []
+        for style, text in self._cached_fragments:
+            if text == "\n":
+                if merged:
+                    prev_s, prev_t = merged[-1]
+                    merged[-1] = (prev_s, prev_t + "\n")
+                else:
+                    merged.append((style, "\n"))
+            else:
+                merged.append((style, text))
+        self._cached_merged = merged
+        self._split_plain = [text for _, text in merged]
+        self._cached_handlers = [self._make_frag_handler(idx) for idx in range(len(merged))]
 
     @staticmethod
     def _wrap_ft(ft, width):
@@ -535,34 +598,30 @@ class DualPanelTui(TuiSession):
                 if i > run_start:
                     result.append((style, text[run_start:i]))
                     col = run_col
+                elif col > 0:
+                    result.append(("", "\n"))
+                    col = 0
+                else:
+                    result.append((style, text[i]))
+                    i += 1
+                    col = 0
         return result
 
-    def _build_ft_with_selection(self, ft):
-        merged = []
-        for style, text in ft:
-            if text == "\n":
-                if merged:
-                    prev_s, prev_t = merged[-1]
-                    merged[-1] = (prev_s, prev_t + "\n")
-                else:
-                    merged.append((style, "\n"))
-            else:
-                merged.append((style, text))
-
-        self._split_plain = [text for _, text in merged]
-
+    def _build_ft_with_selection(self):
         sel_start = self._sel_frag_start
         sel_end = self._sel_frag_end
         has_sel = sel_start is not None and sel_end is not None
         if has_sel and sel_start > sel_end:
             sel_start, sel_end = sel_end, sel_start
 
+        merged = self._cached_merged
+        handlers = self._cached_handlers
         result = []
-        for idx, (style, text) in enumerate(merged):
+        for idx in range(len(merged)):
+            style, text = merged[idx]
             if has_sel and sel_start <= idx <= sel_end:
-                style = style + " class:selected"
-            handler = self._make_frag_handler(idx)
-            result.append((style, text, handler))
+                style = (style + " class:selected").strip()
+            result.append((style, text, handlers[idx]))
         return result
 
     def _make_frag_handler(self, frag_idx):
@@ -571,59 +630,91 @@ class DualPanelTui(TuiSession):
         def handler(mouse_event: MouseEvent):
             et = mouse_event.event_type
             if et in (MouseEventType.SCROLL_UP, MouseEventType.SCROLL_DOWN):
+                if et == MouseEventType.SCROLL_UP:
+                    if tui._output_window:
+                        if tui._auto_scroll:
+                            tui._auto_scroll = False
+                            ri = tui._output_window.render_info
+                            tui._scroll_y = ri.vertical_scroll if ri else 0
+                        tui._scroll_y = max(0, tui._scroll_y - 3)
+                        if tui._app:
+                            tui._app.invalidate()
+                elif et == MouseEventType.SCROLL_DOWN:
+                    if tui._output_window:
+                        ri = tui._output_window.render_info
+                        wh = ri.window_height if ri else 20
+                        max_y = max(0, tui._output_line_count - wh)
+                        if not tui._auto_scroll:
+                            tui._scroll_y = min(tui._scroll_y + 3, max_y)
+                            if tui._scroll_y >= max_y:
+                                tui._auto_scroll = True
+                            if tui._app:
+                                tui._app.invalidate()
                 return NotImplemented
             if et == MouseEventType.MOUSE_DOWN and mouse_event.button == MouseButton.LEFT:
                 tui._sel_frag_start = frag_idx
                 tui._sel_frag_end = None
                 tui._sel_dragging = True
-                tui._cache_dirty = True
+                tui._sel_dirty = True
                 if tui._app:
                     tui._app.invalidate()
             elif et == MouseEventType.MOUSE_MOVE and tui._sel_dragging:
-                tui._sel_frag_end = frag_idx
-                tui._cache_dirty = True
-                if tui._app:
-                    tui._app.invalidate()
+                now = time.monotonic()
+                if now - tui._last_mouse_time < _MOUSE_THROTTLE_SEC:
+                    return
+                tui._last_mouse_time = now
+                if tui._sel_frag_end != frag_idx:
+                    tui._sel_frag_end = frag_idx
+                    tui._sel_dirty = True
+                    if tui._app:
+                        tui._app.invalidate()
             elif et == MouseEventType.MOUSE_UP and mouse_event.button == MouseButton.LEFT:
                 if tui._sel_dragging:
                     tui._sel_frag_end = frag_idx
                     tui._sel_dragging = False
-                    tui._copy_selection()
+                    tui._sel_dirty = True
+                    if tui._app:
+                        tui._app.invalidate()
+                    asyncio.ensure_future(tui._copy_selection_async())
 
         return handler
 
-    def _copy_selection(self):
+    async def _copy_selection_async(self):
         s, e = self._sel_frag_start, self._sel_frag_end
         if s is None or e is None:
             return
         if s > e:
             s, e = e, s
+        self._sel_frag_start = None
+        self._sel_frag_end = None
+        self._sel_dirty = True
+        if self._app:
+            self._app.invalidate()
         if s >= len(self._split_plain) or e >= len(self._split_plain):
-            self._sel_frag_start = None
-            self._sel_frag_end = None
-            self._cache_dirty = True
-            if self._app:
-                self._app.invalidate()
             return
         parts = self._split_plain[s : e + 1]
         selected = "".join(parts)
-        self._sel_frag_start = None
-        self._sel_frag_end = None
-        self._cache_dirty = True
-        if self._app:
-            self._app.invalidate()
         if not selected.strip():
             return
         try:
-            subprocess.run(["pbcopy"], input=selected.encode(), check=True, timeout=2)
+            proc = await asyncio.create_subprocess_exec(
+                "pbcopy",
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await proc.communicate(selected.encode())
         except Exception:
             try:
-                subprocess.run(
-                    ["xclip", "-selection", "clipboard"],
-                    input=selected.encode(),
-                    check=True,
-                    timeout=2,
+                proc = await asyncio.create_subprocess_exec(
+                    "xclip",
+                    "-selection",
+                    "clipboard",
+                    stdin=asyncio.subprocess.PIPE,
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
                 )
+                await proc.communicate(selected.encode())
             except Exception:
                 pass
 
@@ -648,9 +739,159 @@ class DualPanelTui(TuiSession):
             parts.append(("class:status-queue", f"  Queue:{len(self._pending_inputs)}"))
         return FormattedText(parts)
 
+    async def _render_worker(self):
+        _log = logging.getLogger(__name__)
+        loop = asyncio.get_event_loop()
+        while True:
+            try:
+                items: list[tuple] = []
+                try:
+                    item = await self._render_queue.get()
+                    items.append(item)
+                except asyncio.CancelledError:
+                    break
+                deadline = loop.time() + 0.03
+                while len(items) < 20:
+                    timeout = max(0, deadline - loop.time())
+                    if timeout <= 0:
+                        break
+                    try:
+                        item = await asyncio.wait_for(self._render_queue.get(), timeout=timeout)
+                        items.append(item)
+                    except TimeoutError:
+                        break
+                    except asyncio.CancelledError:
+                        break
+                if not items:
+                    continue
+
+                results = await loop.run_in_executor(None, self._render_batch_sync, items)
+                for action in results:
+                    action()
+                self._cache_dirty = True
+                self._sel_dirty = True
+                if self._app:
+                    self._app.invalidate()
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                logging.getLogger(__name__).warning("render worker error", exc_info=True)
+
+    def _render_batch_sync(self, items: list[tuple]) -> list:
+        results = []
+        console = Console(force_terminal=True, width=self._cached_width, color_system="truecolor")
+        for item in items:
+            kind = item[0]
+            try:
+                if kind == "append_ansi":
+                    ansi = item[1]
+                    results.append(lambda a=ansi: self._ansi_segments.append(a))
+
+                elif kind == "markdown":
+                    md_text = item[1]
+                    ansi = _md2a_static(console, md_text)
+                    if ansi:
+                        results.append(lambda a=ansi: self._ansi_segments.append(a))
+
+                elif kind == "rich_text":
+                    text_content, style = item[1], item[2]
+                    ansi = _r2a_static(console, Text(text_content, style=style))
+                    if ansi:
+                        results.append(lambda a=ansi: self._ansi_segments.append(a))
+
+                elif kind == "thinking_flush":
+                    chunks = item[1]
+                    seg_idx = item[2]
+                    full_text = "".join(chunks)
+                    if full_text:
+                        ansi = _r2a_static(console, Text(full_text, style="dim italic"))
+                        if ansi and seg_idx is not None and seg_idx < len(self._ansi_segments):
+                            results.append(lambda a=ansi, si=seg_idx: self._ansi_segments.__setitem__(si, a))
+
+                elif kind == "thinking_remove":
+                    seg_idx = item[1]
+                    if seg_idx is not None and seg_idx < len(self._ansi_segments):
+                        results.append(lambda si=seg_idx: self._ansi_segments.__delitem__(si))
+
+                elif kind == "thinking_init":
+                    seg_idx = item[1]
+                    ansi = _r2a_static(console, Text("Thinking: ", style="dim italic"))
+                    if ansi:
+                        results.append(lambda a=ansi: self._ansi_segments.append(a))
+                    else:
+                        results.append(lambda si=seg_idx: None)
+
+                elif kind == "thinking_append_ansi":
+                    seg_idx = item[1]
+                    ansi = item[2]
+                    if ansi and seg_idx is not None and seg_idx < len(self._ansi_segments):
+                        results.append(
+                            lambda a=ansi, si=seg_idx: self._ansi_segments.__setitem__(si, self._ansi_segments[si] + a)
+                        )
+
+                elif kind == "history":
+                    msgs = item[1]
+                    import json as _json
+
+                    for msg in msgs:
+                        try:
+                            role = msg.get("role", "")
+                            content = msg.get("content") or ""
+                            reasoning = msg.get("reasoning_content") or ""
+                            if role == "user" and content:
+                                ansi = _md2a_static(console, f"▶ {content}")
+                                if ansi:
+                                    results.append(lambda a=ansi: self._ansi_segments.append(a))
+                            elif role == "assistant":
+                                if reasoning:
+                                    ansi = _r2a_static(
+                                        console,
+                                        Text(f"Thinking: {reasoning[:200]}", style="dim italic"),
+                                    )
+                                    if ansi:
+                                        results.append(lambda a=ansi: self._ansi_segments.append(a))
+                                tool_calls = msg.get("tool_calls") or []
+                                for tc in tool_calls:
+                                    fn = tc.get("function", {})
+                                    args_raw = fn.get("arguments", {})
+                                    args = _json.loads(args_raw) if isinstance(args_raw, str) else args_raw
+                                    display = self._fmt_tool(fn.get("name", ""), args)
+                                    ansi = _r2a_static(console, Text(f"  → {display}", style="cyan"))
+                                    if ansi:
+                                        results.append(lambda a=ansi: self._ansi_segments.append(a))
+                                if content:
+                                    ansi = _md2a_static(console, content)
+                                    if ansi:
+                                        results.append(lambda a=ansi: self._ansi_segments.append(a))
+                        except Exception:
+                            continue
+            except Exception:
+                continue
+        return results
+
+    async def _periodic_stream_flush(self):
+        while True:
+            try:
+                await asyncio.sleep(0.1)
+                if self._stream and self._rendered_up_to < len(self._stream):
+                    content = self._stream[self._rendered_up_to :]
+                    boundary = self._find_paragraph_boundary(content)
+                    if boundary > 0:
+                        paragraph = content[:boundary]
+                        if paragraph.strip():
+                            await self._render_queue.put(("markdown", paragraph))
+                        toggle_count = paragraph.count("```")
+                        if toggle_count % 2 == 1:
+                            self._in_code_block = not self._in_code_block
+                        self._rendered_up_to += boundary
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                pass
+
     async def _handle_input(self, text: str):
         if text.startswith("/"):
-            self._append_md(f"[dim]{text}[/dim]")
+            self._append_dim(f"{text}")
             should_exit = await self._handle_slash(text)
             self._invalidate()
             if should_exit:
@@ -676,7 +917,7 @@ class DualPanelTui(TuiSession):
 
         self._stream = ""
         self._thinking_active = False
-        self._thinking_buf = ""
+        self._thinking_chunks = []
         self._rendered_up_to = 0
         self._in_code_block = False
         self._sub_agent_tasks = {}
@@ -689,9 +930,9 @@ class DualPanelTui(TuiSession):
             self._agent_task = asyncio.create_task(run_agent(self.agent_ctx, ui))
             await self._agent_task
         except asyncio.CancelledError:
-            self._append_md("[dim][interrupted][/dim]")
+            self._append_dim("[interrupted]")
         except Exception as e:
-            self._append_md(f"[red]Error: {e}[/red]")
+            self._append_rich(Text(f"Error: {e}", style="red"))
         finally:
             self._agent_running = False
             self._agent_task = None
@@ -713,48 +954,50 @@ class DualPanelTui(TuiSession):
             else:
                 await self._execute_agent(clean_text or next_ui)
 
-    def _on_agent_event(self, event: AgentEvent):
+    async def _on_agent_event(self, event: AgentEvent):
         if event.type == EventType.THINKING_DELTA:
             chunk = event.data.get("text", "")
             if not self._thinking_active:
                 self._thinking_active = True
-                self._thinking_buf = ""
+                self._thinking_chunks = []
                 self._thinking_seg_idx = len(self._ansi_segments)
                 self._append_rich(Text("Thinking: ", style="dim italic"))
-            self._thinking_buf += chunk
-            if chunk and self._thinking_seg_idx is not None:
-                ansi_chunk = self._r2a(Text(chunk, style="dim italic"))
-                if ansi_chunk:
-                    self._ansi_segments[self._thinking_seg_idx] += ansi_chunk
-                    self._cache_dirty = True
-                    self._invalidate()
+            self._thinking_chunks.append(chunk)
 
         elif event.type == EventType.THINKING_DONE:
             if self._thinking_active:
                 self._thinking_active = False
-                if self._thinking_buf.strip():
+                full_text = "".join(self._thinking_chunks)
+                if full_text.strip():
+                    if self._thinking_seg_idx is not None:
+                        await self._render_queue.put(("thinking_flush", self._thinking_chunks, self._thinking_seg_idx))
                     self._append_ansi("")
                 else:
                     if self._thinking_seg_idx is not None:
-                        del self._ansi_segments[self._thinking_seg_idx]
-                self._thinking_buf = ""
+                        await self._render_queue.put(("thinking_remove", self._thinking_seg_idx))
+                self._thinking_chunks = []
                 self._thinking_seg_idx = None
                 self._invalidate()
 
         elif event.type == EventType.TEXT_DELTA:
             if self._thinking_active:
                 self._thinking_active = False
-                if not self._thinking_buf.strip() and self._thinking_seg_idx is not None:
-                    del self._ansi_segments[self._thinking_seg_idx]
-                self._thinking_buf = ""
+                full_text = "".join(self._thinking_chunks)
+                if full_text.strip():
+                    if self._thinking_seg_idx is not None:
+                        await self._render_queue.put(("thinking_flush", self._thinking_chunks, self._thinking_seg_idx))
+                    self._append_ansi("")
+                else:
+                    if self._thinking_seg_idx is not None:
+                        await self._render_queue.put(("thinking_remove", self._thinking_seg_idx))
+                self._thinking_chunks = []
                 self._thinking_seg_idx = None
             self._stream += event.data.get("text", "")
-            self._flush_stream()
 
         elif event.type == EventType.TEXT_DONE:
             remaining = self._stream[self._rendered_up_to :]
             if remaining.strip():
-                self._append_md(remaining)
+                await self._render_queue.put(("markdown", remaining))
             self._stream = ""
             self._rendered_up_to = 0
             self._in_code_block = False
@@ -771,20 +1014,29 @@ class DualPanelTui(TuiSession):
                 display = self._fmt_tool(tool_name, event.data.get("arguments", {}))
                 source = event.data.get("source", "builtin")
                 style = "bright_magenta" if source == "mcp" else "cyan"
-                self._append_rich(Text(f"  → {display}", style=style))
+                await self._render_queue.put(("rich_text", f"  → {display}", style))
+
+        elif event.type == EventType.TOOL_RESULT:
+            result = event.data.get("result", "")
+            result_str = str(result)
+            preview = result_str[:300]
+            if len(result_str) > 300:
+                preview += "..."
+            await self._render_queue.put(("rich_text", f"  ← {preview}", "dim"))
+            self._invalidate()
 
         elif event.type == EventType.AGENT_ERROR:
-            self._append_md(f"[red]Error: {event.data.get('error')}[/red]")
+            await self._render_queue.put(("rich_text", f"Error: {event.data.get('error')}", "red"))
             self._invalidate()
 
         elif event.type == EventType.BUDGET_EXHAUSTED:
-            self._append_md("[yellow]Budget exhausted, generating summary...[/yellow]")
+            await self._render_queue.put(("rich_text", "Budget exhausted, generating summary...", "yellow"))
             self._invalidate()
 
         elif event.type == EventType.CONTEXT_COMPRESSED:
             orig = event.data.get("original_count", "?")
             comp = event.data.get("compressed_count", "?")
-            self._append_md(f"[dim yellow]Context compressed: {orig} → {comp} messages[/dim yellow]")
+            await self._render_queue.put(("rich_text", f"Context compressed: {orig} → {comp} messages", "dim yellow"))
             self._invalidate()
 
         elif event.type == EventType.SUB_AGENT_START:
@@ -800,7 +1052,7 @@ class DualPanelTui(TuiSession):
                 "tools": 0,
                 "current": "starting...",
             }
-            self._append_md(f"**▶ {display}** `{task_desc[:80]}`")
+            await self._render_queue.put(("markdown", f"**▶ {display}** `{task_desc[:80]}`"))
             self._invalidate()
 
         elif event.type == EventType.SUB_AGENT_TOOL_CALL:
@@ -822,7 +1074,12 @@ class DualPanelTui(TuiSession):
             if sub_id in self._sub_agent_tasks:
                 self._sub_agent_tasks[sub_id]["status"] = "done"
             tok_str = f"{tokens:,}" if tokens else "0"
-            self._append_md(f"**✓ {display}** `({elapsed}s, {tok_str} tok, {iterations} steps, {tools} tools)`")
+            await self._render_queue.put(
+                (
+                    "markdown",
+                    f"**✓ {display}** `({elapsed}s, {tok_str} tok, {iterations} steps, {tools} tools)`",
+                )
+            )
             self._invalidate()
 
         elif event.type == EventType.SUB_AGENT_ERROR:
@@ -831,30 +1088,30 @@ class DualPanelTui(TuiSession):
             error = event.data.get("error", "unknown error")
             if sub_id in self._sub_agent_tasks:
                 self._sub_agent_tasks[sub_id]["status"] = "error"
-            self._append_md(f"**✗ {agent_name}** Error: {error}")
+            await self._render_queue.put(("markdown", f"**✗ {agent_name}** Error: {error}"))
             self._invalidate()
 
         elif event.type == EventType.PIPELINE_START:
             total = event.data.get("total_steps", 0)
             step_agents = event.data.get("step_agents", {})
             step_tasks = event.data.get("step_tasks", {})
-            self._append_md(f"**Pipeline** {total} steps")
+            await self._render_queue.put(("markdown", f"**Pipeline** {total} steps"))
             for sid, agent in step_agents.items():
                 task = step_tasks.get(sid, "")[:60]
-                self._append_md(f"  └ {agent}: {task}")
+                await self._render_queue.put(("markdown", f"  └ {agent}: {task}"))
             self._invalidate()
 
         elif event.type == EventType.PIPELINE_STEP_START:
             agent = event.data.get("agent_name", "?")
             task = event.data.get("task", "")[:80]
-            self._append_md(f"  **▶ Step** {agent}: `{task}`")
+            await self._render_queue.put(("markdown", f"  **▶ Step** {agent}: `{task}`"))
             self._invalidate()
 
         elif event.type == EventType.PIPELINE_STEP_END:
             agent = event.data.get("agent_name", "?")
             elapsed = event.data.get("elapsed", 0)
             result_preview = str(event.data.get("result", ""))[:100]
-            self._append_md(f"  **✓ Step** {agent} `({elapsed}s)` {result_preview}")
+            await self._render_queue.put(("markdown", f"  **✓ Step** {agent} `({elapsed}s)` {result_preview}"))
             self._invalidate()
 
         elif event.type == EventType.PIPELINE_END:
@@ -863,29 +1120,15 @@ class DualPanelTui(TuiSession):
             fail = event.data.get("fail_count", 0)
             elapsed = event.data.get("total_elapsed", 0)
             icon = "✓" if fail == 0 else "⚠"
-            self._append_md(f"**{icon} Pipeline done** `{ok}/{total}` in `{elapsed}s`")
+            await self._render_queue.put(("markdown", f"**{icon} Pipeline done** `{ok}/{total}` in `{elapsed}s`"))
             self._invalidate()
-
-    def _flush_stream(self):
-        content = self._stream[self._rendered_up_to :]
-        if not content.strip():
-            return
-        boundary = self._find_paragraph_boundary(content)
-        if boundary > 0:
-            paragraph = content[:boundary]
-            if paragraph.strip():
-                self._append_md(paragraph)
-            toggle_count = paragraph.count("```")
-            if toggle_count % 2 == 1:
-                self._in_code_block = not self._in_code_block
-            self._rendered_up_to += boundary
 
     def _print_banner(self):
         pass
 
     async def _handle_new_session(self):
         if getattr(self.args, "no_persist", False):
-            self._append_md("[dim]Persistence disabled.[/dim]")
+            self._append_dim("Persistence disabled.")
             return
         if not self._user:
             return
@@ -903,7 +1146,7 @@ class DualPanelTui(TuiSession):
             self.agent_ctx.metadata["session_id"] = cv.session_id
             self.agent_ctx.metadata["branch_id"] = "main"
             self._replace_persistence_listener()
-        self._append_md(f"[dim]New session: {cv.session_id[:8]}[/dim]")
+        self._append_dim(f"New session: {cv.session_id[:8]}")
 
     async def _handle_slash(self, ui: str) -> bool:
         p = ui.split(maxsplit=1)
@@ -926,14 +1169,12 @@ class DualPanelTui(TuiSession):
                 "/skills  List skills\n/skill <name>  Show skill\n"
                 "/abort  Abort running agent\n\n"
                 "Scroll: PageUp/PageDown/MouseWheel/Home/End\n"
-                "Select text: Hold Shift + mouse drag\n"
+                "Select text: mouse drag\n"
             )
         elif cmd == "/clear":
             if self.agent_ctx:
                 self.agent_ctx.messages.clear()
-            self._ansi_segments.clear()
-            self._rendered_cache = FormattedText([("", "")])
-            self._cache_dirty = True
+            self._reset_output()
             self._append_md("**CrabAgent v0.7.2**\n")
         elif cmd == "/history":
             if self.agent_ctx:
@@ -952,13 +1193,13 @@ class DualPanelTui(TuiSession):
                     lines.append(f"  {i:>2}. {m}{mark}")
                 self._append_md("```\n" + "\n".join(lines) + "\n```")
             else:
-                self._append_md("[dim]No models.[/dim]")
+                self._append_dim("No models.")
         elif cmd == "/model":
             chosen_model = arg.strip()
             if not chosen_model:
                 ms = await self._fetch_models()
                 if not ms:
-                    self._append_md("[dim]No models.[/dim]")
+                    self._append_dim("No models.")
                     return False
                 current = self.agent_ctx.model if self.agent_ctx else None
                 items = [(m, f"{m} {'←' if m == current else ''}".strip()) for m in ms]
@@ -969,7 +1210,7 @@ class DualPanelTui(TuiSession):
                     from crabagent.core.config import settings as _settings
 
                     _settings.save_last_model(m)
-                    self._append_md(f"[dim]Model: {m}[/dim]")
+                    self._append_dim(f"Model: {m}")
 
                 self._selection_popup.show("Select Model", items, on_select)
                 return False
@@ -979,7 +1220,7 @@ class DualPanelTui(TuiSession):
                 if 0 <= idx < len(ms):
                     chosen_model = ms[idx]
                 else:
-                    self._append_md(f"[dim]Invalid #{chosen_model}. Use 1-{len(ms)}[/dim]")
+                    self._append_dim(f"Invalid #{chosen_model}. Use 1-{len(ms)}")
                     return False
             except ValueError:
                 pass
@@ -988,7 +1229,7 @@ class DualPanelTui(TuiSession):
             from crabagent.core.config import settings as _settings
 
             _settings.save_last_model(chosen_model)
-            self._append_md(f"[dim]Model: {chosen_model}[/dim]")
+            self._append_dim(f"Model: {chosen_model}")
         elif cmd == "/export":
             await self._handle_export()
         elif cmd == "/provider":
@@ -1001,23 +1242,21 @@ class DualPanelTui(TuiSession):
                 maybe_agent = parts[0].lstrip("@")
                 task = parts[1].strip() if len(parts) > 1 else ""
                 if not task:
-                    self._append_md("[dim]Usage: /delegate @agent task[/dim]")
+                    self._append_dim("Usage: /delegate @agent task")
                     return False
                 self._append_ansi("")
                 await self._run_delegation(maybe_agent, task)
             else:
-                self._append_md("[dim]Usage: /delegate @agent task[/dim]")
+                self._append_dim("Usage: /delegate @agent task")
         elif cmd == "/new":
             await self._handle_new_session()
-            self._ansi_segments.clear()
-            self._rendered_cache = FormattedText([("", "")])
-            self._cache_dirty = True
+            self._reset_output()
             self._append_md("**CrabAgent v0.7.2**\n")
         elif cmd == "/sessions":
             await self._handle_sessions_popup()
         elif cmd == "/session":
             if not arg.strip():
-                self._append_md("[dim]Usage: /session <session_id>[/dim]")
+                self._append_dim("Usage: /session <session_id>")
                 return False
             await self._handle_session_load(arg)
         elif cmd == "/memory":
@@ -1029,7 +1268,7 @@ class DualPanelTui(TuiSession):
             dirs = _settings.skill_discovery_dirs()
             skills = discover_skills(dirs)
             if not skills:
-                self._append_md("[dim]No skills found.[/dim]")
+                self._append_dim("No skills found.")
             else:
                 lines = []
                 for s in sorted(skills.values(), key=lambda x: x.name):
@@ -1038,7 +1277,7 @@ class DualPanelTui(TuiSession):
                 self._append_md("\n".join(lines))
         elif cmd == "/skill":
             if not arg:
-                self._append_md("[dim]/skill <name>[/dim]")
+                self._append_dim("/skill <name>")
             else:
                 from crabagent.core.agent.skill.loader import (
                     discover_skills,
@@ -1051,19 +1290,32 @@ class DualPanelTui(TuiSession):
                 skill = skills.get(arg)
                 if not skill:
                     names = ", ".join(sorted(skills.keys())) if skills else "(none)"
-                    self._append_md(f"[dim]Skill '{arg}' not found. Available: {names}[/dim]")
+                    self._append_dim(f"Skill '{arg}' not found. Available: {names}")
                 else:
                     self._append_md(f"```\n{format_skill_content(skill)}\n```")
         elif cmd == "/agent_stats":
             if not arg:
-                self._append_md("[dim]/agent_stats <name>[/dim]")
+                self._append_dim("/agent_stats <name>")
             else:
                 await self._handle_agent_stats(arg)
         elif cmd == "/runs":
             await self._handle_runs(arg)
         else:
-            self._append_md(f"[dim]Unknown: {cmd}[/dim]")
+            self._append_dim(f"Unknown: {cmd}")
         return False
+
+    def _reset_output(self):
+        self._ansi_segments.clear()
+        self._cached_seg_count = 0
+        self._cached_fragments.clear()
+        self._cached_merged.clear()
+        self._cached_handlers.clear()
+        self._cached_line_count = 0
+        self._rendered_cache = FormattedText([("", "")])
+        self._cache_dirty = True
+        self._sel_dirty = True
+        self._output_plain_text = ""
+        self._split_plain = []
 
     async def _handle_provider_dual(self, arg: str):
         from crabagent.core.provider_store import (
@@ -1082,7 +1334,7 @@ class DualPanelTui(TuiSession):
         if sc in ("list", ""):
             ps = await list_providers()
             if not ps:
-                self._append_md("[dim]No providers. Use `/provider add` to add one.[/dim]")
+                self._append_dim("No providers. Use `/provider add` to add one.")
                 return
             d = await get_default_provider()
             items = []
@@ -1095,9 +1347,9 @@ class DualPanelTui(TuiSession):
             async def on_select(name):
                 try:
                     await set_default_provider(name)
-                    self._append_md(f"[dim]Default: {name}[/dim]")
+                    self._append_dim(f"Default: {name}")
                 except Exception as e:
-                    self._append_md(f"[red]Error: {e}[/red]")
+                    self._append_rich(Text(f"Error: {e}", style="red"))
 
             self._selection_popup.show("Providers (Enter=set default)", items, on_select)
 
@@ -1114,7 +1366,7 @@ class DualPanelTui(TuiSession):
             api_key = parts[2]
             base_url = parts[3] if len(parts) > 3 else ""
             if provider_type not in PROVIDER_CATALOG:
-                self._append_md(f"[dim]Unknown type: {provider_type}[/dim]")
+                self._append_dim(f"Unknown type: {provider_type}")
                 return
             try:
                 existing = await list_providers()
@@ -1128,27 +1380,27 @@ class DualPanelTui(TuiSession):
                 )
                 self._append_md(f"**Provider added:** `{name}`")
             except Exception as e:
-                self._append_md(f"[red]Error: {e}[/red]")
+                self._append_rich(Text(f"Error: {e}", style="red"))
 
         elif sc in ("set", "set-default"):
             if not sa:
-                self._append_md("[dim]/provider set <name>[/dim]")
+                self._append_dim("/provider set <name>")
                 return
             try:
                 await set_default_provider(sa)
-                self._append_md(f"[dim]Default: {sa}[/dim]")
+                self._append_dim(f"Default: {sa}")
             except Exception as e:
-                self._append_md(f"[red]Error: {e}[/red]")
+                self._append_rich(Text(f"Error: {e}", style="red"))
 
         elif sc in ("rm", "remove", "del", "delete"):
             if not sa:
-                self._append_md("[dim]/provider rm <name>[/dim]")
+                self._append_dim("/provider rm <name>")
                 return
             await delete_provider(sa)
-            self._append_md(f"[dim]Removed: {sa}[/dim]")
+            self._append_dim(f"Removed: {sa}")
 
         else:
-            self._append_md("[dim]/provider {list|add|set|rm}[/dim]")
+            self._append_dim("/provider {list|add|set|rm}")
 
     async def _handle_agents_dual(self, arg: str):
         sp = arg.split(maxsplit=1) if arg else []
@@ -1157,7 +1409,7 @@ class DualPanelTui(TuiSession):
         if sc == "list":
             agents = await self._fetch_all_agents()
             if not agents:
-                self._append_md("[dim]No agents. Use `/agents add` in classic TUI mode.[/dim]")
+                self._append_dim("No agents. Use `/agents add` in classic TUI mode.")
                 return
             enabled_count = sum(1 for a in agents if a.enabled)
             lines = [f"**Agent Team** ({enabled_count}/{len(agents)} active)\n"]
@@ -1179,11 +1431,11 @@ class DualPanelTui(TuiSession):
                 "Use `crabagent` without `--dual-tui` flag.[/dim]"
             )
         else:
-            self._append_md("[dim]/agents {list}[/dim]")
+            self._append_dim("/agents {list}")
 
     async def _handle_sessions_popup(self):
         if getattr(self.args, "no_persist", False):
-            self._append_md("[dim]Persistence disabled.[/dim]")
+            self._append_dim("Persistence disabled.")
             return
         from crabagent.core.database import async_session_factory
         from crabagent.serve.services.conversation import list_conversations
@@ -1191,7 +1443,7 @@ class DualPanelTui(TuiSession):
         async with async_session_factory() as db:
             convs = await list_conversations(db, self._user.id)
         if not convs:
-            self._append_md("[dim]No sessions.[/dim]")
+            self._append_dim("No sessions.")
             return
         items = []
         for c in convs[:20]:
@@ -1202,18 +1454,21 @@ class DualPanelTui(TuiSession):
             items.append((c.session_id, display))
 
         async def on_select(sid):
-            await self._handle_session_load(sid)
+            try:
+                await self._handle_session_load(sid)
+            except Exception as e:
+                self._append_dim(f"Session load failed: {e}")
 
         self._selection_popup.show("Sessions", items, on_select)
 
     async def _handle_session_load(self, arg: str):
         if getattr(self.args, "no_persist", False):
-            self._append_md("[dim]Persistence disabled.[/dim]")
+            self._append_dim("Persistence disabled.")
             return
         chosen_sid = arg.strip()
         cv, hist, ms = await self._load_conv(chosen_sid, self._user.id)
         if not cv:
-            self._append_md("[dim]Session not found.[/dim]")
+            self._append_dim("Session not found.")
             return
         self._conversation_id = cv.id
         self._session_id_str = cv.session_id
@@ -1227,40 +1482,24 @@ class DualPanelTui(TuiSession):
             if cv.model:
                 self.agent_ctx.model = cv.model
             self._replace_persistence_listener()
-        self._ansi_segments.clear()
-        self._rendered_cache = FormattedText([("", "")])
-        self._cache_dirty = True
-        self._append_md("**CrabAgent v0.7.2**\n")
-        if hist:
-            import json as _json
-
-            for idx, msg in enumerate(hist):
-                role = msg.get("role", "")
-                content = msg.get("content") or ""
-                reasoning = msg.get("reasoning_content") or ""
-                if role == "user" and content:
-                    self._append_md(f"▶ {content}")
-                elif role == "assistant":
-                    if reasoning:
-                        self._append_rich(Text(f"Thinking: {reasoning[:200]}", style="dim italic"))
-                    tool_calls = msg.get("tool_calls") or []
-                    for tc in tool_calls:
-                        fn = tc.get("function", {})
-                        args_raw = fn.get("arguments", {})
-                        args = _json.loads(args_raw) if isinstance(args_raw, str) else args_raw
-                        display = self._fmt_tool(fn.get("name", ""), args)
-                        self._append_rich(Text(f"  → {display}", style="cyan"))
-                    if content:
-                        self._append_md(content)
-                if idx % 5 == 0:
-                    await asyncio.sleep(0)
-        user_count = sum(1 for m in hist if m.get("role") == "user")
-        self._append_md(f"[dim]Loaded session {cv.session_id[:8]} ({user_count} turns, {len(hist)} messages)[/dim]")
+        self._reset_output()
+        self._append_dim(f"Loaded session {cv.session_id[:8]} ({len(hist)} messages)")
         self._invalidate()
+
+        if hist:
+            to_show = hist[-5:] if len(hist) > 5 else hist
+            hidden = len(hist) - len(to_show)
+            if hidden > 0:
+                self._append_dim(f"... {hidden} earlier messages hidden ...")
+                self._invalidate()
+                await asyncio.sleep(0)
+
+            await self._render_queue.put(("history", to_show))
+            self._invalidate()
 
     async def _handle_runs(self, arg: str):
         if getattr(self.args, "no_persist", False) or not self._user:
-            self._append_md("[dim]Persistence disabled.[/dim]")
+            self._append_dim("Persistence disabled.")
             return
         from crabagent.core.database import run_record_list
 
@@ -1279,7 +1518,7 @@ class DualPanelTui(TuiSession):
             limit=limit,
         )
         if not runs:
-            self._append_md("[dim]No runs found.[/dim]")
+            self._append_dim("No runs found.")
             return
         import datetime as _dt
 
@@ -1301,7 +1540,7 @@ class DualPanelTui(TuiSession):
 
     async def _handle_export(self):
         if not self._conversation_id:
-            self._append_md("[dim]No conversation.[/dim]")
+            self._append_dim("No conversation.")
             return
         from crabagent.core.database import async_session_factory
         from crabagent.serve.services.message import get_messages
@@ -1319,11 +1558,10 @@ class DualPanelTui(TuiSession):
                     f.write(f"{c}\n\n")
                 elif m.role == "user":
                     f.write(f"▶ {c}\n\n")
-        self._append_md(f"[dim]→ {fn}[/dim]")
+        self._append_dim(f"→ {fn}")
 
 
 async def run_dual_tui(args):
-    # Redirect all logging to a file so it doesn't corrupt the prompt_toolkit TUI display
     root_logger = logging.getLogger()
     for handler in list(root_logger.handlers):
         if isinstance(handler, logging.StreamHandler) and handler.stream in (
@@ -1333,9 +1571,7 @@ async def run_dual_tui(args):
             root_logger.removeHandler(handler)
     if not any(isinstance(h, logging.FileHandler) for h in root_logger.handlers):
         fh = logging.FileHandler("/tmp/crabagent.log", mode="a")
-        fh.setFormatter(
-            logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
-        )
+        fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
         root_logger.addHandler(fh)
 
     logging.getLogger("LiteLLM").setLevel(logging.WARNING)
