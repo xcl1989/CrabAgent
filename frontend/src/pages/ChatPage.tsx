@@ -70,6 +70,7 @@ export default function ChatPage({ onLogout }: Props) {
   const [input, setInput] = useState("");
   const [pendingImages, setPendingImages] = useState<string[]>([]);
   const [agentProfiles, setAgentProfiles] = useState<AgentProfileType[]>([]);
+  const [selectedAgent, setSelectedAgent] = useState("default");
   const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
   const [mcpStatus, setMcpStatus] = useState<McpServerStatus[]>([]);
 
@@ -190,7 +191,13 @@ export default function ChatPage({ onLogout }: Props) {
           text = `[delegate_parallel] tasks=${JSON.stringify(tasksJson)}\n\nOriginal request: ${text}`;
         }
       }
-      await sessionsApi.sendPrompt(activeSession.session_id, text || "请分析这张图片", selectedModel, images.length > 0 ? images : undefined);
+      await sessionsApi.sendPrompt(
+        activeSession.session_id,
+        text || "请分析这张图片",
+        selectedModel,
+        images.length > 0 ? images : undefined,
+        selectedAgent,
+      );
     } catch {
       setSending(false);
     }
@@ -340,6 +347,34 @@ export default function ChatPage({ onLogout }: Props) {
 
             <div className="px-4 pb-4" onDrop={handleDrop} onDragOver={handleDragOver}>
               <AgentBar onAgentClick={handleAgentBarClick} />
+              {agentProfiles.length > 0 && (
+                <div className="mb-2 flex items-center gap-2">
+                  <span className="text-xs" style={{ color: "var(--text-secondary)" }}>Agent:</span>
+                  <select
+                    value={selectedAgent}
+                    onChange={async (e) => {
+                      const agent = e.target.value;
+                      setSelectedAgent(agent);
+                      if (activeSession) {
+                        try {
+                          await sessionsApi.switchAgent(activeSession.session_id, agent);
+                        } catch {
+                          // ignore
+                        }
+                      }
+                    }}
+                    className="text-xs px-2 py-1 rounded outline-none"
+                    style={{ background: "var(--bg-tertiary)", color: "var(--text-primary)", border: "1px solid var(--border)" }}
+                  >
+                    <option value="default">🦀 default (All tools)</option>
+                    {agentProfiles.map((a) => (
+                      <option key={a.name} value={a.name}>
+                        {a.icon || "🤖"} {a.display_name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               {models.length > 0 && (
                 <div className="mb-2 flex items-center gap-2">
                   <span className="text-xs" style={{ color: "var(--text-secondary)" }}>Model:</span>
