@@ -344,23 +344,25 @@ async def get_pipeline_history(
 
     async with async_session_factory() as db:
         pipelines = (
-            await db.execute(
-                select(AgentRun)
-                .where(AgentRun.user_id == user.id, AgentRun.agent_name == "pipeline")
-                .order_by(AgentRun.id.desc())
-                .limit(limit)
+            (
+                await db.execute(
+                    select(AgentRun)
+                    .where(AgentRun.user_id == user.id, AgentRun.agent_name == "pipeline")
+                    .order_by(AgentRun.id.desc())
+                    .limit(limit)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         result = []
         for p in pipelines:
             pd = _run_to_dict(p)
             steps = (
-                await db.execute(
-                    select(AgentRun)
-                    .where(AgentRun.parent_run_id == p.id)
-                    .order_by(AgentRun.id.asc())
-                )
-            ).scalars().all()
+                (await db.execute(select(AgentRun).where(AgentRun.parent_run_id == p.id).order_by(AgentRun.id.asc())))
+                .scalars()
+                .all()
+            )
             pd["steps"] = [_run_to_dict(s) for s in steps]
             result.append(pd)
         return result

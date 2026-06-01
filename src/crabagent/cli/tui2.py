@@ -49,6 +49,7 @@ _PT_STYLE = PtStyle.from_dict(
         "status-bar": "bg:#161b22 #8b949e",
         "status-running": "bg:#161b22 #58a6ff",
         "status-queue": "bg:#161b22 #f0883e",
+        "status-agent": "bg:#161b22 #7ee787",
         "separator": "#30363d",
         "prompt": "bold",
         "selected": "reverse",
@@ -304,6 +305,9 @@ class DualPanelTui(TuiSession):
         if not self.agent_ctx:
             return
 
+        self._full_tool_registry = self.agent_ctx.tool_registry
+        self._full_model = self.agent_ctx.model
+
         self.console = _CapturingConsole(
             self,
             force_terminal=True,
@@ -313,7 +317,7 @@ class DualPanelTui(TuiSession):
 
         self.agent_ctx.event_bus.subscribe(self._on_agent_event)
 
-        self._append_md(f"**CrabAgent v0.7.3**\n\n  workspace: `{self.agent_ctx.workspace}`\n")
+        self._append_md(f"**CrabAgent v0.7.4**\n\n  workspace: `{self.agent_ctx.workspace}`\n")
 
         app = self._build_application()
         self._app = app
@@ -740,6 +744,9 @@ class DualPanelTui(TuiSession):
         model = self.agent_ctx.model or "?"
         provider = self._provider_display
         parts.append(("class:status-bar", f" {provider}/{model}"))
+        agent = self.agent_ctx.metadata.get("_current_agent", "default")
+        if agent != "default":
+            parts.append(("class:status-agent", f" → {agent}"))
         parts.append(("class:status-bar", f"  Msgs:{m}"))
         parts.append(("class:status-bar", f"  Tok:{t}"))
         parts.append(("class:status-bar", f"  Iter:{i}"))
@@ -857,7 +864,11 @@ class DualPanelTui(TuiSession):
                             content = msg.get("content") or ""
                             reasoning = msg.get("reasoning_content") or ""
                             if role == "user" and content:
-                                ansi = _md2a_static(console, f"▶ {content}")
+                                agent_tag = msg.get("agent", "")
+                                if agent_tag and agent_tag != "default":
+                                    ansi = _md2a_static(console, f"▶ [{agent_tag}] {content}")
+                                else:
+                                    ansi = _md2a_static(console, f"▶ {content}")
                                 if ansi:
                                     results.append(lambda a=ansi: self._ansi_segments.append(a))
                             elif role == "assistant":
@@ -1192,7 +1203,7 @@ class DualPanelTui(TuiSession):
                 "/history  Stats\n/model [n]  Switch\n/models  List\n"
                 "/new  New session\n/sessions  List\n/session [id]  Load\n"
                 "/export  export .md\n/provider  Manage\n"
-                "/agents  Agent team\n/delegate [@agent] [task]  Delegate\n"
+                "/agents  Agent team\n/agent [name]  Switch agent\n/delegate [@agent] [task]  Delegate\n"
                 "/agent_stats <name>  Agent stats\n"
                 "/runs  Recent run history\n"
                 "/memory [list|search|clear]  Team memory\n"
@@ -1205,7 +1216,7 @@ class DualPanelTui(TuiSession):
             if self.agent_ctx:
                 self.agent_ctx.messages.clear()
             self._reset_output()
-            self._append_md("**CrabAgent v0.7.3**\n")
+            self._append_md("**CrabAgent v0.7.4**\n")
         elif cmd == "/history":
             if self.agent_ctx:
                 self._append_md(
@@ -1260,6 +1271,12 @@ class DualPanelTui(TuiSession):
 
             _settings.save_last_model(chosen_model)
             self._append_dim(f"Model: {chosen_model}")
+        elif cmd == "/agent":
+            if arg.strip():
+                await self._switch_agent(arg.strip())
+            else:
+                await self._agent_popup()
+            return False
         elif cmd == "/export":
             await self._handle_export()
         elif cmd == "/provider":
@@ -1281,7 +1298,7 @@ class DualPanelTui(TuiSession):
         elif cmd == "/new":
             await self._handle_new_session()
             self._reset_output()
-            self._append_md("**CrabAgent v0.7.3**\n")
+            self._append_md("**CrabAgent v0.7.4**\n")
         elif cmd == "/sessions":
             await self._handle_sessions_popup()
         elif cmd == "/session":
@@ -1463,6 +1480,83 @@ class DualPanelTui(TuiSession):
         else:
             self._append_dim("/agents {list}")
 
+    async def _agent_popup(self):
+        from crabagent.core.agent.agents import load_agent_registry
+
+        agents = await load_agent_registry()
+        items = [("default", "🦀 default (All tools)")]
+        for a in agents:
+            icon = a.get("icon", "") or "🤖"
+            tools_n = len(a.get("tools", []))
+            label = f"{icon} {a['display_name']} ({a['role'][:20]}) [{tools_n} tools]"
+            items.append((a["name"], label))
+
+        async def on_select(name):
+            await self._switch_agent(name)
+
+        self._selection_popup.show("Select Agent", items, on_select)
+
+    async def _switch_agent(self, name: str):
+        if not self.agent_ctx:
+            return
+
+        current = self.agent_ctx.metadata.get("_current_agent", "default")
+        if name == current:
+            self._append_dim(f"Already using {name}")
+            return
+
+        try:
+            if name == "default":
+                self.agent_ctx.tool_registry = self._full_tool_registry
+                self.agent_ctx.current_agent = "default"
+                self.agent_ctx.metadata["_current_agent"] = "default"
+                if self._full_model:
+                    self.agent_ctx.model = self._full_model
+                self.agent_ctx.messages.append(
+                    {
+                        "role": "user",
+                        "content": "[Agent Switch] Back to default — all tools restored.",
+                        "agent": "default",
+                    }
+                )
+                self._append_dim("Agent: default (all tools)")
+            else:
+                from crabagent.core.agent.agents import get_agent
+
+                agent = await get_agent(name)
+                if not agent:
+                    self._append_dim(f"Agent '{name}' not found")
+                    return
+
+                from crabagent.core.agent.agent_switch import filter_tool_registry
+
+                filtered = filter_tool_registry(self._full_tool_registry, agent.get("tools"))
+                self.agent_ctx.tool_registry = filtered
+                if agent.get("model"):
+                    self.agent_ctx.model = agent["model"]
+
+                self.agent_ctx.current_agent = name
+                self.agent_ctx.metadata["_current_agent"] = name
+
+                from crabagent.core.agent.agents import build_agent_switch_msg
+
+                self.agent_ctx.messages.append(build_agent_switch_msg(agent))
+                icon = agent.get("icon", "")
+                tool_n = len(agent.get("tools", []))
+                extra = f" | Model: {agent['model']}" if agent.get("model") else ""
+                self._append_dim(f"Agent: {icon} {agent['display_name']} ({tool_n} tools){extra}")
+
+            if self._conversation_id:
+                from crabagent.core.database import async_session_factory
+                from crabagent.serve.services.conversation import update_conversation
+
+                async with async_session_factory() as db:
+                    await update_conversation(db, self._session_id_str, agent=name)
+        except Exception as e:
+            self._append_dim(f"Switch failed: {e}")
+
+        self._invalidate()
+
     async def _handle_sessions_popup(self):
         if getattr(self.args, "no_persist", False):
             self._append_dim("Persistence disabled.")
@@ -1511,6 +1605,9 @@ class DualPanelTui(TuiSession):
             self.agent_ctx.metadata["branch_id"] = "main"
             if cv.model:
                 self.agent_ctx.model = cv.model
+            if cv.agent:
+                self.agent_ctx.current_agent = cv.agent
+                self.agent_ctx.metadata["_current_agent"] = cv.agent
             await self._replace_persistence_listener()
         self._reset_output()
         self._append_dim(f"Loaded session {cv.session_id[:8]} ({len(hist)} messages)")

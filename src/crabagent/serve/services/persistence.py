@@ -65,6 +65,7 @@ class PersistenceListener:
                 "name": name,
                 "reasoning_content": reasoning_content,
                 "branch_id": self.branch_id,
+                "agent": msg.get("agent", "default"),
             }
         )
         self._schedule_flush()

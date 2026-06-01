@@ -32,6 +32,7 @@ SLASH_COMMANDS = [
     "/models",
     "/provider",
     "/agents",
+    "/agent",
     "/agent_stats",
     "/delegate",
     "/memory",
@@ -465,7 +466,7 @@ class TuiSession:
 
     def _print_banner(self):
         self.console.print(
-            f"[bold]CrabAgent v0.7.3[/bold]\n"
+            f"[bold]CrabAgent v0.7.4[/bold]\n"
             f"  provider: {self._provider_display}  "
             f"model: {self.agent_ctx.model or 'default'}\n"
             f"  workspace: {self.agent_ctx.workspace}\n"
@@ -1440,8 +1441,11 @@ class TuiSession:
         from crabagent.serve.services.message import save_message
 
         seq = len(self.agent_ctx.messages) + 1
+        agent = self.agent_ctx.metadata.get("_current_agent", "default") if self.agent_ctx else "default"
         async with async_session_factory() as db:
-            await save_message(db, conversation_id=self._conversation_id, sequence=seq, role="user", content=ui)
+            await save_message(
+                db, conversation_id=self._conversation_id, sequence=seq, role="user", content=ui, agent=agent
+            )
         if self._state.get("fm", [True])[0]:
             self._state["fm"][0] = False
             from crabagent.serve.services.conversation import update_conversation

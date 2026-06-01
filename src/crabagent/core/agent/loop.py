@@ -43,7 +43,7 @@ async def run_agent(
     context: AgentContext,
     query: str | list[dict],
 ) -> list[dict]:
-    context.messages.append({"role": "user", "content": query})
+    context.messages.append({"role": "user", "content": query, "agent": context.current_agent})
 
     provider = await _resolve_provider(context.provider_name)
     llm = _litellm_params(provider)
@@ -147,6 +147,8 @@ async def run_agent(
             if reasoning_text:
                 assistant_msg["reasoning_content"] = reasoning_text
 
+            assistant_msg["agent"] = context.current_agent
+
             if reasoning_text:
                 await context.event_bus.emit(AgentEvent(type=EventType.THINKING_DONE, data={"text": reasoning_text}))
 
@@ -222,6 +224,7 @@ async def run_agent(
                     "role": "tool",
                     "content": result,
                     "tool_call_id": meta["tc"]["id"],
+                    "agent": context.current_agent,
                 }
                 context.messages.append(tool_msg)
 
@@ -263,6 +266,7 @@ async def _grace_call(context: AgentContext, llm: dict, model: str):
                     "You have exhausted your iteration budget. "
                     "Please summarize what you've done and any remaining steps."
                 ),
+                "agent": context.current_agent,
             }
         )
         response = await litellm.acompletion(
@@ -275,7 +279,7 @@ async def _grace_call(context: AgentContext, llm: dict, model: str):
         _gelapsed = time.time() - _g0
         if _gelapsed > 5:
             logger.info("_grace_call took %.1fs", _gelapsed)
-        context.messages.append({"role": "assistant", "content": content})
+        context.messages.append({"role": "assistant", "content": content, "agent": context.current_agent})
         await context.event_bus.emit(AgentEvent(type=EventType.TEXT_DONE, data={"text": content}))
     except Exception as e:
         logger.error(f"Grace call failed: {e}")

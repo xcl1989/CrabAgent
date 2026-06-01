@@ -74,6 +74,31 @@ _DELEGATION_TOOLS = {
 }
 
 
+def get_memory_tools() -> set[str]:
+    return _MEMORY_TOOLS
+
+
+def get_shared_tools() -> set[str]:
+    return _SHARED_TOOLS
+
+
+def get_delegation_tools() -> set[str]:
+    return _DELEGATION_TOOLS
+
+
+def build_agent_switch_msg(agent_def: dict) -> dict:
+    icon = agent_def.get("icon", "")
+    lines = [
+        f"[Agent Switch] You are now acting as {icon} **{agent_def['display_name']}**.",
+        f"Role: {agent_def['role']}",
+        f"Goal: {agent_def['goal']}",
+    ]
+    if agent_def.get("backstory"):
+        lines.append(f"Background: {agent_def['backstory']}")
+    lines.append("Use only the tools available to you for this role. Respond accordingly.")
+    return {"role": "user", "content": "\n".join(lines), "agent": agent_def["name"]}
+
+
 def _build_system_prompt(
     agent_def: dict,
     has_shared: bool = False,

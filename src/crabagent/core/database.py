@@ -57,6 +57,7 @@ class Conversation(Base):
     model: Mapped[str] = mapped_column(String(200), default="")
     tokens: Mapped[int] = mapped_column(Integer, default=0)
     active_branch: Mapped[str] = mapped_column(String(32), default="main")
+    agent: Mapped[str] = mapped_column(String(100), default="default")
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
@@ -75,6 +76,7 @@ class Message(Base):
     reasoning_content: Mapped[str] = mapped_column(Text, nullable=True)
     parent_id: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
     branch_id: Mapped[str] = mapped_column(String(32), default="main")
+    agent: Mapped[str] = mapped_column(String(100), default="default")
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
 
 
@@ -309,6 +311,8 @@ async def init_db() -> None:
             await conn.execute(text("ALTER TABLE conversations ADD COLUMN tokens INTEGER DEFAULT 0"))
         if "active_branch" not in columns:
             await conn.execute(text("ALTER TABLE conversations ADD COLUMN active_branch VARCHAR(32) DEFAULT 'main'"))
+        if "agent" not in columns:
+            await conn.execute(text("ALTER TABLE conversations ADD COLUMN agent VARCHAR(100) DEFAULT 'default'"))
 
         result = await conn.execute(text("PRAGMA table_info(messages)"))
         columns = [row[1] for row in result.fetchall()]
@@ -316,6 +320,8 @@ async def init_db() -> None:
             await conn.execute(text("ALTER TABLE messages ADD COLUMN parent_id INTEGER DEFAULT NULL"))
         if "branch_id" not in columns:
             await conn.execute(text("ALTER TABLE messages ADD COLUMN branch_id VARCHAR(32) DEFAULT 'main'"))
+        if "agent" not in columns:
+            await conn.execute(text("ALTER TABLE messages ADD COLUMN agent VARCHAR(100) DEFAULT 'default'"))
 
         result = await conn.execute(text("PRAGMA table_info(molts)"))
         columns = [row[1] for row in result.fetchall()]

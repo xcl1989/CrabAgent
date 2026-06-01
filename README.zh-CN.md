@@ -103,6 +103,26 @@ Agent 不只是执行任务，**每次执行都会学习成长**。
 - `delegate_parallel` 多 Agent 并行执行
 - `run_pipeline` 串联多个 Agent 按依赖执行
 
+### 会话内 Agent 切换
+
+在会话中途切换当前 Agent 身份，不丢失对话历史：
+
+```bash
+# TUI
+/agent                  # 弹窗选择 5 个 Agent
+/agent researcher       # 直接切换
+/agent default          # 恢复全部工具
+
+# Web API
+POST /api/sessions/{id}/agent  {"agent": "researcher"}
+```
+
+- 每个 Agent 有不同工具集（researcher 有 web 工具，coder 有 bash+edit 等）
+- System prompt 不变 — **LLM KV 缓存不失效**
+- 所有消息自动标记 Agent 信息，历史可追溯
+- Model 跟随 Agent 画像自动切换
+- 状态栏实时显示当前 Agent：`[deepseek/chat → researcher] Msgs:5 Tok:1234`
+
 ### 实时监控
 
 - 🟣 **运行中** — 实时步骤计数和计时
@@ -138,6 +158,7 @@ Agent 不只是执行任务，**每次执行都会学习成长**。
 修改文件前自动拍照，`/molt rollback <id>` 即可回滚。
 
 ### 🔧 自定义插件
+
 在 `.crabagent/tools/` 下放 `.py` 文件即可：
 
 ```python
@@ -149,6 +170,15 @@ requires_permission = False
 def run(name: str) -> str:
     return f"你好，{name}！"
 ```
+
+**或者让 Agent 自己写工具** — AI 可以在会话中帮你编写和注册自定义工具。只需告诉它你需要什么：
+
+```
+> 创建一个解析 CSV 文件并提取某列的工具
+> 创建一个查询城市天气的工具
+```
+
+工具自动存入 `.crabagent/tools/`，即时注册，跨会话持久化。Agent 会通过团队记忆记住自己创建的工具。
 
 ---
 
@@ -165,6 +195,7 @@ def run(name: str) -> str:
 | `/sessions` / `/session [id]` | 列出 / 加载会话 |
 | `/new` | 新会话 |
 | `/agents [cmd]` | Agent 团队管理 |
+| `/agent [name]` | 切换当前 Agent |
 | `/agent_stats <name>` | Agent 成长统计 |
 | `/delegate [@agent] [task]` | 委派任务 |
 | `/memory [list\|search\|clear]` | 团队记忆 |
@@ -190,6 +221,13 @@ def run(name: str) -> str:
 | `CRAB_MAX_TOKENS` | `4096` | 最大响应 Token 数 |
 | `CRAB_BROWSER_HEADLESS` | `true` | 浏览器无头模式 |
 | `CRAB_WEB_PROXY` | （空） | web_search / web_scrape 的 HTTP 代理 |
+
+**v0.7.4 更新亮点**
+
+- 🔄 **会话内 Agent 切换** — 通过 `/agent`（TUI）或 API 在中途切换当前 Agent 身份。不同 Agent 有不同工具集，消息自动标记 Agent 信息用于历史追踪。
+- 🛠️ **Agent 自创工具** — Agent 可通过 `create_tool`/`update_tool`/`delete_tool` 自己编写和注册可复用工具。代码即时验证、存入 `.crabagent/tools/`、自动跨会话加载。
+- 🐛 **TUI 队列与历史修复** — 修复排队输入在渲染未完成时就发出的竞态条件。修复带排队消息的会话加载时 DB 消息顺序错乱问题。
+- 🔤 **TUI CJK 与 Thinking 修复** — 修复双面板 TUI 中 CJK 字符渲染卡死。修复 Thinking 文本显示 bug（off-by-one、缓存遗漏、flush 丢失前缀）。
 
 **v0.7.2 更新亮点**
 - 🖥️ **双面板 TUI** — 全新基于 prompt_toolkit 的全屏 TUI：可滚动输出区域（鼠标滚轮 + PageUp/Down/Home/End）、自适应高度的输入框、实时状态栏。默认模式（`crabagent`），`--old` 回退旧版。

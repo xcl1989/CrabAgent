@@ -20,6 +20,7 @@ async def save_message(
     reasoning_content: str | None = None,
     branch_id: str = "main",
     parent_id: int | None = None,
+    agent: str = "default",
 ) -> Message:
     msg = Message(
         conversation_id=conversation_id,
@@ -32,6 +33,7 @@ async def save_message(
         reasoning_content=reasoning_content,
         branch_id=branch_id,
         parent_id=parent_id,
+        agent=agent,
     )
     db.add(msg)
     await db.commit()

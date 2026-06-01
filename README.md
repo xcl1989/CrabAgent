@@ -104,6 +104,26 @@ Sub-agent completes task
 - `delegate_parallel` runs multiple agents simultaneously
 - `run_pipeline` chains agents with dependencies
 
+### Session Agent Switching
+
+Switch your current agent identity mid-session without losing conversation history:
+
+```bash
+# TUI
+/agent                  # Popup menu: select from 5 agents
+/agent researcher       # Direct switch
+/agent default          # Back to all tools
+
+# Web API
+POST /api/sessions/{id}/agent  {"agent": "researcher"}
+```
+
+- Each agent has different tool sets (researcher gets web tools, coder gets bash+edit, etc.)
+- System prompt stays unchanged — **LLM KV cache preserved** across switches
+- All messages are tagged with agent info for history tracking
+- Model auto-switches if the agent profile specifies one
+- Status bar shows current agent: `[deepseek/chat → researcher] Msgs:5 Tok:1234`
+
 ### Real-time monitoring
 
 - 🟣 **Running** — live step count and timer
@@ -139,6 +159,7 @@ Connect external MCP servers (stdio + HTTP). Tools auto-discover.
 Auto-snapshot before file changes. Roll back with `/molt rollback <id>`.
 
 ### 🔧 Custom Plugins
+
 Drop a `.py` file in `.crabagent/tools/`:
 
 ```python
@@ -150,6 +171,15 @@ requires_permission = False
 def run(name: str) -> str:
     return f"Hello, {name}!"
 ```
+
+**Or let agents create tools themselves** — Your agent can write and register custom tools during a session. Tell it what you need and it will generate, validate, and save the tool:
+
+```
+> Create a tool that parses CSV files and extracts a column
+> Create a tool to fetch weather for a city
+```
+
+Tools are saved to `.crabagent/tools/`, auto-registered, and persist across sessions. The agent remembers its created tools via team memory.
 
 ---
 
@@ -166,6 +196,7 @@ def run(name: str) -> str:
 | `/sessions` / `/session [id]` | List / load sessions |
 | `/new` | New conversation |
 | `/agents [cmd]` | Agent team management |
+| `/agent [name]` | Switch current agent |
 | `/agent_stats <name>` | Agent growth stats |
 | `/delegate [@agent] [task]` | Delegate task |
 | `/memory [list\|search\|clear]` | Team memory |
@@ -191,6 +222,13 @@ def run(name: str) -> str:
 | `CRAB_MAX_TOKENS` | `4096` | Max response tokens |
 | `CRAB_BROWSER_HEADLESS` | `true` | Browser headless mode |
 | `CRAB_WEB_PROXY` | (empty) | HTTP proxy for web_search & web_scrape |
+
+**v0.7.4 Highlights**
+
+- 🔄 **Session Agent Switching** — Switch agent identity mid-session with `/agent` (TUI) or `POST /api/sessions/{id}/agent` (API). Each agent has different tool sets, and messages are tagged with agent info for history tracking.
+- 🛠️ **Agent-Created Custom Tools** — Agents can now write and register their own reusable tools via `create_tool`/`update_tool`/`delete_tool`. Code is validated, saved to `.crabagent/tools/`, registered immediately, and auto-loads across sessions.
+- 🐛 **TUI Queue & History Fixes** — Fixed race condition where queued inputs were sent before previous rendering completed. Fixed message ordering in DB when loading sessions with queued messages via persistence flush improvements.
+- 🔤 **TUI CJK & Thinking Fixes** — Fixed CJK character rendering freeze in dual-panel TUI. Fixed thinking text display bugs (off-by-one, cache miss on content update, prefix loss on flush).
 
 **v0.7.2 Highlights**
 - 🖥️ **Dual-Panel TUI** — New prompt_toolkit-based full-screen TUI: scrollable output panel (mouse wheel + PageUp/Down/Home/End), persistent input area that auto-grows with content, and real-time status bar. Default mode (`crabagent`), use `--old` for legacy TUI.

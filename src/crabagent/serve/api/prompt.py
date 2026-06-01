@@ -78,6 +78,7 @@ class PromptRequest(BaseModel):
     model: str | None = None
     provider: str | None = None
     images: list[str] | None = None
+    agent: str | None = None
 
 
 @router.post("/sessions/{session_id}/prompt", status_code=status.HTTP_202_ACCEPTED)
@@ -195,6 +196,25 @@ async def prompt_async(
     context.metadata["session_id"] = session_id
     context.metadata["branch_id"] = active_branch
     context.metadata["user_id"] = user.id
+
+    effective_agent = req.agent or getattr(conv, "agent", None) or "default"
+    context.current_agent = effective_agent
+    context.metadata["_current_agent"] = effective_agent
+
+    if effective_agent != "default":
+        from crabagent.core.agent.agent_switch import filter_tool_registry
+        from crabagent.core.agent.agents import build_agent_switch_msg, get_agent
+
+        agent_def = await get_agent(effective_agent)
+        if agent_def:
+            context.tool_registry = filter_tool_registry(context.tool_registry, agent_def.get("tools"))
+            if agent_def.get("model"):
+                context.model = agent_def["model"]
+            context.messages.append(build_agent_switch_msg(agent_def))
+            try:
+                await conv_svc.update_conversation(db, session_id, agent=effective_agent)
+            except Exception:
+                pass
 
     for msg_record in history_msgs:
         if msg_record.role == "stats":

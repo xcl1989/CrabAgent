@@ -19,6 +19,7 @@ class AgentContext:
     max_iterations: int = 50
     model: str | None = None
     provider_name: str | None = None
+    current_agent: str = "default"
     system_prompt: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     total_tokens: int = 0
