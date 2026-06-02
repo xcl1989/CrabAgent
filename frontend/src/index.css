@@ -1,77 +1,442 @@
 @import "tailwindcss";
 
-:root {
-  --bg-primary: #0d1117;
-  --bg-secondary: #161b22;
-  --bg-tertiary: #21262d;
-  --bg-elevated: #30363d;
-  --text-primary: #e6edf3;
-  --text-secondary: #8b949e;
-  --text-tertiary: #6e7681;
-  --border: #30363d;
-  --accent: #58a6ff;
-  --accent-bg: rgba(88, 166, 255, 0.1);
-  --accent-hover: #79c0ff;
-  --accent-2: #a371f7;
-  --accent-2-bg: rgba(163, 113, 247, 0.1);
-  --accent-2-hover: #bc8cff;
-  --success: #3fb950;
-  --success-bg: rgba(63, 185, 80, 0.1);
-  --success-border: rgba(63, 185, 80, 0.25);
-  --warning: #d29922;
-  --warning-bg: rgba(210, 153, 34, 0.1);
-  --danger: #f85149;
-  --danger-bg: rgba(248, 81, 73, 0.1);
-  --danger-border: rgba(248, 81, 73, 0.25);
-  --overlay: rgba(0, 0, 0, 0.7);
+/* =========================================================================
+   CrabAgent Design System
+   - Claude/Cursor-inspired warm palette
+   - Dual theme: light + dark via [data-theme] attribute
+   - All components should reference these tokens, NOT raw hex
+   ========================================================================= */
+
+:root,
+[data-theme="dark"] {
+  /* Surfaces — warm dark */
+  --bg-primary: #1a1814;        /* app background */
+  --bg-secondary: #252320;      /* cards, sidebar, modal */
+  --bg-tertiary: #33302b;       /* inputs, hover, elevated */
+  --bg-elevated: #3d3a35;       /* popovers, tooltips */
+  --bg-overlay: rgba(0, 0, 0, 0.6);
+
+  /* Text */
+  --text-primary: #f5f1e8;
+  --text-secondary: #b8b0a0;
+  --text-tertiary: #8a8275;
   --text-on-accent: #ffffff;
-  --glow-accent: 0 0 12px rgba(88, 166, 255, 0.15);
-  --glow-accent-2: 0 0 12px rgba(163, 113, 247, 0.15);
+  --text-on-brand: #ffffff;
+
+  /* Borders */
+  --border: #3d3a35;
+  --border-subtle: #2e2c28;
+  --border-strong: #4d4a44;
+
+  /* Brand — Claude orange */
+  --brand: #d97757;
+  --brand-hover: #e88563;
+  --brand-active: #c46843;
+  --brand-bg: rgba(217, 119, 87, 0.12);
+  --brand-bg-strong: rgba(217, 119, 87, 0.22);
+  --brand-border: rgba(217, 119, 87, 0.35);
+
+  /* Accents */
+  --accent: #6ba0d8;            /* blue */
+  --accent-hover: #82b3e8;
+  --accent-bg: rgba(107, 160, 216, 0.12);
+  --accent-border: rgba(107, 160, 216, 0.3);
+  --accent-2: #b794e0;          /* purple */
+  --accent-2-hover: #c7a8eb;
+  --accent-2-bg: rgba(183, 148, 224, 0.12);
+
+  /* Semantic */
+  --success: #6ec07a;
+  --success-bg: rgba(110, 192, 122, 0.12);
+  --success-border: rgba(110, 192, 122, 0.3);
+  --warning: #e0b860;
+  --warning-bg: rgba(224, 184, 96, 0.12);
+  --warning-border: rgba(224, 184, 96, 0.3);
+  --danger: #ef6b6b;
+  --danger-hover: #f58585;
+  --danger-bg: rgba(239, 107, 107, 0.12);
+  --danger-border: rgba(239, 107, 107, 0.3);
+
+  /* Per-agent theme colors (used by dashboard / chips / charts) */
+  --agent-researcher: #6ba0d8;
+  --agent-researcher-bg: rgba(107, 160, 216, 0.12);
+  --agent-analyst: #b794e0;
+  --agent-analyst-bg: rgba(183, 148, 224, 0.12);
+  --agent-coder: #6ec07a;
+  --agent-coder-bg: rgba(110, 192, 122, 0.12);
+  --agent-writer: #e0a868;
+  --agent-writer-bg: rgba(224, 168, 104, 0.12);
+
+  /* Code block */
+  --code-bg: #14120f;
+  --code-border: #2e2c28;
+
+  /* Shadows & glows */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.5);
+  --shadow-glow-brand: 0 0 24px rgba(217, 119, 87, 0.18);
+  --shadow-glow-accent: 0 0 24px rgba(107, 160, 216, 0.15);
+  --shadow-inset: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+
+  /* Focus ring */
+  --focus-ring: 0 0 0 2px var(--bg-primary), 0 0 0 4px var(--brand);
+}
+
+[data-theme="light"] {
+  /* Surfaces — warm cream */
+  --bg-primary: #faf7f2;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #f0ebe2;
+  --bg-elevated: #e6dfd2;
+  --bg-overlay: rgba(45, 35, 25, 0.4);
+
+  --text-primary: #1f1c17;
+  --text-secondary: #6b6358;
+  --text-tertiary: #948a7a;
+  --text-on-accent: #ffffff;
+  --text-on-brand: #ffffff;
+
+  --border: #e0d8c8;
+  --border-subtle: #ece5d5;
+  --border-strong: #c9bfa9;
+
+  --brand: #c46a47;
+  --brand-hover: #d97757;
+  --brand-active: #b35c3c;
+  --brand-bg: rgba(196, 106, 71, 0.08);
+  --brand-bg-strong: rgba(196, 106, 71, 0.15);
+  --brand-border: rgba(196, 106, 71, 0.25);
+
+  --accent: #4a82b8;
+  --accent-hover: #5a95c9;
+  --accent-bg: rgba(74, 130, 184, 0.08);
+  --accent-border: rgba(74, 130, 184, 0.25);
+  --accent-2: #8b6db8;
+  --accent-2-hover: #9d80c8;
+  --accent-2-bg: rgba(139, 109, 184, 0.08);
+
+  --success: #4d9659;
+  --success-bg: rgba(77, 150, 89, 0.1);
+  --success-border: rgba(77, 150, 89, 0.25);
+  --warning: #b88a30;
+  --warning-bg: rgba(184, 138, 48, 0.1);
+  --warning-border: rgba(184, 138, 48, 0.25);
+  --danger: #c8504e;
+  --danger-hover: #d66462;
+  --danger-bg: rgba(200, 80, 78, 0.08);
+  --danger-border: rgba(200, 80, 78, 0.25);
+
+  --agent-researcher: #4a82b8;
+  --agent-researcher-bg: rgba(74, 130, 184, 0.08);
+  --agent-analyst: #8b6db8;
+  --agent-analyst-bg: rgba(139, 109, 184, 0.08);
+  --agent-coder: #4d9659;
+  --agent-coder-bg: rgba(77, 150, 89, 0.08);
+  --agent-writer: #c48a45;
+  --agent-writer-bg: rgba(196, 138, 69, 0.08);
+
+  --code-bg: #f5f0e5;
+  --code-border: #e0d8c8;
+
+  --shadow-sm: 0 1px 2px rgba(45, 35, 25, 0.06);
+  --shadow-md: 0 4px 12px rgba(45, 35, 25, 0.08);
+  --shadow-lg: 0 12px 40px rgba(45, 35, 25, 0.12);
+  --shadow-glow-brand: 0 0 24px rgba(196, 106, 71, 0.15);
+  --shadow-glow-accent: 0 0 24px rgba(74, 130, 184, 0.12);
+  --shadow-inset: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+
+  --focus-ring: 0 0 0 2px var(--bg-primary), 0 0 0 4px var(--brand);
+}
+
+/* =========================================================================
+   Base
+   ========================================================================= */
+
+@font-face {
+  font-family: "Inter Fallback";
+  src: local("Inter"), local("PingFang SC"), local("Microsoft YaHei");
+  font-display: swap;
+}
+
+:root {
+  color-scheme: dark;
+}
+[data-theme="light"] {
+  color-scheme: light;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
 }
 
 body {
-  margin: 0;
   background: var(--bg-primary);
   color: var(--text-primary);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family: "Inter", "Inter Fallback", -apple-system, BlinkMacSystemFont,
+    "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-feature-settings: "cv11", "ss01", "ss03";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-size: 14px;
+  line-height: 1.55;
 }
 
 * {
   box-sizing: border-box;
 }
 
+/* Headings */
+h1, h2, h3, h4, h5, h6 {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+/* Links */
+a {
+  color: var(--accent);
+  text-decoration: none;
+  transition: color 120ms ease;
+}
+a:hover {
+  color: var(--accent-hover);
+}
+
+/* Selection */
+::selection {
+  background: var(--brand-bg-strong);
+  color: var(--text-primary);
+}
+
+/* =========================================================================
+   Scrollbar
+   ========================================================================= */
+
 ::-webkit-scrollbar {
-  width: 6px;
+  width: 8px;
+  height: 8px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
   background: var(--border);
-  border-radius: 3px;
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--border-strong);
+  background-clip: content-box;
+  border: 2px solid transparent;
 }
 
-pre {
-  margin: 0;
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
 }
 
-pre code {
-  display: block;
-  padding: 12px 16px;
-  border-radius: 8px;
-  background: var(--bg-primary) !important;
-  font-size: 13px;
-  line-height: 1.5;
-  overflow-x: auto;
+/* =========================================================================
+   Focus-visible — global keyboard accessibility
+   ========================================================================= */
+
+:focus {
+  outline: none;
 }
+:focus-visible {
+  box-shadow: var(--focus-ring);
+  border-radius: 6px;
+}
+
+/* =========================================================================
+   Code blocks (rehype-highlight)
+   ========================================================================= */
 
 code {
-  font-family: "SF Mono", "Fira Code", "JetBrains Mono", monospace;
+  font-family: "JetBrains Mono", "SF Mono", "Fira Code", "Menlo", monospace;
+  font-size: 0.9em;
 }
 
 :not(pre) > code {
   padding: 2px 6px;
   border-radius: 4px;
   background: var(--bg-tertiary);
-  font-size: 0.9em;
+  color: var(--text-primary);
+  border: 1px solid var(--border-subtle);
+}
+
+pre {
+  margin: 0;
+  font-family: "JetBrains Mono", "SF Mono", "Fira Code", "Menlo", monospace;
+}
+
+pre code {
+  display: block;
+  padding: 14px 16px;
+  border-radius: 10px;
+  background: var(--code-bg);
+  border: 1px solid var(--code-border);
+  font-size: 13px;
+  line-height: 1.6;
+  overflow-x: auto;
+  color: var(--text-primary);
+}
+
+/* highlight.js — minimal warm theme that adapts to light/dark via tokens */
+.hljs-comment, .hljs-quote { color: var(--text-tertiary); font-style: italic; }
+.hljs-keyword, .hljs-selector-tag, .hljs-built_in, .hljs-name, .hljs-tag {
+  color: var(--accent-2);
+}
+.hljs-string, .hljs-title, .hljs-section, .hljs-attribute, .hljs-literal,
+.hljs-template-tag, .hljs-template-variable, .hljs-type, .hljs-addition {
+  color: var(--success);
+}
+.hljs-number, .hljs-symbol, .hljs-bullet, .hljs-meta, .hljs-link, .hljs-deletion {
+  color: var(--agent-writer);
+}
+.hljs-function, .hljs-class .hljs-title, .hljs-title.class_, .hljs-title.function_ {
+  color: var(--brand);
+}
+.hljs-params, .hljs-variable {
+  color: var(--text-primary);
+}
+.hljs-emphasis { font-style: italic; }
+.hljs-strong { font-weight: 600; }
+
+/* =========================================================================
+   Markdown body (used inside chat messages)
+   ========================================================================= */
+
+.markdown-body {
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--text-primary);
+  word-wrap: break-word;
+}
+.markdown-body > *:first-child { margin-top: 0; }
+.markdown-body > *:last-child { margin-bottom: 0; }
+.markdown-body p { margin: 0.6em 0; }
+.markdown-body h1, .markdown-body h2, .markdown-body h3,
+.markdown-body h4, .markdown-body h5, .markdown-body h6 {
+  margin: 1.2em 0 0.6em;
+  font-weight: 600;
+}
+.markdown-body h1 { font-size: 1.5em; }
+.markdown-body h2 { font-size: 1.3em; }
+.markdown-body h3 { font-size: 1.15em; }
+.markdown-body h4 { font-size: 1em; }
+.markdown-body ul, .markdown-body ol {
+  margin: 0.6em 0;
+  padding-left: 1.6em;
+}
+.markdown-body li { margin: 0.25em 0; }
+.markdown-body li > p { margin: 0.25em 0; }
+.markdown-body blockquote {
+  margin: 0.8em 0;
+  padding: 0.4em 1em;
+  border-left: 3px solid var(--brand-border);
+  background: var(--brand-bg);
+  color: var(--text-secondary);
+  border-radius: 0 6px 6px 0;
+}
+.markdown-body hr {
+  margin: 1.4em 0;
+  border: none;
+  border-top: 1px solid var(--border);
+}
+.markdown-body table {
+  margin: 0.8em 0;
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 13px;
+}
+.markdown-body th, .markdown-body td {
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  text-align: left;
+}
+.markdown-body th {
+  background: var(--bg-tertiary);
+  font-weight: 600;
+}
+.markdown-body a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.markdown-body img {
+  max-width: 100%;
+  border-radius: 8px;
+  cursor: zoom-in;
+}
+
+/* =========================================================================
+   Animations
+   ========================================================================= */
+
+@keyframes pulse-soft {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+@keyframes blink-caret {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes scale-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.animate-fade-in { animation: fade-in 200ms ease-out both; }
+.animate-slide-up { animation: slide-up 240ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+.animate-scale-in { animation: scale-in 180ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+.animate-blink-caret { animation: blink-caret 1s steps(2, end) infinite; }
+
+/* =========================================================================
+   Utility: caret (streaming indicator)
+   ========================================================================= */
+
+.streaming-caret::after {
+  content: "▍";
+  display: inline-block;
+  margin-left: 2px;
+  color: var(--brand);
+  animation: blink-caret 1s steps(2, end) infinite;
+  vertical-align: baseline;
+}
+
+/* =========================================================================
+   User chat bubble — brand orange gradient
+   ========================================================================= */
+
+.chat-bubble-user {
+  background: linear-gradient(135deg, var(--brand) 0%, var(--brand-active) 100%);
+  color: var(--text-on-brand);
+  border-radius: 16px 16px 4px 16px;
+  padding: 10px 14px;
+  box-shadow: var(--shadow-sm);
+  align-self: flex-end;
+  max-width: min(720px, 80%);
+  word-wrap: break-word;
+}
+[data-theme="light"] .chat-bubble-user {
+  background: linear-gradient(135deg, var(--brand) 0%, var(--brand-active) 100%);
 }
