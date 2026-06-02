@@ -1,11 +1,33 @@
 import { useEffect, useState, useRef } from "react";
-import { listNotifications, unreadCount, markRead, markAllRead, Notification } from "../api/notifications";
+import { Bell } from "lucide-react";
+import {
+  listNotifications,
+  unreadCount,
+  markRead,
+  markAllRead,
+  Notification,
+} from "../api/notifications";
+import { cn } from "../lib/cn";
 
 interface Props {
   onSwitchSession: (sessionId: string) => void;
 }
 
 type Tab = "unread" | "read";
+
+function relativeTime(d: string | null | undefined): string {
+  if (!d) return "";
+  const date = new Date(d);
+  const diff = Date.now() - date.getTime();
+  const minutes = Math.floor(diff / 60000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return date.toLocaleDateString();
+}
 
 export function NotificationBell({ onSwitchSession }: Props) {
   const [count, setCount] = useState(0);
@@ -18,14 +40,17 @@ export function NotificationBell({ onSwitchSession }: Props) {
     try {
       const res = await unreadCount();
       setCount(res.count);
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   };
 
   const fetchList = async () => {
     try {
-      const list = await listNotifications();
-      setNotifications(list);
-    } catch { /* ignore */ }
+      setNotifications(await listNotifications());
+    } catch {
+      /* ignore */
+    }
   };
 
   useEffect(() => {
@@ -39,8 +64,17 @@ export function NotificationBell({ onSwitchSession }: Props) {
     const handler = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     };
-    if (open) document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    if (open) {
+      document.addEventListener("mousedown", handler);
+      document.addEventListener("keydown", onKey);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handler);
+      document.removeEventListener("keydown", onKey);
+    };
   }, [open]);
 
   const handleClick = async (n: Notification) => {
@@ -63,91 +97,113 @@ export function NotificationBell({ onSwitchSession }: Props) {
   const displayItems = tab === "unread" ? unreadItems : readItems;
 
   return (
-    <div ref={ref} className="relative" style={{ zIndex: 50 }}>
+    <div ref={ref} className="relative">
       <button
-        onClick={() => setOpen(!open)}
-        className="relative p-1.5 rounded hover:opacity-80 transition-opacity"
-        style={{ background: "transparent" }}
+        onClick={() => setOpen((v) => !v)}
+        className={cn(
+          "relative p-1.5 rounded-lg transition-colors",
+          "text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)]",
+        )}
         title="Notifications"
+        aria-label={`Notifications${count > 0 ? ` (${count} unread)` : ""}`}
       >
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
-          <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
-        </svg>
+        <Bell size={15} />
         {count > 0 && (
           <span
-            className="absolute -top-0.5 -right-0.5 text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center"
-            style={{ background: "#ef4444", color: "#fff" }}
-          >
+            className="absolute -top-0.5 -right-0.5 text-[9px] font-bold min-w-[16px] h-4 px-1 rounded-full flex items-center justify-center bg-[var(--danger)] text-white animate-scale-in">
             {count > 9 ? "9+" : count}
           </span>
         )}
       </button>
       {open && (
         <div
-          className="absolute right-0 top-full mt-1 w-80 rounded-xl shadow-2xl flex flex-col"
-          style={{ background: "var(--bg-primary)", border: "1px solid var(--border)", maxHeight: "420px" }}
+          className={cn(
+            "absolute right-0 top-full mt-1 w-80 rounded-xl flex flex-col z-50",
+            "bg-[var(--bg-elevated)] border border-[var(--border)]",
+            "shadow-[var(--shadow-lg)] animate-scale-in origin-top-right",
+          )}
+          style={{ maxHeight: "440px" }}
         >
-          <div className="flex items-center shrink-0" style={{ borderBottom: "1px solid var(--border)" }}>
+          <div className="flex items-center shrink-0 border-b border-[var(--border-subtle)]">
             {(["unread", "read"] as Tab[]).map((t) => {
               const isActive = tab === t;
-              const label = t === "unread" ? `Unread${unreadItems.length > 0 ? ` (${unreadItems.length})` : ""}` : "Read";
+              const label =
+                t === "unread"
+                  ? `Unread${unreadItems.length > 0 ? ` (${unreadItems.length})` : ""}`
+                  : "Read";
               return (
                 <button
                   key={t}
                   onClick={() => setTab(t)}
-                  className="flex-1 px-3 py-2.5 text-xs font-medium transition-colors relative"
-                  style={{ color: isActive ? "var(--text-primary)" : "var(--text-secondary)" }}
+                  className={cn(
+                    "flex-1 px-3 py-2 text-xs font-medium transition-colors relative",
+                    isActive
+                      ? "text-[var(--text-primary)]"
+                      : "text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]",
+                  )}
                 >
                   {label}
                   {isActive && (
-                    <span
-                      className="absolute bottom-0 left-2 right-2 h-0.5 rounded-full"
-                      style={{ background: "var(--accent)" }}
-                    />
+                    <span className="absolute bottom-0 left-2 right-2 h-0.5 rounded-full bg-[var(--brand)]" />
                   )}
                 </button>
               );
             })}
             {unreadItems.length > 0 && (
-              <button onClick={handleMarkAll} className="px-3 py-2.5 text-[10px] shrink-0" style={{ color: "var(--accent)" }}>
-                Mark all read
+              <button
+                onClick={handleMarkAll}
+                className="px-3 py-2 text-[10px] shrink-0 text-[var(--brand)] hover:underline"
+              >
+                Mark all
               </button>
             )}
           </div>
           <div className="flex-1 overflow-y-auto">
             {displayItems.length === 0 ? (
-              <div className="px-4 py-6 text-center text-xs" style={{ color: "var(--text-secondary)" }}>
-                {tab === "unread" ? "No unread notifications" : "No read notifications"}
+              <div className="px-4 py-8 text-center text-xs text-[var(--text-tertiary)]">
+                {tab === "unread"
+                  ? "No unread notifications"
+                  : "No read notifications"}
               </div>
             ) : (
               displayItems.slice(0, 20).map((n) => (
                 <div
                   key={n.id}
                   onClick={() => handleClick(n)}
-                  className="px-4 py-3 cursor-pointer transition-colors hover:opacity-80"
-                  style={{
-                    borderBottom: "1px solid var(--border)",
-                    background: n.read ? "transparent" : "var(--bg-tertiary)",
-                  }}
+                  className={cn(
+                    "px-3 py-2.5 cursor-pointer transition-colors border-l-2",
+                    "hover:bg-[var(--bg-tertiary)]",
+                    !n.read
+                      ? "border-l-[var(--brand)] bg-[var(--brand-bg)]/30"
+                      : "border-l-transparent",
+                  )}
                 >
                   <div className="flex items-center gap-2">
-                    {!n.read && <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: "var(--accent)" }} />}
+                    {!n.read && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-[var(--brand)] shrink-0" />
+                    )}
                     <span
-                      className="text-sm font-medium truncate"
-                      style={{ color: n.read ? "var(--text-secondary)" : "var(--text-primary)" }}
+                      className={cn(
+                        "text-xs flex-1 truncate",
+                        n.read
+                          ? "text-[var(--text-tertiary)] font-normal"
+                          : "text-[var(--text-primary)] font-semibold",
+                      )}
                     >
                       {n.title}
                     </span>
                   </div>
                   <div
-                    className="text-xs mt-0.5 truncate"
-                    style={{ color: n.read ? "var(--text-secondary)" : "var(--text-secondary)" }}
+                    className={cn(
+                      "text-[11px] mt-0.5 truncate ml-3.5",
+                      n.read ? "text-[var(--text-tertiary)]" : "text-[var(--text-secondary)]",
+                    )}
                   >
                     {n.body}
                   </div>
-                  <div className="text-[10px] mt-1" style={{ color: "var(--text-secondary)" }}>
-                    {n.created_at ? new Date(n.created_at).toLocaleString() : ""}
+                  <div className="text-[10px] mt-1 ml-3.5 text-[var(--text-tertiary)] font-mono">
+                    {relativeTime(n.created_at)}
                   </div>
                 </div>
               ))

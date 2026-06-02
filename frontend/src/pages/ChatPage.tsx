@@ -1,10 +1,28 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import {
+  Paperclip,
+  Bot,
+  ArrowUp,
+  Square,
+  FolderOpen,
+  PanelRightOpen,
+  PanelRightClose,
+  LogOut,
+  Sparkles,
+  MessageSquare,
+  Code,
+  Compass,
+  X,
+} from "lucide-react";
 import * as sessionsApi from "../api/sessions";
 import * as providersApi from "../api/providers";
 import * as mcpServersApi from "../api/mcpServers";
 import { McpServer, McpServerStatus } from "../api/mcpServers";
 import { Session } from "../api/sessions";
-import { AgentProfile as AgentProfileType, listAgentProfiles } from "../api/agents";
+import {
+  AgentProfile as AgentProfileType,
+  listAgentProfiles,
+} from "../api/agents";
 import SessionList from "../components/SessionList";
 import ChatPanel from "../components/ChatPanel";
 import ProviderPanel from "../components/ProviderPanel";
@@ -20,16 +38,26 @@ import { TaskBoard } from "../components/TaskBoard";
 import { AgentBar } from "../components/AgentBar";
 import { DelegateModal } from "../components/DelegateModal";
 import { ResultCompare } from "../components/ResultCompare";
+import { Modal, Button, Textarea } from "../components/ui";
 import { useChatState } from "../hooks/useChatState";
 import { useTaskBoard } from "../hooks/useTaskBoard";
 import { useModelSelector } from "../hooks/useModelSelector";
+import { cn } from "../lib/cn";
 
 interface Props {
   onLogout: () => void;
 }
 
+const STARTER_PROMPTS = [
+  { icon: <Code size={14} />, label: "Debug an error", prompt: "Help me debug this error: " },
+  { icon: <Compass size={14} />, label: "Explain a concept", prompt: "Explain how " },
+  { icon: <Sparkles size={14} />, label: "Brainstorm ideas", prompt: "Brainstorm some ideas for " },
+  { icon: <MessageSquare size={14} />, label: "Write a doc", prompt: "Write documentation for " },
+];
+
 export default function ChatPage({ onLogout }: Props) {
-  const { taskBoardTasks, handleTaskBoardEvent, clearTaskBoard } = useTaskBoard();
+  const { taskBoardTasks, handleTaskBoardEvent, clearTaskBoard } =
+    useTaskBoard();
 
   const {
     sessions,
@@ -57,7 +85,16 @@ export default function ChatPage({ onLogout }: Props) {
     getSubAgentContent,
   } = useChatState(handleTaskBoardEvent);
 
-  const { providers, catalog, models, providersLoading, selectedModel, setSelectedModel, setProviders, setProvidersLoading } = useModelSelector();
+  const {
+    providers,
+    catalog,
+    models,
+    providersLoading,
+    selectedModel,
+    setSelectedModel,
+    setProviders,
+    setProvidersLoading,
+  } = useModelSelector();
 
   const [showProviders, setShowProviders] = useState(false);
   const [showMcpServers, setShowMcpServers] = useState(false);
@@ -73,6 +110,9 @@ export default function ChatPage({ onLogout }: Props) {
   const [selectedAgent, setSelectedAgent] = useState("default");
   const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
   const [mcpStatus, setMcpStatus] = useState<McpServerStatus[]>([]);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     mcpServersApi.listMcpServers().then(setMcpServers);
@@ -87,13 +127,35 @@ export default function ChatPage({ onLogout }: Props) {
     return () => clearInterval(interval);
   }, []);
 
+  // Global keyboard shortcuts: / focus input, Cmd+K new session
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      const isTyping =
+        target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.isContentEditable;
+      if (e.key === "/" && !isTyping) {
+        e.preventDefault();
+        inputRef.current?.focus();
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
+        onNewSession();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedModel, models]);
+
   const onSelectSession = useCallback(
     async (session: Session) => {
       const model = await selectSession(session, selectedModel, models);
       setSelectedModel(model);
       clearTaskBoard();
     },
-    [selectSession, selectedModel, models, setSelectedModel, clearTaskBoard]
+    [selectSession, selectedModel, models, setSelectedModel, clearTaskBoard],
   );
 
   const onNewSession = useCallback(async () => {
@@ -107,7 +169,7 @@ export default function ChatPage({ onLogout }: Props) {
       const model = await selectSessionById(sessionId, selectedModel, models);
       setSelectedModel(model);
     },
-    [selectSessionById, selectedModel, models, setSelectedModel]
+    [selectSessionById, selectedModel, models, setSelectedModel],
   );
 
   const processImageFile = (file: File) => {
@@ -160,21 +222,29 @@ export default function ChatPage({ onLogout }: Props) {
   const parseAgentMentions = (text: string, profiles: AgentProfileType[]) => {
     const enabled = profiles.filter((p) => p.enabled);
     const matches: AgentProfileType[] = [];
+    const tokens = text.split(/\s+/);
     for (const p of enabled) {
-      if (text.includes(`@${p.name}`)) {
-        matches.push(p);
-      }
+      if (tokens.includes(`@${p.name}`)) matches.push(p);
     }
     return matches;
   };
 
   const handleSend = async () => {
-    if ((!input.trim() && pendingImages.length === 0) || !activeSession || sending) return;
+    if ((!input.trim() && pendingImages.length === 0) || !activeSession || sending)
+      return;
     let text = input.trim();
     const images = [...pendingImages];
     setInput("");
     setPendingImages([]);
-    setMessages((prev) => [...prev, { id: `u-${Date.now()}`, role: "user", content: text, images: images.length > 0 ? images : undefined }]);
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: `u-${Date.now()}`,
+        role: "user",
+        content: text,
+        images: images.length > 0 ? images : undefined,
+      },
+    ]);
     setSending(true);
     try {
       const mentions = parseAgentMentions(text, agentProfiles);
@@ -205,7 +275,11 @@ export default function ChatPage({ onLogout }: Props) {
 
   const handleToolConfirm = async (confirmId: string, approved: boolean) => {
     if (!activeSession) return;
-    setMessages((prev) => prev.map((m) => (m.confirm_id === confirmId ? { ...m, confirmed: approved } : m)));
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.confirm_id === confirmId ? { ...m, confirmed: approved } : m,
+      ),
+    );
     try {
       await sessionsApi.confirmTool(activeSession.session_id, confirmId, approved);
     } catch {
@@ -215,7 +289,11 @@ export default function ChatPage({ onLogout }: Props) {
 
   const handleUserInput = async (inputId: string, answer: string) => {
     if (!activeSession) return;
-    setMessages((prev) => prev.map((m) => (m.confirm_id === inputId ? { ...m, confirmed: true, content: answer } : m)));
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.confirm_id === inputId ? { ...m, confirmed: true, content: answer } : m,
+      ),
+    );
     try {
       await sessionsApi.submitInput(activeSession.session_id, inputId, answer);
     } catch {
@@ -223,12 +301,24 @@ export default function ChatPage({ onLogout }: Props) {
     }
   };
 
-  const handleDelegateFromModal = async (tasks: { agent_name: string; task: string }[]) => {
+  const handleDelegateFromModal = async (
+    tasks: { agent_name: string; task: string }[],
+  ) => {
     if (!activeSession || sending) return;
     setShowDelegate(false);
     const names = tasks.map((t) => `@${t.agent_name}`).join(" ");
-    const taskDesc = tasks.length === 1 ? tasks[0].task : tasks.map((t) => `${t.agent_name}: ${t.task}`).join("; ");
-    setMessages((prev) => [...prev, { id: `u-${Date.now()}`, role: "user", content: `${names} ${taskDesc}` }]);
+    const taskDesc =
+      tasks.length === 1
+        ? tasks[0].task
+        : tasks.map((t) => `${t.agent_name}: ${t.task}`).join("; ");
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: `u-${Date.now()}`,
+        role: "user",
+        content: `${names} ${taskDesc}`,
+      },
+    ]);
     setSending(true);
     try {
       let promptText: string;
@@ -249,12 +339,15 @@ export default function ChatPage({ onLogout }: Props) {
       if (prev.includes(mention.trim())) return prev;
       return prev ? `${prev} ${mention}` : mention;
     });
+    inputRef.current?.focus();
   };
 
   const handleExportReport = async () => {
     if (!activeSession) return;
     const token = localStorage.getItem("crab_token") || "";
-    const resp = await fetch(`/api/sessions/${encodeURIComponent(activeSession.session_id)}/report?token=${encodeURIComponent(token)}`);
+    const resp = await fetch(
+      `/api/sessions/${encodeURIComponent(activeSession.session_id)}/report?token=${encodeURIComponent(token)}`,
+    );
     const text = await resp.text();
     const blob = new Blob([text], { type: "text/markdown" });
     const url = URL.createObjectURL(blob);
@@ -265,8 +358,10 @@ export default function ChatPage({ onLogout }: Props) {
     URL.revokeObjectURL(url);
   };
 
+  const completedTasks = taskBoardTasks.filter((t) => t.status === "done");
+
   return (
-    <div className="flex h-full overflow-hidden">
+    <div className="flex h-full overflow-hidden bg-[var(--bg-primary)]">
       <SessionList
         sessions={sessions}
         activeId={activeSession?.session_id || null}
@@ -280,8 +375,11 @@ export default function ChatPage({ onLogout }: Props) {
       />
 
       <div className="flex-1 flex flex-col min-w-0">
-        <div className="flex items-center border-b" style={{ borderBottom: "1px solid var(--border)" }}>
-          <div className="flex-1">
+        {/* Toolbar */}
+        <div
+          className="flex items-center gap-1 px-3 h-11 border-b border-[var(--border)] bg-[var(--bg-secondary)]"
+        >
+          <div className="flex-1 min-w-0">
             {activeSession && (
               <BranchSelector
                 sessionId={activeSession.session_id}
@@ -292,186 +390,323 @@ export default function ChatPage({ onLogout }: Props) {
             )}
           </div>
           <NotificationBell onSwitchSession={onSelectSessionById} />
-          {taskBoardTasks.filter((t) => t.status === "done").length > 0 && (
-            <button
+          {completedTasks.length > 0 && (
+            <Button
+              size="icon"
+              variant="ghost"
               onClick={() => setShowResultCompare(true)}
-              className="px-3 py-2 text-sm"
-              style={{ color: "#a78bfa" }}
               title="View agent results"
+              className="text-[var(--accent-2)] hover:text-[var(--accent-2)] hover:bg-[var(--accent-2-bg)]"
             >
-              📋
-            </button>
+              <Bot size={15} />
+            </Button>
           )}
-          <button
+          <Button
+            size="icon"
+            variant="ghost"
             onClick={() => setShowFiles((v) => !v)}
-            className="px-3 py-2 text-sm"
-            style={{ color: showFiles ? "var(--accent)" : "var(--text-secondary)" }}
-            title="Toggle file browser"
+            title={showFiles ? "Hide file browser" : "Show file browser"}
+            className={showFiles ? "text-[var(--brand)] bg-[var(--brand-bg)]" : ""}
           >
-            📁
-          </button>
-          <button
-            onClick={onLogout}
-            className="px-3 py-2 text-sm"
-            style={{ color: "var(--text-secondary)" }}
+            {showFiles ? <PanelRightClose size={15} /> : <PanelRightOpen size={15} />}
+          </Button>
+          <Button
+            size="icon"
+            variant="ghost"
+            onClick={() => setShowLogoutConfirm(true)}
             title="Logout"
+            className="text-[var(--text-tertiary)] hover:text-[var(--danger)] hover:bg-[var(--danger-bg)]"
           >
-            ⏻
-          </button>
+            <LogOut size={15} />
+          </Button>
         </div>
+
         {activeSession ? (
           <>
             {replaying && replayProgress.total > 0 && (
-              <div className="px-4 pt-2 pb-1" style={{ borderBottom: "1px solid var(--border)" }}>
+              <div className="px-4 pt-2 pb-1 border-b border-[var(--border)] bg-[var(--bg-secondary)]">
                 <div className="flex items-center justify-between mb-1">
-                  <span className="text-xs" style={{ color: "#34d399" }}>▶ Replaying branch</span>
-                  <span className="text-xs" style={{ color: "var(--text-secondary)", fontFamily: "'SF Mono', monospace" }}>
+                  <span className="text-xs text-[var(--success)] flex items-center gap-1.5">
+                    <Sparkles size={11} className="animate-pulse" />
+                    Replaying branch
+                  </span>
+                  <span className="text-xs text-[var(--text-tertiary)] font-mono">
                     {replayProgress.current} / {replayProgress.total}
                   </span>
                 </div>
-                <div className="h-1 rounded-full overflow-hidden" style={{ background: "var(--bg-tertiary)" }}>
+                <div className="h-1 rounded-full overflow-hidden bg-[var(--bg-tertiary)]">
                   <div
-                    className="h-full transition-all duration-200 rounded-full"
+                    className="h-full transition-all duration-200 rounded-full bg-gradient-to-r from-[var(--success)] to-[var(--accent)]"
                     style={{
                       width: `${(replayProgress.current / replayProgress.total) * 100}%`,
-                      background: "linear-gradient(90deg, #34d399, #67e8f9)",
                     }}
                   />
                 </div>
               </div>
             )}
-            <ChatPanel ref={bottomRef} messages={messages} connected={connected} onToolConfirm={handleToolConfirm} onUserInput={handleUserInput} onBranch={handleBranch} replaying={replaying}
-              externalSubAgentId={viewingSubAgent} onSubAgentModalClose={() => setViewingSubAgent(null)} getSubAgentContent={getSubAgentContent} />
+
+            <ChatPanel
+              ref={bottomRef}
+              messages={messages}
+              connected={connected}
+              onToolConfirm={handleToolConfirm}
+              onUserInput={handleUserInput}
+              onBranch={handleBranch}
+              replaying={replaying}
+              externalSubAgentId={viewingSubAgent}
+              onSubAgentModalClose={() => setViewingSubAgent(null)}
+              getSubAgentContent={getSubAgentContent}
+            />
 
             <McpStatusBar status={mcpStatus} />
 
-            <div className="px-4 pb-4" onDrop={handleDrop} onDragOver={handleDragOver}>
+            <div
+              className="px-3 sm:px-4 pb-3 pt-2"
+              onDrop={handleDrop}
+              onDragOver={handleDragOver}
+            >
               <AgentBar onAgentClick={handleAgentBarClick} />
-              {agentProfiles.length > 0 && (
-                <div className="mb-2 flex items-center gap-2">
-                  <span className="text-xs" style={{ color: "var(--text-secondary)" }}>Agent:</span>
-                  <select
-                    value={selectedAgent}
-                    onChange={async (e) => {
-                      const agent = e.target.value;
-                      setSelectedAgent(agent);
-                      if (activeSession) {
-                        try {
-                          await sessionsApi.switchAgent(activeSession.session_id, agent);
-                        } catch {
-                          // ignore
+
+              {/* Agent + Model selectors */}
+              <div className="mb-2 flex items-center gap-2 flex-wrap">
+                {agentProfiles.length > 0 && (
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[11px] text-[var(--text-tertiary)]">
+                      Agent
+                    </span>
+                    <select
+                      value={selectedAgent}
+                      onChange={async (e) => {
+                        const agent = e.target.value;
+                        setSelectedAgent(agent);
+                        if (activeSession) {
+                          try {
+                            await sessionsApi.switchAgent(
+                              activeSession.session_id,
+                              agent,
+                            );
+                          } catch {
+                            // ignore
+                          }
                         }
-                      }
-                    }}
-                    className="text-xs px-2 py-1 rounded outline-none"
-                    style={{ background: "var(--bg-tertiary)", color: "var(--text-primary)", border: "1px solid var(--border)" }}
-                  >
-                    <option value="default">🦀 default (All tools)</option>
-                    {agentProfiles.map((a) => (
-                      <option key={a.name} value={a.name}>
-                        {a.icon || "🤖"} {a.display_name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-              {models.length > 0 && (
-                <div className="mb-2 flex items-center gap-2">
-                  <span className="text-xs" style={{ color: "var(--text-secondary)" }}>Model:</span>
-                  <select
-                    value={selectedModel}
-                    onChange={(e) => setSelectedModel(e.target.value)}
-                    className="text-xs px-2 py-1 rounded outline-none"
-                    style={{ background: "var(--bg-tertiary)", color: "var(--text-primary)", border: "1px solid var(--border)" }}
-                  >
-                    {models.map((m) => (
-                      <option key={m.id} value={m.id}>{m.id}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
+                      }}
+                      className="text-xs h-7 px-2 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border)] text-[var(--text-primary)] focus:outline-none focus:border-[var(--brand)] focus:ring-2 focus:ring-[var(--brand)]/30"
+                    >
+                      <option value="default">🦀 default</option>
+                      {agentProfiles.map((a) => (
+                        <option key={a.name} value={a.name}>
+                          {a.icon || "🤖"} {a.display_name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                {models.length > 0 && (
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[11px] text-[var(--text-tertiary)]">
+                      Model
+                    </span>
+                    <select
+                      value={selectedModel}
+                      onChange={(e) => setSelectedModel(e.target.value)}
+                      className="text-xs h-7 px-2 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border)] text-[var(--text-primary)] font-mono focus:outline-none focus:border-[var(--brand)] focus:ring-2 focus:ring-[var(--brand)]/30"
+                    >
+                      {models.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.id}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+
+              {/* Pending images */}
               {pendingImages.length > 0 && (
                 <div className="flex gap-2 mb-2 flex-wrap">
                   {pendingImages.map((img, i) => (
                     <div key={i} className="relative inline-block">
-                      <img src={img} className="h-16 w-16 object-cover rounded-lg" style={{ border: "1px solid var(--border)" }} />
+                      <img
+                        src={img}
+                        className="h-16 w-16 object-cover rounded-lg border border-[var(--border)]"
+                        alt=""
+                      />
                       <button
-                        onClick={() => setPendingImages((prev) => prev.filter((_, idx) => idx !== i))}
-                        className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full flex items-center justify-center text-xs"
-                        style={{ background: "var(--danger)", color: "#fff", fontSize: "10px", lineHeight: 1 }}
+                        onClick={() =>
+                          setPendingImages((prev) =>
+                            prev.filter((_, idx) => idx !== i),
+                          )
+                        }
+                        className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full flex items-center justify-center bg-[var(--danger)] text-white hover:bg-[var(--danger-hover)] transition-colors"
+                        aria-label="Remove image"
                       >
-                        ×
+                        <X size={11} />
                       </button>
                     </div>
                   ))}
                 </div>
               )}
-              <div className="flex gap-2">
-                <button
+
+              {/* Input row */}
+              <div className="flex gap-2 items-end">
+                <Button
+                  size="icon"
+                  variant="outline"
                   onClick={handleImageUpload}
                   disabled={sending || replaying || pendingImages.length >= 5}
-                  className="px-3 py-3 rounded-lg text-sm disabled:opacity-30"
-                  style={{ background: "var(--bg-secondary)", color: "var(--text-secondary)", border: "1px solid var(--border)" }}
                   title="Attach image"
+                  className="h-10 w-10"
                 >
-                  📎
-                </button>
-                <button
+                  <Paperclip size={15} />
+                </Button>
+                <Button
+                  size="icon"
+                  variant="outline"
                   onClick={() => setShowDelegate(true)}
                   disabled={sending || replaying}
-                  className="px-3 py-3 rounded-lg text-sm disabled:opacity-30"
-                  style={{ background: "var(--bg-secondary)", color: "#a78bfa", border: "1px solid #7c3aed40" }}
                   title="Delegate to agent team"
+                  className="h-10 w-10 text-[var(--accent-2)] hover:text-[var(--accent-2)] hover:bg-[var(--accent-2-bg)] border-[var(--accent-2-border,var(--border))]"
                 >
-                  🤖
-                </button>
-                <input
-                  type="text"
+                  <Bot size={15} />
+                </Button>
+                <Textarea
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSend()}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSend();
+                    }
+                  }}
                   onPaste={handleImagePaste}
-                  placeholder="Type a message... (paste/drag images here)"
+                  placeholder="Type a message… (Shift+Enter for newline, / to focus, ⌘K new session)"
                   disabled={sending || replaying}
-                  className="flex-1 px-4 py-3 rounded-lg text-sm outline-none disabled:opacity-50"
-                  style={{ background: "var(--bg-secondary)", color: "var(--text-primary)", border: "1px solid var(--border)" }}
+                  ref={inputRef}
+                  autoGrow
+                  minRows={1}
+                  maxRows={6}
+                  className="flex-1 min-h-[40px]"
                 />
                 {sending ? (
-                  <button
+                  <Button
+                    variant="danger"
                     onClick={handleAbort}
-                    className="px-4 py-3 rounded-lg text-sm font-medium"
-                    style={{ background: "var(--danger)", color: "#fff" }}
+                    className="h-10 w-10"
+                    size="icon"
+                    title="Stop"
                   >
-                    Stop
-                  </button>
+                    <Square size={14} fill="currentColor" />
+                  </Button>
                 ) : (
-                  <button
+                  <Button
+                    variant="brand"
                     onClick={handleSend}
                     disabled={!input.trim() && pendingImages.length === 0}
-                    className="px-4 py-3 rounded-lg text-sm font-medium text-white disabled:opacity-50"
-                    style={{ background: "var(--accent)" }}
+                    className="h-10 w-10 shrink-0"
+                    size="icon"
+                    title="Send"
                   >
-                    Send
-                  </button>
+                    <ArrowUp size={16} />
+                  </Button>
                 )}
               </div>
             </div>
           </>
         ) : (
-          <div className="flex-1 flex items-center justify-center" style={{ color: "var(--text-secondary)" }}>
-            <div className="text-center">
-              <p className="text-lg mb-2">CrabAgent</p>
-              <p className="text-sm">Select a session or create a new one</p>
+          /* Empty state */
+          <div className="flex-1 flex items-center justify-center px-4">
+            <div className="text-center max-w-md animate-fade-in">
+              <div
+                className="w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center text-3xl shadow-[var(--shadow-md)]"
+                style={{
+                  background:
+                    "linear-gradient(135deg, var(--brand) 0%, var(--brand-active) 100%)",
+                }}
+              >
+                🦀
+              </div>
+              <h2 className="text-xl font-semibold text-[var(--text-primary)] mb-1">
+                Welcome to CrabAgent
+              </h2>
+              <p className="text-sm text-[var(--text-tertiary)] mb-6">
+                Start a conversation or pick a quick template below
+              </p>
+              <div className="grid grid-cols-2 gap-2 mb-6">
+                {STARTER_PROMPTS.map((p, i) => (
+                  <button
+                    key={i}
+                    onClick={() => {
+                      onNewSession();
+                      setTimeout(() => {
+                        setInput(p.prompt);
+                        inputRef.current?.focus();
+                      }, 100);
+                    }}
+                    className={cn(
+                      "flex items-center gap-2 px-3 py-2.5 rounded-xl text-left",
+                      "bg-[var(--bg-secondary)] border border-[var(--border)]",
+                      "hover:border-[var(--border-strong)] hover:bg-[var(--bg-tertiary)]",
+                      "transition-colors group",
+                    )}
+                  >
+                    <span className="text-[var(--brand)] group-hover:scale-110 transition-transform">
+                      {p.icon}
+                    </span>
+                    <span className="text-xs text-[var(--text-secondary)] group-hover:text-[var(--text-primary)]">
+                      {p.label}
+                    </span>
+                  </button>
+                ))}
+              </div>
+              <Button variant="brand" onClick={onNewSession}>
+                <Sparkles size={14} /> Start New Conversation
+              </Button>
             </div>
           </div>
         )}
       </div>
 
-      <FileBrowser collapsed={!showFiles} onToggle={() => setShowFiles((v) => !v)} sessionId={activeSession?.session_id || null} />
+      <FileBrowser
+        collapsed={!showFiles}
+        onToggle={() => setShowFiles((v) => !v)}
+        sessionId={activeSession?.session_id || null}
+      />
 
-      <TaskBoard tasks={taskBoardTasks} onTaskClick={(t) => setViewingSubAgent(t.subId)} />
+      <TaskBoard
+        tasks={taskBoardTasks}
+        onTaskClick={(t) => setViewingSubAgent(t.subId)}
+      />
 
-      <TodoWidget sessionId={activeSession?.session_id || null} refreshKey={todoRefreshKey} />
+      <TodoWidget
+        sessionId={activeSession?.session_id || null}
+        refreshKey={todoRefreshKey}
+      />
+
+      {/* No provider overlay */}
+      {!providersLoading && providers.length === 0 && (
+        <Modal
+          open={true}
+          onOpenChange={() => {}}
+          title="Welcome to CrabAgent"
+          description="Set up your first LLM provider to get started"
+          size="sm"
+          hideClose
+          disableBackdropClose
+          footer={
+            <Button variant="brand" onClick={() => setShowProviders(true)}>
+              Add Provider
+            </Button>
+          }
+        >
+          <div className="text-center py-2">
+            <div className="text-4xl mb-3">🔑</div>
+            <p className="text-sm text-[var(--text-secondary)] leading-relaxed">
+              CrabAgent needs at least one LLM provider to function. Add your API
+              key to start chatting.
+            </p>
+          </div>
+        </Modal>
+      )}
 
       {showProviders && (
         <ProviderPanel
@@ -482,28 +717,6 @@ export default function ChatPage({ onLogout }: Props) {
             providersApi.listProviders().then(setProviders);
           }}
         />
-      )}
-
-      {!providersLoading && providers.length === 0 && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.7)" }}>
-          <div
-            className="w-full max-w-sm rounded-xl p-8 text-center"
-            style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}
-          >
-            <div className="text-3xl mb-4">&#x26a0;&#xfe0f;</div>
-            <h2 className="text-lg font-semibold mb-2">No Provider Configured</h2>
-            <p className="text-sm mb-6" style={{ color: "var(--text-secondary)" }}>
-              CrabAgent needs at least one LLM provider to function. Please add a provider to get started.
-            </p>
-            <button
-              onClick={() => setShowProviders(true)}
-              className="w-full py-3 rounded-lg text-sm font-medium text-white"
-              style={{ background: "var(--accent)" }}
-            >
-              + Add Provider
-            </button>
-          </div>
-        </div>
       )}
 
       {showMcpServers && (
@@ -526,9 +739,7 @@ export default function ChatPage({ onLogout }: Props) {
       )}
 
       {showAgentTeam && (
-        <AgentTeamPanel
-          onClose={() => setShowAgentTeam(false)}
-        />
+        <AgentTeamPanel onClose={() => setShowAgentTeam(false)} />
       )}
 
       {showDelegate && activeSession && (
@@ -545,6 +756,29 @@ export default function ChatPage({ onLogout }: Props) {
           onExport={handleExportReport}
         />
       )}
+
+      {/* Logout confirmation */}
+      <Modal
+        open={showLogoutConfirm}
+        onOpenChange={setShowLogoutConfirm}
+        title="Sign out?"
+        description="You'll need to log in again to continue."
+        size="sm"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setShowLogoutConfirm(false)}>
+              Cancel
+            </Button>
+            <Button variant="danger" onClick={onLogout}>
+              Sign Out
+            </Button>
+          </>
+        }
+      >
+        <div className="text-center py-2">
+          <LogOut size={32} className="mx-auto text-[var(--danger)] mb-2" />
+        </div>
+      </Modal>
     </div>
   );
 }
