@@ -1,6 +1,10 @@
 import { useState } from "react";
+import { Plus, Trash2, Star, StarOff } from "lucide-react";
 import { Provider, CatalogEntry } from "../api/providers";
 import * as providersApi from "../api/providers";
+import { Modal, Button, Input, PasswordInput, ConfirmDialog, EmptyState } from "./ui";
+import { toast } from "./ui/Toast";
+import { cn } from "../lib/cn";
 
 interface Props {
   providers: Provider[];
@@ -9,12 +13,19 @@ interface Props {
   onRefresh: () => void;
 }
 
-export default function ProviderPanel({ providers, catalog, onClose, onRefresh }: Props) {
+export default function ProviderPanel({
+  providers,
+  catalog,
+  onClose,
+  onRefresh,
+}: Props) {
   const [mode, setMode] = useState<"list" | "add">("list");
   const [formType, setFormType] = useState(catalog[0]?.type || "");
   const [formName, setFormName] = useState("");
   const [formKey, setFormKey] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
 
   const handleAdd = async () => {
     setError(null);
@@ -22,150 +33,190 @@ export default function ProviderPanel({ providers, catalog, onClose, onRefresh }
       setError("All fields required");
       return;
     }
+    setBusy(true);
     try {
-      await providersApi.createProvider({ name: formName, type: formType, api_key: formKey });
+      await providersApi.createProvider({
+        name: formName,
+        type: formType,
+        api_key: formKey,
+      });
+      toast.success("Provider added");
       onRefresh();
       setMode("list");
       setFormName("");
       setFormKey("");
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed");
+      setError(e instanceof Error ? e.message : "Failed to add provider");
+    } finally {
+      setBusy(false);
     }
   };
 
   const handleSetDefault = async (name: string) => {
-    await providersApi.updateProvider(name, { is_default: true });
-    onRefresh();
+    try {
+      await providersApi.updateProvider(name, { is_default: true });
+      toast.success("Default provider updated");
+      onRefresh();
+    } catch {
+      toast.error("Failed to set default");
+    }
   };
 
   const handleDelete = async (name: string) => {
-    if (!confirm(`Delete provider "${name}"?`)) return;
-    await providersApi.deleteProvider(name);
-    onRefresh();
+    try {
+      await providersApi.deleteProvider(name);
+      toast.success("Provider deleted");
+      onRefresh();
+    } catch {
+      toast.error("Failed to delete provider");
+    } finally {
+      setDeleteTarget(null);
+    }
   };
 
   const selectedCatalog = catalog.find((c) => c.type === formType);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.6)" }}>
-      <div className="w-full max-w-md rounded-xl p-6 max-h-[80vh] overflow-y-auto" style={{ background: "var(--bg-secondary)" }}>
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold">Providers</h2>
-          <button onClick={onClose} className="text-sm" style={{ color: "var(--text-secondary)" }}>
-            Close
-          </button>
-        </div>
-
+    <>
+      <Modal
+        open={true}
+        onOpenChange={(o) => !o && onClose()}
+        title={mode === "list" ? "Providers" : "Add Provider"}
+        description={
+          mode === "list"
+            ? "Manage your LLM provider credentials"
+            : "Configure a new provider connection"
+        }
+        size="md"
+        footer={
+          mode === "add" ? (
+            <>
+              <Button variant="ghost" onClick={() => setMode("list")}>
+                Cancel
+              </Button>
+              <Button variant="brand" loading={busy} onClick={handleAdd}>
+                Add Provider
+              </Button>
+            </>
+          ) : (
+            <Button variant="brand" onClick={() => setMode("add")}>
+              <Plus size={14} /> Add Provider
+            </Button>
+          )
+        }
+      >
         {mode === "list" ? (
-          <>
-            {providers.map((p) => (
-              <div
-                key={p.name}
-                className="p-3 mb-2 rounded-lg flex items-center justify-between"
-                style={{ background: "var(--bg-tertiary)" }}
-              >
-                <div>
-                  <div className="text-sm font-medium">
-                    {p.display_name} {p.is_default && <span className="text-xs text-blue-400">default</span>}
-                  </div>
-                  <div className="text-xs" style={{ color: "var(--text-secondary)" }}>
-                    {p.type} | {p.api_key_preview}
-                  </div>
-                </div>
-                <div className="flex gap-2">
-                  {!p.is_default && (
-                    <button
-                      onClick={() => handleSetDefault(p.name)}
-                      className="text-xs px-2 py-1 rounded"
-                      style={{ background: "var(--bg-primary)", color: "var(--text-secondary)" }}
-                    >
-                      Set default
-                    </button>
+          <div className="space-y-2">
+            {providers.length === 0 ? (
+              <EmptyState
+                title="No providers configured"
+                description="Add an LLM provider to start using CrabAgent."
+                action={
+                  <Button variant="brand" size="sm" onClick={() => setMode("add")}>
+                    <Plus size={14} /> Add Provider
+                  </Button>
+                }
+              />
+            ) : (
+              providers.map((p) => (
+                <div
+                  key={p.name}
+                  className={cn(
+                    "p-3 rounded-xl flex items-center justify-between gap-3",
+                    "bg-[var(--bg-tertiary)] border border-[var(--border)]",
                   )}
-                  <button
-                    onClick={() => handleDelete(p.name)}
-                    className="text-xs px-2 py-1 rounded"
-                    style={{ color: "var(--danger)" }}
-                  >
-                    Delete
-                  </button>
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-medium text-[var(--text-primary)] flex items-center gap-1.5">
+                      <span className="truncate">{p.display_name}</span>
+                      {p.is_default && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--brand-bg)] text-[var(--brand)] border border-[var(--brand-border)] flex items-center gap-1 shrink-0">
+                          <Star size={9} /> default
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-xs text-[var(--text-tertiary)] font-mono truncate">
+                      {p.type} · {p.api_key_preview}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    {!p.is_default && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleSetDefault(p.name)}
+                        title="Set as default"
+                      >
+                        <StarOff size={14} />
+                      </Button>
+                    )}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setDeleteTarget(p.name)}
+                      title="Delete"
+                      className="text-[var(--danger)] hover:text-[var(--danger)] hover:bg-[var(--danger-bg)]"
+                    >
+                      <Trash2 size={14} />
+                    </Button>
+                  </div>
                 </div>
-              </div>
-            ))}
-            <button
-              onClick={() => setMode("add")}
-              className="w-full mt-2 py-2 rounded-lg text-sm font-medium"
-              style={{ background: "var(--accent)", color: "var(--text-on-accent)" }}
-            >
-              + Add Provider
-            </button>
-          </>
+              ))
+            )}
+          </div>
         ) : (
-          <>
-            {error && <p className="text-sm mb-3" style={{ color: "var(--danger)" }}>{error}</p>}
-
-            <div className="mb-3">
-              <label className="text-xs block mb-1" style={{ color: "var(--text-secondary)" }}>Type</label>
+          <div className="space-y-4">
+            {error && (
+              <div className="px-3 py-2 rounded-lg bg-[var(--danger-bg)] border border-[var(--danger-border)] text-xs text-[var(--danger)]">
+                {error}
+              </div>
+            )}
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-[var(--text-secondary)]">
+                Type
+              </label>
               <select
                 value={formType}
                 onChange={(e) => setFormType(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg text-sm outline-none"
-                style={{ background: "var(--bg-tertiary)", color: "var(--text-primary)", border: "1px solid var(--border)" }}
+                className="w-full h-9 px-3 text-sm rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border)] text-[var(--text-primary)] focus:outline-none focus:border-[var(--brand)] focus:ring-2 focus:ring-[var(--brand)]/30"
               >
                 {catalog.map((c) => (
-                  <option key={c.type} value={c.type}>{c.display_name}</option>
+                  <option key={c.type} value={c.type}>
+                    {c.display_name}
+                  </option>
                 ))}
               </select>
+              {selectedCatalog && (
+                <p className="text-[11px] text-[var(--text-tertiary)] font-mono">
+                  Base URL: {selectedCatalog.base_url}
+                </p>
+              )}
             </div>
-
-            <div className="mb-3">
-              <label className="text-xs block mb-1" style={{ color: "var(--text-secondary)" }}>Name</label>
-              <input
-                value={formName}
-                onChange={(e) => setFormName(e.target.value)}
-                placeholder="my-provider"
-                className="w-full px-3 py-2 rounded-lg text-sm outline-none"
-                style={{ background: "var(--bg-tertiary)", color: "var(--text-primary)", border: "1px solid var(--border)" }}
-              />
-            </div>
-
-            {selectedCatalog && (
-              <div className="mb-3 text-xs" style={{ color: "var(--text-secondary)" }}>
-                Base URL: {selectedCatalog.base_url}
-              </div>
-            )}
-
-            <div className="mb-4">
-              <label className="text-xs block mb-1" style={{ color: "var(--text-secondary)" }}>API Key</label>
-              <input
-                type="password"
-                value={formKey}
-                onChange={(e) => setFormKey(e.target.value)}
-                placeholder="sk-..."
-                className="w-full px-3 py-2 rounded-lg text-sm outline-none"
-                style={{ background: "var(--bg-tertiary)", color: "var(--text-primary)", border: "1px solid var(--border)" }}
-              />
-            </div>
-
-            <div className="flex gap-2">
-              <button
-                onClick={() => setMode("list")}
-                className="flex-1 py-2 rounded-lg text-sm"
-                style={{ background: "var(--bg-tertiary)", color: "var(--text-secondary)" }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleAdd}
-                className="flex-1 py-2 rounded-lg text-sm font-medium"
-                style={{ background: "var(--accent)", color: "var(--text-on-accent)" }}
-              >
-                Add
-              </button>
-            </div>
-          </>
+            <Input
+              label="Name"
+              value={formName}
+              onChange={(e) => setFormName(e.target.value)}
+              placeholder="my-provider"
+            />
+            <PasswordInput
+              label="API Key"
+              value={formKey}
+              onChange={(e) => setFormKey(e.target.value)}
+              placeholder="sk-…"
+            />
+          </div>
         )}
-      </div>
-    </div>
+      </Modal>
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onOpenChange={(o) => !o && setDeleteTarget(null)}
+        title={`Delete provider "${deleteTarget}"?`}
+        description="This will permanently remove the provider and its encrypted API key."
+        confirmText="Delete"
+        tone="danger"
+        onConfirm={() => { if (deleteTarget) handleDelete(deleteTarget); }}
+      />
+    </>
   );
 }

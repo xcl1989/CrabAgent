@@ -1,7 +1,18 @@
 import { useEffect, useState } from "react";
+import { Plug, Plus, Trash2 } from "lucide-react";
 import * as mcpApi from "../api/mcpServers";
 import { McpServer, McpServerStatus } from "../api/mcpServers";
 import * as settingsApi from "../api/settings";
+import {
+  Modal,
+  Button,
+  Input,
+  Textarea,
+  ConfirmDialog,
+  EmptyState,
+} from "./ui";
+import { toast } from "./ui/Toast";
+import { cn } from "../lib/cn";
 
 interface Props {
   servers: McpServer[];
@@ -10,8 +21,15 @@ interface Props {
   onRefresh: () => void;
 }
 
-export default function McpServerPanel({ servers, status, onClose, onRefresh }: Props) {
-  const [tab, setTab] = useState<"servers" | "settings">("servers");
+type Tab = "servers" | "settings";
+
+export default function McpServerPanel({
+  servers,
+  status,
+  onClose,
+  onRefresh,
+}: Props) {
+  const [tab, setTab] = useState<Tab>("servers");
   const [mode, setMode] = useState<"list" | "add">("list");
   const [formName, setFormName] = useState("");
   const [formDisplayName, setFormDisplayName] = useState("");
@@ -23,20 +41,27 @@ export default function McpServerPanel({ servers, status, onClose, onRefresh }: 
   const [formHeaders, setFormHeaders] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [acting, setActing] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
 
   const [searxngUrl, setSearxngUrl] = useState("");
   const [settingsLoaded, setSettingsLoaded] = useState(false);
-  const [testResult, setTestResult] = useState<{ success: boolean; result_count?: number; error?: string } | null>(null);
+  const [testResult, setTestResult] = useState<{
+    success: boolean;
+    result_count?: number;
+    error?: string;
+  } | null>(null);
   const [testing, setTesting] = useState(false);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    settingsApi.getSettings().then((s) => {
-      setSearxngUrl(s.searxng_url || "");
-      setSettingsLoaded(true);
-    }).catch(() => {
-      setSettingsLoaded(true);
-    });
+    settingsApi
+      .getSettings()
+      .then((s) => {
+        setSearxngUrl(s.searxng_url || "");
+        setSettingsLoaded(true);
+      })
+      .catch(() => setSettingsLoaded(true));
   }, []);
 
   const resetForm = () => {
@@ -51,52 +76,41 @@ export default function McpServerPanel({ servers, status, onClose, onRefresh }: 
     setError(null);
   };
 
-  const getStatus = (name: string): McpServerStatus | undefined => status.find((s) => s.name === name);
+  const getStatus = (name: string) => status.find((s) => s.name === name);
 
   const handleAdd = async () => {
     setError(null);
-    if (!formName) {
-      setError("Name is required");
-      return;
-    }
-    if (formTransport === "stdio" && !formCommand) {
-      setError("Command is required for stdio transport");
-      return;
-    }
-    if (formTransport === "http" && !formUrl) {
-      setError("URL is required for HTTP transport");
-      return;
-    }
+    if (!formName) return setError("Name is required");
+    if (formTransport === "stdio" && !formCommand)
+      return setError("Command is required for stdio transport");
+    if (formTransport === "http" && !formUrl)
+      return setError("URL is required for HTTP transport");
 
     let parsedArgs: string[] = [];
     try {
       parsedArgs = formArgs.trim() ? JSON.parse(formArgs.trim()) : [];
       if (!Array.isArray(parsedArgs)) throw new Error();
     } catch {
-      setError('Args must be a valid JSON array (e.g. ["-y", "@mcp/server"])');
-      return;
+      return setError('Args must be a JSON array, e.g. ["-y", "@mcp/server"]');
     }
-
     let parsedEnv: Record<string, string> = {};
     if (formEnv.trim()) {
       try {
         parsedEnv = JSON.parse(formEnv.trim());
       } catch {
-        setError('Env must be a valid JSON object (e.g. {"KEY": "value"})');
-        return;
+        return setError('Env must be a JSON object, e.g. {"KEY": "value"}');
       }
     }
-
     let parsedHeaders: Record<string, string> = {};
     if (formHeaders.trim()) {
       try {
         parsedHeaders = JSON.parse(formHeaders.trim());
       } catch {
-        setError("Headers must be a valid JSON object");
-        return;
+        return setError("Headers must be a JSON object");
       }
     }
 
+    setAdding(true);
     try {
       await mcpApi.createMcpServer({
         name: formName,
@@ -108,11 +122,14 @@ export default function McpServerPanel({ servers, status, onClose, onRefresh }: 
         env: parsedEnv,
         headers: parsedHeaders,
       });
+      toast.success("MCP server added");
       onRefresh();
       setMode("list");
       resetForm();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to add MCP server");
+    } finally {
+      setAdding(false);
     }
   };
 
@@ -123,7 +140,9 @@ export default function McpServerPanel({ servers, status, onClose, onRefresh }: 
       await mcpApi.connectMcpServer(name);
       onRefresh();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed to connect");
+      toast.error("Failed to connect", {
+        description: e instanceof Error ? e.message : undefined,
+      });
     } finally {
       setActing(null);
     }
@@ -136,19 +155,25 @@ export default function McpServerPanel({ servers, status, onClose, onRefresh }: 
       await mcpApi.disconnectMcpServer(name);
       onRefresh();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed to disconnect");
+      toast.error("Failed to disconnect", {
+        description: e instanceof Error ? e.message : undefined,
+      });
     } finally {
       setActing(null);
     }
   };
 
   const handleDelete = async (name: string) => {
-    if (!confirm(`Delete MCP server "${name}"?`)) return;
     try {
       await mcpApi.deleteMcpServer(name);
+      toast.success("Server deleted");
       onRefresh();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed to delete");
+      toast.error("Failed to delete", {
+        description: e instanceof Error ? e.message : undefined,
+      });
+    } finally {
+      setDeleteTarget(null);
     }
   };
 
@@ -157,8 +182,9 @@ export default function McpServerPanel({ servers, status, onClose, onRefresh }: 
     setTestResult(null);
     try {
       await settingsApi.updateSettings({ searxng_url: searxngUrl });
+      toast.success("Settings saved");
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed to save settings");
+      toast.error("Failed to save settings");
     } finally {
       setSaving(false);
     }
@@ -172,411 +198,328 @@ export default function McpServerPanel({ servers, status, onClose, onRefresh }: 
       const result = await settingsApi.testSearxng(searxngUrl);
       setTestResult(result);
     } catch (e: unknown) {
-      setTestResult({ success: false, error: e instanceof Error ? e.message : "Test failed" });
+      setTestResult({
+        success: false,
+        error: e instanceof Error ? e.message : "Test failed",
+      });
     } finally {
       setTesting(false);
     }
   };
 
   const statusColor = (s: string) =>
-    s === "connected" ? "var(--success)" : s === "connecting" ? "var(--warning)" : s === "error" ? "var(--danger)" : "var(--text-secondary)";
+    s === "connected"
+      ? "var(--success)"
+      : s === "connecting"
+        ? "var(--warning)"
+        : s === "error"
+          ? "var(--danger)"
+          : "var(--text-tertiary)";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "var(--overlay)" }}>
-      <div
-        className="w-full max-w-lg rounded-xl p-6 max-h-[85vh] overflow-y-auto"
-        style={{ background: "var(--bg-secondary)" }}
+    <>
+      <Modal
+        open={true}
+        onOpenChange={(o) => !o && onClose()}
+        title="MCP Servers"
+        description="Connect external tools via the Model Context Protocol"
+        size="lg"
       >
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold">MCP Servers</h2>
-          <button onClick={onClose} className="text-sm" style={{ color: "var(--text-secondary)" }}>
-            Close
-          </button>
-        </div>
-
-        <div className="flex gap-1 mb-4">
-          <button
-            onClick={() => { setTab("servers"); setError(null); }}
-            className="flex-1 py-1.5 rounded-lg text-sm font-medium"
-            style={{
-              background: tab === "servers" ? "var(--accent-2)" : "var(--bg-tertiary)",
-              color: tab === "servers" ? "var(--text-on-accent)" : "var(--text-secondary)",
-              border: `1px solid ${tab === "servers" ? "var(--accent-2)" : "var(--border)"}`,
-            }}
-          >
-            Servers
-          </button>
-          <button
-            onClick={() => { setTab("settings"); setError(null); setTestResult(null); }}
-            className="flex-1 py-1.5 rounded-lg text-sm font-medium"
-            style={{
-              background: tab === "settings" ? "var(--accent-2)" : "var(--bg-tertiary)",
-              color: tab === "settings" ? "var(--text-on-accent)" : "var(--text-secondary)",
-              border: `1px solid ${tab === "settings" ? "var(--accent-2)" : "var(--border)"}`,
-            }}
-          >
-            Settings
-          </button>
+        <div className="flex gap-1 p-1 bg-[var(--bg-tertiary)] rounded-lg mb-4">
+          {(["servers", "settings"] as Tab[]).map((t) => (
+            <button
+              key={t}
+              onClick={() => {
+                setTab(t);
+                setError(null);
+                setTestResult(null);
+              }}
+              className={cn(
+                "flex-1 py-1.5 rounded-md text-sm font-medium transition-all capitalize",
+                tab === t
+                  ? "bg-[var(--bg-secondary)] text-[var(--text-primary)] shadow-[var(--shadow-sm)]"
+                  : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]",
+              )}
+            >
+              {t}
+            </button>
+          ))}
         </div>
 
         {error && (
-          <div
-            className="mb-3 px-3 py-2 rounded text-xs"
-            style={{ background: "var(--danger-bg)", border: "1px solid var(--danger-border)", color: "var(--danger)" }}
-          >
+          <div className="mb-3 px-3 py-2 rounded-lg bg-[var(--danger-bg)] border border-[var(--danger-border)] text-xs text-[var(--danger)]">
             {error}
           </div>
         )}
 
         {tab === "settings" ? (
-          <>
-            <div className="mb-3">
-              <label className="text-xs block mb-1" style={{ color: "var(--text-secondary)" }}>
-                SearXNG URL (optional)
-              </label>
-              <input
-                value={searxngUrl}
-                onChange={(e) => setSearxngUrl(e.target.value)}
-                placeholder="http://localhost:8888"
-                className="w-full px-3 py-2 rounded-lg text-sm outline-none font-mono"
-                disabled={!settingsLoaded}
-                style={{
-                  background: "var(--bg-tertiary)",
-                  color: "var(--text-primary)",
-                  border: "1px solid var(--border)",
-                }}
-              />
-              <div className="text-xs mt-1" style={{ color: "var(--text-secondary)" }}>
-                If set, web_search uses SearXNG first. Otherwise DuckDuckGo is used automatically (no API key needed).
-              </div>
-            </div>
-
-            <div className="flex gap-2 mb-3">
-              <button
+          <div className="space-y-3">
+            <Input
+              label="SearXNG URL (optional)"
+              value={searxngUrl}
+              onChange={(e) => setSearxngUrl(e.target.value)}
+              placeholder="http://localhost:8888"
+              disabled={!settingsLoaded}
+              hint="If set, web_search uses SearXNG first. Otherwise DuckDuckGo is used (no API key needed)."
+            />
+            <div className="flex gap-2">
+              <Button
+                variant="secondary"
                 onClick={handleSaveSettings}
-                disabled={saving}
-                className="flex-1 py-2 rounded-lg text-sm font-medium"
-                style={{ background: "var(--accent-2)", color: "var(--text-on-accent)" }}
+                loading={saving}
               >
-                {saving ? "Saving..." : "Save"}
-              </button>
-              <button
+                Save
+              </Button>
+              <Button
+                variant="outline"
                 onClick={handleTestSearxng}
-                disabled={testing || !searxngUrl}
-                className="flex-1 py-2 rounded-lg text-sm font-medium"
-                style={{ background: "var(--success-bg)", color: "var(--success)" }}
+                loading={testing}
+                disabled={!searxngUrl}
               >
-                {testing ? "Testing..." : "Test Connection"}
-              </button>
+                Test Connection
+              </Button>
             </div>
-
             {testResult && (
               <div
-                className="px-3 py-2 rounded text-xs"
-                style={{
-                  background: testResult.success ? "var(--success-bg)" : "var(--danger-bg)",
-                  border: `1px solid ${testResult.success ? "var(--success-border)" : "var(--danger-border)"}`,
-                  color: testResult.success ? "var(--success)" : "var(--danger)",
-                }}
+                className={cn(
+                  "px-3 py-2 rounded-lg text-xs",
+                  testResult.success
+                    ? "bg-[var(--success-bg)] border border-[var(--success-border)] text-[var(--success)]"
+                    : "bg-[var(--danger-bg)] border border-[var(--danger-border)] text-[var(--danger)]",
+                )}
               >
                 {testResult.success
                   ? `Connected successfully! (${testResult.result_count} results returned)`
                   : `Connection failed: ${testResult.error}`}
               </div>
             )}
-          </>
+          </div>
         ) : mode === "list" ? (
-          <>
-            {servers.length === 0 && (
-              <div className="text-center py-6 text-sm" style={{ color: "var(--text-secondary)" }}>
-                No MCP servers configured.
-                <br />
-                Add one to connect external tools via the Model Context Protocol.
-              </div>
-            )}
-            {servers.map((s) => {
-              const st = getStatus(s.name);
-              const connStatus = st?.status || "disconnected";
-              const connError = st?.error || "";
-              const toolCount = st?.tool_count || 0;
-              const isActing = acting === s.name;
-
-              return (
-                <div
-                  key={s.name}
-                  className="p-3 mb-2 rounded-lg"
-                  style={{ background: "var(--bg-tertiary)", border: "1px solid var(--border)" }}
-                >
-                  <div className="flex items-center justify-between mb-1">
-                    <div className="flex items-center gap-2">
-                      <span style={{ color: "var(--accent-2)", fontSize: "14px" }}>&#x1f50c;</span>
-                      <span className="text-sm font-medium">{s.display_name || s.name}</span>
-                      <span
-                        className="text-xs px-1.5 py-0.5 rounded"
-                        style={{
-                          background: s.transport === "http" ? "var(--accent-bg)" : "var(--accent-2-bg)",
-                          color: s.transport === "http" ? "var(--accent)" : "var(--accent-2)",
-                        }}
-                      >
-                        {s.transport}
-                      </span>
-                      <span className="flex items-center gap-1 text-xs">
-                        <span
-                          style={{
-                            display: "inline-block",
-                            width: 6,
-                            height: 6,
-                            borderRadius: "50%",
-                            background: statusColor(connStatus),
-                          }}
-                        />
-                        <span style={{ color: statusColor(connStatus) }}>{connStatus}</span>
-                        {connStatus === "connected" && toolCount > 0 && (
-                          <span style={{ color: "var(--text-secondary)" }}>({toolCount} tools)</span>
-                        )}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="text-xs mb-1.5" style={{ color: "var(--text-secondary)" }}>
-                    {s.transport === "stdio" ? (
-                      <span style={{ fontFamily: "monospace" }}>
-                        {s.command} {s.args.join(" ")}
-                      </span>
-                    ) : (
-                      <span style={{ fontFamily: "monospace" }}>{s.url}</span>
-                    )}
-                  </div>
-
-                  {connError && (
-                    <div className="text-xs mb-1.5 px-2 py-1 rounded" style={{ color: "var(--danger)", background: "var(--danger-bg)" }}>
-                      {connError}
-                    </div>
-                  )}
-
-                  <div className="flex gap-1.5 justify-end">
-                    {connStatus === "connected" && (
-                      <button
-                        onClick={() => handleDisconnect(s.name)}
-                        disabled={isActing}
-                        className="text-xs px-2.5 py-1 rounded"
-                        style={{ background: "var(--bg-primary)", color: "var(--text-secondary)" }}
-                      >
-                        {isActing ? "..." : "Disconnect"}
-                      </button>
-                    )}
-                    {(connStatus === "disconnected" || connStatus === "error") && (
-                      <button
-                        onClick={() => handleConnect(s.name)}
-                        disabled={isActing}
-                        className="text-xs px-2.5 py-1 rounded font-medium"
-                        style={{ background: "var(--success-bg)", color: "var(--success)" }}
-                      >
-                        {isActing ? "..." : connStatus === "error" ? "Reconnect" : "Connect"}
-                      </button>
-                    )}
-                    <button
-                      onClick={() => handleDelete(s.name)}
-                      className="text-xs px-2 py-1 rounded"
-                      style={{ color: "var(--danger)" }}
+          <div className="space-y-2">
+            {servers.length === 0 ? (
+              <EmptyState
+                icon={<Plug size={28} />}
+                title="No MCP servers configured"
+                description="Add an MCP server to connect external tools."
+                action={
+                  <Button variant="brand" size="sm" onClick={() => setMode("add")}>
+                    <Plus size={14} /> Add Server
+                  </Button>
+                }
+              />
+            ) : (
+              <>
+                {servers.map((s) => {
+                  const st = getStatus(s.name);
+                  const connStatus = st?.status || "disconnected";
+                  const connError = st?.error || "";
+                  const toolCount = st?.tool_count || 0;
+                  const isActing = acting === s.name;
+                  return (
+                    <div
+                      key={s.name}
+                      className="p-3 rounded-xl bg-[var(--bg-tertiary)] border border-[var(--border)] hover:border-[var(--border-strong)] transition-colors"
                     >
-                      Del
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-            <button
-              onClick={() => {
-                resetForm();
-                setMode("add");
-              }}
-              className="w-full mt-2 py-2 rounded-lg text-sm font-medium"
-              style={{ background: "var(--accent-2)", color: "var(--text-on-accent)" }}
-            >
-              + Add MCP Server
-            </button>
-          </>
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <span className="text-[var(--accent-2)]">
+                          <Plug size={14} />
+                        </span>
+                        <span className="text-sm font-medium text-[var(--text-primary)] truncate">
+                          {s.display_name || s.name}
+                        </span>
+                        <span
+                          className={cn(
+                            "text-[10px] px-1.5 py-0.5 rounded font-mono",
+                            s.transport === "http"
+                              ? "bg-[var(--accent-bg)] text-[var(--accent)]"
+                              : "bg-[var(--accent-2-bg)] text-[var(--accent-2)]",
+                          )}
+                        >
+                          {s.transport}
+                        </span>
+                        <span className="flex items-center gap-1 text-xs ml-auto">
+                          <span
+                            className="inline-block w-1.5 h-1.5 rounded-full"
+                            style={{ background: statusColor(connStatus) }}
+                          />
+                          <span style={{ color: statusColor(connStatus) }}>
+                            {connStatus}
+                          </span>
+                          {connStatus === "connected" && toolCount > 0 && (
+                            <span className="text-[var(--text-tertiary)]">
+                              ({toolCount} tools)
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                      <div className="text-xs mb-1.5 font-mono text-[var(--text-tertiary)] truncate">
+                        {s.transport === "stdio"
+                          ? `${s.command} ${s.args.join(" ")}`
+                          : s.url}
+                      </div>
+                      {connError && (
+                        <div className="text-[11px] mb-1.5 px-2 py-1 rounded bg-[var(--danger-bg)] text-[var(--danger)] break-words">
+                          {connError}
+                        </div>
+                      )}
+                      <div className="flex gap-1.5 justify-end">
+                        {connStatus === "connected" && (
+                          <Button
+                            size="xs"
+                            variant="ghost"
+                            onClick={() => handleDisconnect(s.name)}
+                            loading={isActing}
+                          >
+                            Disconnect
+                          </Button>
+                        )}
+                        {(connStatus === "disconnected" ||
+                          connStatus === "error") && (
+                          <Button
+                            size="xs"
+                            variant="primary"
+                            onClick={() => handleConnect(s.name)}
+                            loading={isActing}
+                          >
+                            {connStatus === "error" ? "Reconnect" : "Connect"}
+                          </Button>
+                        )}
+                        <Button
+                          size="xs"
+                          variant="ghost"
+                          onClick={() => setDeleteTarget(s.name)}
+                          className="text-[var(--danger)] hover:text-[var(--danger)] hover:bg-[var(--danger-bg)]"
+                          title="Delete"
+                        >
+                          <Trash2 size={12} />
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })}
+                <Button
+                  variant="secondary"
+                  fullWidth
+                  onClick={() => {
+                    resetForm();
+                    setMode("add");
+                  }}
+                >
+                  <Plus size={14} /> Add MCP Server
+                </Button>
+              </>
+            )}
+          </div>
         ) : (
-          <>
-            <div className="mb-3">
-              <label className="text-xs block mb-1" style={{ color: "var(--text-secondary)" }}>
-                Name
-              </label>
-              <input
-                value={formName}
-                onChange={(e) => setFormName(e.target.value)}
-                placeholder="my-mcp-server"
-                className="w-full px-3 py-2 rounded-lg text-sm outline-none"
-                style={{
-                  background: "var(--bg-tertiary)",
-                  color: "var(--text-primary)",
-                  border: "1px solid var(--border)",
-                }}
-              />
-            </div>
-
-            <div className="mb-3">
-              <label className="text-xs block mb-1" style={{ color: "var(--text-secondary)" }}>
-                Display Name
-              </label>
-              <input
-                value={formDisplayName}
-                onChange={(e) => setFormDisplayName(e.target.value)}
-                placeholder="My MCP Server"
-                className="w-full px-3 py-2 rounded-lg text-sm outline-none"
-                style={{
-                  background: "var(--bg-tertiary)",
-                  color: "var(--text-primary)",
-                  border: "1px solid var(--border)",
-                }}
-              />
-            </div>
-
-            <div className="mb-3">
-              <label className="text-xs block mb-1" style={{ color: "var(--text-secondary)" }}>
+          <div className="space-y-3">
+            <Input
+              label="Name"
+              value={formName}
+              onChange={(e) => setFormName(e.target.value)}
+              placeholder="my-mcp-server"
+            />
+            <Input
+              label="Display Name"
+              value={formDisplayName}
+              onChange={(e) => setFormDisplayName(e.target.value)}
+              placeholder="My MCP Server"
+            />
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-[var(--text-secondary)]">
                 Transport
               </label>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setFormTransport("stdio")}
-                  className="flex-1 py-2 rounded-lg text-sm font-medium"
-                  style={{
-                    background: formTransport === "stdio" ? "var(--accent-2)" : "var(--bg-tertiary)",
-                    color: formTransport === "stdio" ? "var(--text-on-accent)" : "var(--text-secondary)",
-                    border: `1px solid ${formTransport === "stdio" ? "var(--accent-2)" : "var(--border)"}`,
-                  }}
-                >
-                  Stdio (local)
-                </button>
-                <button
-                  onClick={() => setFormTransport("http")}
-                  className="flex-1 py-2 rounded-lg text-sm font-medium"
-                  style={{
-                    background: formTransport === "http" ? "var(--accent-2)" : "var(--bg-tertiary)",
-                    color: formTransport === "http" ? "var(--text-on-accent)" : "var(--text-secondary)",
-                    border: `1px solid ${formTransport === "http" ? "var(--accent-2)" : "var(--border)"}`,
-                  }}
-                >
-                  HTTP (remote)
-                </button>
+              <div className="flex gap-1 p-1 bg-[var(--bg-tertiary)] rounded-lg">
+                {(["stdio", "http"] as const).map((t) => (
+                  <button
+                    key={t}
+                    onClick={() => setFormTransport(t)}
+                    className={cn(
+                      "flex-1 py-1.5 rounded-md text-xs font-medium transition-all",
+                      formTransport === t
+                        ? "bg-[var(--bg-secondary)] text-[var(--text-primary)] shadow-[var(--shadow-sm)]"
+                        : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]",
+                    )}
+                  >
+                    {t === "stdio" ? "Stdio (local)" : "HTTP (remote)"}
+                  </button>
+                ))}
               </div>
             </div>
 
             {formTransport === "stdio" ? (
               <>
-                <div className="mb-3">
-                  <label className="text-xs block mb-1" style={{ color: "var(--text-secondary)" }}>
-                    Command
-                  </label>
-                  <input
-                    value={formCommand}
-                    onChange={(e) => setFormCommand(e.target.value)}
-                    placeholder="npx / uvx / python"
-                    className="w-full px-3 py-2 rounded-lg text-sm outline-none font-mono"
-                    style={{
-                      background: "var(--bg-tertiary)",
-                      color: "var(--text-primary)",
-                      border: "1px solid var(--border)",
-                    }}
-                  />
-                </div>
-                <div className="mb-3">
-                  <label className="text-xs block mb-1" style={{ color: "var(--text-secondary)" }}>
-                    Args (JSON array)
-                  </label>
-                  <input
-                    value={formArgs}
-                    onChange={(e) => setFormArgs(e.target.value)}
-                    placeholder='["-y", "@modelcontextprotocol/server-filesystem", "/path"]'
-                    className="w-full px-3 py-2 rounded-lg text-xs outline-none font-mono"
-                    style={{
-                      background: "var(--bg-tertiary)",
-                      color: "var(--text-primary)",
-                      border: "1px solid var(--border)",
-                    }}
-                  />
-                </div>
+                <Input
+                  label="Command"
+                  value={formCommand}
+                  onChange={(e) => setFormCommand(e.target.value)}
+                  placeholder="npx / uvx / python"
+                />
+                <Input
+                  label="Args (JSON array)"
+                  value={formArgs}
+                  onChange={(e) => setFormArgs(e.target.value)}
+                  placeholder='["-y", "@modelcontextprotocol/server-filesystem", "/path"]'
+                />
               </>
             ) : (
-              <div className="mb-3">
-                <label className="text-xs block mb-1" style={{ color: "var(--text-secondary)" }}>
-                  URL
-                </label>
-                <input
-                  value={formUrl}
-                  onChange={(e) => setFormUrl(e.target.value)}
-                  placeholder="https://example.com/mcp"
-                  className="w-full px-3 py-2 rounded-lg text-sm outline-none font-mono"
-                  style={{
-                    background: "var(--bg-tertiary)",
-                    color: "var(--text-primary)",
-                    border: "1px solid var(--border)",
-                  }}
-                />
-              </div>
+              <Input
+                label="URL"
+                value={formUrl}
+                onChange={(e) => setFormUrl(e.target.value)}
+                placeholder="https://example.com/mcp"
+              />
             )}
 
-            <div className="mb-3">
-              <label className="text-xs block mb-1" style={{ color: "var(--text-secondary)" }}>
-                Environment Variables (JSON object)
-              </label>
-              <textarea
-                value={formEnv}
-                onChange={(e) => setFormEnv(e.target.value)}
-                placeholder='{"API_KEY": "sk-xxx"}'
-                rows={2}
-                className="w-full px-3 py-2 rounded-lg text-xs outline-none font-mono resize-none"
-                style={{
-                  background: "var(--bg-tertiary)",
-                  color: "var(--text-primary)",
-                  border: "1px solid var(--border)",
-                }}
-              />
-            </div>
+            <Textarea
+              label="Environment Variables (JSON object)"
+              value={formEnv}
+              onChange={(e) => setFormEnv(e.target.value)}
+              placeholder='{"API_KEY": "sk-xxx"}'
+              rows={2}
+            />
 
             {formTransport === "http" && (
-              <div className="mb-4">
-                <label className="text-xs block mb-1" style={{ color: "var(--text-secondary)" }}>
-                  Headers (JSON object)
-                </label>
-                <textarea
-                  value={formHeaders}
-                  onChange={(e) => setFormHeaders(e.target.value)}
-                  placeholder='{"Authorization": "Bearer xxx"}'
-                  rows={2}
-                  className="w-full px-3 py-2 rounded-lg text-xs outline-none font-mono resize-none"
-                  style={{
-                    background: "var(--bg-tertiary)",
-                    color: "var(--text-primary)",
-                    border: "1px solid var(--border)",
-                  }}
-                />
-              </div>
+              <Textarea
+                label="Headers (JSON object)"
+                value={formHeaders}
+                onChange={(e) => setFormHeaders(e.target.value)}
+                placeholder='{"Authorization": "Bearer xxx"}'
+                rows={2}
+              />
             )}
 
-            <div className="flex gap-2">
-              <button
+            <div className="flex gap-2 pt-2">
+              <Button
+                variant="ghost"
                 onClick={() => {
                   setMode("list");
                   resetForm();
                 }}
-                className="flex-1 py-2 rounded-lg text-sm"
-                style={{ background: "var(--bg-tertiary)", color: "var(--text-secondary)" }}
               >
                 Cancel
-              </button>
-              <button
+              </Button>
+              <Button
+                variant="primary"
                 onClick={handleAdd}
-                className="flex-1 py-2 rounded-lg text-sm font-medium"
-                style={{ background: "var(--accent-2)", color: "var(--text-on-accent)" }}
+                loading={adding}
+                fullWidth
               >
                 Add Server
-              </button>
+              </Button>
             </div>
-          </>
+          </div>
         )}
-      </div>
-    </div>
+      </Modal>
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onOpenChange={(o) => !o && setDeleteTarget(null)}
+        title={`Delete MCP server "${deleteTarget}"?`}
+        description="This will disconnect (if connected) and remove the server configuration."
+        confirmText="Delete"
+        tone="danger"
+        onConfirm={() => { if (deleteTarget) handleDelete(deleteTarget); }}
+      />
+    </>
   );
 }

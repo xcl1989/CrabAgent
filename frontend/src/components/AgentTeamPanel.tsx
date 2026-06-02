@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { Plus, Pencil, Trash2, Loader2 } from "lucide-react";
 import {
   AgentProfile,
   listAgentProfiles,
@@ -12,6 +13,16 @@ import {
   AgentMemoryItem,
   AgentTaskStats,
 } from "../api/agents";
+import {
+  Modal,
+  Button,
+  Input,
+  Textarea,
+  ConfirmDialog,
+  EmptyState,
+} from "./ui";
+import { toast } from "./ui/Toast";
+import { cn } from "../lib/cn";
 
 const ICON_OPTIONS = [
   "🔍", "📊", "💻", "📝", "🤖", "🧠", "🎨", "🔧", "📡", "🛡️",
@@ -19,9 +30,19 @@ const ICON_OPTIONS = [
 ];
 
 const AVAILABLE_TOOLS = [
-  "bash", "read", "write", "edit", "glob", "grep",
-  "web_search", "web_scrape", "browser", "sandbox",
-  "shared_get", "shared_put", "shared_list",
+  "bash",
+  "read",
+  "write",
+  "edit",
+  "glob",
+  "grep",
+  "web_search",
+  "web_scrape",
+  "browser",
+  "sandbox",
+  "shared_get",
+  "shared_put",
+  "shared_list",
 ];
 
 interface Props {
@@ -39,7 +60,13 @@ type FormState = {
 };
 
 const emptyForm: FormState = {
-  display_name: "", role: "", goal: "", backstory: "", model: "", icon: "🤖", tools: [],
+  display_name: "",
+  role: "",
+  goal: "",
+  backstory: "",
+  model: "",
+  icon: "🤖",
+  tools: [],
 };
 
 export function AgentTeamPanel({ onClose }: Props) {
@@ -57,11 +84,19 @@ export function AgentTeamPanel({ onClose }: Props) {
   const [agentMemories, setAgentMemories] = useState<AgentMemoryItem[]>([]);
   const [loadingLearn, setLoadingLearn] = useState(false);
 
+  const [deleteTarget, setDeleteTarget] = useState<AgentProfile | null>(null);
+
   const fetchAgents = async () => {
-    try { setAgents(await listAgentProfiles()); } catch { /* ignore */ }
+    try {
+      setAgents(await listAgentProfiles());
+    } catch {
+      /* ignore */
+    }
   };
 
-  useEffect(() => { fetchAgents(); }, []);
+  useEffect(() => {
+    fetchAgents();
+  }, []);
 
   useEffect(() => {
     listLearningAgents().then(setLearningAgents).catch(() => {});
@@ -89,7 +124,9 @@ export function AgentTeamPanel({ onClose }: Props) {
     try {
       await deleteAgentMemory(key);
       setAgentMemories((prev) => prev.filter((m) => m.key !== key));
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   };
 
   const startEdit = (a: AgentProfile) => {
@@ -118,6 +155,7 @@ export function AgentTeamPanel({ onClose }: Props) {
     setError("");
     try {
       await updateAgentProfile(name, form);
+      toast.success("Agent saved");
       await fetchAgents();
       setEditing(null);
     } catch (e: any) {
@@ -128,7 +166,12 @@ export function AgentTeamPanel({ onClose }: Props) {
   };
 
   const handleCreate = async () => {
-    if (!createName.trim() || !form.display_name.trim() || !form.role.trim() || !form.goal.trim()) {
+    if (
+      !createName.trim() ||
+      !form.display_name.trim() ||
+      !form.role.trim() ||
+      !form.goal.trim()
+    ) {
       setError("Name, display name, role and goal are required");
       return;
     }
@@ -145,6 +188,7 @@ export function AgentTeamPanel({ onClose }: Props) {
         icon: form.icon,
         tools: form.tools,
       });
+      toast.success("Agent created");
       await fetchAgents();
       setShowCreate(false);
     } catch (e: any) {
@@ -155,12 +199,14 @@ export function AgentTeamPanel({ onClose }: Props) {
   };
 
   const handleDelete = async (a: AgentProfile) => {
-    if (!confirm(`Delete agent "${a.display_name}"?`)) return;
     try {
       await deleteAgentProfile(a.name);
+      toast.success("Agent deleted");
       await fetchAgents();
     } catch (e: any) {
-      setError(e?.message || "Delete failed");
+      toast.error(e?.message || "Delete failed");
+    } finally {
+      setDeleteTarget(null);
     }
   };
 
@@ -168,192 +214,267 @@ export function AgentTeamPanel({ onClose }: Props) {
     try {
       await updateAgentProfile(a.name, { enabled: !a.enabled });
       await fetchAgents();
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const cancelForm = () => {
+    setEditing(null);
+    setShowCreate(false);
   };
 
   const renderForm = (onSave: () => void, showNameField = false) => (
-    <div className="space-y-2.5">
+    <div className="space-y-3">
       {showNameField && (
-        <>
-          <label className="block text-[10px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-secondary)" }}>Agent ID</label>
-          <input value={createName} onChange={(e) => setCreateName(e.target.value)}
-            className="w-full px-2.5 py-1.5 rounded-lg text-xs outline-none transition-colors focus:ring-1"
-            style={{ background: "var(--bg-tertiary)", color: "var(--text-primary)", border: "1px solid var(--border)", "--tw-ring-color": "var(--accent)" } as any}
-            placeholder="e.g. designer, translator" />
-        </>
+        <Input
+          label="Agent ID"
+          value={createName}
+          onChange={(e) => setCreateName(e.target.value)}
+          placeholder="e.g. designer, translator"
+        />
       )}
-      <div className="flex gap-3">
+      <div className="flex gap-3 items-end">
         <div className="flex-1">
-          <label className="block text-[10px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-secondary)" }}>Display Name</label>
-          <input value={form.display_name} onChange={(e) => setForm({ ...form, display_name: e.target.value })}
-            className="w-full px-2.5 py-1.5 rounded-lg text-xs outline-none"
-            style={{ background: "var(--bg-tertiary)", color: "var(--text-primary)", border: "1px solid var(--border)" }} />
+          <Input
+            label="Display Name"
+            value={form.display_name}
+            onChange={(e) => setForm({ ...form, display_name: e.target.value })}
+          />
         </div>
         <div>
-          <label className="block text-[10px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-secondary)" }}>Icon</label>
-          <div className="flex flex-wrap gap-1 p-1.5 rounded-lg" style={{ background: "var(--bg-tertiary)", border: "1px solid var(--border)" }}>
-            {ICON_OPTIONS.slice(0, 10).map((ic) => (
-              <button key={ic} onClick={() => setForm({ ...form, icon: ic })}
-                className="w-6 h-6 rounded text-sm flex items-center justify-center transition-all"
-                style={{ background: form.icon === ic ? "var(--accent)" : "transparent", transform: form.icon === ic ? "scale(1.15)" : "scale(1)" }}>
+          <label className="block text-[11px] font-medium text-[var(--text-secondary)] mb-1.5">
+            Icon
+          </label>
+          <div className="flex flex-wrap gap-0.5 p-1.5 rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border)] max-w-[200px]">
+            {ICON_OPTIONS.map((ic) => (
+              <button
+                key={ic}
+                type="button"
+                onClick={() => setForm({ ...form, icon: ic })}
+                className={cn(
+                  "w-6 h-6 rounded text-sm flex items-center justify-center transition-all",
+                  form.icon === ic
+                    ? "bg-[var(--brand)] scale-110"
+                    : "hover:bg-[var(--bg-elevated)]",
+                )}
+              >
                 {ic}
               </button>
             ))}
           </div>
         </div>
       </div>
+      <Input
+        label="Role"
+        value={form.role}
+        onChange={(e) => setForm({ ...form, role: e.target.value })}
+      />
+      <Textarea
+        label="Goal"
+        value={form.goal}
+        onChange={(e) => setForm({ ...form, goal: e.target.value })}
+        rows={2}
+      />
+      <Textarea
+        label="Backstory"
+        value={form.backstory}
+        onChange={(e) => setForm({ ...form, backstory: e.target.value })}
+        rows={2}
+        placeholder="Optional personality and expertise context"
+      />
+      <Input
+        label="Model Override"
+        value={form.model}
+        onChange={(e) => setForm({ ...form, model: e.target.value })}
+        placeholder="Leave empty to use default"
+      />
       <div>
-        <label className="block text-[10px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-secondary)" }}>Role</label>
-        <input value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}
-          className="w-full px-2.5 py-1.5 rounded-lg text-xs outline-none"
-          style={{ background: "var(--bg-tertiary)", color: "var(--text-primary)", border: "1px solid var(--border)" }} />
-      </div>
-      <div>
-        <label className="block text-[10px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-secondary)" }}>Goal</label>
-        <textarea value={form.goal} onChange={(e) => setForm({ ...form, goal: e.target.value })} rows={2}
-          className="w-full px-2.5 py-1.5 rounded-lg text-xs outline-none resize-none"
-          style={{ background: "var(--bg-tertiary)", color: "var(--text-primary)", border: "1px solid var(--border)" }} />
-      </div>
-      <div>
-        <label className="block text-[10px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-secondary)" }}>Backstory</label>
-        <textarea value={form.backstory} onChange={(e) => setForm({ ...form, backstory: e.target.value })} rows={2}
-          className="w-full px-2.5 py-1.5 rounded-lg text-xs outline-none resize-none"
-          style={{ background: "var(--bg-tertiary)", color: "var(--text-primary)", border: "1px solid var(--border)" }} placeholder="Optional personality and expertise context" />
-      </div>
-      <div>
-        <label className="block text-[10px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-secondary)" }}>Model Override</label>
-        <input value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })}
-          className="w-full px-2.5 py-1.5 rounded-lg text-xs outline-none"
-          style={{ background: "var(--bg-tertiary)", color: "var(--text-primary)", border: "1px solid var(--border)" }} placeholder="Leave empty to use default" />
-      </div>
-      <div>
-        <label className="block text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: "var(--text-secondary)" }}>
-          Tools {form.tools.length === 0 && <span style={{ color: "var(--text-secondary)", fontWeight: 400, textTransform: "none" }}>(all enabled)</span>}
+        <label className="block text-[11px] font-medium text-[var(--text-secondary)] mb-1.5">
+          Tools{" "}
+          {form.tools.length === 0 && (
+            <span className="font-normal text-[var(--text-tertiary)]">
+              (all enabled)
+            </span>
+          )}
         </label>
         <div className="flex flex-wrap gap-1">
           {AVAILABLE_TOOLS.map((t) => {
             const selected = form.tools.includes(t);
             return (
-              <button key={t} type="button" onClick={() => {
-                setForm({ ...form, tools: selected ? form.tools.filter((x) => x !== t) : [...form.tools, t] });
-              }} className="text-[10px] px-1.5 py-0.5 rounded transition-all"
-                style={{
-                  background: selected ? "var(--accent)" : "var(--bg-tertiary)",
-                  color: selected ? "var(--text-on-accent)" : "var(--text-secondary)",
-                  border: `1px solid ${selected ? "var(--accent)" : "var(--border)"}`,
-                }}>
+              <button
+                key={t}
+                type="button"
+                onClick={() =>
+                  setForm({
+                    ...form,
+                    tools: selected
+                      ? form.tools.filter((x) => x !== t)
+                      : [...form.tools, t],
+                  })
+                }
+                className={cn(
+                  "text-[10px] px-2 py-1 rounded-md font-mono transition-colors",
+                  selected
+                    ? "bg-[var(--brand)] text-white"
+                    : "bg-[var(--bg-tertiary)] text-[var(--text-secondary)] border border-[var(--border)] hover:text-[var(--text-primary)]",
+                )}
+              >
                 {t}
               </button>
             );
           })}
           {form.tools.length > 0 && (
-            <button type="button" onClick={() => setForm({ ...form, tools: [] })}
-              className="text-[10px] px-1.5 py-0.5 rounded transition-all"
-              style={{ background: "var(--bg-tertiary)", color: "var(--text-secondary)", border: "1px solid var(--border)" }}>
+            <button
+              type="button"
+              onClick={() => setForm({ ...form, tools: [] })}
+              className="text-[10px] px-2 py-1 rounded-md bg-[var(--bg-tertiary)] text-[var(--text-tertiary)] border border-[var(--border)] hover:text-[var(--text-secondary)]"
+            >
               clear
             </button>
           )}
         </div>
       </div>
       <div className="flex gap-2 pt-1">
-        <button onClick={onSave} disabled={saving}
-          className="text-xs px-4 py-1.5 rounded-lg font-medium transition-all hover:opacity-80"
-          style={{ background: "var(--accent)", color: "var(--text-on-accent)" }}>
-          {saving ? "Saving..." : "Save"}
-        </button>
-        <button onClick={() => { setEditing(null); setShowCreate(false); }}
-          className="text-xs px-4 py-1.5 rounded-lg transition-all hover:opacity-80"
-          style={{ background: "var(--bg-tertiary)", color: "var(--text-primary)" }}>
+        <Button variant="brand" loading={saving} onClick={onSave}>
+          Save
+        </Button>
+        <Button variant="ghost" onClick={cancelForm}>
           Cancel
-        </button>
+        </Button>
       </div>
     </div>
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.6)" }}>
-      <div className="w-full max-w-xl rounded-xl max-h-[88vh] flex flex-col overflow-hidden"
-        style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", boxShadow: "0 25px 60px rgba(0,0,0,0.4)" }}>
-        <div className="flex items-center justify-between px-5 py-4 shrink-0" style={{ borderBottom: "1px solid var(--border)" }}>
+    <>
+      <Modal
+        open={true}
+        onOpenChange={(o) => !o && onClose()}
+        title={
           <div className="flex items-center gap-2">
-            <span className="text-lg">🤖</span>
-            <h2 className="text-base font-bold" style={{ color: "var(--text-primary)" }}>Agent Team</h2>
-            <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium"
-              style={{ background: "var(--bg-tertiary)", color: "var(--text-secondary)" }}>
+            <span>🤖</span>
+            <span>Agent Team</span>
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-[var(--bg-tertiary)] text-[var(--text-secondary)] ml-1">
               {agents.filter((a) => a.enabled).length}/{agents.length} active
             </span>
           </div>
-          <button onClick={onClose} className="text-lg leading-none opacity-60 hover:opacity-100 transition-opacity" style={{ color: "var(--text-secondary)" }}>
-            ✕
-          </button>
-        </div>
+        }
+        description="Configure your multi-agent team"
+        size="xl"
+        footer={
+          !showCreate && !editing ? (
+            <Button variant="brand" onClick={startCreate}>
+              <Plus size={14} /> New Agent
+            </Button>
+          ) : undefined
+        }
+      >
+        {error && (
+          <div className="mb-3 px-3 py-2 rounded-lg bg-[var(--danger-bg)] border border-[var(--danger-border)] text-xs text-[var(--danger)]">
+            {error}
+          </div>
+        )}
 
-        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
-          {error && (
-            <div className="px-3 py-2 rounded-lg text-xs" style={{ background: "var(--danger-bg)", color: "var(--danger)", border: "1px solid var(--danger-border)" }}>
-              {error}
-            </div>
+        {showCreate && (
+          <div className="mb-4 p-4 rounded-xl bg-[var(--bg-tertiary)] border border-[var(--border)]">
+            {renderForm(handleCreate, true)}
+          </div>
+        )}
+
+        <div className="space-y-2">
+          {agents.length === 0 && !showCreate && (
+            <EmptyState
+              icon={<span className="text-2xl">🤖</span>}
+              title="No agents yet"
+              description="Create your first agent profile to enable multi-agent delegation."
+              action={
+                <Button variant="brand" size="sm" onClick={startCreate}>
+                  <Plus size={14} /> New Agent
+                </Button>
+              }
+            />
           )}
 
-          {showCreate && renderForm(handleCreate, true)}
-
           {agents.map((a) => (
-            <div key={a.id} className="rounded-xl transition-all"
-              style={{
-                background: "var(--bg-primary)",
-                border: `1px solid ${a.enabled ? "var(--border)" : "transparent"}`,
-                opacity: a.enabled ? 1 : 0.55,
-              }}>
+            <div
+              key={a.id}
+              className={cn(
+                "rounded-xl transition-all border",
+                a.enabled
+                  ? "bg-[var(--bg-tertiary)] border-[var(--border)]"
+                  : "bg-[var(--bg-tertiary)] border-transparent opacity-60",
+              )}
+            >
               {editing === a.name ? (
                 <div className="p-4">{renderForm(() => handleSave(a.name))}</div>
               ) : (
                 <div className="p-3.5">
                   <div className="flex items-center gap-3 mb-2">
-                    <span className="text-xl w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
-                      style={{ background: "var(--bg-tertiary)" }}>
+                    <span className="text-xl w-9 h-9 rounded-lg flex items-center justify-center shrink-0 bg-[var(--bg-elevated)]">
                       {a.icon || "🤖"}
                     </span>
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-semibold truncate" style={{ color: "var(--text-primary)" }}>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-sm font-semibold text-[var(--text-primary)] truncate">
                           {a.display_name}
                         </span>
                         {a.model && (
-                          <span className="text-[9px] px-1.5 py-0.5 rounded font-mono" style={{ background: "var(--accent-bg)", color: "var(--accent)" }}>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded font-mono bg-[var(--accent-bg)] text-[var(--accent)]">
                             {a.model}
                           </span>
                         )}
                       </div>
-                      <code className="text-[10px] font-mono" style={{ color: "var(--text-secondary)" }}>{a.name}</code>
+                      <code className="text-[10px] font-mono text-[var(--text-tertiary)]">
+                        {a.name}
+                      </code>
                     </div>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <button onClick={() => startEdit(a)} title="Edit"
-                        className="text-[10px] px-2 py-1 rounded-md transition-opacity hover:opacity-80"
-                        style={{ background: "var(--bg-tertiary)", color: "var(--text-primary)" }}>
-                        Edit
-                      </button>
-                      <button onClick={() => handleToggle(a)} title={a.enabled ? "Disable" : "Enable"}
-                        className="text-[10px] px-2 py-1 rounded-md transition-opacity hover:opacity-80"
-                        style={{ background: a.enabled ? "var(--success-bg)" : "var(--bg-elevated)", color: "var(--text-on-accent)" }}>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <Button
+                        size="xs"
+                        variant="ghost"
+                        onClick={() => startEdit(a)}
+                        title="Edit"
+                      >
+                        <Pencil size={12} />
+                      </Button>
+                      <button
+                        onClick={() => handleToggle(a)}
+                        title={a.enabled ? "Disable" : "Enable"}
+                        className={cn(
+                          "h-7 px-2 rounded-md text-[10px] font-medium border transition-colors",
+                          a.enabled
+                            ? "bg-[var(--success-bg)] text-[var(--success)] border-[var(--success-border)] hover:bg-[var(--success)] hover:text-white"
+                            : "bg-[var(--bg-elevated)] text-[var(--text-tertiary)] border-[var(--border)] hover:text-[var(--text-secondary)]",
+                        )}
+                      >
                         {a.enabled ? "On" : "Off"}
                       </button>
                       {!a.is_default && (
-                        <button onClick={() => handleDelete(a)} title="Delete"
-                          className="text-[10px] px-2 py-1 rounded-md transition-opacity hover:opacity-80"
-                          style={{ background: "var(--danger-bg)", color: "var(--danger)" }}>
-                          Del
-                        </button>
+                        <Button
+                          size="xs"
+                          variant="ghost"
+                          onClick={() => setDeleteTarget(a)}
+                          title="Delete"
+                          className="text-[var(--danger)] hover:text-[var(--danger)] hover:bg-[var(--danger-bg)]"
+                        >
+                          <Trash2 size={12} />
+                        </Button>
                       )}
                     </div>
                   </div>
-                  <p className="text-xs leading-relaxed" style={{ color: "var(--text-secondary)" }}>
-                    {a.role} — {a.goal}
+                  <p className="text-xs leading-relaxed text-[var(--text-secondary)]">
+                    <span className="text-[var(--text-primary)]">{a.role}</span>
+                    {" — "}
+                    {a.goal}
                   </p>
                   {a.tools && a.tools.length > 0 && (
                     <div className="flex flex-wrap gap-1 mt-1.5">
                       {a.tools.map((t) => (
-                        <span key={t} className="text-[9px] px-1.5 py-0.5 rounded font-mono"
-                          style={{ background: "var(--bg-tertiary)", color: "var(--text-secondary)", border: "1px solid var(--border)" }}>
+                        <span
+                          key={t}
+                          className="text-[10px] px-1.5 py-0.5 rounded font-mono bg-[var(--bg-secondary)] text-[var(--text-tertiary)] border border-[var(--border)]"
+                        >
                           {t}
                         </span>
                       ))}
@@ -364,69 +485,89 @@ export function AgentTeamPanel({ onClose }: Props) {
             </div>
           ))}
 
-          {agents.length === 0 && !showCreate && (
-            <div className="text-center py-8">
-              <p className="text-sm" style={{ color: "var(--text-secondary)" }}>No agents yet</p>
-            </div>
-          )}
-
           {learningAgents.length > 0 && (
-            <div className="rounded-xl p-3.5" style={{ background: "var(--bg-primary)", border: "1px solid var(--border)" }}>
+            <div className="mt-4 rounded-xl p-3.5 bg-[var(--bg-tertiary)] border border-[var(--border)]">
               <div className="flex items-center gap-2 mb-2">
                 <span className="text-sm">🧠</span>
-                <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--text-secondary)" }}>
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
                   Learning Stats
                 </span>
               </div>
-              <div className="flex gap-2 mb-2">
+              <div className="flex gap-1.5 mb-2 flex-wrap">
                 {learningAgents.map((name) => (
                   <button
                     key={name}
                     onClick={() => loadLearning(name)}
-                    className="text-[10px] px-2 py-1 rounded-md font-mono transition-all"
-                    style={{
-                      background: selectedLearnAgent === name ? "var(--accent)" : "var(--bg-tertiary)",
-                      color: selectedLearnAgent === name ? "var(--text-on-accent)" : "var(--text-primary)",
-                    }}
+                    className={cn(
+                      "text-[11px] px-2.5 py-1 rounded-md font-mono transition-colors",
+                      selectedLearnAgent === name
+                        ? "bg-[var(--brand)] text-white"
+                        : "bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] border border-[var(--border)]",
+                    )}
                   >
                     {name}
                   </button>
                 ))}
               </div>
               {loadingLearn && (
-                <p className="text-[10px]" style={{ color: "var(--text-secondary)" }}>Loading...</p>
+                <div className="flex items-center gap-2 py-2 text-xs text-[var(--text-tertiary)]">
+                  <Loader2 size={12} className="animate-spin" /> Loading…
+                </div>
               )}
               {agentStats && !loadingLearn && (
                 <div className="space-y-2">
-                  <div className="flex gap-3 text-[10px] font-mono" style={{ color: "var(--text-secondary)" }}>
-                    <span>Tasks: <b style={{ color: "var(--text-primary)" }}>{agentStats.total}</b></span>
-                    <span>Success: <b style={{ color: "#34d399" }}>{agentStats.success_rate}%</b></span>
-                    <span>Avg: <b style={{ color: "var(--text-primary)" }}>{agentStats.avg_elapsed}s</b></span>
-                    <span>Tokens: <b style={{ color: "var(--text-primary)" }}>{agentStats.avg_tokens}</b></span>
+                  <div className="flex gap-3 text-[11px] font-mono flex-wrap">
+                    <span className="text-[var(--text-tertiary)]">
+                      Tasks:{" "}
+                      <b className="text-[var(--text-primary)]">
+                        {agentStats.total}
+                      </b>
+                    </span>
+                    <span className="text-[var(--text-tertiary)]">
+                      Success:{" "}
+                      <b className="text-[var(--success)]">
+                        {agentStats.success_rate}%
+                      </b>
+                    </span>
+                    <span className="text-[var(--text-tertiary)]">
+                      Avg:{" "}
+                      <b className="text-[var(--text-primary)]">
+                        {agentStats.avg_elapsed}s
+                      </b>
+                    </span>
+                    <span className="text-[var(--text-tertiary)]">
+                      Tokens:{" "}
+                      <b className="text-[var(--text-primary)]">
+                        {agentStats.avg_tokens}
+                      </b>
+                    </span>
                   </div>
                   {agentMemories.length > 0 && (
                     <div className="space-y-1 max-h-40 overflow-y-auto">
                       {agentMemories.map((m) => (
-                        <div key={m.key} className="flex items-start gap-1.5 group">
+                        <div
+                          key={m.key}
+                          className="flex items-start gap-1.5 group"
+                        >
                           <span
-                            className="text-[9px] px-1 py-0.5 rounded shrink-0 font-mono"
-                            style={{
-                              background: m.source === "llm" ? "var(--accent-bg)" : "var(--bg-tertiary)",
-                              color: m.source === "llm" ? "var(--accent)" : "var(--text-secondary)",
-                            }}
+                            className={cn(
+                              "text-[9px] px-1.5 py-0.5 rounded shrink-0 font-mono",
+                              m.source === "llm"
+                                ? "bg-[var(--accent-bg)] text-[var(--accent)]"
+                                : "bg-[var(--bg-secondary)] text-[var(--text-tertiary)]",
+                            )}
                           >
                             {m.source || "rule"}
                           </span>
-                          <span className="text-[10px] flex-1 leading-relaxed truncate" style={{ color: "var(--text-secondary)" }}>
+                          <span className="text-[11px] flex-1 leading-relaxed truncate text-[var(--text-secondary)]">
                             {m.content}
                           </span>
                           <button
                             onClick={() => handleDeleteMemory(m.key)}
-                            className="text-[9px] opacity-0 group-hover:opacity-60 hover:!opacity-100 shrink-0"
-                            style={{ color: "#f87171" }}
+                            className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0 p-0.5 rounded text-[var(--danger)] hover:bg-[var(--danger-bg)]"
                             title="Delete"
                           >
-                            ✕
+                            <Trash2 size={10} />
                           </button>
                         </div>
                       ))}
@@ -435,22 +576,26 @@ export function AgentTeamPanel({ onClose }: Props) {
                 </div>
               )}
               {!agentStats && !loadingLearn && selectedLearnAgent && (
-                <p className="text-[10px]" style={{ color: "var(--text-secondary)" }}>No data for {selectedLearnAgent}</p>
+                <p className="text-[11px] text-[var(--text-tertiary)]">
+                  No data for {selectedLearnAgent}
+                </p>
               )}
             </div>
           )}
         </div>
+      </Modal>
 
-        {!showCreate && (
-          <div className="px-5 py-3 shrink-0" style={{ borderTop: "1px solid var(--border)" }}>
-            <button onClick={startCreate}
-              className="w-full py-2 rounded-lg text-xs font-medium transition-all hover:opacity-80"
-              style={{ background: "var(--accent)", color: "var(--text-on-accent)" }}>
-              + New Agent
-            </button>
-          </div>
-        )}
-      </div>
-    </div>
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onOpenChange={(o) => !o && setDeleteTarget(null)}
+        title={`Delete agent "${deleteTarget?.display_name}"?`}
+        description="This permanently removes the agent profile and its learning data."
+        confirmText="Delete"
+        tone="danger"
+        onConfirm={() => {
+          if (deleteTarget) handleDelete(deleteTarget);
+        }}
+      />
+    </>
   );
 }
