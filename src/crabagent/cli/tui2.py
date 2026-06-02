@@ -209,12 +209,13 @@ class DualPanelTui(TuiSession):
         self._ansi_segments: deque[str] = deque(maxlen=_MAX_SEGMENTS)
         self._cache_dirty = True
         self._agent_task: asyncio.Task | None = None
-        self._thinking_chunks: list[str] = []
         self._thinking_active = False
         self._thinking_seg_idx: int | None = None
         tw = max(80, os.get_terminal_size().columns - 2) if os.isatty(1) else 80
         self._render_console = Console(force_terminal=True, width=tw, color_system="truecolor")
         self._abort_flag = False
+        self._pending_calls: dict[str, tuple] = {}
+        self._buffered_tool_pairs: list[tuple] = []
         self._auto_scroll = True
         self._scroll_y = 0
         self._output_line_count = 0
@@ -553,6 +554,9 @@ class DualPanelTui(TuiSession):
             self._cached_seg_count = current_len
             self._cache_dirty = False
             self._rebuild_merged_cache()
+            self._cached_line_count = 1
+            for _, text in self._cached_merged:
+                self._cached_line_count += text.count("\n")
             self._output_line_count = self._cached_line_count
             self._sel_dirty = True
 
@@ -570,11 +574,15 @@ class DualPanelTui(TuiSession):
             if text == "\n":
                 if merged:
                     prev_s, prev_t = merged[-1]
-                    merged[-1] = (prev_s, prev_t + "\n")
+                    merged[-1] = (prev_s, prev_t.rstrip() + "\n")
                 else:
                     merged.append((style, "\n"))
             else:
-                merged.append((style, text))
+                if merged and merged[-1][0] == style:
+                    prev_s, prev_t = merged[-1]
+                    merged[-1] = (prev_s, prev_t + text)
+                else:
+                    merged.append((style, text))
         self._cached_merged = merged
         self._split_plain = [text for _, text in merged]
         self._cached_handlers = [self._make_frag_handler(idx) for idx in range(len(merged))]
@@ -824,28 +832,6 @@ class DualPanelTui(TuiSession):
                     if ansi:
                         results.append(lambda a=ansi: self._ansi_segments.append(a))
 
-                elif kind == "thinking_flush":
-                    chunks = item[1]
-                    seg_idx = item[2]
-                    full_text = "".join(chunks)
-                    if full_text:
-                        ansi = _r2a_static(console, Text("Thinking: " + full_text, style="dim italic"))
-                        if ansi and seg_idx is not None and seg_idx < len(self._ansi_segments):
-                            results.append(lambda a=ansi, si=seg_idx: self._ansi_segments.__setitem__(si, a))
-
-                elif kind == "thinking_remove":
-                    seg_idx = item[1]
-                    if seg_idx is not None and seg_idx < len(self._ansi_segments):
-                        results.append(lambda si=seg_idx: self._ansi_segments.__delitem__(si))
-
-                elif kind == "thinking_init":
-                    seg_idx = item[1]
-                    ansi = _r2a_static(console, Text("Thinking: ", style="dim italic"))
-                    if ansi:
-                        results.append(lambda a=ansi: self._ansi_segments.append(a))
-                    else:
-                        results.append(lambda si=seg_idx: None)
-
                 elif kind == "thinking_append_ansi":
                     seg_idx = item[1]
                     ansi = item[2]
@@ -853,6 +839,27 @@ class DualPanelTui(TuiSession):
                         results.append(
                             lambda a=ansi, si=seg_idx: self._ansi_segments.__setitem__(si, self._ansi_segments[si] + a)
                         )
+
+                elif kind == "thinking_delta":
+                    seg_idx = item[1]
+                    chunk = item[2]
+                    ansi = _r2a_static(console, Text(chunk, style="dim italic"))
+                    if ansi and seg_idx is not None and seg_idx < len(self._ansi_segments):
+                        results.append(
+                            lambda a=ansi, si=seg_idx: self._ansi_segments.__setitem__(si, self._ansi_segments[si] + a)
+                        )
+
+                elif kind == "tool_pair":
+                    display, style, result_preview = item[1], item[2], item[3]
+                    call_ansi = _r2a_static(console, Text(f"  → {display}", style=style))
+                    if call_ansi:
+                        results.append(lambda a=call_ansi: self._ansi_segments.append(a))
+                    result_text = f"     ← {result_preview}"
+                    if "\n" in result_text:
+                        result_text = result_text.replace("\n", "\n     ") + "\n"
+                    result_ansi = _r2a_static(console, Text(result_text, style="dim"))
+                    if result_ansi:
+                        results.append(lambda a=result_ansi: self._ansi_segments.append(a))
 
                 elif kind == "history":
                     msgs = item[1]
@@ -946,10 +953,11 @@ class DualPanelTui(TuiSession):
 
         self._stream = ""
         self._thinking_active = False
-        self._thinking_chunks = []
         self._rendered_up_to = 0
         self._in_code_block = False
         self._sub_agent_tasks = {}
+        self._pending_calls.clear()
+        self._buffered_tool_pairs.clear()
         self._agent_running = True
         self._abort_flag = False
         self._invalidate()
@@ -994,45 +1002,30 @@ class DualPanelTui(TuiSession):
     async def _on_agent_event(self, event: AgentEvent):
         if event.type == EventType.THINKING_DELTA:
             chunk = event.data.get("text", "")
+            if not chunk:
+                return
             if not self._thinking_active:
                 self._thinking_active = True
-                self._thinking_chunks = []
                 self._append_rich(Text("Thinking: ", style="dim italic"))
                 self._thinking_seg_idx = len(self._ansi_segments) - 1
-            self._thinking_chunks.append(chunk)
+            await self._render_queue.put(("thinking_delta", self._thinking_seg_idx, chunk))
 
         elif event.type == EventType.THINKING_DONE:
             if self._thinking_active:
                 self._thinking_active = False
-                full_text = "".join(self._thinking_chunks)
-                if full_text.strip():
-                    if self._thinking_seg_idx is not None:
-                        await self._render_queue.put(
-                            ("thinking_flush", list(self._thinking_chunks), self._thinking_seg_idx)
-                        )
-                    self._append_ansi("")
-                else:
-                    if self._thinking_seg_idx is not None:
-                        await self._render_queue.put(("thinking_remove", self._thinking_seg_idx))
-                self._thinking_chunks = []
                 self._thinking_seg_idx = None
-                self._invalidate()
+                for pair in self._buffered_tool_pairs:
+                    await self._render_queue.put(("tool_pair", pair[0], pair[1], pair[2]))
+                self._buffered_tool_pairs.clear()
+            self._invalidate()
 
         elif event.type == EventType.TEXT_DELTA:
             if self._thinking_active:
                 self._thinking_active = False
-                full_text = "".join(self._thinking_chunks)
-                if full_text.strip():
-                    if self._thinking_seg_idx is not None:
-                        await self._render_queue.put(
-                            ("thinking_flush", list(self._thinking_chunks), self._thinking_seg_idx)
-                        )
-                    self._append_ansi("")
-                else:
-                    if self._thinking_seg_idx is not None:
-                        await self._render_queue.put(("thinking_remove", self._thinking_seg_idx))
-                self._thinking_chunks = []
                 self._thinking_seg_idx = None
+                for pair in self._buffered_tool_pairs:
+                    await self._render_queue.put(("tool_pair", pair[0], pair[1], pair[2]))
+                self._buffered_tool_pairs.clear()
             self._stream += event.data.get("text", "")
 
         elif event.type == EventType.TEXT_DONE:
@@ -1052,18 +1045,29 @@ class DualPanelTui(TuiSession):
                 "handoff_to",
                 "list_agents",
             ):
+                tool_id = event.data.get("id", "")
                 display = self._fmt_tool(tool_name, event.data.get("arguments", {}))
                 source = event.data.get("source", "builtin")
                 style = "bright_magenta" if source == "mcp" else "cyan"
-                await self._render_queue.put(("rich_text", f"  → {display}", style))
+                if tool_id:
+                    self._pending_calls[tool_id] = (display, style)
 
         elif event.type == EventType.TOOL_RESULT:
             result = event.data.get("result", "")
             result_str = str(result)
-            preview = result_str[:300]
-            if len(result_str) > 300:
+            preview = result_str[:200]
+            if len(result_str) > 200:
                 preview += "..."
-            await self._render_queue.put(("rich_text", f"  ← {preview}", "dim"))
+            tool_id = event.data.get("id", "")
+            call_info = self._pending_calls.pop(tool_id, None)
+            if call_info:
+                display, style = call_info
+                if self._thinking_active:
+                    self._buffered_tool_pairs.append((display, style, preview))
+                else:
+                    await self._render_queue.put(("tool_pair", display, style, preview))
+            else:
+                await self._render_queue.put(("rich_text", f"  ← {preview}", "dim"))
             self._invalidate()
 
         elif event.type == EventType.AGENT_ERROR:

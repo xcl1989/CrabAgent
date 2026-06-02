@@ -210,8 +210,6 @@ class TuiSession:
                 continue
             if not in_code and i + 1 < len(text) and text[i] == "\n" and text[i + 1] == "\n":
                 last_boundary = i + 2
-            elif not in_code and text[i] == "\n" and last_boundary == 0:
-                last_boundary = i + 1
             i += 1
         return last_boundary
 
