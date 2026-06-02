@@ -420,6 +420,19 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(
                     <pre className="text-[12px] whitespace-pre-wrap break-all leading-relaxed font-mono text-[var(--text-secondary)] m-0 bg-transparent! p-0! border-0! max-h-48 overflow-auto">
                       {resultMsg.content}
                     </pre>
+                    {resultMsg.images && resultMsg.images.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {resultMsg.images.map((img, idx) => (
+                          <img
+                            key={idx}
+                            src={img}
+                            alt={`Tool result screenshot ${idx + 1}`}
+                            className="max-w-full max-h-[320px] rounded-md object-contain cursor-pointer border border-[var(--border)] hover:border-[var(--brand-border)] transition-colors"
+                            onClick={() => setPreviewImage(img)}
+                          />
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
               </details>

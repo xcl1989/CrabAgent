@@ -51,12 +51,18 @@ async def event_stream(
 
         raise HTTPException(status_code=401, detail="Invalid token or unauthorized")
 
-    queue: asyncio.Queue[AgentEvent] = asyncio.Queue(maxsize=50)
+    critical_queue: asyncio.Queue[AgentEvent] = asyncio.Queue(maxsize=0)
+    stream_queue: asyncio.Queue[AgentEvent] = asyncio.Queue(maxsize=50)
     queue_id = uuid.uuid4().hex
 
     if not hasattr(request.app.state, "event_queues"):
         request.app.state.event_queues = {}
-    request.app.state.event_queues[queue_id] = (session_id, queue, time.time())
+    request.app.state.event_queues[queue_id] = (
+        session_id,
+        critical_queue,
+        stream_queue,
+        time.time(),
+    )
 
     connected_event = AgentEvent(
         type=EventType.MESSAGE_CREATED,
@@ -84,7 +90,10 @@ async def event_stream(
                 if await request.is_disconnected():
                     break
                 try:
-                    event = await asyncio.wait_for(queue.get(), timeout=30.0)
+                    try:
+                        event = critical_queue.get_nowait()
+                    except asyncio.QueueEmpty:
+                        event = await asyncio.wait_for(stream_queue.get(), timeout=30.0)
                     if isinstance(event, AgentEvent):
                         try:
                             yield event.to_sse()
@@ -98,7 +107,15 @@ async def event_stream(
                     elif isinstance(event, dict):
                         yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
                 except TimeoutError:
-                    yield ": keepalive\n\n"
+                    # Check critical queue one last time before keepalive
+                    try:
+                        event = critical_queue.get_nowait()
+                        if isinstance(event, AgentEvent):
+                            yield event.to_sse()
+                        elif isinstance(event, dict):
+                            yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                    except asyncio.QueueEmpty:
+                        yield ": keepalive\n\n"
         finally:
             queues = getattr(request.app.state, "event_queues", {})
             queues.pop(queue_id, None)

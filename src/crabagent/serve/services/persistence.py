@@ -47,7 +47,15 @@ class PersistenceListener:
 
         self.sequence += 1
         role = msg.get("role", "")
-        content = msg.get("content") or ""
+        raw_content = msg.get("content")
+        # v0.9 — tool results may be list[dict] (multimodal: text + image_url).
+        # Persist as JSON string; message_to_dict will deserialize on read.
+        if isinstance(raw_content, list):
+            content = json.dumps(raw_content, ensure_ascii=False)
+        elif raw_content is None:
+            content = ""
+        else:
+            content = raw_content
         tool_calls_raw = msg.get("tool_calls")
         tool_calls = json.dumps(tool_calls_raw) if tool_calls_raw else None
         tool_call_id = msg.get("tool_call_id")

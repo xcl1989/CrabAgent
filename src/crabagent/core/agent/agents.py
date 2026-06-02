@@ -6,6 +6,15 @@ import time
 
 from sqlalchemy import select
 
+from crabagent.core.agent.reflect import (
+    classify_task as _classify_task,
+)
+from crabagent.core.agent.reflect import (
+    llm_reflect_lesson as _llm_reflect_lesson,
+)
+from crabagent.core.agent.reflect import (
+    rule_extract_lesson as _rule_extract_lesson,
+)
 from crabagent.core.database import AgentProfile, async_session_factory
 
 logger = logging.getLogger(__name__)
@@ -202,273 +211,128 @@ async def _load_shared_context(session_id: str) -> str:
     return "\n".join(lines)
 
 
-async def build_memory_prompt(user_id: int) -> str:
+async def build_memory_prompt(user_id: int, query: str = "") -> str:
     if not user_id:
         return ""
-    from crabagent.core.database import agent_memory_get_by_type
+    from crabagent.core.config import settings
+    from crabagent.core.database import (
+        agent_memory_get_by_type,
+        agent_memory_search,
+    )
+
+    parts: list[str] = []
 
     team_memories = await agent_memory_get_by_type(user_id, "team_knowledge", limit=10)
-    if not team_memories:
-        return ""
-    total_chars = sum(len(m["content"]) for m in team_memories)
-    if total_chars > 3000:
-        team_memories = team_memories[:5]
-    lines = ["## Team Knowledge", ""]
-    for m in team_memories:
-        cat = m["category"]
-        lines.append(f"- **{m['key']}** ({cat}): {m['content']}")
-    lines.append("")
-    lines.append(
-        "You can save new knowledge with `memory_save(memory_type='team', ...)`. "
-        "When the user makes a choice or rejects an option, record it."
-    )
-    lines.append("")
-    return "\n".join(lines)
-
-
-def _classify_task(task: str) -> str:
-    tl = task.lower()
-    code_kw = [
-        "code",
-        "代码",
-        "bug",
-        "debug",
-        "refactor",
-        "重构",
-        "implement",
-        "实现",
-        "function",
-        "函数",
-        "class",
-        "api",
-        "test",
-        "测试",
-        "write",
-        "编写",
-        "fix",
-        "修复",
-    ]
-    research_kw = [
-        "search",
-        "搜索",
-        "research",
-        "调研",
-        "find",
-        "查找",
-        "browse",
-        "浏览",
-        "scrape",
-        "爬取",
-        "look up",
-        "查询",
-    ]
-    analysis_kw = [
-        "analyze",
-        "分析",
-        "compare",
-        "比较",
-        "report",
-        "报告",
-        "review",
-        "审查",
-        "evaluate",
-        "评估",
-        "check",
-        "检查",
-    ]
-    writing_kw = [
-        "translate",
-        "翻译",
-        "edit",
-        "编辑",
-        "format",
-        "格式化",
-        "document",
-        "文档",
-        "content",
-        "内容",
-        "article",
-        "文章",
-        "write",
-        "撰写",
-    ]
-    scores = {"code": 0, "research": 0, "analysis": 0, "writing": 0}
-    for kw in code_kw:
-        if kw in tl:
-            scores["code"] += 1
-    for kw in research_kw:
-        if kw in tl:
-            scores["research"] += 1
-    for kw in analysis_kw:
-        if kw in tl:
-            scores["analysis"] += 1
-    for kw in writing_kw:
-        if kw in tl:
-            scores["writing"] += 1
-    best = max(scores, key=scores.get)
-    return best if scores[best] > 0 else "general"
-
-
-def _rule_extract_lesson(
-    agent_name: str,
-    iterations: int,
-    max_iterations: int,
-    task: str,
-    result: str,
-    task_category: str = "general",
-) -> dict | None:
-    if iterations >= max_iterations * 0.8 and result:
-        return {
-            "category": "failed_approach",
-            "key": f"lesson:{agent_name}:rule:high_iterations:{int(time.time())}",
-            "content": (
-                f"Exhausted {iterations}/{max_iterations} iterations on: {task[:100]}. "
-                f"Next time: decompose complex tasks, narrow scope, or use fewer tools per iteration."
-            ),
-            "importance": 0.5,
-            "source": "rule",
-            "task_category": task_category,
-        }
-    return None
-
-
-async def _llm_reflect_lesson(
-    agent_name: str,
-    task: str,
-    result: str,
-    task_category: str,
-    stats: dict,
-    model: str,
-    provider_name: str | None = None,
-    error_msg: str = "",
-) -> dict | None:
-    try:
-        _t = time.time()
-        import litellm
-
-        from crabagent.core.provider_store import get_default_provider, get_provider
-
-        if error_msg:
-            result_text = f"(TASK FAILED) Error: {error_msg[:600]}"
-        else:
-            result_text = result[:800] if result else "(no output)"
-
-        prompt = (
-            f"Based on this completed task, extract ONE concrete lesson.\n\n"
-            f"Agent: {agent_name}\n"
-            f"Task: {task[:400]}\n"
-            f"Output: {result_text}\n"
-            f"Stats: {stats['iterations']} steps, {stats['tokens']} tokens, {stats['elapsed']}s\n\n"
-            f"Identify one specific tip, pitfall, or technique that would help in future similar tasks. "
-            f"Be specific and actionable. Do not give generic praise.\n\n"
-            f"Category (pick one): {task_category}\n\n"
-            f"If there is truly nothing worth noting, respond with just the word: NONE\n"
-            f"Otherwise respond with:\n"
-            f"Category: {{category}}\n"
-            f"Insight: {{one sentence of actionable advice}}"
+    if team_memories:
+        total_chars = sum(len(m["content"]) for m in team_memories)
+        if total_chars > 3000:
+            team_memories = team_memories[:5]
+        lines = ["## Team Knowledge", ""]
+        for m in team_memories:
+            cat = m["category"]
+            lines.append(f"- **{m['key']}** ({cat}): {m['content']}")
+        lines.append("")
+        lines.append(
+            "You can save new knowledge with `memory_save(memory_type='team', ...)`. "
+            "When the user makes a choice or rejects an option, record it."
         )
+        lines.append("")
+        parts.append("\n".join(lines))
 
-        if provider_name:
-            provider = await get_provider(provider_name)
-        else:
-            provider = await get_default_provider()
-        if not provider:
-            logger.warning("LLM reflection skipped for %s: no provider found", agent_name)
-            return None
-
-        logger.info(
-            "_llm_reflect_lesson for %s: model=%s provider=%s task_cat=%s error=%s",
-            agent_name,
-            model,
-            provider.name,
-            task_category,
-            bool(error_msg),
-        )
-
-        llm_params = {"api_key": provider.api_key}
-        if provider.base_url:
-            llm_params["api_base"] = provider.base_url
-            llm_params["custom_llm_provider"] = "openai"
-
-        response = await litellm.acompletion(
-            model=model,
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=2000,
-            temperature=0.3,
-            **llm_params,
-        )
-
-        _elapsed = time.time() - _t
-        if _elapsed > 5:
-            logger.debug("_llm_reflect_lesson for %s took %.1fs", agent_name, _elapsed)
-
-        text = ""
-        if response.choices:
-            msg = response.choices[0].message
-            text = (msg.content or "").strip()
-            if not text:
-                reasoning = getattr(msg, "reasoning_content", None)
-                if reasoning:
-                    text = reasoning.strip()
-                    if "<｜end▁of▁thinking｜>" in text:
-                        text = text.rsplit(" response", 1)[-1].strip()
-
-        if text.strip().upper() in ("NONE", "SKIP"):
-            logger.debug("_llm_reflect_lesson for %s: nothing to learn", agent_name)
-            return None
-
-        category = task_category
-        insight = ""
-        for line in text.split("\n"):
-            line = line.strip()
-            if line.lower().startswith("category:") or line.startswith("类别:"):
-                cat = line.split(":", 1)[1].strip().lower()
-                if cat in {"code", "research", "analysis", "writing", "general"}:
-                    category = cat
-            elif line.lower().startswith("insight:") or line.startswith("经验:") or line.startswith("反思:"):
-                insight = line.split(":", 1)[1].strip()
-
-        if not insight:
-            insight = text[:250]
-
-        bad_words = [
-            "completed efficiently",
-            "completed in",
-            "did a good",
-            "well done",
-            "great job",
-            "successfully completed",
-            "完成任务",
-            "完成得很好",
-            "做得很好",
-            "顺利完成",
-            "completed the task",
-        ]
-        tl = insight.lower()
-        if any(bw in tl for bw in bad_words):
-            logger.debug("_llm_reflect_lesson for %s: insight too generic, skipping", agent_name)
-            return None
-
-        if len(insight) < 10:
-            logger.warning(
-                "_llm_reflect_lesson for %s: insight too short (%d chars): %s",
-                agent_name,
-                len(insight),
-                text[:100],
+    # NEW (v0.9): query-aware recall. Searches both lessons and user_preferences
+    # by keyword; injects top-K relevant to the current user message.
+    max_inject = int(getattr(settings, "memory_max_inject", 5))
+    if query and getattr(settings, "memory_auto_recall", True) and max_inject > 0:
+        try:
+            related = await agent_memory_search(
+                user_id,
+                query[:200],
+                memory_type="",
+                limit=max_inject,
             )
-            return None
+        except Exception:
+            related = []
+        if related:
+            # Prefer user_preferences first (they shape behaviour), then lessons
+            prefs = [m for m in related if m.get("memory_type") == "user_preference"]
+            lessons = [m for m in related if m.get("memory_type") != "user_preference"]
+            ordered = prefs[:3] + lessons[: max_inject - len(prefs[:3])]
+            if ordered:
+                lines = ["## Related Memories (auto-recalled)", ""]
+                for m in ordered:
+                    mtype = m.get("memory_type", "lesson")
+                    agent_tag = f" [{m.get('agent_name')}]" if m.get("agent_name") else ""
+                    lines.append(
+                        f"- **{m['key']}** ({mtype}{agent_tag}, imp={m.get('importance', 0.5):.1f}): {m['content']}"
+                    )
+                lines.append("")
+                parts.append("\n".join(lines))
 
-        return {
-            "category": "failed_approach" if error_msg else "effective_strategy",
-            "key": f"lesson:{agent_name}:llm:{int(time.time())}",
-            "content": insight,
-            "importance": 0.8 if error_msg else 0.7,
-            "source": "llm",
-            "task_category": category,
-        }
+    return "\n\n".join(parts) if parts else ""
+
+
+async def inject_agent_lessons(
+    system_prompt: str,
+    user_id: int,
+    agent_name: str,
+    task_hint: str = "",
+) -> str:
+    """Append a '## Your Past Experiences' block to ``system_prompt`` if the
+    agent has previously persisted lessons.
+
+    Used by both sub-agent delegation (agents.py) and the main agent
+    (prompt.py). When ``task_hint`` is given, we additionally query for
+    lessons whose content/key matches the hint (cheap LIKE-based search).
+    """
+
+    if not user_id or not agent_name:
+        return system_prompt
+    from crabagent.core.database import agent_memory_get_by_agent, agent_memory_search
+
+    lessons: list[dict] = []
+    try:
+        lessons = await agent_memory_get_by_agent(user_id, agent_name, limit=5)
     except Exception:
-        logger.warning("LLM reflection failed for %s", agent_name, exc_info=True)
-        return None
+        logger.debug("Failed to load agent lessons for %s", agent_name, exc_info=True)
+
+    if task_hint and len(lessons) < 7:
+        try:
+            similar = await agent_memory_search(
+                user_id,
+                task_hint[:120],
+                memory_type="agent_lesson",
+                limit=3,
+            )
+            existing_keys = {item["key"] for item in lessons}
+            for s in similar:
+                if s["key"] not in existing_keys and s.get("agent_name") == agent_name:
+                    lessons.append(s)
+        except Exception:
+            pass
+
+    if not lessons:
+        return system_prompt
+
+    by_cat: dict[str, list[str]] = {}
+    for lesson in lessons:
+        cat = lesson.get("category", "effective_strategy") or "effective_strategy"
+        source = lesson.get("source", "")
+        tag = "⚠️" if cat == "failed_approach" else ("🧠" if source == "llm" else "📋")
+        by_cat.setdefault(cat, []).append(f"{tag} {lesson['content']}")
+
+    lines = [system_prompt or "", "\n\n## Your Past Experiences\n"]
+    lines.append("Use these to guide your approach. Avoid repeating past mistakes.\n")
+    if "failed_approach" in by_cat:
+        lines.append("### Pitfalls to Avoid")
+        for item in by_cat["failed_approach"]:
+            lines.append(f"- {item}")
+        lines.append("")
+    if "effective_strategy" in by_cat:
+        lines.append("### What Worked Before")
+        for item in by_cat["effective_strategy"]:
+            lines.append(f"- {item}")
+        lines.append("")
+    return "\n".join(lines)
 
 
 _running_sub_agents: dict[str, dict] = {}
@@ -578,50 +442,17 @@ async def spawn_sub_agent(
     if session_id:
         sub_context.metadata["session_id"] = session_id
 
-    agent_lessons = []
     task_category = _classify_task(task)
     if parent_user_id:
         try:
-            from crabagent.core.database import agent_memory_get_by_agent, agent_memory_search
-
-            agent_lessons = await agent_memory_get_by_agent(parent_user_id, agent_name, limit=5)
-            try:
-                similar = await agent_memory_search(
-                    parent_user_id,
-                    task_category,
-                    memory_type="agent_lesson",
-                    limit=3,
-                )
-                existing_keys = {item["key"] for item in agent_lessons}
-                for s in similar:
-                    if s["key"] not in existing_keys and s["agent_name"] == agent_name:
-                        agent_lessons.append(s)
-            except Exception:
-                pass
+            sub_context.system_prompt = await inject_agent_lessons(
+                sub_context.system_prompt,
+                user_id=parent_user_id,
+                agent_name=agent_name,
+                task_hint=task_category,
+            )
         except Exception:
-            pass
-
-    if agent_lessons:
-        lesson_by_cat: dict[str, list[str]] = {}
-        for lesson in agent_lessons:
-            cat = lesson.get("category", "effective_strategy")
-            source = lesson.get("source", "")
-            tag = "⚠️" if cat == "failed_approach" else "🧠" if source == "llm" else "📋"
-            lesson_by_cat.setdefault(cat, []).append(f"{tag} {lesson['content']}")
-
-        lesson_lines = ["\n\n## Your Past Experiences\n"]
-        lesson_lines.append("Use these to guide your approach. Avoid repeating past mistakes.\n")
-        if "failed_approach" in lesson_by_cat:
-            lesson_lines.append("### Pitfalls to Avoid")
-            for l in lesson_by_cat["failed_approach"]:
-                lesson_lines.append(f"- {l}")
-            lesson_lines.append("")
-        if "effective_strategy" in lesson_by_cat:
-            lesson_lines.append("### What Worked Before")
-            for l in lesson_by_cat["effective_strategy"]:
-                lesson_lines.append(f"- {l}")
-            lesson_lines.append("")
-        sub_context.system_prompt += "\n".join(lesson_lines)
+            logger.debug("Failed to inject lessons for sub-agent %s", agent_name, exc_info=True)
 
     shared_context = await _load_shared_context(session_id)
 

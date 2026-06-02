@@ -3,10 +3,13 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from crabagent.core.agent.tools.registry import ToolRegistry
 from crabagent.core.event import EventBus
+
+if TYPE_CHECKING:
+    from crabagent.core.agent.middlewares import MiddlewareChain
 
 
 @dataclass
@@ -26,6 +29,7 @@ class AgentContext:
     approved_tools: set[str] = field(default_factory=set)
     confirm_callback: Callable[[str, dict[str, Any]], Awaitable[bool]] | None = None
     ask_callback: Callable[[str, list[str] | None], Awaitable[str]] | None = None
+    middlewares: MiddlewareChain | None = None
 
     @property
     def budget_remaining(self) -> int:

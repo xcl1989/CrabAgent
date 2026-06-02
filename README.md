@@ -229,44 +229,7 @@ Tools are saved to `.crabagent/tools/`, auto-registered, and persist across sess
 | `CRAB_BROWSER_HEADLESS` | `true` | Browser headless mode |
 | `CRAB_WEB_PROXY` | (empty) | HTTP proxy for web_search & web_scrape |
 
-**v0.8.0 Highlights**
-
-- 🎨 **Complete Web UI Redesign** — Brand-new CrabAgent ocean-teal design system with full light/dark theme support (auto-detects system preference). Every component rebuilt on a token-based design foundation — no more hardcoded hex values.
-- 🌗 **Light + Dark Theme** — Toggle between warm-cream light and warm-dark themes via the navbar. Persisted in `localStorage` with `prefers-color-scheme` fallback. Every component theme-aware, including charts.
-- 🧩 **Reusable UI Library** — New `components/ui/` library: Button, Input, Modal, ConfirmDialog, Toast (sonner), Tooltip (Radix), EmptyState, LoadingState, Skeleton, CodeBlock with copy + syntax highlighting. All components use design tokens.
-- 📊 **Theme-Aware Charts** — AgentGrowthChart now uses `useThemeColors()` hook for recharts SVG strokes. Colors automatically follow the active theme.
-- 📱 **Mobile Responsive** — SessionList becomes a slide-in drawer on `<md` viewports. Hamburger menu button in the ChatPage toolbar (mobile only). Esc-to-close and tap-overlay-to-close.
-- 🗂 **AgentsPage: Modal → Inline Page** — Agent Team panel is now a dedicated inline page at `/agents` (was a modal overlay). Better information density. ChatPage still uses modal mode for quick access.
-- 📦 **Bundle Optimization** — Vite `manualChunks` splits vendor code into 4 chunks (react / charts / markdown / ui). Largest single chunk: 380 kB (was 1.22 MB monolith).
-- 🎯 **Dashboard Refactor** — DashboardPage replaces 44 inline styles and `AGENT_THEME` hardcoded hex gradients with theme-aware `agentColor()` helper + `--agent-*` CSS vars. Lucide icons replace ASCII glyphs. Empty state for "no pipelines".
-- 🔌 **Small Component Cleanup** — TodoWidget, McpStatusBar, FileBrowser, TaskBoard all refactored to use design tokens and Lucide icons.
-
-**v0.7.4 Highlights**
-
-- 🔄 **Session Agent Switching** — Switch agent identity mid-session with `/agent` (TUI) or `POST /api/sessions/{id}/agent` (API). Each agent has different tool sets, and messages are tagged with agent info for history tracking.
-- 🛠️ **Agent-Created Custom Tools** — Agents can now write and register their own reusable tools via `create_tool`/`update_tool`/`delete_tool`. Code is validated, saved to `.crabagent/tools/`, registered immediately, and auto-loads across sessions.
-- 🐛 **TUI Queue & History Fixes** — Fixed race condition where queued inputs were sent before previous rendering completed. Fixed message ordering in DB when loading sessions with queued messages via persistence flush improvements.
-- 🔤 **TUI CJK & Thinking Fixes** — Fixed CJK character rendering freeze in dual-panel TUI. Fixed thinking text display bugs (off-by-one, cache miss on content update, prefix loss on flush).
-
-**v0.7.2 Highlights**
-- 🖥️ **Dual-Panel TUI** — New prompt_toolkit-based full-screen TUI: scrollable output panel (mouse wheel + PageUp/Down/Home/End), persistent input area that auto-grows with content, and real-time status bar. Default mode (`crabagent`), use `--old` for legacy TUI.
-- 🖱️ **Mouse Text Selection** — Hold Shift + mouse drag to select text in the output area. Ctrl+C copies to clipboard (macOS pbcopy / Linux xclip).
-- 💬 **Interactive Popup Menus** — `/model`, `/sessions`, `/provider` now show scrolling selection popups with arrow key navigation, instead of printing long lists.
-- 🧠 **Streaming Thinking** — Agent reasoning (`THINKING_DELTA`) streams in real-time to the output panel, dim italic style.
-- 💡 **Completions Menu** — Slash command autocomplete appears as a floating completions menu above the input area.
-
-**v0.7.1 Highlights**
-- 📊 **Pipeline Dashboard** — Real-time pipeline visualization: see active pipelines with step progress, agent cards with running counts, and growth charts. History pipelines auto-collapsed.
-- 🔄 **AgentRun Persistence** — New `agent_runs` table tracks every agent/pipeline execution with full metadata (tool calls, elapsed time, tokens, iterations). API endpoints for run history and per-agent growth stats.
-- 🐛 **Streaming Fix** — `TEXT_DELTA` and `THINKING_DELTA` events are no longer throttled/dropped by SSE forwarder. `TEXT_DONE` handler now uses full text from backend to ensure complete message display.
-- 🛠 **Tool Display Fix** — `delegate_parallel` arguments with nested objects no longer show `[object Object]` in the UI.
-- 📡 **RunRecorder** — EventBus subscriber that creates `agent_runs` records for pipeline, main, and sub-agent executions in real-time.
-
-**v0.7.0 Highlights**
-- 🧠 **Learning quality overhaul** — LLM reflection now extracts **actionable insights** (tool tricks, pitfalls, domain tips), no more "completed in X steps" noise. Failure learning added — agents learn from mistakes too.
-- 🌐 **Web proxy support** — `CRAB_WEB_PROXY=http://127.0.0.1:7890` for web_search/web_scrape (critical for users behind firewalls).
-- 📊 **Learning Dashboard** — View each agent's task stats and past lessons directly in the Web UI Agent Team panel.
-- 📡 **Sub-agent persistence** — Completed sub-agents stay visible in the Dashboard for 30 minutes after finishing.
+> See [CHANGELOG.md](CHANGELOG.md) for per-version release notes.
 
 ---
 

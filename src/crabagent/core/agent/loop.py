@@ -39,6 +39,53 @@ def _litellm_params(provider: ProviderInfo) -> dict:
 _MAX_TOOL_RESULT_CHARS = 20_000
 
 
+def _preview_result(result: object, max_chars: int = 2000) -> str:
+    """Render a short string preview of a tool result for SSE events."""
+    if isinstance(result, str):
+        return result[:max_chars]
+    if isinstance(result, list):
+        parts: list[str] = []
+        total = 0
+        for block in result:
+            if isinstance(block, dict):
+                if block.get("type") == "text":
+                    parts.append(block.get("text", ""))
+                elif block.get("type") == "image_url":
+                    url = block.get("image_url", {}).get("url", "")
+                    if url.startswith("data:"):
+                        parts.append("[image embedded]")
+                    else:
+                        parts.append(f"[image: {url[:80]}]")
+            else:
+                parts.append(str(block))
+            total += len(parts[-1])
+            if total >= max_chars:
+                break
+        text = "\n".join(parts)
+        return text[:max_chars]
+    return str(result)[:max_chars]
+
+
+def _truncate_result(result: object, max_chars: int) -> object:
+    """Truncate a string result; pass list (multimodal) results through."""
+    if isinstance(result, str):
+        orig_len = len(result)
+        if orig_len > max_chars:
+            return result[:max_chars] + (f"\n\n... [truncated {orig_len - max_chars} chars]")
+        return result
+    if isinstance(result, list):
+        # Truncate any text blocks; leave image_url blocks untouched
+        out: list = []
+        for block in result:
+            if isinstance(block, dict) and block.get("type") == "text":
+                text = block.get("text", "")
+                if len(text) > max_chars:
+                    block = {**block, "text": text[:max_chars] + "\n\n... [truncated]"}
+            out.append(block)
+        return out
+    return result
+
+
 async def run_agent(
     context: AgentContext,
     query: str | list[dict],
@@ -60,6 +107,8 @@ async def run_agent(
 
     _stream_retries = 0
     _max_stream_retries = 2
+    context.metadata["_llm_params"] = dict(llm)
+    context.metadata["_resolved_model"] = model.split("/", 1)[-1] if "/" in model else model
 
     while not context.budget_exhausted:
         context.iteration += 1
@@ -67,9 +116,16 @@ async def run_agent(
 
         tools = context.tool_registry.tool_defs() or None
 
+        # Context compression: prefer middleware if attached, fall back to direct call
         max_context = get_model_token_limit(model)
         if context.total_tokens > max_context * settings.context_compression_threshold:
-            await compress_context(context, llm, model)
+            if context.middlewares:
+                try:
+                    await context.middlewares.run_before_llm(context, context.messages)
+                except Exception:
+                    logger.debug("middleware before_llm failed", exc_info=True)
+            else:
+                await compress_context(context, llm, model)
 
         try:
             full_text = ""
@@ -198,12 +254,13 @@ async def run_agent(
 
             async def _run_and_emit(meta: dict):
                 result = await context.tool_registry.execute(meta["name"], meta["args"], context=context)
+                preview = _preview_result(result)
                 await context.event_bus.emit(
                     AgentEvent(
                         type=EventType.TOOL_RESULT,
                         data={
                             "name": meta["name"],
-                            "result": result[:2000],
+                            "result": preview,
                             "id": meta["tc"]["id"],
                             "source": meta["source"],
                             "server_name": meta["server"],
@@ -215,11 +272,7 @@ async def run_agent(
             gathered = await asyncio.gather(*[_run_and_emit(m) for m in tool_metas])
 
             for meta, result in gathered:
-                orig_len = len(result)
-                if orig_len > _MAX_TOOL_RESULT_CHARS:
-                    result = result[:_MAX_TOOL_RESULT_CHARS] + (
-                        f"\n\n... [truncated {orig_len - _MAX_TOOL_RESULT_CHARS} chars]"
-                    )
+                result = _truncate_result(result, _MAX_TOOL_RESULT_CHARS)
                 tool_msg = {
                     "role": "tool",
                     "content": result,

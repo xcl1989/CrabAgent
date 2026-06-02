@@ -228,44 +228,7 @@ def run(name: str) -> str:
 | `CRAB_BROWSER_HEADLESS` | `true` | 浏览器无头模式 |
 | `CRAB_WEB_PROXY` | （空） | web_search / web_scrape 的 HTTP 代理 |
 
-**v0.8.0 更新亮点**
-
-- 🎨 **Web UI 全面重构** — 全新 CrabAgent 海洋青色设计系统，完整支持明暗双主题（自动检测系统偏好）。所有组件基于 token 的设计基础重建，不再有硬编码十六进制色值。
-- 🌗 **明暗双主题** — 通过导航栏切换暖色浅色和暖色深色主题。`localStorage` 持久化，`prefers-color-scheme` 后备方案。每个组件主题感知，包括图表。
-- 🧩 **可复用 UI 库** — 新增 `components/ui/` 组件库：Button、Input、Modal、ConfirmDialog、Toast (sonner)、Tooltip (Radix)、EmptyState、LoadingState、Skeleton、带复制按钮和语法高亮的 CodeBlock。所有组件使用设计 token。
-- 📊 **主题感知图表** — AgentGrowthChart 使用 `useThemeColors()` hook 为 recharts SVG 描边提供颜色。颜色自动跟随当前主题，不再有 `#60a5fa` 等硬编码。
-- 📱 **移动端响应式** — SessionList 在 `<md` 屏幕下变为滑入式抽屉。ChatPage 工具栏新增汉堡菜单按钮（仅移动端）。支持 Esc 关闭和点击遮罩关闭。
-- 🗂 **AgentsPage：模态框→内联页面** — Agent 团队面板现在是 `/agents` 的独立内联页面（原为模态浮层）。信息密度更高，ChatPage 仍保持模态模式以便快速访问。
-- 📦 **包体积优化** — Vite `manualChunks` 将 vendor 代码拆分为 4 个 chunk（react / charts / markdown / ui）。最大单 chunk：380 kB（原为 1.22 MB 单体文件）。
-- 🎯 **Dashboard 重构** — DashboardPage 移除 44 个内联样式和 `AGENT_THEME` 硬编码渐变，改用 `agentColor()` helper + `--agent-*` CSS 变量。Lucide 图标替换 ASCII 字符（○●✓✗ → Activity/Check/X/Circle）。空状态提示。
-- 🔌 **小组件清理** — TodoWidget、McpStatusBar、FileBrowser、TaskBoard 全部重构为使用设计 token 和 Lucide 图标。
-
-**v0.7.4 更新亮点**
-
-- 🔄 **会话内 Agent 切换** — 通过 `/agent`（TUI）或 API 在中途切换当前 Agent 身份。不同 Agent 有不同工具集，消息自动标记 Agent 信息用于历史追踪。
-- 🛠️ **Agent 自创工具** — Agent 可通过 `create_tool`/`update_tool`/`delete_tool` 自己编写和注册可复用工具。代码即时验证、存入 `.crabagent/tools/`、自动跨会话加载。
-- 🐛 **TUI 队列与历史修复** — 修复排队输入在渲染未完成时就发出的竞态条件。修复带排队消息的会话加载时 DB 消息顺序错乱问题。
-- 🔤 **TUI CJK 与 Thinking 修复** — 修复双面板 TUI 中 CJK 字符渲染卡死。修复 Thinking 文本显示 bug（off-by-one、缓存遗漏、flush 丢失前缀）。
-
-**v0.7.2 更新亮点**
-- 🖥️ **双面板 TUI** — 全新基于 prompt_toolkit 的全屏 TUI：可滚动输出区域（鼠标滚轮 + PageUp/Down/Home/End）、自适应高度的输入框、实时状态栏。默认模式（`crabagent`），`--old` 回退旧版。
-- 🖱️ **鼠标文本选择** — 按住 Shift + 鼠标拖动选中输出区域的文本，Ctrl+C 复制（macOS pbcopy / Linux xclip）。
-- 💬 **交互式浮窗菜单** — `/model`、`/sessions`、`/provider` 改为方向键导航的滚动选择弹窗，不再打印长列表。
-- 🧠 **流式 Thinking** — Agent 推理过程 (`THINKING_DELTA`) 实时流式输出到面板，灰色斜体样式。
-- 💡 **补全菜单** — 斜杠命令自动补全以浮窗形式显示在输入框上方。
-
-**v0.7.1 更新亮点**
-- 📊 **Pipeline 可视化看板** — 实时展示 Pipeline 执行进度：活跃 Pipeline 步骤进度环、Agent 卡片运行计数、成长趋势图表。历史 Pipeline 自动折叠。
-- 🔄 **AgentRun 持久化** — 新增 `agent_runs` 表，完整记录每次 Agent/Pipeline 执行的元数据（工具调用、耗时、Token、迭代数）。提供运行历史和 Agent 成长统计 API。
-- 🐛 **流式输出修复** — `TEXT_DELTA` 和 `THINKING_DELTA` 事件不再被 SSE 转发器节流丢弃。`TEXT_DONE` 处理器使用后端完整文本，确保消息显示完整。
-- 🛠 **工具参数显示修复** — `delegate_parallel` 嵌套对象参数不再显示 `[object Object]`。
-- 📡 **RunRecorder** — EventBus 订阅器，实时为 Pipeline、主代理和子代理执行创建 `agent_runs` 记录。
-
-**v0.7.0 更新亮点**
-- 🧠 **学习品质升级** — LLM 反思改为提取**可执行的具体洞察**（工具技巧、踩坑经验、领域提示），不再有"completed in X steps"之类的废话。新增失败学习 — Agent 也能从错误中成长。
-- 🌐 **Web 代理支持** — `CRAB_WEB_PROXY=http://127.0.0.1:7890` 解决防火墙环境下的搜索问题。
-- 📊 **学习看板** — Web UI Agent Team 面板直接查看每个 Agent 的任务统计和历史经验。
-- 📡 **子 Agent 持久化** — 已完成的子 Agent 在 Dashboard 中保留显示 30 分钟。
+> 各版本更新明细请查看 [CHANGELOG.zh-CN.md](CHANGELOG.zh-CN.md)。
 
 ---
 

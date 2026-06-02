@@ -58,6 +58,7 @@ class Conversation(Base):
     tokens: Mapped[int] = mapped_column(Integer, default=0)
     active_branch: Mapped[str] = mapped_column(String(32), default="main")
     agent: Mapped[str] = mapped_column(String(100), default="default")
+    auto_titled: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
@@ -313,6 +314,8 @@ async def init_db() -> None:
             await conn.execute(text("ALTER TABLE conversations ADD COLUMN active_branch VARCHAR(32) DEFAULT 'main'"))
         if "agent" not in columns:
             await conn.execute(text("ALTER TABLE conversations ADD COLUMN agent VARCHAR(100) DEFAULT 'default'"))
+        if "auto_titled" not in columns:
+            await conn.execute(text("ALTER TABLE conversations ADD COLUMN auto_titled BOOLEAN DEFAULT 0"))
 
         result = await conn.execute(text("PRAGMA table_info(messages)"))
         columns = [row[1] for row in result.fetchall()]

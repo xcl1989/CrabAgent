@@ -140,11 +140,23 @@ async def prompt_async(
         pass
 
     try:
-        from crabagent.core.agent.agents import build_memory_prompt
+        from crabagent.core.agent.agents import build_memory_prompt, inject_agent_lessons
 
-        mem_prompt = await build_memory_prompt(user.id)
+        mem_prompt = await build_memory_prompt(user.id, query=(req.content or "")[:500])
         if mem_prompt:
             base_prompt += "\n\n" + mem_prompt
+    except Exception:
+        pass
+
+    # Inject per-agent lessons for the effective agent (v0.9 — A3)
+    try:
+        effective_agent_for_lessons = req.agent or getattr(conv, "agent", None) or "default"
+        base_prompt = await inject_agent_lessons(
+            base_prompt,
+            user_id=user.id,
+            agent_name=effective_agent_for_lessons,
+            task_hint=(req.content or "")[:120],
+        )
     except Exception:
         pass
 
@@ -241,6 +253,8 @@ async def prompt_async(
     _SKIP_GLOBAL_EVENTS: set[str] = set()
     _last_stale_cleanup = time.time()
 
+    _CRITICAL_EVENT_TYPES = {EventType.TOOL_CONFIRM_REQUEST, EventType.USER_INPUT_REQUEST}
+
     async def _sse_forward(event: AgentEvent):
         nonlocal _fwd_count, _fwd_last_log, _last_stale_cleanup
         _fwd_count += 1
@@ -252,30 +266,55 @@ async def prompt_async(
             _throttle_until[event.type] = now + _THROTTLE_INTERVAL
 
         forward_to_global = event.type not in _SKIP_GLOBAL_EVENTS
+        is_critical = event.type in _CRITICAL_EVENT_TYPES
 
         stale = []
         for qid, entry in list(queues.items()):
-            if len(entry) == 2:
-                sid, queue = entry
+            # Parse queue entry — supports old (2/3-tuple) and new (4-tuple) formats
+            if isinstance(entry, tuple) and len(entry) >= 4:
+                sid, critical_q, stream_q, ts = entry
+            elif isinstance(entry, tuple) and len(entry) == 3:
+                sid, q, ts = entry
+                critical_q = stream_q = q
+            elif isinstance(entry, tuple) and len(entry) == 2:
+                sid, q = entry
+                critical_q = stream_q = q
                 ts = now
             else:
-                sid, queue, ts = entry
+                continue
+
             if now - ts > 60:
                 stale.append(qid)
                 continue
-            if sid == session_id:
+            if sid != session_id:
+                continue
+
+            if is_critical:
+                # Critical events → unbounded queue, never dropped
+                await critical_q.put(event)
+            else:
                 try:
-                    queue.put_nowait(event)
+                    stream_q.put_nowait(event)
                 except asyncio.QueueFull:
+                    logger.warning(
+                        "_sse_forward: stream queue full session=%s event=%s → dropping oldest",
+                        session_id[:8],
+                        event.type,
+                    )
                     try:
-                        queue.get_nowait()
+                        stream_q.get_nowait()
                     except asyncio.QueueEmpty:
                         pass
                     try:
-                        queue.put_nowait(event)
+                        stream_q.put_nowait(event)
                     except asyncio.QueueFull:
-                        pass
-                queues[qid] = (sid, queue, now)
+                        logger.warning(
+                            "_sse_forward: stream queue still full session=%s event=%s → dropped",
+                            session_id[:8],
+                            event.type,
+                        )
+
+            queues[qid] = (sid, critical_q, stream_q, now)
         for qid in stale:
             queues.pop(qid, None)
 
@@ -302,13 +341,26 @@ async def prompt_async(
                 global_queues.pop(gqid, None)
 
         if now - _fwd_last_log > 5:
-            qsizes = [q.qsize() for sid, q, *_ in queues.values() if sid == session_id]
+            qsizes = []
+            for entry in queues.values():
+                if isinstance(entry, tuple) and len(entry) >= 4:
+                    s, cq, sq, *_ = entry
+                    if s == session_id:
+                        qsizes.append(f"c={cq.qsize()}/s={sq.qsize()}")
+                elif isinstance(entry, tuple) and len(entry) >= 2:
+                    s, q, *_ = entry
+                    if s == session_id:
+                        qsizes.append(str(q.qsize()))
             logger.info(
                 "_sse_forward: %d events in %.0fs session=%s queues=%d qsizes=%s",
                 _fwd_count,
                 now - _fwd_last_log,
                 session_id[:8],
-                sum(1 for s, *_ in queues.values() if s == session_id),
+                sum(
+                    1
+                    for entry in queues.values()
+                    if (isinstance(entry, tuple) and len(entry) >= 2 and entry[0] == session_id)
+                ),
                 qsizes,
             )
             _fwd_count = 0
@@ -372,6 +424,16 @@ async def prompt_async(
 
     context.ask_callback = _serve_ask
 
+    # v0.9 — attach middleware chain (compress + reflect + title)
+    try:
+        from crabagent.core.agent.middlewares import MiddlewareChain
+        from crabagent.core.agent.middlewares.reflect_middleware import ReflectMiddleware
+        from crabagent.core.agent.middlewares.title_middleware import TitleMiddleware
+
+        context.middlewares = MiddlewareChain([ReflectMiddleware(), TitleMiddleware()])
+    except Exception:
+        logger.debug("Failed to attach middleware chain", exc_info=True)
+
     @context.tool_registry.register(
         name="ask_question",
         description="Ask the user a question and get their response. Use when you need clarification, more information, or a decision from the user before proceeding.",
@@ -423,6 +485,11 @@ async def prompt_async(
                     )
             else:
                 agent_query = req.message
+            if context.middlewares:
+                try:
+                    await context.middlewares.run_start(context)
+                except Exception:
+                    logger.debug("middleware run_start failed", exc_info=True)
             await run_agent(context, agent_query)
         except asyncio.CancelledError:
             logger.info("Agent task cancelled for session %s", session_id)
@@ -430,7 +497,15 @@ async def prompt_async(
             logger.exception("Agent task failed for session %s", session_id)
         finally:
             elapsed = round(time.time() - t0, 1)
+            context.metadata["_run_elapsed"] = elapsed
             resolved_model = context.metadata.get("resolved_model", context.model or "")
+
+            # v0.9 — fire middleware end hooks (reflect / auto-title / etc.)
+            if context.middlewares:
+                try:
+                    await context.middlewares.run_end(context)
+                except Exception:
+                    logger.debug("middleware run_end failed", exc_info=True)
 
             browser_mgr = context.metadata.get("_browser_manager")
             if browser_mgr:

@@ -232,11 +232,32 @@ export function dbMessagesToChat(msgs: Message[]): ChatMessage[] {
           content: JSON.stringify({ name: tc.name, arguments: tc.args }),
         });
       }
-      result.push({
+      // v0.9 — tool results may carry list content (multimodal browser results)
+      let toolContent = m.content || "";
+      let toolImages: string[] | undefined;
+      if (toolContent.startsWith("[")) {
+        try {
+          const blocks = JSON.parse(toolContent);
+          if (Array.isArray(blocks)) {
+            const textBlock = blocks.find((b: { type: string }) => b.type === "text");
+            const imageBlocks = blocks.filter((b: { type: string }) => b.type === "image_url");
+            if (textBlock) toolContent = textBlock.text || "";
+            if (imageBlocks.length > 0)
+              toolImages = imageBlocks.map(
+                (b: { image_url?: { url?: string } }) => b.image_url?.url || "",
+              );
+          }
+        } catch {
+          /* keep original content */
+        }
+      }
+      const toolResultMsg: ChatMessage = {
         id: `db-${m.id}`,
         role: "tool_result",
-        content: m.content || "",
-      });
+        content: toolContent,
+      };
+      if (toolImages && toolImages.length > 0) toolResultMsg.images = toolImages;
+      result.push(toolResultMsg);
       continue;
     }
 
@@ -292,6 +313,22 @@ export function dbMessagesToChat(msgs: Message[]): ChatMessage[] {
     const base: ChatMessage = { id: `db-${m.id}`, role: m.role, content: m.content || "" };
     if (m.reasoning_content) base.reasoning_content = m.reasoning_content;
     if (m.role === "user" && m.content && m.content.startsWith("[{")) {
+      try {
+        const blocks = JSON.parse(m.content);
+        if (Array.isArray(blocks)) {
+          const textBlock = blocks.find((b: { type: string }) => b.type === "text");
+          const imageBlocks = blocks.filter((b: { type: string }) => b.type === "image_url");
+          if (textBlock) base.content = textBlock.text || "";
+          if (imageBlocks.length > 0)
+            base.images = imageBlocks.map((b: { image_url?: { url?: string } }) => b.image_url?.url || "");
+        }
+      } catch {
+        /* keep original content */
+      }
+    }
+    // v0.9 — tool messages may carry list content (multimodal browser results).
+    // Extract embedded images for inline rendering.
+    if (m.role === "tool" && m.content && m.content.startsWith("[")) {
       try {
         const blocks = JSON.parse(m.content);
         if (Array.isArray(blocks)) {
