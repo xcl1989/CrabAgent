@@ -1,7 +1,7 @@
 # Project Rules
 
 ## Version
-- Current: **0.7.2** (dual-panel TUI + mouse selection + scrolling + popup menus + streaming thinking)
+- Current: **0.8.0** (complete Web UI redesign with ocean-teal design system, light/dark theme, mobile responsive, bundle optimization)
 - Version in 4 places: `pyproject.toml`, `src/crabagent/serve/app.py` (`create_app` + `/health`), CLI banner in `src/crabagent/cli/__main__.py` (`_print_banner`), TUI banner in `src/crabagent/cli/tui.py`
 - Bump all four when changing version
 

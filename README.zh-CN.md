@@ -4,6 +4,12 @@
 
 CrabAgent 是一个本地优先的 AI Agent 平台。从任意项目目录启动，支持 CLI/TUI/Web 三种模式。数据全在本地，API Key 加密存储，自由选择任意 LLM 提供商。
 
+[![PyPI version](https://badge.fury.io/py/crabagent.svg)](https://badge.fury.io/py/crabagent)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
+[![License: AGPLv3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
+
+**[English](README.md)** | **[中文](README.zh-CN.md)**
+
 ---
 
 ## 为什么选 CrabAgent
@@ -221,6 +227,18 @@ def run(name: str) -> str:
 | `CRAB_MAX_TOKENS` | `4096` | 最大响应 Token 数 |
 | `CRAB_BROWSER_HEADLESS` | `true` | 浏览器无头模式 |
 | `CRAB_WEB_PROXY` | （空） | web_search / web_scrape 的 HTTP 代理 |
+
+**v0.8.0 更新亮点**
+
+- 🎨 **Web UI 全面重构** — 全新 CrabAgent 海洋青色设计系统，完整支持明暗双主题（自动检测系统偏好）。所有组件基于 token 的设计基础重建，不再有硬编码十六进制色值。
+- 🌗 **明暗双主题** — 通过导航栏切换暖色浅色和暖色深色主题。`localStorage` 持久化，`prefers-color-scheme` 后备方案。每个组件主题感知，包括图表。
+- 🧩 **可复用 UI 库** — 新增 `components/ui/` 组件库：Button、Input、Modal、ConfirmDialog、Toast (sonner)、Tooltip (Radix)、EmptyState、LoadingState、Skeleton、带复制按钮和语法高亮的 CodeBlock。所有组件使用设计 token。
+- 📊 **主题感知图表** — AgentGrowthChart 使用 `useThemeColors()` hook 为 recharts SVG 描边提供颜色。颜色自动跟随当前主题，不再有 `#60a5fa` 等硬编码。
+- 📱 **移动端响应式** — SessionList 在 `<md` 屏幕下变为滑入式抽屉。ChatPage 工具栏新增汉堡菜单按钮（仅移动端）。支持 Esc 关闭和点击遮罩关闭。
+- 🗂 **AgentsPage：模态框→内联页面** — Agent 团队面板现在是 `/agents` 的独立内联页面（原为模态浮层）。信息密度更高，ChatPage 仍保持模态模式以便快速访问。
+- 📦 **包体积优化** — Vite `manualChunks` 将 vendor 代码拆分为 4 个 chunk（react / charts / markdown / ui）。最大单 chunk：380 kB（原为 1.22 MB 单体文件）。
+- 🎯 **Dashboard 重构** — DashboardPage 移除 44 个内联样式和 `AGENT_THEME` 硬编码渐变，改用 `agentColor()` helper + `--agent-*` CSS 变量。Lucide 图标替换 ASCII 字符（○●✓✗ → Activity/Check/X/Circle）。空状态提示。
+- 🔌 **小组件清理** — TodoWidget、McpStatusBar、FileBrowser、TaskBoard 全部重构为使用设计 token 和 Lucide 图标。
 
 **v0.7.4 更新亮点**
 

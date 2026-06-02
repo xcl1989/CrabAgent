@@ -4,6 +4,12 @@
 
 CrabAgent is a local-first AI agent platform. Run it from any project directory via CLI or browser. Your data stays local, your API keys are encrypted, and you pick any LLM provider.
 
+[![PyPI version](https://badge.fury.io/py/crabagent.svg)](https://badge.fury.io/py/crabagent)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
+[![License: AGPLv3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
+
+**[English](README.md)** | **[中文](README.zh-CN.md)**
+
 ---
 
 ## Why CrabAgent
@@ -222,6 +228,18 @@ Tools are saved to `.crabagent/tools/`, auto-registered, and persist across sess
 | `CRAB_MAX_TOKENS` | `4096` | Max response tokens |
 | `CRAB_BROWSER_HEADLESS` | `true` | Browser headless mode |
 | `CRAB_WEB_PROXY` | (empty) | HTTP proxy for web_search & web_scrape |
+
+**v0.8.0 Highlights**
+
+- 🎨 **Complete Web UI Redesign** — Brand-new CrabAgent ocean-teal design system with full light/dark theme support (auto-detects system preference). Every component rebuilt on a token-based design foundation — no more hardcoded hex values.
+- 🌗 **Light + Dark Theme** — Toggle between warm-cream light and warm-dark themes via the navbar. Persisted in `localStorage` with `prefers-color-scheme` fallback. Every component theme-aware, including charts.
+- 🧩 **Reusable UI Library** — New `components/ui/` library: Button, Input, Modal, ConfirmDialog, Toast (sonner), Tooltip (Radix), EmptyState, LoadingState, Skeleton, CodeBlock with copy + syntax highlighting. All components use design tokens.
+- 📊 **Theme-Aware Charts** — AgentGrowthChart now uses `useThemeColors()` hook for recharts SVG strokes. Colors automatically follow the active theme.
+- 📱 **Mobile Responsive** — SessionList becomes a slide-in drawer on `<md` viewports. Hamburger menu button in the ChatPage toolbar (mobile only). Esc-to-close and tap-overlay-to-close.
+- 🗂 **AgentsPage: Modal → Inline Page** — Agent Team panel is now a dedicated inline page at `/agents` (was a modal overlay). Better information density. ChatPage still uses modal mode for quick access.
+- 📦 **Bundle Optimization** — Vite `manualChunks` splits vendor code into 4 chunks (react / charts / markdown / ui). Largest single chunk: 380 kB (was 1.22 MB monolith).
+- 🎯 **Dashboard Refactor** — DashboardPage replaces 44 inline styles and `AGENT_THEME` hardcoded hex gradients with theme-aware `agentColor()` helper + `--agent-*` CSS vars. Lucide icons replace ASCII glyphs. Empty state for "no pipelines".
+- 🔌 **Small Component Cleanup** — TodoWidget, McpStatusBar, FileBrowser, TaskBoard all refactored to use design tokens and Lucide icons.
 
 **v0.7.4 Highlights**
 
