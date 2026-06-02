@@ -7,6 +7,8 @@ export function useModelSelector() {
   const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [providersLoading, setProvidersLoading] = useState(true);
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const [modelsError, setModelsError] = useState<string>("");
   const [selectedModel, setSelectedModel] = useState<string>("");
 
   useEffect(() => {
@@ -20,17 +22,34 @@ export function useModelSelector() {
   useEffect(() => {
     const defaultProvider = providers.find((p) => p.is_default);
     if (defaultProvider) {
+      setModelsLoading(true);
+      setModelsError("");
       providersApi
         .getProviderModels(defaultProvider.name)
         .then((m) => {
           setModels(m);
+          setModelsLoading(false);
           if (m.length > 0 && !selectedModel) {
             setSelectedModel(m[0].id);
           }
         })
-        .catch(() => {});
+        .catch((err) => {
+          setModelsLoading(false);
+          setModelsError(err instanceof Error ? err.message : String(err));
+        });
     }
   }, [providers]);
 
-  return { providers, catalog, models, providersLoading, selectedModel, setSelectedModel, setProviders, setProvidersLoading };
+  return {
+    providers,
+    catalog,
+    models,
+    providersLoading,
+    modelsLoading,
+    modelsError,
+    selectedModel,
+    setSelectedModel,
+    setProviders,
+    setProvidersLoading,
+  };
 }

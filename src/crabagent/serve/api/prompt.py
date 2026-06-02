@@ -297,22 +297,10 @@ async def prompt_async(
                     stream_q.put_nowait(event)
                 except asyncio.QueueFull:
                     logger.warning(
-                        "_sse_forward: stream queue full session=%s event=%s → dropping oldest",
+                        "_sse_forward: stream queue full session=%s event=%s → dropped (TEXT_DONE will fix tail)",
                         session_id[:8],
                         event.type,
                     )
-                    try:
-                        stream_q.get_nowait()
-                    except asyncio.QueueEmpty:
-                        pass
-                    try:
-                        stream_q.put_nowait(event)
-                    except asyncio.QueueFull:
-                        logger.warning(
-                            "_sse_forward: stream queue still full session=%s event=%s → dropped",
-                            session_id[:8],
-                            event.type,
-                        )
 
             queues[qid] = (sid, critical_q, stream_q, now)
         for qid in stale:

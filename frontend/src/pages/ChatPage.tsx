@@ -14,6 +14,7 @@ import {
   Compass,
   X,
   Menu,
+  Loader2,
 } from "lucide-react";
 import * as sessionsApi from "../api/sessions";
 import * as providersApi from "../api/providers";
@@ -91,6 +92,8 @@ export default function ChatPage({ onLogout }: Props) {
     catalog,
     models,
     providersLoading,
+    modelsLoading,
+    modelsError,
     selectedModel,
     setSelectedModel,
     setProviders,
@@ -514,7 +517,12 @@ export default function ChatPage({ onLogout }: Props) {
                     </select>
                   </div>
                 )}
-                {models.length > 0 && (
+                {modelsLoading ? (
+                  <div className="flex items-center gap-1.5">
+                    <Loader2 size={12} className="animate-spin text-[var(--text-tertiary)]" />
+                    <span className="text-[11px] text-[var(--text-tertiary)]">Loading models…</span>
+                  </div>
+                ) : models.length > 0 ? (
                   <div className="flex items-center gap-1.5">
                     <span className="text-[11px] text-[var(--text-tertiary)]">
                       Model
@@ -530,6 +538,28 @@ export default function ChatPage({ onLogout }: Props) {
                         </option>
                       ))}
                     </select>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[11px] text-[var(--text-tertiary)]">
+                      Model
+                    </span>
+                    <input
+                      type="text"
+                      value={selectedModel}
+                      onChange={(e) => setSelectedModel(e.target.value)}
+                      placeholder="type model id…"
+                      className="text-xs h-7 px-2 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border)] text-[var(--text-primary)] font-mono focus:outline-none focus:border-[var(--brand)] focus:ring-2 focus:ring-[var(--brand)]/30 w-40 placeholder:text-[var(--text-tertiary)]"
+                    />
+                    {modelsError && (
+                      <span
+                        className="text-[10px] text-[var(--danger)] cursor-pointer"
+                        title={modelsError}
+                        onClick={() => window.location.reload()}
+                      >
+                        Retry
+                      </span>
+                    )}
                   </div>
                 )}
               </div>

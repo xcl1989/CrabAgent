@@ -52,7 +52,7 @@ async def event_stream(
         raise HTTPException(status_code=401, detail="Invalid token or unauthorized")
 
     critical_queue: asyncio.Queue[AgentEvent] = asyncio.Queue(maxsize=0)
-    stream_queue: asyncio.Queue[AgentEvent] = asyncio.Queue(maxsize=50)
+    stream_queue: asyncio.Queue[AgentEvent] = asyncio.Queue(maxsize=500)
     queue_id = uuid.uuid4().hex
 
     if not hasattr(request.app.state, "event_queues"):
