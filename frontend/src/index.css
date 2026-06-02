@@ -28,20 +28,20 @@
   --border-subtle: #2e2c28;
   --border-strong: #4d4a44;
 
-  /* Brand — Claude orange */
-  --brand: #d97757;
-  --brand-hover: #e88563;
-  --brand-active: #c46843;
-  --brand-bg: rgba(217, 119, 87, 0.12);
-  --brand-bg-strong: rgba(217, 119, 87, 0.22);
-  --brand-border: rgba(217, 119, 87, 0.35);
+  /* Brand — Crab shell teal (ocean identity) */
+  --brand: #3da89e;
+  --brand-hover: #4ec0b5;
+  --brand-active: #2e8a82;
+  --brand-bg: rgba(61, 168, 158, 0.12);
+  --brand-bg-strong: rgba(61, 168, 158, 0.22);
+  --brand-border: rgba(61, 168, 158, 0.35);
 
   /* Accents */
-  --accent: #6ba0d8;            /* blue */
-  --accent-hover: #82b3e8;
-  --accent-bg: rgba(107, 160, 216, 0.12);
-  --accent-border: rgba(107, 160, 216, 0.3);
-  --accent-2: #b794e0;          /* purple */
+  --accent: #0ea5e9;            /* ocean blue */
+  --accent-hover: #38bdf8;
+  --accent-bg: rgba(14, 165, 233, 0.12);
+  --accent-border: rgba(14, 165, 233, 0.3);
+  --accent-2: #b794e0;          /* purple (secondary) */
   --accent-2-hover: #c7a8eb;
   --accent-2-bg: rgba(183, 148, 224, 0.12);
 
@@ -64,8 +64,8 @@
   --agent-analyst-bg: rgba(183, 148, 224, 0.12);
   --agent-coder: #6ec07a;
   --agent-coder-bg: rgba(110, 192, 122, 0.12);
-  --agent-writer: #e0a868;
-  --agent-writer-bg: rgba(224, 168, 104, 0.12);
+  --agent-writer: #fbbf24;
+  --agent-writer-bg: rgba(251, 191, 36, 0.12);
 
   /* Code block */
   --code-bg: #14120f;
@@ -101,17 +101,17 @@
   --border-subtle: #ece5d5;
   --border-strong: #c9bfa9;
 
-  --brand: #c46a47;
-  --brand-hover: #d97757;
-  --brand-active: #b35c3c;
-  --brand-bg: rgba(196, 106, 71, 0.08);
-  --brand-bg-strong: rgba(196, 106, 71, 0.15);
-  --brand-border: rgba(196, 106, 71, 0.25);
+  --brand: #2e8a82;
+  --brand-hover: #3da89e;
+  --brand-active: #1f756d;
+  --brand-bg: rgba(46, 138, 130, 0.08);
+  --brand-bg-strong: rgba(46, 138, 130, 0.15);
+  --brand-border: rgba(46, 138, 130, 0.25);
 
-  --accent: #4a82b8;
-  --accent-hover: #5a95c9;
-  --accent-bg: rgba(74, 130, 184, 0.08);
-  --accent-border: rgba(74, 130, 184, 0.25);
+  --accent: #0284c7;
+  --accent-hover: #0ea5e9;
+  --accent-bg: rgba(2, 132, 199, 0.08);
+  --accent-border: rgba(2, 132, 199, 0.25);
   --accent-2: #8b6db8;
   --accent-2-hover: #9d80c8;
   --accent-2-bg: rgba(139, 109, 184, 0.08);
@@ -133,8 +133,8 @@
   --agent-analyst-bg: rgba(139, 109, 184, 0.08);
   --agent-coder: #4d9659;
   --agent-coder-bg: rgba(77, 150, 89, 0.08);
-  --agent-writer: #c48a45;
-  --agent-writer-bg: rgba(196, 138, 69, 0.08);
+  --agent-writer: #d97706;
+  --agent-writer-bg: rgba(217, 119, 6, 0.08);
 
   --code-bg: #f5f0e5;
   --code-border: #e0d8c8;
