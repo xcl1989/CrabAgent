@@ -1,5 +1,24 @@
 import { useState, useEffect } from "react";
-import { ScheduledTask, listScheduledTasks, createScheduledTask, updateScheduledTask, deleteScheduledTask, runScheduledTask, CreateScheduledTaskRequest } from "../api/scheduledTasks";
+import { Plus, Play, Pencil, Trash2, Clock } from "lucide-react";
+import {
+  ScheduledTask,
+  listScheduledTasks,
+  createScheduledTask,
+  updateScheduledTask,
+  deleteScheduledTask,
+  runScheduledTask,
+  type CreateScheduledTaskRequest,
+} from "../api/scheduledTasks";
+import {
+  Modal,
+  Button,
+  Input,
+  Textarea,
+  ConfirmDialog,
+  EmptyState,
+} from "./ui";
+import { toast } from "./ui/Toast";
+import { cn } from "../lib/cn";
 
 interface Props {
   onClose: () => void;
@@ -11,33 +30,66 @@ function cronToHuman(expr: string): string {
   if (parts.length !== 5) return expr;
   const [min, hour, day, month, week] = parts;
   if (min.startsWith("*/")) return `Every ${min.slice(2)} min`;
-  if (hour === "*" && day === "*" && month === "*" && week === "*") return `Daily at ${hour}:${min.padStart(2, "0")}`;
+  if (hour === "*" && day === "*" && month === "*" && week === "*")
+    return `Hourly at :${min.padStart(2, "0")}`;
+  if (day === "*" && month === "*" && week === "*")
+    return `Daily at ${hour}:${min.padStart(2, "0")}`;
   if (day === "*" && month === "*" && week !== "*") {
-    const days: Record<string, string> = { "0": "Sun", "1": "Mon", "2": "Tue", "3": "Wed", "4": "Thu", "5": "Fri", "6": "Sat" };
-    const wdays = week.split(",").map((d) => days[d] || d).join(", ");
+    const days: Record<string, string> = {
+      "0": "Sun",
+      "1": "Mon",
+      "2": "Tue",
+      "3": "Wed",
+      "4": "Thu",
+      "5": "Fri",
+      "6": "Sat",
+    };
+    const wdays = week
+      .split(",")
+      .map((d) => days[d] || d)
+      .join(", ");
     return `Every ${wdays} at ${hour}:${min.padStart(2, "0")}`;
   }
-  if (hour !== "*" && day !== "*" && month !== "*") return `${month}/${day} ${hour}:${min.padStart(2, "0")}`;
+  if (hour !== "*" && day !== "*" && month !== "*")
+    return `${month}/${day} ${hour}:${min.padStart(2, "0")}`;
   return expr;
 }
+
+const PRESETS: { label: string; cron: string }[] = [
+  { label: "Every 30 min", cron: "*/30 * * * *" },
+  { label: "Hourly", cron: "0 * * * *" },
+  { label: "Daily 9am", cron: "0 9 * * *" },
+  { label: "Weekdays 9am", cron: "0 9 * * 1-5" },
+  { label: "Weekly Mon", cron: "0 9 * * 1" },
+  { label: "Monthly 1st", cron: "0 9 1 * *" },
+];
 
 export function ScheduledTaskPanel({ onClose, onSwitchSession }: Props) {
   const [tasks, setTasks] = useState<ScheduledTask[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [form, setForm] = useState<CreateScheduledTaskRequest>({ name: "", prompt: "", cron_expression: "0 9 * * *", model: "" });
+  const [form, setForm] = useState<CreateScheduledTaskRequest>({
+    name: "",
+    prompt: "",
+    cron_expression: "0 9 * * *",
+    model: "",
+  });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [acting, setActing] = useState<number | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<number | null>(null);
 
   const fetchTasks = async () => {
     try {
-      const list = await listScheduledTasks();
-      setTasks(list);
-    } catch { /* ignore */ }
+      setTasks(await listScheduledTasks());
+    } catch {
+      /* ignore */
+    }
   };
 
-  useEffect(() => { fetchTasks(); }, []);
+  useEffect(() => {
+    fetchTasks();
+  }, []);
 
   const resetForm = () => {
     setForm({ name: "", prompt: "", cron_expression: "0 9 * * *", model: "" });
@@ -61,8 +113,10 @@ export function ScheduledTaskPanel({ onClose, onSwitchSession }: Props) {
     try {
       if (editingId) {
         await updateScheduledTask(editingId, form);
+        toast.success("Task updated");
       } else {
         await createScheduledTask(form);
+        toast.success("Task created");
       }
       await fetchTasks();
       resetForm();
@@ -74,15 +128,16 @@ export function ScheduledTaskPanel({ onClose, onSwitchSession }: Props) {
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm("Delete this task?")) return;
     setActing(id);
     try {
       await deleteScheduledTask(id);
+      toast.success("Task deleted");
       await fetchTasks();
-    } catch (e: any) {
-      setError(e?.message || "Delete failed");
+    } catch {
+      toast.error("Delete failed");
     } finally {
       setActing(null);
+      setDeleteTarget(null);
     }
   };
 
@@ -91,16 +146,20 @@ export function ScheduledTaskPanel({ onClose, onSwitchSession }: Props) {
     try {
       await updateScheduledTask(t.id, { enabled: !t.enabled });
       await fetchTasks();
-    } catch { /* ignore */ }
-    finally { setActing(null); }
+    } catch {
+      /* ignore */
+    } finally {
+      setActing(null);
+    }
   };
 
   const handleRun = async (id: number) => {
     setActing(id);
     try {
       await runScheduledTask(id);
+      toast.success("Task triggered");
     } catch (e: any) {
-      setError(e?.message || "Run failed");
+      toast.error(e?.message || "Run failed");
     } finally {
       setActing(null);
     }
@@ -108,142 +167,227 @@ export function ScheduledTaskPanel({ onClose, onSwitchSession }: Props) {
 
   const startEdit = (t: ScheduledTask) => {
     setEditingId(t.id);
-    setForm({ name: t.name, prompt: t.prompt, cron_expression: t.cron_expression, model: t.model || "" });
+    setForm({
+      name: t.name,
+      prompt: t.prompt,
+      cron_expression: t.cron_expression,
+      model: t.model || "",
+    });
     setShowForm(true);
     setError("");
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.6)" }}>
-      <div className="w-full max-w-lg rounded-xl p-6 max-h-[85vh] overflow-y-auto" style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)" }}>
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-bold" style={{ color: "var(--text-primary)" }}>Scheduled Tasks</h2>
-          <button onClick={onClose} className="text-xl leading-none" style={{ color: "var(--text-secondary)" }}>✕</button>
-        </div>
-
-        {error && (
-          <div className="mb-3 px-3 py-2 rounded text-xs" style={{ background: "var(--danger-bg)", color: "var(--danger)", border: "1px solid var(--danger-border)" }}>{error}</div>
-        )}
-
-        {!showForm ? (
-          <>
-            <button
-              onClick={() => { resetForm(); setShowForm(true); }}
-              className="w-full mb-4 py-2 rounded-lg text-sm font-medium transition-opacity hover:opacity-80"
-              style={{ background: "var(--accent)", color: "var(--text-on-accent)" }}
+    <>
+      <Modal
+        open={true}
+        onOpenChange={(o) => !o && onClose()}
+        title="Scheduled Tasks"
+        description="Run prompts on a recurring schedule"
+        size="lg"
+        footer={
+          !showForm ? (
+            <Button
+              variant="brand"
+              onClick={() => {
+                resetForm();
+                setShowForm(true);
+              }}
             >
-              + New Task
-            </button>
-            {tasks.length === 0 ? (
-              <div className="text-center text-sm py-6" style={{ color: "var(--text-secondary)" }}>No scheduled tasks</div>
-            ) : (
-              tasks.map((t) => (
-                <div key={t.id} className="mb-3 p-3 rounded-lg" style={{ background: "var(--bg-primary)", border: "1px solid var(--border)" }}>
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>{t.name}</span>
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={() => handleToggle(t)} disabled={acting === t.id}
-                        className="text-[10px] px-2 py-0.5 rounded"
-                        style={{ background: t.enabled ? "var(--success-bg)" : "var(--bg-elevated)", color: "var(--text-on-accent)" }}
-                      >
-                        {t.enabled ? "Active" : "Paused"}
-                      </button>
-                    </div>
-                  </div>
-                  <div className="text-xs mb-1" style={{ color: "var(--text-secondary)" }}>
-                    <span className="font-mono">{t.cron_expression}</span>
-                    <span className="mx-1">·</span>
-                    <span>{cronToHuman(t.cron_expression)}</span>
-                    {t.model && <span className="ml-1">· {t.model}</span>}
-                  </div>
-                  <div className="text-xs mb-2 truncate" style={{ color: "var(--text-secondary)" }}>{t.prompt}</div>
-                  {t.last_run_at && (
-                    <div className="text-[10px] mb-2" style={{ color: "var(--text-secondary)" }}>
-                      Last: {new Date(t.last_run_at).toLocaleString()}
-                      {t.last_status === "error" && <span style={{ color: "var(--danger)" }}> (failed)</span>}
-                      {t.last_status === "success" && <span style={{ color: "var(--success)" }}> (success)</span>}
-                    </div>
-                  )}
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => handleRun(t.id)} disabled={acting === t.id}
-                      className="text-[10px] px-2 py-0.5 rounded transition-opacity hover:opacity-80"
-                      style={{ background: "var(--accent)", color: "var(--text-on-accent)" }}
-                    >
-                      {acting === t.id ? "..." : "▶ Run Now"}
-                    </button>
-                    {t.last_conversation_id && (
-                      <button
-                        onClick={() => { onSwitchSession(t.last_conversation_id); onClose(); }}
-                        className="text-[10px] px-2 py-0.5 rounded transition-opacity hover:opacity-80"
-                        style={{ background: "var(--bg-tertiary)", color: "var(--text-primary)" }}
-                      >
-                        View Result
-                      </button>
-                    )}
-                    <button
-                      onClick={() => startEdit(t)}
-                      className="text-[10px] px-2 py-0.5 rounded transition-opacity hover:opacity-80"
-                      style={{ background: "var(--bg-tertiary)", color: "var(--text-primary)" }}
-                    >
-                      Edit
-                    </button>
-                    <button
-                      onClick={() => handleDelete(t.id)} disabled={acting === t.id}
-                      className="text-[10px] px-2 py-0.5 rounded transition-opacity hover:opacity-80"
-                      style={{ background: "var(--danger-bg)", color: "var(--danger)" }}
-                    >
-                      Delete
-                    </button>
-                  </div>
-                </div>
-              ))
-            )}
-          </>
-        ) : (
-          <div>
-            <label className="block text-xs font-medium mb-1" style={{ color: "var(--text-primary)" }}>Name</label>
-            <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}
-              className="w-full mb-3 px-3 py-2 rounded-lg text-sm outline-none" style={{ background: "var(--bg-primary)", color: "var(--text-primary)", border: "1px solid var(--border)" }}
-              placeholder="e.g. Morning news summary" />
-
-            <label className="block text-xs font-medium mb-1" style={{ color: "var(--text-primary)" }}>Prompt</label>
-            <textarea value={form.prompt} onChange={(e) => setForm({ ...form, prompt: e.target.value })}
-              className="w-full mb-3 px-3 py-2 rounded-lg text-sm outline-none resize-none" rows={3}
-              style={{ background: "var(--bg-primary)", color: "var(--text-primary)", border: "1px solid var(--border)" }}
-              placeholder="The question to send to the AI" />
-
-            <label className="block text-xs font-medium mb-1" style={{ color: "var(--text-primary)" }}>Cron Expression (min hour day month weekday)</label>
-            <input value={form.cron_expression} onChange={(e) => setForm({ ...form, cron_expression: e.target.value })}
-              className="w-full mb-1 px-3 py-2 rounded-lg text-sm font-mono outline-none" style={{ background: "var(--bg-primary)", color: "var(--text-primary)", border: "1px solid var(--border)" }}
-              placeholder="0 9 * * *" />
-            {form.cron_expression && <div className="text-[10px] mb-3" style={{ color: "var(--text-secondary)" }}>→ {cronToHuman(form.cron_expression)}</div>}
-
-            <label className="block text-xs font-medium mb-1" style={{ color: "var(--text-primary)" }}>Model (optional)</label>
-            <input value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })}
-              className="w-full mb-4 px-3 py-2 rounded-lg text-sm outline-none" style={{ background: "var(--bg-primary)", color: "var(--text-primary)", border: "1px solid var(--border)" }}
-              placeholder="Leave empty to use default model" />
-
-            <div className="flex items-center gap-2">
-              <button
-                onClick={handleSubmit} disabled={loading}
-                className="flex-1 py-2 rounded-lg text-sm font-medium transition-opacity hover:opacity-80"
-                style={{ background: "var(--accent)", color: "var(--text-on-accent)" }}
-              >
-                {loading ? "..." : editingId ? "Save Changes" : "Create Task"}
-              </button>
-              <button
-                onClick={resetForm}
-                className="flex-1 py-2 rounded-lg text-sm transition-opacity hover:opacity-80"
-                style={{ background: "var(--bg-tertiary)", color: "var(--text-primary)" }}
-              >
+              <Plus size={14} /> New Task
+            </Button>
+          ) : (
+            <>
+              <Button variant="ghost" onClick={resetForm}>
                 Cancel
-              </button>
-            </div>
+              </Button>
+              <Button variant="brand" loading={loading} onClick={handleSubmit}>
+                {editingId ? "Save Changes" : "Create Task"}
+              </Button>
+            </>
+          )
+        }
+      >
+        {error && (
+          <div className="mb-3 px-3 py-2 rounded-lg bg-[var(--danger-bg)] border border-[var(--danger-border)] text-xs text-[var(--danger)]">
+            {error}
           </div>
         )}
-      </div>
-    </div>
+
+        {showForm ? (
+          <div className="space-y-3">
+            <Input
+              label="Name"
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              placeholder="e.g. Morning news summary"
+            />
+            <Textarea
+              label="Prompt"
+              value={form.prompt}
+              onChange={(e) => setForm({ ...form, prompt: e.target.value })}
+              rows={3}
+              placeholder="The question to send to the AI"
+            />
+            <div>
+              <Input
+                label="Cron Expression"
+                value={form.cron_expression}
+                onChange={(e) =>
+                  setForm({ ...form, cron_expression: e.target.value })
+                }
+                placeholder="0 9 * * *"
+                hint={`→ ${cronToHuman(form.cron_expression)}`}
+              />
+              <div className="flex flex-wrap gap-1 mt-2">
+                {PRESETS.map((p) => (
+                  <button
+                    key={p.cron}
+                    onClick={() =>
+                      setForm({ ...form, cron_expression: p.cron })
+                    }
+                    className={cn(
+                      "text-[10px] px-2 py-1 rounded-md transition-colors",
+                      form.cron_expression === p.cron
+                        ? "bg-[var(--brand-bg)] text-[var(--brand)] border border-[var(--brand-border)]"
+                        : "bg-[var(--bg-tertiary)] text-[var(--text-secondary)] border border-[var(--border)] hover:text-[var(--text-primary)]",
+                    )}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <Input
+              label="Model (optional)"
+              value={form.model}
+              onChange={(e) => setForm({ ...form, model: e.target.value })}
+              placeholder="Leave empty to use default"
+            />
+          </div>
+        ) : tasks.length === 0 ? (
+          <EmptyState
+            icon={<Clock size={32} />}
+            title="No scheduled tasks"
+            description="Create recurring prompts that run automatically."
+            action={
+              <Button
+                variant="brand"
+                size="sm"
+                onClick={() => {
+                  resetForm();
+                  setShowForm(true);
+                }}
+              >
+                <Plus size={14} /> New Task
+              </Button>
+            }
+          />
+        ) : (
+          <div className="space-y-2">
+            {tasks.map((t) => (
+              <div
+                key={t.id}
+                className="p-3 rounded-xl bg-[var(--bg-tertiary)] border border-[var(--border)] hover:border-[var(--border-strong)] transition-colors"
+              >
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <span className="text-sm font-semibold text-[var(--text-primary)] truncate">
+                    {t.name}
+                  </span>
+                  <button
+                    onClick={() => handleToggle(t)}
+                    disabled={acting === t.id}
+                    className={cn(
+                      "shrink-0 text-[10px] px-2 py-0.5 rounded-full font-medium border transition-colors",
+                      t.enabled
+                        ? "bg-[var(--success-bg)] text-[var(--success)] border-[var(--success-border)] hover:bg-[var(--success)] hover:text-white"
+                        : "bg-[var(--bg-elevated)] text-[var(--text-tertiary)] border-[var(--border)] hover:text-[var(--text-secondary)]",
+                    )}
+                  >
+                    {t.enabled ? "Active" : "Paused"}
+                  </button>
+                </div>
+                <div className="text-xs text-[var(--text-secondary)] mb-1 flex items-center gap-1.5 flex-wrap">
+                  <span className="font-mono text-[var(--accent)]">
+                    {t.cron_expression}
+                  </span>
+                  <span className="text-[var(--text-tertiary)]">·</span>
+                  <span>{cronToHuman(t.cron_expression)}</span>
+                  {t.model && (
+                    <>
+                      <span className="text-[var(--text-tertiary)]">·</span>
+                      <span className="font-mono text-[10px]">{t.model}</span>
+                    </>
+                  )}
+                </div>
+                <div className="text-xs text-[var(--text-tertiary)] mb-2 truncate">
+                  {t.prompt}
+                </div>
+                {t.last_run_at && (
+                  <div className="text-[10px] mb-2 text-[var(--text-tertiary)] font-mono">
+                    Last: {new Date(t.last_run_at).toLocaleString()}
+                    {t.last_status === "error" && (
+                      <span className="text-[var(--danger)] ml-1">(failed)</span>
+                    )}
+                    {t.last_status === "success" && (
+                      <span className="text-[var(--success)] ml-1">(ok)</span>
+                    )}
+                  </div>
+                )}
+                <div className="flex items-center gap-1.5">
+                  <Button
+                    size="xs"
+                    variant="primary"
+                    onClick={() => handleRun(t.id)}
+                    loading={acting === t.id}
+                  >
+                    <Play size={11} /> Run
+                  </Button>
+                  {t.last_conversation_id && (
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      onClick={() => {
+                        onSwitchSession(t.last_conversation_id);
+                        onClose();
+                      }}
+                    >
+                      View Result
+                    </Button>
+                  )}
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    onClick={() => startEdit(t)}
+                  >
+                    <Pencil size={11} /> Edit
+                  </Button>
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    onClick={() => setDeleteTarget(t.id)}
+                    className="text-[var(--danger)] hover:text-[var(--danger)] hover:bg-[var(--danger-bg)]"
+                  >
+                    <Trash2 size={11} />
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Modal>
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onOpenChange={(o) => !o && setDeleteTarget(null)}
+        title="Delete this task?"
+        description="This will permanently remove the scheduled task."
+        confirmText="Delete"
+        tone="danger"
+        onConfirm={() => {
+          if (deleteTarget != null) handleDelete(deleteTarget);
+        }}
+      />
+    </>
   );
 }

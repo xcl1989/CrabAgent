@@ -1,6 +1,9 @@
 import { useState, useEffect } from "react";
+import { RotateCcw, ChevronDown, ChevronUp, Loader2 } from "lucide-react";
 import { Molt, MoltDiff, listMolts, getMoltDiff, rollbackMolt } from "../api/sessions";
 import { formatTimeShort } from "../api/time";
+import { ConfirmDialog, toast, LoadingState, EmptyState } from "./ui";
+import { cn } from "../lib/cn";
 
 interface Props {
   sessionId: string;
@@ -12,11 +15,16 @@ export default function MoltTimeline({ sessionId }: Props) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [diffData, setDiffData] = useState<MoltDiff[] | null>(null);
   const [diffLoading, setDiffLoading] = useState(false);
+  const [confirmTarget, setConfirmTarget] = useState<string | null>(null);
+  const [rolling, setRolling] = useState(false);
 
   useEffect(() => {
     if (!sessionId) return;
     setLoading(true);
-    listMolts(sessionId).then(setMolts).catch(() => setMolts([])).finally(() => setLoading(false));
+    listMolts(sessionId)
+      .then(setMolts)
+      .catch(() => setMolts([]))
+      .finally(() => setLoading(false));
   }, [sessionId]);
 
   const handleToggle = async (moltId: string) => {
@@ -27,6 +35,7 @@ export default function MoltTimeline({ sessionId }: Props) {
     }
     setExpandedId(moltId);
     setDiffLoading(true);
+    setDiffData(null);
     try {
       const result = await getMoltDiff(sessionId, moltId);
       setDiffData(result.diffs);
@@ -37,67 +46,155 @@ export default function MoltTimeline({ sessionId }: Props) {
   };
 
   const handleRollback = async (moltId: string) => {
-    if (!confirm(`Rollback to ${moltId}?`)) return;
+    setRolling(true);
     try {
       const result = await rollbackMolt(sessionId, moltId);
-      alert(`Rolled back: ${result.restored} files`);
-    } catch (e) {
-      alert("Rollback failed");
+      toast.success("Rolled back", {
+        description: `${result.restored} files restored`,
+      });
+    } catch {
+      toast.error("Rollback failed");
+    } finally {
+      setRolling(false);
+      setConfirmTarget(null);
     }
   };
 
-  if (molts.length === 0) {
-    if (loading) return null;
-    return null;
+  if (loading) {
+    return (
+      <div className="border-t border-[var(--border)]">
+        <div className="p-2 text-[11px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
+          Molts
+        </div>
+        <LoadingState compact title="Loading molts…" />
+      </div>
+    );
   }
 
+  if (molts.length === 0) return null;
+
   return (
-    <div className="border-t" style={{ borderTop: "1px solid var(--border)" }}>
-      <div className="p-2 text-xs font-semibold" style={{ color: "var(--text-secondary)" }}>Molts</div>
-      {molts.slice(0, 10).map((m) => (
-        <div key={m.molt_id}>
-          <div
-            onClick={() => handleToggle(m.molt_id)}
-            className="flex items-center justify-between px-2 py-1 cursor-pointer text-xs hover:opacity-80"
-            style={{ color: "var(--text-primary)" }}
-          >
-            <div className="flex items-center gap-1 min-w-0">
-              <span style={{ color: "#fbbf24" }}>🦀</span>
-              <span className="truncate">{m.description}</span>
-            </div>
-            <div className="flex items-center gap-2 flex-shrink-0">
-              <span style={{ color: "var(--text-secondary)", fontSize: 10 }}>
-                {formatTimeShort(m.created_at)}
-              </span>
-              <button
-                onClick={(e) => { e.stopPropagation(); handleRollback(m.molt_id); }}
-                className="text-[10px] px-1 rounded"
-                style={{ background: "var(--bg-tertiary)", color: "var(--text-secondary)" }}
-              >
-                ↩
-              </button>
-            </div>
-          </div>
-          {expandedId === m.molt_id && (
-            <div className="px-3 pb-2" style={{ background: "var(--bg-tertiary)" }}>
-              {diffLoading ? (
-                <div className="text-xs" style={{ color: "var(--text-secondary)" }}>Loading...</div>
-              ) : diffData && diffData.length > 0 ? (
-                diffData.map((d) => (
-                  <div key={d.file} className="mb-1">
-                    <div className="text-[10px] font-medium mt-1" style={{ color: "var(--accent)" }}>{d.file}</div>
-                    <pre className="text-[10px] leading-tight whitespace-pre-wrap max-h-24 overflow-y-auto rounded p-1" style={{ color: "var(--text-primary)", background: "var(--bg-secondary)" }}>
-                      {d.diff.slice(0, 1000)}
-                    </pre>
-                  </div>
-                ))
-              ) : (
-                <div className="text-xs" style={{ color: "var(--text-secondary)" }}>No changes</div>
+    <div className="border-t border-[var(--border)]">
+      <div className="p-2 text-[11px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
+        Molts
+      </div>
+      {molts.slice(0, 10).map((m) => {
+        const expanded = expandedId === m.molt_id;
+        return (
+          <div key={m.molt_id}>
+            <div
+              onClick={() => handleToggle(m.molt_id)}
+              className={cn(
+                "group flex items-center justify-between gap-2 px-2 py-1.5 cursor-pointer text-xs",
+                "hover:bg-[var(--bg-tertiary)] transition-colors",
               )}
+            >
+              <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                <span className="text-[var(--brand)]">🦀</span>
+                <span className="truncate text-[var(--text-primary)]">
+                  {m.description}
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <span className="text-[10px] text-[var(--text-tertiary)] font-mono">
+                  {formatTimeShort(m.created_at)}
+                </span>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setConfirmTarget(m.molt_id);
+                  }}
+                  disabled={rolling}
+                  title="Rollback to this molt"
+                  className={cn(
+                    "p-1 rounded text-[var(--text-tertiary)] hover:text-[var(--brand)] hover:bg-[var(--brand-bg)]",
+                    "transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)]",
+                  )}
+                >
+                  <RotateCcw size={11} />
+                </button>
+                {expanded ? (
+                  <ChevronUp size={12} className="text-[var(--text-tertiary)]" />
+                ) : (
+                  <ChevronDown size={12} className="text-[var(--text-tertiary)]" />
+                )}
+              </div>
             </div>
-          )}
-        </div>
-      ))}
+            {expanded && (
+              <div className="px-3 pb-2 bg-[var(--bg-tertiary)] border-t border-[var(--border-subtle)]">
+                {diffLoading ? (
+                  <div className="flex items-center gap-2 py-2 text-xs text-[var(--text-tertiary)]">
+                    <Loader2 size={12} className="animate-spin" />
+                    Loading diff…
+                  </div>
+                ) : diffData && diffData.length > 0 ? (
+                  diffData.map((d) => (
+                    <div key={d.file} className="my-2">
+                      <div className="text-[10px] font-semibold font-mono text-[var(--accent)] truncate mb-1">
+                        {d.file}
+                      </div>
+                      <DiffViewer diff={d.diff} />
+                    </div>
+                  ))
+                ) : (
+                  <EmptyState
+                    compact
+                    title="No changes"
+                    icon={<span className="text-xs">∅</span>}
+                  />
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      <ConfirmDialog
+        open={!!confirmTarget}
+        onOpenChange={(o) => !o && !rolling && setConfirmTarget(null)}
+        title="Rollback to this molt?"
+        description="This will overwrite current files with the snapshot. Recent changes may be lost."
+        confirmText="Rollback"
+        tone="danger"
+        onConfirm={() => { if (confirmTarget) handleRollback(confirmTarget); }}
+      />
     </div>
+  );
+}
+
+function DiffViewer({ diff }: { diff: string }) {
+  const lines = diff.split("\n").slice(0, 60);
+  return (
+    <pre className="text-[11px] leading-snug font-mono max-h-40 overflow-auto rounded-md border border-[var(--border)] bg-[var(--code-bg)] p-0 m-0">
+      {lines.map((line, i) => {
+        let cls = "text-[var(--text-secondary)]";
+        let bg = "transparent";
+        if (line.startsWith("+") && !line.startsWith("+++")) {
+          cls = "text-[var(--success)]";
+          bg = "var(--success-bg)";
+        } else if (line.startsWith("-") && !line.startsWith("---")) {
+          cls = "text-[var(--danger)]";
+          bg = "var(--danger-bg)";
+        } else if (line.startsWith("@@")) {
+          cls = "text-[var(--accent)]";
+        }
+        return (
+          <div
+            key={i}
+            className="px-2 py-px"
+            style={{ background: bg, color: cls.replace("text-", "").replace("[", "").replace("]", "") }}
+          >
+            <span style={{ color: cls.includes("success") ? "var(--success)" : cls.includes("danger") ? "var(--danger)" : cls.includes("accent") ? "var(--accent)" : "var(--text-secondary)" }}>
+              {line || " "}
+            </span>
+          </div>
+        );
+      })}
+      {diff.split("\n").length > 60 && (
+        <div className="px-2 py-1 text-[10px] text-[var(--text-tertiary)] italic">
+          … {diff.split("\n").length - 60} more lines truncated
+        </div>
+      )}
+    </pre>
   );
 }

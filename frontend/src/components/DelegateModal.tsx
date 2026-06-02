@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react";
 import { AgentProfile, listAgentProfiles } from "../api/agents";
+import { Modal, Button, Textarea, Input } from "./ui";
+import { cn } from "../lib/cn";
 
 interface Props {
   onClose: () => void;
@@ -13,7 +15,9 @@ export function DelegateModal({ onClose, onDelegate }: Props) {
   const [customTasks, setCustomTasks] = useState<Record<string, string>>({});
 
   useEffect(() => {
-    listAgentProfiles().then((list) => setAgents(list.filter((a) => a.enabled))).catch(() => {});
+    listAgentProfiles()
+      .then((list) => setAgents(list.filter((a) => a.enabled)))
+      .catch(() => {});
   }, []);
 
   const toggle = (name: string) => {
@@ -35,96 +39,94 @@ export function DelegateModal({ onClose, onDelegate }: Props) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "var(--overlay)" }}>
-      <div className="w-full max-w-md rounded-xl overflow-hidden" style={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", boxShadow: "0 25px 60px rgba(0,0,0,0.5), var(--glow-accent-2)" }}>
-        <div className="flex items-center justify-between px-5 py-3.5" style={{ borderBottom: "1px solid var(--border)", background: "var(--bg-tertiary)" }}>
-          <h3 className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>Delegate to Team</h3>
-          <button onClick={onClose} className="text-sm opacity-60 hover:opacity-100 transition-opacity" style={{ color: "var(--text-secondary)" }}>✕</button>
-        </div>
-
-        <div className="px-5 py-4 space-y-4">
-          <div>
-            <label className="block text-[10px] font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--text-secondary)" }}>
-              Select Agents
-            </label>
-            <div className="flex flex-wrap gap-2">
-              {agents.map((a) => (
+    <Modal
+      open={true}
+      onOpenChange={(o) => !o && onClose()}
+      title="Delegate to Team"
+      description="Run a task on multiple agents in parallel"
+      size="md"
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            onClick={handleDelegate}
+            disabled={selected.size === 0 || !task.trim()}
+          >
+            Delegate to {selected.size} agent{selected.size !== 1 ? "s" : ""}
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <div>
+          <label className="block text-[11px] font-semibold uppercase tracking-wider mb-2 text-[var(--text-secondary)]">
+            Select Agents
+          </label>
+          <div className="flex flex-wrap gap-1.5">
+            {agents.map((a) => {
+              const isSel = selected.has(a.name);
+              return (
                 <button
                   key={a.id}
                   onClick={() => toggle(a.name)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs transition-all"
-                  style={{
-                    background: selected.has(a.name) ? "var(--accent-2)" : "var(--bg-tertiary)",
-                    border: `1px solid ${selected.has(a.name) ? "var(--accent-2)" : "var(--border)"}`,
-                    color: selected.has(a.name) ? "var(--text-on-accent)" : "var(--text-secondary)",
-                    boxShadow: selected.has(a.name) ? "var(--glow-accent-2)" : "none",
-                  }}
+                  className={cn(
+                    "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all",
+                    isSel
+                      ? "bg-[var(--accent-2)] text-white border border-[var(--accent-2)] shadow-[var(--shadow-glow-accent)]"
+                      : "bg-[var(--bg-tertiary)] text-[var(--text-secondary)] border border-[var(--border)] hover:border-[var(--border-strong)] hover:text-[var(--text-primary)]",
+                  )}
                 >
                   <span>{a.icon || "🤖"}</span>
                   <span>{a.display_name}</span>
                 </button>
-              ))}
-            </div>
+              );
+            })}
           </div>
+        </div>
 
+        <Textarea
+          label="Task Description"
+          value={task}
+          onChange={(e) => setTask(e.target.value)}
+          rows={3}
+          placeholder="Describe what you want the agent(s) to do…"
+          autoFocus
+        />
+
+        {selected.size > 1 && (
           <div>
-            <label className="block text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: "var(--text-secondary)" }}>
-              Task Description
+            <label className="block text-[11px] font-semibold uppercase tracking-wider mb-2 text-[var(--text-secondary)]">
+              Custom Tasks (optional)
             </label>
-            <textarea
-              value={task}
-              onChange={(e) => setTask(e.target.value)}
-              rows={3}
-              className="w-full px-3 py-2 rounded-lg text-xs outline-none resize-none"
-              style={{ background: "var(--bg-tertiary)", color: "var(--text-primary)", border: "1px solid var(--border)" }}
-              placeholder="Describe what you want the agent(s) to do..."
-              autoFocus
-            />
-          </div>
-
-          {selected.size > 1 && (
-            <div>
-              <label className="block text-[10px] font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--text-secondary)" }}>
-                Custom Tasks (optional — override the task for specific agents)
-              </label>
+            <p className="text-[11px] text-[var(--text-tertiary)] mb-2">
+              Override the task for specific agents. Leave blank to use the description above.
+            </p>
+            <div className="space-y-2">
               {Array.from(selected).map((name) => {
                 const agent = agents.find((a) => a.name === name);
                 return (
-                  <div key={name} className="flex items-center gap-2 mb-2">
-                    <span className="text-xs shrink-0">{agent?.icon || "🤖"}</span>
-                    <span className="text-[10px] shrink-0 w-20 truncate" style={{ color: "var(--text-secondary)" }}>{name}</span>
-                    <input
+                  <div key={name} className="flex items-center gap-2">
+                    <span className="text-sm shrink-0">{agent?.icon || "🤖"}</span>
+                    <span className="text-xs shrink-0 w-20 truncate text-[var(--text-secondary)] font-mono">
+                      {name}
+                    </span>
+                    <Input
                       value={customTasks[name] || ""}
-                      onChange={(e) => setCustomTasks({ ...customTasks, [name]: e.target.value })}
-                      className="flex-1 px-2 py-1 rounded text-[10px] outline-none"
-                      style={{ background: "var(--bg-tertiary)", color: "var(--text-primary)", border: "1px solid var(--border)" }}
+                      onChange={(e) =>
+                        setCustomTasks({ ...customTasks, [name]: e.target.value })
+                      }
                       placeholder="Same as above if empty"
                     />
                   </div>
                 );
               })}
             </div>
-          )}
-        </div>
-
-        <div className="flex gap-2 px-5 py-3" style={{ borderTop: "1px solid var(--border)" }}>
-          <button
-            onClick={handleDelegate}
-            disabled={selected.size === 0 || !task.trim()}
-            className="flex-1 py-2 rounded-lg text-xs font-medium text-white disabled:opacity-40 transition-opacity"
-             style={{ background: "var(--accent-2)" }}
-          >
-            Delegate to {selected.size} agent{selected.size !== 1 ? "s" : ""}
-          </button>
-          <button
-            onClick={onClose}
-            className="px-4 py-2 rounded-lg text-xs transition-opacity"
-            style={{ background: "var(--bg-tertiary)", color: "var(--text-primary)" }}
-          >
-            Cancel
-          </button>
-        </div>
+          </div>
+        )}
       </div>
-    </div>
+    </Modal>
   );
 }

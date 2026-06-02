@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { ListTodo, X as XIcon, Plus } from "lucide-react";
 import { TodoItem, listTodos, addTodo, markTodoDone } from "../api/sessions";
 
 interface Props {
@@ -10,7 +11,6 @@ export default function TodoWidget({ sessionId, refreshKey = 0 }: Props) {
   const [expanded, setExpanded] = useState(false);
   const [todos, setTodos] = useState<TodoItem[]>([]);
   const [newTask, setNewTask] = useState("");
-  const [loading, setLoading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const pendingCount = todos.filter((t) => !t.done).length;
@@ -43,7 +43,9 @@ export default function TodoWidget({ sessionId, refreshKey = 0 }: Props) {
   const handleToggle = async (id: number) => {
     if (!sessionId) return;
     await markTodoDone(sessionId, id);
-    setTodos((prev) => prev.map((t) => (t.id === id ? { ...t, done: true } : t)));
+    setTodos((prev) =>
+      prev.map((t) => (t.id === id ? { ...t, done: true } : t)),
+    );
   };
 
   const handleAdd = async () => {
@@ -62,79 +64,55 @@ export default function TodoWidget({ sessionId, refreshKey = 0 }: Props) {
     return (
       <button
         onClick={() => setExpanded(true)}
-        className="flex flex-col items-center justify-center rounded-full shadow-lg"
-        style={{
-          position: "fixed",
-          bottom: 80,
-          right: 16,
-          zIndex: 40,
-          width: 56,
-          height: 56,
-          background: "var(--accent)",
-          color: "#fff",
-          border: "none",
-        }}
         title={`${pendingCount} pending tasks`}
+        className="fixed bottom-20 right-4 z-40 w-14 h-14 rounded-full flex flex-col items-center justify-center text-white shadow-[var(--shadow-md)] bg-[var(--accent)] hover:bg-[var(--accent-hover)] transition-colors"
       >
-        <span style={{ fontSize: 18 }}>📋</span>
+        <ListTodo size={20} />
         {pendingCount > 0 && (
-          <span style={{ fontSize: 10, fontWeight: 700, lineHeight: 1 }}>{pendingCount}</span>
+          <span className="text-[10px] font-bold leading-none mt-0.5">
+            {pendingCount}
+          </span>
         )}
       </button>
     );
   }
 
   return (
-    <div
-      style={{
-        position: "fixed",
-        bottom: 80,
-        right: 16,
-        zIndex: 40,
-        width: 288,
-        maxHeight: 320,
-        background: "var(--bg-secondary)",
-        border: "1px solid var(--border)",
-        borderRadius: 12,
-        boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
-        display: "flex",
-        flexDirection: "column",
-      }}
-    >
-      <div
-        className="flex items-center justify-between px-3 py-2"
-        style={{ borderBottom: "1px solid var(--border)" }}
-      >
-        <span className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
-          📋 Todo {pendingCount > 0 && `(${pendingCount})`}
+    <div className="fixed bottom-20 right-4 z-40 w-72 max-h-80 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border)] shadow-[var(--shadow-lg)] flex flex-col animate-scale-in">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--border)]">
+        <span className="flex items-center gap-1.5 text-sm font-semibold text-[var(--text-primary)]">
+          <ListTodo size={14} className="text-[var(--accent)]" />
+          Todo {pendingCount > 0 && `(${pendingCount})`}
         </span>
         <button
           onClick={() => setExpanded(false)}
-          className="text-xs px-1"
-          style={{ color: "var(--text-secondary)" }}
+          className="p-1 rounded text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
         >
-          ✕
+          <XIcon size={12} />
         </button>
       </div>
 
-      <div className="overflow-y-auto flex-1" style={{ maxHeight: 200 }}>
-        {loading ? (
-          <div className="text-xs p-3" style={{ color: "var(--text-secondary)" }}>Loading...</div>
-        ) : todos.length === 0 ? (
-          <div className="text-xs p-3" style={{ color: "var(--text-secondary)" }}>No tasks</div>
+      <div className="overflow-y-auto flex-1 max-h-50">
+        {todos.length === 0 ? (
+          <div className="text-xs p-3 text-[var(--text-secondary)]">
+            No tasks
+          </div>
         ) : (
           todos.map((t) => (
             <div
               key={t.id}
-              className="flex items-center gap-2 px-3 py-1.5 text-xs"
-              style={{ color: t.done ? "var(--text-secondary)" : "var(--text-primary)" }}
+              className="flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-[var(--bg-tertiary)]/50 transition-colors"
+              style={{
+                color: t.done
+                  ? "var(--text-secondary)"
+                  : "var(--text-primary)",
+              }}
             >
               <input
                 type="checkbox"
                 checked={t.done}
                 onChange={() => handleToggle(t.id)}
-                className="cursor-pointer"
-                style={{ accentColor: "var(--accent)" }}
+                className="cursor-pointer accent-[var(--accent)]"
               />
               <span className={t.done ? "line-through" : ""}>{t.task}</span>
             </div>
@@ -143,10 +121,7 @@ export default function TodoWidget({ sessionId, refreshKey = 0 }: Props) {
       </div>
 
       {sessionId && (
-        <div
-          className="flex gap-1 p-2"
-          style={{ borderTop: "1px solid var(--border)" }}
-        >
+        <div className="flex gap-1 p-2 border-t border-[var(--border)]">
           <input
             ref={inputRef}
             type="text"
@@ -159,16 +134,14 @@ export default function TodoWidget({ sessionId, refreshKey = 0 }: Props) {
               }
             }}
             placeholder="Add task..."
-            className="flex-1 px-2 py-1 rounded text-xs outline-none"
-            style={{ background: "var(--bg-tertiary)", color: "var(--text-primary)", border: "1px solid var(--border)" }}
+            className="flex-1 px-2 py-1 rounded text-xs outline-none bg-[var(--bg-tertiary)] text-[var(--text-primary)] border border-[var(--border)] focus:border-[var(--accent)] focus:ring-2 focus:ring-[var(--accent)]/30"
           />
           <button
             onClick={handleAdd}
             disabled={!newTask.trim()}
-            className="px-2 py-1 rounded text-xs font-medium text-white disabled:opacity-50"
-            style={{ background: "var(--accent)" }}
+            className="px-2 py-1 rounded text-xs font-medium text-white disabled:opacity-50 bg-[var(--accent)] hover:bg-[var(--accent-hover)] transition-colors flex items-center justify-center"
           >
-            +
+            <Plus size={12} />
           </button>
         </div>
       )}

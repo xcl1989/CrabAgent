@@ -1,6 +1,21 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import {
+  Plus,
+  Trash2,
+  ChevronLeft,
+  Search,
+  Plug,
+  Clock,
+  Bot,
+  Settings as SettingsIcon,
+  GitBranch,
+  MessageSquare,
+  X as XIcon,
+} from "lucide-react";
 import { Session } from "../api/sessions";
 import { formatDate } from "../api/time";
+import { Button, EmptyState, ConfirmDialog } from "./ui";
+import { cn } from "../lib/cn";
 
 interface Props {
   sessions: Session[];
@@ -12,121 +27,355 @@ interface Props {
   onOpenMcpServers: () => void;
   onOpenScheduledTasks: () => void;
   onOpenAgentTeam: () => void;
+  /** Mobile drawer open state — only affects viewports < md */
+  mobileOpen?: boolean;
+  onMobileClose?: () => void;
 }
 
-export default function SessionList({ sessions, activeId, onSelect, onNew, onDelete, onOpenProviders, onOpenMcpServers, onOpenScheduledTasks, onOpenAgentTeam }: Props) {
+export default function SessionList({
+  sessions,
+  activeId,
+  onSelect,
+  onNew,
+  onDelete,
+  onOpenProviders,
+  onOpenMcpServers,
+  onOpenScheduledTasks,
+  onOpenAgentTeam,
+  mobileOpen = false,
+  onMobileClose,
+}: Props) {
   const [collapsed, setCollapsed] = useState(false);
+  const [query, setQuery] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<Session | null>(null);
+
+  // Auto-close mobile drawer when a session is selected
+  useEffect(() => {
+    if (mobileOpen && onMobileClose) {
+      // close on escape
+      const handler = (e: KeyboardEvent) => {
+        if (e.key === "Escape") onMobileClose();
+      };
+      window.addEventListener("keydown", handler);
+      return () => window.removeEventListener("keydown", handler);
+    }
+  }, [mobileOpen, onMobileClose]);
+
+  const filtered = query.trim()
+    ? sessions.filter((s) =>
+        (s.title || "").toLowerCase().includes(query.toLowerCase()),
+      )
+    : sessions;
+
+  const handleSelect = (s: Session) => {
+    onSelect(s);
+    if (onMobileClose) onMobileClose();
+  };
+
+  const handleNew = () => {
+    onNew();
+    if (onMobileClose) onMobileClose();
+  };
+
+  const handleDelete = () => {
+    if (deleteTarget) onDelete(deleteTarget.session_id);
+    setDeleteTarget(null);
+  };
 
   if (collapsed) {
+    const ToolButton = ({
+      onClick,
+      icon,
+      title,
+      color,
+    }: {
+      onClick: () => void;
+      icon: React.ReactNode;
+      title: string;
+      color: string;
+    }) => (
+      <button
+        onClick={onClick}
+        title={title}
+        className={cn(
+          "p-2 rounded-lg transition-colors",
+          "text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]",
+        )}
+        style={{ color }}
+      >
+        {icon}
+      </button>
+    );
     return (
-      <div className="flex flex-col items-center py-3 gap-3 border-r" style={{ width: 48, background: "var(--bg-secondary)", borderRight: "1px solid var(--border)" }}>
-        <button onClick={() => setCollapsed(false)} className="text-sm px-2 py-1 rounded" style={{ color: "var(--text-secondary)" }} title="Expand sessions">
-          ☰
+      <div
+        className="hidden md:flex flex-col items-center py-3 gap-1 border-r border-[var(--border)] bg-[var(--bg-secondary)] shrink-0"
+        style={{ width: 56 }}
+      >
+        <button
+          onClick={() => setCollapsed(false)}
+          title="Expand sidebar"
+          className="p-2 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
+        >
+          <MessageSquare size={16} />
         </button>
+        <Button
+          size="icon"
+          variant="brand"
+          onClick={handleNew}
+          title="New session (⌘K)"
+          className="my-1"
+        >
+          <Plus size={16} />
+        </Button>
         <div className="flex-1" />
-        <button onClick={onOpenMcpServers} className="text-xs" style={{ color: "#a78bfa" }} title="MCP Servers">
-          &#x1f50c;
-        </button>
-        <button onClick={onOpenScheduledTasks} className="text-xs" style={{ color: "#fbbf24" }} title="Scheduled Tasks">
-          🕐
-        </button>
-        <button onClick={onOpenAgentTeam} className="text-xs" style={{ color: "#8b5cf6" }} title="Agent Team">
-          🤖
-        </button>
-        <button onClick={onOpenProviders} className="text-xs" style={{ color: "var(--text-secondary)" }} title="Providers">
-          ⚙
-        </button>
+        <ToolButton
+          onClick={onOpenMcpServers}
+          icon={<Plug size={15} />}
+          title="MCP Servers"
+          color=""
+        />
+        <ToolButton
+          onClick={onOpenScheduledTasks}
+          icon={<Clock size={15} />}
+          title="Scheduled Tasks"
+          color=""
+        />
+        <ToolButton
+          onClick={onOpenAgentTeam}
+          icon={<Bot size={15} />}
+          title="Agent Team"
+          color=""
+        />
+        <ToolButton
+          onClick={onOpenProviders}
+          icon={<SettingsIcon size={15} />}
+          title="Providers"
+          color=""
+        />
       </div>
     );
   }
 
-  return (
-    <div className="flex flex-col border-r" style={{ width: 256, background: "var(--bg-secondary)", borderRight: "1px solid var(--border)" }}>
-      <div className="p-3 flex items-center justify-between border-b" style={{ borderBottom: "1px solid var(--border)" }}>
-        <span className="text-sm font-semibold">Sessions</span>
-        <div className="flex items-center gap-1">
-          <button onClick={onNew} className="text-xs px-2 py-1 rounded" style={{ background: "var(--accent)", color: "#fff" }}>
-            + New
-          </button>
-          <button onClick={() => setCollapsed(true)} className="text-xs px-1 py-1 rounded" style={{ color: "var(--text-secondary)" }} title="Collapse">
-            ◀
-          </button>
-        </div>
+  const sidebar = (
+    <div
+      className={cn(
+        "flex flex-col h-full bg-[var(--bg-secondary)] w-64 lg:w-72",
+        // Desktop: inline sidebar with right border
+        "md:border-r md:border-[var(--border)] md:shrink-0",
+      )}
+    >
+      {/* Mobile header */}
+      <div className="md:hidden p-2.5 flex items-center gap-2 border-b border-[var(--border-subtle)]">
+        <span className="text-sm font-semibold text-[var(--text-primary)] flex-1">
+          Conversations
+        </span>
+        <button
+          onClick={onMobileClose}
+          title="Close"
+          className="p-1.5 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
+        >
+          <XIcon size={14} />
+        </button>
+      </div>
+      {/* Desktop header */}
+      <div className="hidden md:flex p-2.5 items-center gap-2 border-b border-[var(--border-subtle)]">
+        <span className="text-sm font-semibold text-[var(--text-primary)] flex-1">
+          Conversations
+        </span>
+        <Button
+          size="icon"
+          variant="brand"
+          onClick={handleNew}
+          title="New session (⌘K)"
+        >
+          <Plus size={14} />
+        </Button>
+        <button
+          onClick={() => setCollapsed(true)}
+          title="Collapse sidebar"
+          className="p-1.5 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
+        >
+          <ChevronLeft size={14} />
+        </button>
       </div>
 
+      {/* Search */}
+      {sessions.length > 4 && (
+        <div className="p-2 border-b border-[var(--border-subtle)]">
+          <div className="relative">
+            <Search
+              size={13}
+              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)]"
+            />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search…"
+              className="w-full h-7 pl-7 pr-2 text-xs rounded-md bg-[var(--bg-tertiary)] border border-[var(--border)] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--brand)] focus:ring-2 focus:ring-[var(--brand)]/30"
+            />
+          </div>
+        </div>
+      )}
+
+      {/* List */}
       <div className="flex-1 overflow-y-auto">
-        {sessions.map((s) => (
-          <div
-            key={s.session_id}
-            onClick={() => onSelect(s)}
-            className="px-3 py-2 cursor-pointer text-sm group flex items-center justify-between"
-            style={{
-              background: activeId === s.session_id ? "var(--bg-tertiary)" : "transparent",
-              borderBottom: "1px solid var(--border)",
-            }}
-          >
-            <div className="min-w-0 flex-1">
-              <div className="truncate flex items-center gap-1.5" style={{ color: "var(--text-primary)" }}>
-                {s.title || "(untitled)"}
-                {s.active_branch && s.active_branch !== "main" && (
-                  <span className="text-[10px] px-1 py-0 rounded flex-shrink-0" style={{ background: "var(--bg-tertiary)", color: "#fbbf24" }}>
-                    ⎇ {s.active_branch}
-                  </span>
+        {sessions.length === 0 ? (
+          <EmptyState
+            compact
+            icon={<MessageSquare size={24} />}
+            title="No conversations"
+            description="Start a new session to begin."
+          />
+        ) : filtered.length === 0 ? (
+          <div className="p-4 text-xs text-center text-[var(--text-tertiary)]">
+            No matches
+          </div>
+        ) : (
+          filtered.map((s) => {
+            const isActive = activeId === s.session_id;
+            return (
+              <div
+                key={s.session_id}
+                onClick={() => handleSelect(s)}
+                className={cn(
+                  "group relative px-3 py-2 cursor-pointer transition-colors",
+                  "border-l-2",
+                  isActive
+                    ? "bg-[var(--bg-tertiary)] border-l-[var(--brand)]"
+                    : "border-l-transparent hover:bg-[var(--bg-tertiary)]/60",
                 )}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div
+                      className={cn(
+                        "truncate text-sm flex items-center gap-1.5",
+                        isActive
+                          ? "text-[var(--text-primary)] font-medium"
+                          : "text-[var(--text-secondary)]",
+                      )}
+                    >
+                      <span className="truncate">
+                        {s.title || "(untitled)"}
+                      </span>
+                      {s.active_branch && s.active_branch !== "main" && (
+                        <span className="inline-flex items-center gap-0.5 text-[9px] px-1 py-px rounded font-mono bg-[var(--warning-bg)] text-[var(--warning)] shrink-0">
+                          <GitBranch size={9} />
+                          {s.active_branch}
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-[10px] mt-0.5 text-[var(--text-tertiary)] font-mono">
+                      {formatDate(s.updated_at)}
+                    </div>
+                  </div>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDeleteTarget(s);
+                    }}
+                    title="Delete session"
+                    className={cn(
+                      "shrink-0 p-1 rounded transition-all",
+                      "opacity-0 group-hover:opacity-100",
+                      "text-[var(--text-tertiary)] hover:text-[var(--danger)] hover:bg-[var(--danger-bg)]",
+                    )}
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </div>
               </div>
-              <div className="text-xs mt-0.5" style={{ color: "var(--text-secondary)" }}>
-                {formatDate(s.updated_at)}
-              </div>
-            </div>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onDelete(s.session_id);
-              }}
-              className="opacity-0 group-hover:opacity-100 text-xs ml-2 px-1"
-              style={{ color: "var(--danger)" }}
-            >
-              x
-            </button>
-          </div>
-        ))}
-        {sessions.length === 0 && (
-          <div className="p-4 text-xs text-center" style={{ color: "var(--text-secondary)" }}>
-            No sessions yet
-          </div>
+            );
+          })
         )}
       </div>
 
-      <div className="p-2 flex gap-1.5 border-t" style={{ borderTop: "1px solid var(--border)" }}>
+      {/* Footer tools */}
+      <div className="p-2 border-t border-[var(--border-subtle)] grid grid-cols-2 gap-1">
         <button
           onClick={onOpenMcpServers}
-          className="flex-1 text-[10px] py-1.5 rounded font-medium tracking-wide"
-          style={{ background: "#2d1f5e", color: "#a78bfa" }}
+          className={cn(
+            "flex items-center gap-1.5 px-2 py-1.5 rounded-md text-[11px] font-medium",
+            "bg-[var(--bg-tertiary)] border border-[var(--border)]",
+            "hover:border-[var(--border-strong)] hover:text-[var(--text-primary)] transition-colors",
+            "text-[var(--text-secondary)]",
+          )}
+          title="MCP Servers"
         >
-          MCP
+          <Plug size={12} className="text-[var(--accent-2)]" />
+          <span>MCP</span>
         </button>
         <button
           onClick={onOpenScheduledTasks}
-          className="flex-1 text-[10px] py-1.5 rounded font-medium tracking-wide"
-          style={{ background: "#2d1f5e", color: "#fbbf24" }}
+          className={cn(
+            "flex items-center gap-1.5 px-2 py-1.5 rounded-md text-[11px] font-medium",
+            "bg-[var(--bg-tertiary)] border border-[var(--border)]",
+            "hover:border-[var(--border-strong)] hover:text-[var(--text-primary)] transition-colors",
+            "text-[var(--text-secondary)]",
+          )}
+          title="Scheduled Tasks"
         >
-          Tasks
+          <Clock size={12} className="text-[var(--warning)]" />
+          <span>Tasks</span>
         </button>
         <button
           onClick={onOpenAgentTeam}
-          className="flex-1 text-[10px] py-1.5 rounded font-medium tracking-wide"
-          style={{ background: "#4c1d95", color: "#a78bfa" }}
+          className={cn(
+            "flex items-center gap-1.5 px-2 py-1.5 rounded-md text-[11px] font-medium",
+            "bg-[var(--bg-tertiary)] border border-[var(--border)]",
+            "hover:border-[var(--border-strong)] hover:text-[var(--text-primary)] transition-colors",
+            "text-[var(--text-secondary)]",
+          )}
+          title="Agent Team"
         >
-          Team
+          <Bot size={12} className="text-[var(--accent-2)]" />
+          <span>Team</span>
         </button>
         <button
           onClick={onOpenProviders}
-          className="flex-1 text-[10px] py-1.5 rounded font-medium tracking-wide"
-          style={{ background: "var(--bg-tertiary)", color: "var(--text-secondary)" }}
+          className={cn(
+            "flex items-center gap-1.5 px-2 py-1.5 rounded-md text-[11px] font-medium",
+            "bg-[var(--bg-tertiary)] border border-[var(--border)]",
+            "hover:border-[var(--border-strong)] hover:text-[var(--text-primary)] transition-colors",
+            "text-[var(--text-secondary)]",
+          )}
+          title="Providers"
         >
-          Providers
+          <SettingsIcon size={12} className="text-[var(--text-tertiary)]" />
+          <span>API Keys</span>
         </button>
       </div>
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onOpenChange={(o) => !o && setDeleteTarget(null)}
+        title={`Delete conversation "${deleteTarget?.title || "untitled"}"?`}
+        description="This permanently removes the session and its message history."
+        confirmText="Delete"
+        tone="danger"
+        onConfirm={handleDelete}
+      />
     </div>
+  );
+
+  return (
+    <>
+      {/* Desktop: inline — only render when not in mobile drawer mode */}
+      {!mobileOpen && (
+        <div className="hidden md:contents">{sidebar}</div>
+      )}
+      {/* Mobile: drawer with overlay */}
+      {mobileOpen && (
+        <>
+          <div
+            className="md:hidden fixed inset-0 z-40 bg-[var(--bg-overlay)] backdrop-blur-sm animate-fade-in"
+            onClick={onMobileClose}
+          />
+          <div className="md:hidden fixed top-0 left-0 bottom-0 z-50 w-72 max-w-[85vw] animate-slide-up shadow-[var(--shadow-lg)]">
+            {sidebar}
+          </div>
+        </>
+      )}
+    </>
   );
 }
