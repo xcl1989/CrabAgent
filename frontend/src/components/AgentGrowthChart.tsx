@@ -1,9 +1,19 @@
 import { useState, useEffect } from "react";
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  LineChart, Line, ComposedChart, Legend,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  LineChart,
+  Line,
+  ComposedChart,
+  Legend,
 } from "recharts";
 import { getAgentGrowth, GrowthPoint } from "../api/agents";
+import { useThemeColors } from "../lib/theme-colors";
 
 interface AgentGrowthChartProps {
   agentName: string;
@@ -12,10 +22,14 @@ interface AgentGrowthChartProps {
 
 type ViewMode = "overview" | "elapsed" | "tokens";
 
-export default function AgentGrowthChart({ agentName, displayName }: AgentGrowthChartProps) {
+export default function AgentGrowthChart({
+  agentName,
+  displayName,
+}: AgentGrowthChartProps) {
   const [data, setData] = useState<GrowthPoint[]>([]);
   const [loading, setLoading] = useState(true);
   const [mode, setMode] = useState<ViewMode>("overview");
+  const colors = useThemeColors();
 
   useEffect(() => {
     setLoading(true);
@@ -28,7 +42,7 @@ export default function AgentGrowthChart({ agentName, displayName }: AgentGrowth
   if (loading) {
     return (
       <div className="flex items-center justify-center h-48">
-        <span className="text-sm" style={{ color: "var(--text-tertiary)" }}>Loading...</span>
+        <span className="text-sm text-[var(--text-tertiary)]">Loading...</span>
       </div>
     );
   }
@@ -36,36 +50,55 @@ export default function AgentGrowthChart({ agentName, displayName }: AgentGrowth
   if (data.length === 0) {
     return (
       <div className="flex items-center justify-center h-48">
-        <span className="text-sm" style={{ color: "var(--text-tertiary)" }}>
+        <span className="text-sm text-[var(--text-tertiary)]">
           No growth data for {displayName} yet
         </span>
       </div>
     );
   }
 
+  const tooltipStyle = {
+    background: "var(--bg-secondary)",
+    border: "1px solid var(--border)",
+    borderRadius: 6,
+    fontSize: 11,
+    fontFamily: "'SF Mono', monospace",
+    color: "var(--text-primary)",
+  };
+
+  const axisTick = { fontSize: 10, fill: "var(--text-tertiary)" };
+  const gridStroke = "var(--border)";
+
   return (
     <div>
       <div className="flex items-center justify-between mb-3">
-        <span
-          className="text-xs font-medium"
-          style={{ color: "var(--text-primary)", fontFamily: "'SF Mono', monospace" }}
-        >
+        <span className="text-xs font-medium text-[var(--text-primary)] font-mono">
           {displayName} — Last 30 Days
         </span>
         <div className="flex gap-1">
           {(["overview", "elapsed", "tokens"] as ViewMode[]).map((m) => (
             <button
               key={m}
-              className="text-xs px-2 py-0.5 rounded transition-colors"
+              className="text-xs px-2 py-0.5 rounded transition-colors font-mono"
               style={{
-                background: mode === m ? "var(--bg-tertiary)" : "transparent",
-                color: mode === m ? "var(--text-primary)" : "var(--text-tertiary)",
-                border: mode === m ? "1px solid var(--border)" : "1px solid transparent",
-                fontFamily: "'SF Mono', monospace",
+                background:
+                  mode === m ? "var(--bg-tertiary)" : "transparent",
+                color:
+                  mode === m
+                    ? "var(--text-primary)"
+                    : "var(--text-tertiary)",
+                border:
+                  mode === m
+                    ? "1px solid var(--border)"
+                    : "1px solid transparent",
               }}
               onClick={() => setMode(m)}
             >
-              {m === "overview" ? "Tasks+Rate" : m === "elapsed" ? "Avg Time" : "Avg Tokens"}
+              {m === "overview"
+                ? "Tasks+Rate"
+                : m === "elapsed"
+                  ? "Avg Time"
+                  : "Avg Tokens"}
             </button>
           ))}
         </div>
@@ -74,106 +107,97 @@ export default function AgentGrowthChart({ agentName, displayName }: AgentGrowth
       <div style={{ width: "100%", height: 200 }}>
         {mode === "overview" ? (
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={data} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+            <ComposedChart
+              data={data}
+              margin={{ top: 5, right: 5, bottom: 5, left: 5 }}
+            >
+              <CartesianGrid strokeDasharray="3 3" stroke={gridStroke} />
               <XAxis
                 dataKey="date"
-                tick={{ fontSize: 10, fill: "var(--text-tertiary)" }}
+                tick={axisTick}
                 tickFormatter={(v) => v.slice(5)}
               />
-              <YAxis
-                yAxisId="left"
-                tick={{ fontSize: 10, fill: "var(--text-tertiary)" }}
-                allowDecimals={false}
-              />
+              <YAxis yAxisId="left" tick={axisTick} allowDecimals={false} />
               <YAxis
                 yAxisId="right"
                 orientation="right"
                 domain={[0, 100]}
-                tick={{ fontSize: 10, fill: "var(--text-tertiary)" }}
+                tick={axisTick}
                 tickFormatter={(v) => `${v}%`}
               />
-              <Tooltip
-                contentStyle={{
-                  background: "var(--bg-secondary)",
-                  border: "1px solid var(--border)",
-                  borderRadius: 6,
-                  fontSize: 11,
-                  fontFamily: "'SF Mono', monospace",
-                  color: "var(--text-primary)",
+              <Tooltip contentStyle={tooltipStyle} />
+              <Legend
+                wrapperStyle={{
+                  fontSize: 10,
+                  color: "var(--text-tertiary)",
                 }}
               />
-              <Legend wrapperStyle={{ fontSize: 10, color: "var(--text-tertiary)" }} />
-              <Bar yAxisId="left" dataKey="total" name="Tasks" fill="#60a5fa" radius={[2, 2, 0, 0]} />
+              <Bar
+                yAxisId="left"
+                dataKey="total"
+                name="Tasks"
+                fill={colors.accent}
+                radius={[2, 2, 0, 0]}
+              />
               <Line
                 yAxisId="right"
                 type="monotone"
                 dataKey="success_rate"
                 name="Success Rate"
-                stroke="#34d399"
+                stroke={colors.success}
                 strokeWidth={2}
-                dot={{ r: 2, fill: "#34d399" }}
+                dot={{ r: 2, fill: colors.success }}
               />
             </ComposedChart>
           </ResponsiveContainer>
         ) : mode === "elapsed" ? (
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={data} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+            <LineChart
+              data={data}
+              margin={{ top: 5, right: 5, bottom: 5, left: 5 }}
+            >
+              <CartesianGrid strokeDasharray="3 3" stroke={gridStroke} />
               <XAxis
                 dataKey="date"
-                tick={{ fontSize: 10, fill: "var(--text-tertiary)" }}
+                tick={axisTick}
                 tickFormatter={(v) => v.slice(5)}
               />
-              <YAxis tick={{ fontSize: 10, fill: "var(--text-tertiary)" }} />
+              <YAxis tick={axisTick} />
               <Tooltip
-                contentStyle={{
-                  background: "var(--bg-secondary)",
-                  border: "1px solid var(--border)",
-                  borderRadius: 6,
-                  fontSize: 11,
-                  fontFamily: "'SF Mono', monospace",
-                  color: "var(--text-primary)",
-                }}
+                contentStyle={tooltipStyle}
                 formatter={(value) => [`${value}s`, "Avg Elapsed"]}
               />
               <Line
                 type="monotone"
                 dataKey="avg_elapsed"
                 name="Avg Elapsed"
-                stroke="#fbbf24"
+                stroke={colors.warning}
                 strokeWidth={2}
-                dot={{ r: 2, fill: "#fbbf24" }}
+                dot={{ r: 2, fill: colors.warning }}
               />
             </LineChart>
           </ResponsiveContainer>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={data} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+            <LineChart
+              data={data}
+              margin={{ top: 5, right: 5, bottom: 5, left: 5 }}
+            >
+              <CartesianGrid strokeDasharray="3 3" stroke={gridStroke} />
               <XAxis
                 dataKey="date"
-                tick={{ fontSize: 10, fill: "var(--text-tertiary)" }}
+                tick={axisTick}
                 tickFormatter={(v) => v.slice(5)}
               />
-              <YAxis tick={{ fontSize: 10, fill: "var(--text-tertiary)" }} />
-              <Tooltip
-                contentStyle={{
-                  background: "var(--bg-secondary)",
-                  border: "1px solid var(--border)",
-                  borderRadius: 6,
-                  fontSize: 11,
-                  fontFamily: "'SF Mono', monospace",
-                  color: "var(--text-primary)",
-                }}
-              />
+              <YAxis tick={axisTick} />
+              <Tooltip contentStyle={tooltipStyle} />
               <Line
                 type="monotone"
                 dataKey="avg_tokens"
                 name="Avg Tokens"
-                stroke="#a78bfa"
+                stroke={colors.accent2}
                 strokeWidth={2}
-                dot={{ r: 2, fill: "#a78bfa" }}
+                dot={{ r: 2, fill: colors.accent2 }}
               />
             </LineChart>
           </ResponsiveContainer>

@@ -47,6 +47,8 @@ const AVAILABLE_TOOLS = [
 
 interface Props {
   onClose: () => void;
+  /** Render inline (no modal wrapper) for use in a dedicated page. */
+  inline?: boolean;
 }
 
 type FormState = {
@@ -69,7 +71,7 @@ const emptyForm: FormState = {
   tools: [],
 };
 
-export function AgentTeamPanel({ onClose }: Props) {
+export function AgentTeamPanel({ onClose, inline = false }: Props) {
   const [agents, setAgents] = useState<AgentProfile[]>([]);
   const [editing, setEditing] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
@@ -346,57 +348,51 @@ export function AgentTeamPanel({ onClose }: Props) {
     </div>
   );
 
-  return (
+  const headerLabel = (
+    <div className="flex items-center gap-2">
+      <span>🤖</span>
+      <span>Agent Team</span>
+      <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-[var(--bg-tertiary)] text-[var(--text-secondary)] ml-1">
+        {agents.filter((a) => a.enabled).length}/{agents.length} active
+      </span>
+    </div>
+  );
+
+  const newAgentButton = !showCreate && !editing ? (
+    <Button variant="brand" onClick={startCreate}>
+      <Plus size={14} /> New Agent
+    </Button>
+  ) : undefined;
+
+  const bodyContent = (
     <>
-      <Modal
-        open={true}
-        onOpenChange={(o) => !o && onClose()}
-        title={
-          <div className="flex items-center gap-2">
-            <span>🤖</span>
-            <span>Agent Team</span>
-            <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-[var(--bg-tertiary)] text-[var(--text-secondary)] ml-1">
-              {agents.filter((a) => a.enabled).length}/{agents.length} active
-            </span>
-          </div>
-        }
-        description="Configure your multi-agent team"
-        size="xl"
-        footer={
-          !showCreate && !editing ? (
-            <Button variant="brand" onClick={startCreate}>
-              <Plus size={14} /> New Agent
-            </Button>
-          ) : undefined
-        }
-      >
-        {error && (
-          <div className="mb-3 px-3 py-2 rounded-lg bg-[var(--danger-bg)] border border-[var(--danger-border)] text-xs text-[var(--danger)]">
-            {error}
-          </div>
+      {error && (
+        <div className="mb-3 px-3 py-2 rounded-lg bg-[var(--danger-bg)] border border-[var(--danger-border)] text-xs text-[var(--danger)]">
+          {error}
+        </div>
+      )}
+
+      {showCreate && (
+        <div className="mb-4 p-4 rounded-xl bg-[var(--bg-tertiary)] border border-[var(--border)]">
+          {renderForm(handleCreate, true)}
+        </div>
+      )}
+
+      <div className="space-y-2">
+        {agents.length === 0 && !showCreate && (
+          <EmptyState
+            icon={<span className="text-2xl">🤖</span>}
+            title="No agents yet"
+            description="Create your first agent profile to enable multi-agent delegation."
+            action={
+              <Button variant="brand" size="sm" onClick={startCreate}>
+                <Plus size={14} /> New Agent
+              </Button>
+            }
+          />
         )}
 
-        {showCreate && (
-          <div className="mb-4 p-4 rounded-xl bg-[var(--bg-tertiary)] border border-[var(--border)]">
-            {renderForm(handleCreate, true)}
-          </div>
-        )}
-
-        <div className="space-y-2">
-          {agents.length === 0 && !showCreate && (
-            <EmptyState
-              icon={<span className="text-2xl">🤖</span>}
-              title="No agents yet"
-              description="Create your first agent profile to enable multi-agent delegation."
-              action={
-                <Button variant="brand" size="sm" onClick={startCreate}>
-                  <Plus size={14} /> New Agent
-                </Button>
-              }
-            />
-          )}
-
-          {agents.map((a) => (
+        {agents.map((a) => (
             <div
               key={a.id}
               className={cn(
@@ -583,8 +579,47 @@ export function AgentTeamPanel({ onClose }: Props) {
             </div>
           )}
         </div>
-      </Modal>
+      </>
+    );
 
+  return inline ? (
+    <div className="flex flex-col h-full">
+      <header className="flex items-center justify-between px-6 py-4 border-b border-[var(--border)] bg-[var(--bg-secondary)]">
+        <div>
+          <h1 className="text-base font-semibold text-[var(--text-primary)]">
+            {headerLabel}
+          </h1>
+          <p className="text-xs text-[var(--text-secondary)] mt-0.5">
+            Configure your multi-agent team
+          </p>
+        </div>
+        {newAgentButton}
+      </header>
+      <div className="flex-1 overflow-y-auto px-6 py-4">{bodyContent}</div>
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onOpenChange={(o) => !o && setDeleteTarget(null)}
+        title={`Delete agent "${deleteTarget?.display_name}"?`}
+        description="This permanently removes the agent profile and its learning data."
+        confirmText="Delete"
+        tone="danger"
+        onConfirm={() => {
+          if (deleteTarget) handleDelete(deleteTarget);
+        }}
+      />
+    </div>
+  ) : (
+    <>
+      <Modal
+        open={true}
+        onOpenChange={(o) => !o && onClose()}
+        title={headerLabel}
+        description="Configure your multi-agent team"
+        size="xl"
+        footer={newAgentButton}
+      >
+        {bodyContent}
+      </Modal>
       <ConfirmDialog
         open={!!deleteTarget}
         onOpenChange={(o) => !o && setDeleteTarget(null)}

@@ -13,6 +13,7 @@ import {
   Code,
   Compass,
   X,
+  Menu,
 } from "lucide-react";
 import * as sessionsApi from "../api/sessions";
 import * as providersApi from "../api/providers";
@@ -111,6 +112,7 @@ export default function ChatPage({ onLogout }: Props) {
   const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
   const [mcpStatus, setMcpStatus] = useState<McpServerStatus[]>([]);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -372,6 +374,8 @@ export default function ChatPage({ onLogout }: Props) {
         onOpenMcpServers={() => setShowMcpServers(true)}
         onOpenScheduledTasks={() => setShowScheduledTasks(true)}
         onOpenAgentTeam={() => setShowAgentTeam(true)}
+        mobileOpen={mobileSidebarOpen}
+        onMobileClose={() => setMobileSidebarOpen(false)}
       />
 
       <div className="flex-1 flex flex-col min-w-0">
@@ -379,6 +383,15 @@ export default function ChatPage({ onLogout }: Props) {
         <div
           className="flex items-center gap-1 px-3 h-11 border-b border-[var(--border)] bg-[var(--bg-secondary)]"
         >
+          <Button
+            size="icon"
+            variant="ghost"
+            onClick={() => setMobileSidebarOpen(true)}
+            title="Conversations"
+            className="md:hidden"
+          >
+            <Menu size={16} />
+          </Button>
           <div className="flex-1 min-w-0">
             {activeSession && (
               <BranchSelector

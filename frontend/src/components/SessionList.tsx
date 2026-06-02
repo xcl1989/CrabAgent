@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Plus,
   Trash2,
@@ -10,6 +10,7 @@ import {
   Settings as SettingsIcon,
   GitBranch,
   MessageSquare,
+  X as XIcon,
 } from "lucide-react";
 import { Session } from "../api/sessions";
 import { formatDate } from "../api/time";
@@ -26,6 +27,9 @@ interface Props {
   onOpenMcpServers: () => void;
   onOpenScheduledTasks: () => void;
   onOpenAgentTeam: () => void;
+  /** Mobile drawer open state — only affects viewports < md */
+  mobileOpen?: boolean;
+  onMobileClose?: () => void;
 }
 
 export default function SessionList({
@@ -38,16 +42,40 @@ export default function SessionList({
   onOpenMcpServers,
   onOpenScheduledTasks,
   onOpenAgentTeam,
+  mobileOpen = false,
+  onMobileClose,
 }: Props) {
   const [collapsed, setCollapsed] = useState(false);
   const [query, setQuery] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<Session | null>(null);
+
+  // Auto-close mobile drawer when a session is selected
+  useEffect(() => {
+    if (mobileOpen && onMobileClose) {
+      // close on escape
+      const handler = (e: KeyboardEvent) => {
+        if (e.key === "Escape") onMobileClose();
+      };
+      window.addEventListener("keydown", handler);
+      return () => window.removeEventListener("keydown", handler);
+    }
+  }, [mobileOpen, onMobileClose]);
 
   const filtered = query.trim()
     ? sessions.filter((s) =>
         (s.title || "").toLowerCase().includes(query.toLowerCase()),
       )
     : sessions;
+
+  const handleSelect = (s: Session) => {
+    onSelect(s);
+    if (onMobileClose) onMobileClose();
+  };
+
+  const handleNew = () => {
+    onNew();
+    if (onMobileClose) onMobileClose();
+  };
 
   const handleDelete = () => {
     if (deleteTarget) onDelete(deleteTarget.session_id);
@@ -93,7 +121,7 @@ export default function SessionList({
         <Button
           size="icon"
           variant="brand"
-          onClick={onNew}
+          onClick={handleNew}
           title="New session (⌘K)"
           className="my-1"
         >
@@ -128,19 +156,36 @@ export default function SessionList({
     );
   }
 
-  return (
+  const sidebar = (
     <div
-      className="hidden md:flex flex-col border-r border-[var(--border)] bg-[var(--bg-secondary)] shrink-0 w-64 lg:w-72"
+      className={cn(
+        "flex flex-col h-full bg-[var(--bg-secondary)] w-64 lg:w-72",
+        // Desktop: inline sidebar with right border
+        "md:border-r md:border-[var(--border)] md:shrink-0",
+      )}
     >
-      {/* Header */}
-      <div className="p-2.5 flex items-center gap-2 border-b border-[var(--border-subtle)]">
+      {/* Mobile header */}
+      <div className="md:hidden p-2.5 flex items-center gap-2 border-b border-[var(--border-subtle)]">
+        <span className="text-sm font-semibold text-[var(--text-primary)] flex-1">
+          Conversations
+        </span>
+        <button
+          onClick={onMobileClose}
+          title="Close"
+          className="p-1.5 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
+        >
+          <XIcon size={14} />
+        </button>
+      </div>
+      {/* Desktop header */}
+      <div className="hidden md:flex p-2.5 items-center gap-2 border-b border-[var(--border-subtle)]">
         <span className="text-sm font-semibold text-[var(--text-primary)] flex-1">
           Conversations
         </span>
         <Button
           size="icon"
           variant="brand"
-          onClick={onNew}
+          onClick={handleNew}
           title="New session (⌘K)"
         >
           <Plus size={14} />
@@ -191,7 +236,7 @@ export default function SessionList({
             return (
               <div
                 key={s.session_id}
-                onClick={() => onSelect(s)}
+                onClick={() => handleSelect(s)}
                 className={cn(
                   "group relative px-3 py-2 cursor-pointer transition-colors",
                   "border-l-2",
@@ -311,5 +356,26 @@ export default function SessionList({
         onConfirm={handleDelete}
       />
     </div>
+  );
+
+  return (
+    <>
+      {/* Desktop: inline — only render when not in mobile drawer mode */}
+      {!mobileOpen && (
+        <div className="hidden md:contents">{sidebar}</div>
+      )}
+      {/* Mobile: drawer with overlay */}
+      {mobileOpen && (
+        <>
+          <div
+            className="md:hidden fixed inset-0 z-40 bg-[var(--bg-overlay)] backdrop-blur-sm animate-fade-in"
+            onClick={onMobileClose}
+          />
+          <div className="md:hidden fixed top-0 left-0 bottom-0 z-50 w-72 max-w-[85vw] animate-slide-up shadow-[var(--shadow-lg)]">
+            {sidebar}
+          </div>
+        </>
+      )}
+    </>
   );
 }
