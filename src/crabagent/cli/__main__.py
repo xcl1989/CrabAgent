@@ -191,7 +191,7 @@ async def _ensure_cli_user():
         user = result.scalar_one_or_none()
         if user:
             return user
-        from crabagent.serve.services.auth import hash_password
+        from crabagent.core.auth_utils import hash_password
 
         user = User(
             username=CLI_USERNAME,
@@ -731,10 +731,10 @@ def _print_banner(context, provider: str, model: str):
         from rich.text import Text
 
         console = Console()
-        t = Text("CrabAgent v0.8.1", style="bold")
+        t = Text("CrabAgent v0.9.0", style="bold")
         console.print(t)
     except ImportError:
-        print("CrabAgent v0.8.1")
+        print("CrabAgent v0.9.0")
 
     print(f"  provider: {provider}  model: {model}")
     print(f"  workspace: {context.workspace}")

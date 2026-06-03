@@ -34,13 +34,16 @@ async def get_conversation(db: AsyncSession, session_id: str) -> Conversation | 
     return result.scalar_one_or_none()
 
 
-async def list_conversations(db: AsyncSession, user_id: int, limit: int = 30) -> list[Conversation]:
-    result = await db.execute(
-        select(Conversation)
-        .where(Conversation.user_id == user_id)
-        .order_by(Conversation.updated_at.desc())
-        .limit(limit)
-    )
+async def list_conversations(
+    db: AsyncSession,
+    user_id: int,
+    limit: int = 30,
+    workspace: str | None = None,
+) -> list[Conversation]:
+    q = select(Conversation).where(Conversation.user_id == user_id)
+    if workspace is not None:
+        q = q.where(Conversation.workspace == workspace)
+    result = await db.execute(q.order_by(Conversation.updated_at.desc()).limit(limit))
     return list(result.scalars().all())
 
 

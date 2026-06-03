@@ -260,8 +260,16 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 
 def _ensure_workspace_dirs():
-    base = settings.workspace.resolve() / ".crabagent"
-    base.mkdir(parents=True, exist_ok=True)
+    from pathlib import Path
+
+    ws = settings.workspace.resolve()
+    if ws == Path("/"):
+        ws = Path.home()
+    base = ws / ".crabagent"
+    try:
+        base.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return
     skills_dir = base / "skills"
     if not skills_dir.exists():
         skills_dir.mkdir(parents=True, exist_ok=True)
@@ -299,8 +307,27 @@ def _ensure_workspace_dirs():
         )
 
 
+def _migrate_db_to_home():
+    import logging
+    import shutil
+    from pathlib import Path
+
+    logger = logging.getLogger(__name__)
+
+    home_db = Path.home() / ".crabagent" / "crabagent.db"
+    if home_db.exists():
+        return
+
+    cwd_db = Path.cwd() / "crabagent.db"
+    if cwd_db.exists():
+        home_db.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(cwd_db, home_db)
+        logger.info("Migrated database from %s to %s", cwd_db, home_db)
+
+
 async def init_db() -> None:
     _ensure_workspace_dirs()
+    _migrate_db_to_home()
 
     async with engine.begin() as conn:
         await conn.execute(text("PRAGMA journal_mode=WAL"))
@@ -372,7 +399,7 @@ async def init_db() -> None:
 async def _ensure_default_admin():
     from sqlalchemy import select
 
-    from crabagent.serve.services.auth import hash_password
+    from crabagent.core.auth_utils import hash_password
 
     async with async_session_factory() as db:
         result = await db.execute(select(User).where(User.username == "admin"))

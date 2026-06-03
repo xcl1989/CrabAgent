@@ -2,7 +2,7 @@
 
 > **AI 团队指挥中心** — 组建能持续学习和进化的 AI 专家团队。委派、并行、流水线，从终端或浏览器实时看板监控进度。
 
-CrabAgent 是一个本地优先的 AI Agent 平台。从任意项目目录启动，支持 CLI/TUI/Web 三种模式。数据全在本地，API Key 加密存储，自由选择任意 LLM 提供商。
+CrabAgent 是一个本地优先的 AI Agent 平台。从任意项目目录启动，支持 CLI/TUI/Web/原生 macOS 桌面应用四种模式。数据全在本地，API Key 加密存储，自由选择任意 LLM 提供商。
 
 [![PyPI version](https://badge.fury.io/py/crabagent.svg)](https://badge.fury.io/py/crabagent)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
@@ -23,6 +23,7 @@ CrabAgent 是一个本地优先的 AI Agent 平台。从任意项目目录启动
 | **📊 成长追踪** | 查看每个 Agent 的统计数据：任务数、成功率、经验数、常用类别。`ctrl+space agent_stats` |
 | **⏱ 定时 + 实时** | Agent 按 cron 表达式自主执行，也支持 @提及即时委派。所有 Agent 输出实时流式显示。 |
 | **🦀 快照回滚** | 修改文件前自动拍照，随时回滚，不依赖 Git。 |
+| **🖥️ 桌面应用** | 基于 Electron 的原生 macOS 应用，自动启动后端、自动登录，界面与浏览器一致。 |
 | **🔒 本地优先** | 数据全在本地，API Key 加密存储，零遥测。 |
 
 ---
@@ -48,6 +49,16 @@ crabagent --serve          # → http://localhost:5210
 crabagent "帮我整理这个目录"
 crabagent -p deepseek -m deepseek-chat "写一个 Python 脚本"
 ```
+
+### 桌面应用 (macOS)
+
+```bash
+# 从源码构建：
+cd electron && npm install && npm run build:mac
+# → electron/dist-electron/CrabAgent-0.9.0-arm64.dmg
+```
+
+双击 `CrabAgent.app` — 自动启动 Python 后端、自动登录，在原生窗口中打开完整 Web UI。需要 Python 3.12+ 和 `crabagent[serve]`。
 
 ---
 
@@ -234,10 +245,21 @@ def run(name: str) -> str:
 
 ## 安装
 
+### CLI + Web 服务
+
 ```bash
-pip install 'crabagent[serve]'          # Web UI + API
+pip install 'crabagent[serve]'          # CLI + Web UI + API
 pip install 'crabagent[browser]'        # 浏览器自动化
 pip install 'crabagent[dev]'            # 测试 + lint
+```
+
+### 桌面应用
+
+克隆仓库后从源码构建（参见上文）。需要 Python 3.12+ 和 `crabagent[serve]`，以及 Node.js 20+。
+
+```bash
+cd electron && npm install && npm run build:mac
+# 输出：electron/dist-electron/CrabAgent-0.9.0-arm64.dmg
 ```
 
 ```bash

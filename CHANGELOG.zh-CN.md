@@ -8,6 +8,38 @@ English version: [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
+## [0.9.0]
+
+### 新增
+- **Electron 桌面应用** — 原生 macOS 窗口，自动启动 Python 后端、自动登录、支持系统托盘
+  - `electron/` 目录，含 `main.js` / `preload.js` / `electron-builder` 打包配置
+  - 旧 PySide6 GUI 已移除，换成 Electron + Web UI 方案
+  - macOS `.app` + `.dmg` 通过 `npm run build:mac` 构建
+  - 螃蟹 emoji（🦀）应用图标，使用 macOS 原生 CoreText 渲染
+- **多工作空间支持** — 按工作目录筛选会话
+  - `GET /api/sessions?workspace=` 查询参数
+  - `GET /api/sessions/workspaces` 端点 — 列出工作空间及会话数量
+  - Web UI 新增 `WorkspaceSwitcher` 组件，使用目录选择器替代手动输入路径
+  - `list_conversations()` 服务层支持 `workspace` 过滤
+- **全局数据库迁移** — 首次启动时自动将 CWD 下的 `crabagent.db` 迁移到 `~/.crabagent/`
+  - `init_db()` 中新增 `_migrate_db_to_home()`，检测旧 DB 并复制
+  - `db_url` 默认值改为 `~/.crabagent/crabagent.db`
+
+### 变更
+- **认证重构** — `hash_password` / `verify_password` 提取到 `core/auth_utils.py` 以便共享
+- **移动端适配** — NavBar 小屏仅显示图标、TaskBoard 改为底部抽屉、ChatPanel/InputBar 紧凑布局
+- **SSE 重连修复** — `useSSE.ts` 正确处理 `"message_created"` 事件类型
+
+### 修复
+- Electron 窗口启动后自动关闭的问题（移除 `titleBarStyle: hiddenInset`，完善生命周期）
+- `QFileSystemModel` 导入修正（从 `QtGui` 移到 `QtWidgets`）
+
+### 移除
+- PySide6 GUI 模块（`src/crabagent/gui/`）— 由 Electron 替代
+- `gui` 可选依赖（`PySide6`、`qasync`、`markdown2`）
+
+---
+
 ## [0.8.1]
 
 ### 新增

@@ -31,12 +31,27 @@ export interface BranchInfo {
   parent_message_id: number;
 }
 
-export function listSessions(): Promise<Session[]> {
-  return api.get("/sessions");
+export interface WorkspaceInfo {
+  workspace: string;
+  session_count: number;
+  last_active: string | null;
 }
 
-export function createSession(title?: string): Promise<Session> {
-  return api.post("/sessions", { title: title || "" });
+export function listSessions(workspace?: string): Promise<Session[]> {
+  const params = workspace ? { workspace } : undefined;
+  return api.get("/sessions", params);
+}
+
+export function listWorkspaces(): Promise<WorkspaceInfo[]> {
+  return api.get("/sessions/workspaces");
+}
+
+export function getCurrentWorkspace(): Promise<{ workspace: string }> {
+  return api.get("/sessions/current-workspace");
+}
+
+export function createSession(title?: string, workspace?: string): Promise<Session> {
+  return api.post("/sessions", { title: title || "", workspace: workspace || "" });
 }
 
 export function getSession(sessionId: string): Promise<Session> {

@@ -9,29 +9,33 @@ interface Props {
   collapsed: boolean;
   onToggle: () => void;
   sessionId: string | null;
+  workspace?: string;
 }
 
-function useFileTree() {
+function useFileTree(workspace?: string) {
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [fileContent, setFileContent] = useState<string | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const isAbsolute = !!workspace;
+  const rootPath = workspace || "";
+
   useEffect(() => {
     setLoading(true);
-    getTree("", 2)
+    getTree(rootPath, 2, isAbsolute)
       .then(setEntries)
       .catch(() => setEntries([]))
       .finally(() => setLoading(false));
-  }, []);
+  }, [workspace, rootPath, isAbsolute]);
 
   const handleSelect = async (path: string) => {
     setSelectedPath(path);
     setFileContent(null);
     setFileError(null);
     try {
-      const result: FileContent = await readFile(path);
+      const result: FileContent = await readFile(path, isAbsolute);
       if (result.truncated) {
         setFileContent(result.message || "(truncated)");
       } else {
@@ -44,7 +48,7 @@ function useFileTree() {
     }
   };
 
-  return { entries, selectedPath, fileContent, fileError, loading, handleSelect };
+  return { entries, selectedPath, fileContent, fileError, loading, handleSelect, absolute: isAbsolute };
 }
 
 function FileTreePanel({
@@ -55,6 +59,7 @@ function FileTreePanel({
   loading,
   handleSelect,
   sessionId,
+  absolute,
 }: {
   entries: FileEntry[];
   selectedPath: string | null;
@@ -63,6 +68,7 @@ function FileTreePanel({
   loading: boolean;
   handleSelect: (path: string) => void;
   sessionId: string | null;
+  absolute: boolean;
 }) {
   return (
     <>
@@ -76,6 +82,7 @@ function FileTreePanel({
             entries={entries}
             onSelect={handleSelect}
             selectedPath={selectedPath}
+            absolute={absolute}
           />
         )}
       </div>
@@ -117,8 +124,9 @@ export default function FileBrowser({
   collapsed,
   onToggle,
   sessionId,
+  workspace,
 }: Props) {
-  const tree = useFileTree();
+  const tree = useFileTree(workspace);
 
   if (collapsed) return null;
 

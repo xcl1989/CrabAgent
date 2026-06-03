@@ -1,0 +1,50 @@
+{
+  "name": "crabagent-desktop",
+  "version": "0.9.0",
+  "description": "CrabAgent Desktop - AI Agent Platform",
+  "main": "main.js",
+  "author": "Xie Congling",
+  "license": "Commercial",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder",
+    "build:mac": "electron-builder --mac",
+    "build:win": "electron-builder --win",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "devDependencies": {
+    "electron": "^35.7.5",
+    "electron-builder": "^26.0.0"
+  },
+  "dependencies": {
+    "wait-on": "^8.0.0"
+  },
+  "build": {
+    "appId": "com.crabagent.desktop",
+    "productName": "CrabAgent",
+    "directories": {
+      "output": "dist-electron",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "package.json",
+      "node_modules/**/*"
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "icon": "build/icon.png",
+      "target": ["dmg"],
+      "darkModeSupport": true
+    },
+    "dmg": {
+      "title": "CrabAgent Installer",
+      "iconSize": 128,
+      "contents": [
+        { "x": 380, "y": 240, "type": "link", "path": "/Applications" },
+        { "x": 130, "y": 240, "type": "file" }
+      ]
+    }
+  }
+}

@@ -3,6 +3,12 @@ from pathlib import Path
 from pydantic_settings import BaseSettings
 
 
+def _default_db_url() -> str:
+    d = Path.home() / ".crabagent"
+    d.mkdir(exist_ok=True)
+    return f"sqlite+aiosqlite:///{d / 'crabagent.db'}"
+
+
 class Settings(BaseSettings):
     model_config = {
         "env_prefix": "CRAB_",
@@ -20,7 +26,7 @@ class Settings(BaseSettings):
     skills_paths: list[str] = []
     disable_opencode_skills: bool = False
 
-    db_url: str = "sqlite+aiosqlite:///./crabagent.db"
+    db_url: str = ""
     redis_url: str = "redis://localhost:6379/0"
     jwt_secret: str = "crabagent-secret-change-me"
     jwt_expire_minutes: int = 1440
@@ -55,19 +61,21 @@ class Settings(BaseSettings):
     context_compression_threshold: float = 0.8
     context_keep_recent: int = 6
 
-    # v0.9 — Long-term memory middleware
     memory_auto_extract: bool = True
     memory_auto_recall: bool = True
     memory_max_inject: int = 5
 
-    # v0.9 — Browser DOM labels + vision screenshot embedding
-    browser_strategy: str = "dom"  # "dom" | "vision" | "hybrid" (v0.9 only implements dom+vision fallback)
+    browser_strategy: str = "dom"
     browser_screenshot_to_llm: bool = True
     browser_screenshot_history: int = 3
     browser_screenshot_max_bytes: int = 200_000
 
     molt_keep_count: int = 20
     molt_keep_days: int = 7
+
+    def model_post_init(self, __context) -> None:
+        if not self.db_url:
+            self.db_url = _default_db_url()
 
     @staticmethod
     def _user_config_dir() -> Path:

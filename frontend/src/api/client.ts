@@ -41,7 +41,11 @@ class ApiClient {
     return data;
   }
 
-  get<T>(path: string) {
+  get<T>(path: string, params?: Record<string, string>) {
+    if (params) {
+      const qs = new URLSearchParams(params).toString();
+      return this.request<T>(`${path}?${qs}`);
+    }
     return this.request<T>(path);
   }
 

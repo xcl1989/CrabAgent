@@ -6,7 +6,7 @@ import * as sessionsApi from "../api/sessions";
 import { sseEventToMessages, dbMessagesToChat } from "../lib/messageTransforms";
 import { useSSE } from "./useSSE";
 
-export function useChatState(onEvent?: (event: SSEEvent) => void) {
+export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: string) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSession, setActiveSession] = useState<Session | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -68,8 +68,8 @@ export function useChatState(onEvent?: (event: SSEEvent) => void) {
   }, [activeSession]);
 
   useEffect(() => {
-    sessionsApi.listSessions().then(setSessions);
-  }, []);
+    sessionsApi.listSessions(workspace).then(setSessions);
+  }, [workspace]);
 
   const handleSSEEvent = useCallback(
     (event: SSEEvent) => {
@@ -97,7 +97,7 @@ export function useChatState(onEvent?: (event: SSEEvent) => void) {
         setReplaying(false);
         setReplayProgress({ current: 0, total: 0 });
         setTimeout(() => {
-          sessionsApi.listSessions().then(setSessions);
+          sessionsApi.listSessions(workspace).then(setSessions);
         }, 500);
         return;
       }
@@ -114,7 +114,7 @@ export function useChatState(onEvent?: (event: SSEEvent) => void) {
         };
         setMessages((prev) => [...prev, { id: `stats-${Date.now()}`, role: "stats", content: "", stats }]);
         setTimeout(() => {
-          sessionsApi.listSessions().then(setSessions);
+          sessionsApi.listSessions(workspace).then(setSessions);
         }, 500);
         const sid = activeSessionRef.current?.session_id;
         if (sid) {
@@ -142,7 +142,7 @@ export function useChatState(onEvent?: (event: SSEEvent) => void) {
       setMessages((prev) => sseEventToMessages(event, prev));
       onEvent?.(event);
     },
-    [onEvent]
+    [onEvent, workspace]
   );
 
   const { connected } = useSSE(activeSession?.session_id || null, handleSSEEvent);
@@ -169,12 +169,12 @@ export function useChatState(onEvent?: (event: SSEEvent) => void) {
 
   const newSession = useCallback(async (selectedModel: string, models: { id: string }[]) => {
     setSending(false);
-    const s = await sessionsApi.createSession();
+    const s = await sessionsApi.createSession(undefined, workspace);
     setSessions((prev) => [s, ...prev]);
     setActiveSession(s);
     setMessages([]);
     return models.length > 0 ? models[0].id : selectedModel;
-  }, []);
+  }, [workspace]);
 
   const selectSessionById = useCallback(
     async (sessionId: string, selectedModel: string, models: { id: string }[]) => {

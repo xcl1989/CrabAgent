@@ -9,6 +9,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.9.0]
+
+### Added
+- **Electron desktop app** — native macOS app with auto-start Python backend, auto-login, and system tray support
+  - `electron/` directory with `main.js` / `preload.js` / `electron-builder` config
+  - `crabagent-gui` entry point replaced by Electron (older PySide6 GUI removed)
+  - macOS `.app` + `.dmg` build via `npm run build:mac`
+  - Crab emoji (`🦀`) app icon rendered with native macOS CoreText
+- **Multi-workspace support** — filter sessions by workspace directory
+  - `GET /api/sessions?workspace=` query parameter
+  - `GET /api/sessions/workspaces` endpoint — lists workspaces with session counts
+  - `WorkspaceSwitcher` component in Web UI with directory picker (no more manual path entry)
+  - `list_conversations()` service layer supports `workspace` filter
+- **Global database migration** — `crabagent.db` auto-migrates from CWD to `~/.crabagent/` on first launch
+  - `_migrate_db_to_home()` in `init_db()` detects old DB and copies it
+  - `db_url` now defaults to `~/.crabagent/crabagent.db` via `model_post_init`
+
+### Changed
+- **Auth refactor** — `hash_password` / `verify_password` extracted to `core/auth_utils.py` for shared use
+- **Mobile responsiveness** — NavBar icon-only on small screens, TaskBoard as bottom drawer, compact ChatPanel/InputBar
+- **SSE reconnection fix** — `useSSE.ts` handles `"message_created"` event type properly
+
+### Fixed
+- Electron app window auto-closing on launch (removed `titleBarStyle: hiddenInset`, improved lifecycle)
+- `QFileSystemModel` import correction (moved from `QtGui` to `QtWidgets`)
+
+### Removed
+- PySide6 GUI module (`src/crabagent/gui/`) — replaced by Electron
+- `gui` optional dependencies (`PySide6`, `qasync`, `markdown2`)
+
+---
+
 ## [0.8.1]
 
 ### Added

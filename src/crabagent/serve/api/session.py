@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from crabagent.core.database import Message, User, get_db
+from crabagent.core.database import Conversation, Message, User, get_db
 from crabagent.serve.deps import get_current_user, get_owned_conversation
 from crabagent.serve.services import conversation as conv_svc
 
@@ -49,11 +50,46 @@ def _conv_to_response(conv) -> SessionResponse:
 
 @router.get("", response_model=list[SessionResponse])
 async def list_sessions(
+    workspace: str | None = Query(None, description="Filter by workspace path"),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    convs = await conv_svc.list_conversations(db, user.id)
+    convs = await conv_svc.list_conversations(db, user.id, workspace=workspace)
     return [_conv_to_response(c) for c in convs]
+
+
+class WorkspaceInfo(BaseModel):
+    workspace: str
+    session_count: int
+    last_active: str | None = None
+
+
+@router.get("/workspaces", response_model=list[WorkspaceInfo])
+async def list_workspaces(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(
+            Conversation.workspace,
+            Conversation.session_id,
+        )
+        .where(Conversation.user_id == user.id, Conversation.workspace != "")
+        .order_by(Conversation.updated_at.desc())
+    )
+    rows = result.fetchall()
+    seen: dict[str, dict] = {}
+    for row in rows:
+        ws = row[0]
+        if ws not in seen:
+            seen[ws] = {"workspace": ws, "session_count": 0, "last_active": None}
+        seen[ws]["session_count"] += 1
+    return list(seen.values())
+
+
+@router.get("/current-workspace")
+async def get_current_workspace():
+    return {"workspace": str(Path.cwd().resolve())}
 
 
 @router.post("", response_model=SessionResponse, status_code=status.HTTP_201_CREATED)

@@ -38,6 +38,7 @@ import { TaskBoard } from "../components/TaskBoard";
 import { AgentBar } from "../components/AgentBar";
 import { DelegateModal } from "../components/DelegateModal";
 import { ResultCompare } from "../components/ResultCompare";
+import WorkspaceSwitcher from "../components/WorkspaceSwitcher";
 import { Modal, Button, Textarea } from "../components/ui";
 import { useChatState } from "../hooks/useChatState";
 import { useTaskBoard } from "../hooks/useTaskBoard";
@@ -55,6 +56,7 @@ const STARTER_PROMPTS = [
 ];
 
 export default function ChatPage() {
+  const [workspace, setWorkspace] = useState<string>("");
   const { taskBoardTasks, handleTaskBoardEvent, clearTaskBoard } =
     useTaskBoard();
 
@@ -82,7 +84,7 @@ export default function ChatPage() {
     handleAbort,
     handleDeleteSession,
     getSubAgentContent,
-  } = useChatState(handleTaskBoardEvent);
+  } = useChatState(handleTaskBoardEvent, workspace);
 
   const {
     providers,
@@ -391,6 +393,7 @@ export default function ChatPage() {
           >
             <Menu size={16} />
           </Button>
+          <WorkspaceSwitcher current={workspace} onChange={setWorkspace} />
           <div className="flex-1 min-w-0">
             {activeSession && (
               <BranchSelector
@@ -701,6 +704,7 @@ export default function ChatPage() {
         collapsed={!showFiles}
         onToggle={() => setShowFiles((v) => !v)}
         sessionId={activeSession?.session_id || null}
+        workspace={workspace || undefined}
       />
 
       <TaskBoard

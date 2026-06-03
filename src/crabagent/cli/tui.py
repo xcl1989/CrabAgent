@@ -464,7 +464,7 @@ class TuiSession:
 
     def _print_banner(self):
         self.console.print(
-            f"[bold]CrabAgent v0.8.1[/bold]\n"
+            f"[bold]CrabAgent v0.9.0[/bold]\n"
             f"  provider: {self._provider_display}  "
             f"model: {self.agent_ctx.model or 'default'}\n"
             f"  workspace: {self.agent_ctx.workspace}\n"
@@ -1302,8 +1302,8 @@ class TuiSession:
         await init_db()
         from sqlalchemy import select
 
+        from crabagent.core.auth_utils import hash_password
         from crabagent.core.database import User, async_session_factory
-        from crabagent.serve.services.auth import hash_password
 
         async with async_session_factory() as db:
             r = await db.execute(select(User).where(User.username == "cli_user"))

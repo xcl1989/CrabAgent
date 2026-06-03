@@ -8,6 +8,16 @@ interface Props {
   onSelect: (path: string) => void;
   selectedPath: string | null;
   depth?: number;
+  absolute?: boolean;
+}
+
+function sortEntries(entries: FileEntry[]): FileEntry[] {
+  return [...entries].sort((a, b) => {
+    if (a.type !== b.type) {
+      return a.type === "directory" ? -1 : 1;
+    }
+    return a.name.localeCompare(b.name);
+  });
 }
 
 export default function FileTree({
@@ -15,6 +25,7 @@ export default function FileTree({
   onSelect,
   selectedPath,
   depth = 0,
+  absolute = false,
 }: Props) {
   if (entries.length === 0) {
     return depth === 0 ? (
@@ -26,13 +37,14 @@ export default function FileTree({
 
   return (
     <div>
-      {entries.map((entry) => (
+      {sortEntries(entries).map((entry) => (
         <FileTreeNode
           key={entry.path}
           entry={entry}
           onSelect={onSelect}
           selectedPath={selectedPath}
           depth={depth}
+          absolute={absolute}
         />
       ))}
     </div>
@@ -44,13 +56,15 @@ function FileTreeNode({
   onSelect,
   selectedPath,
   depth,
+  absolute,
 }: {
   entry: FileEntry;
   onSelect: (path: string) => void;
   selectedPath: string | null;
   depth: number;
+  absolute: boolean;
 }) {
-  const [expanded, setExpanded] = useState(depth < 1);
+  const [expanded, setExpanded] = useState(false);
   const [children, setChildren] = useState<FileEntry[] | undefined>(
     entry.children,
   );
@@ -71,7 +85,7 @@ function FileTreeNode({
       setLoading(true);
       try {
         const { getTree } = await import("../api/files");
-        setChildren(await getTree(entry.path, 1));
+        setChildren(await getTree(entry.path, 1, absolute));
       } catch {
         setChildren([]);
       }
@@ -133,6 +147,7 @@ function FileTreeNode({
               onSelect={onSelect}
               selectedPath={selectedPath}
               depth={depth + 1}
+              absolute={absolute}
             />
           )}
         </div>
