@@ -24,8 +24,9 @@ export function connectSSE(
     }
   };
 
-  es.onerror = (e) => {
-    onError?.(e);
+  es.onerror = () => {
+    // EventSource auto-reconnects on error, just notify
+    onError?.(new Event("error"));
   };
 
   return es;

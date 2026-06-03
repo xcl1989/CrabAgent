@@ -115,7 +115,7 @@ async def event_stream(
                         elif isinstance(event, dict):
                             yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
                     except asyncio.QueueEmpty:
-                        yield ": keepalive\n\n"
+                        yield f"event: keepalive\ndata: {json.dumps({'ts': time.time()})}\n\n"
         finally:
             queues = getattr(request.app.state, "event_queues", {})
             queues.pop(queue_id, None)
@@ -183,7 +183,7 @@ async def global_event_stream(
                     event = await asyncio.wait_for(queue.get(), timeout=30.0)
                     yield event.to_sse()
                 except TimeoutError:
-                    yield ": keepalive\n\n"
+                    yield f"event: keepalive\ndata: {json.dumps({'ts': time.time()})}\n\n"
         finally:
             queues = getattr(request.app.state, "global_event_queues", {})
             queues.pop(queue_id, None)
