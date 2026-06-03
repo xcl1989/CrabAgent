@@ -384,5 +384,7 @@ def _build_messages(context: AgentContext) -> list[dict]:
             msg = dict(msg, content="")
         elif msg.get("role") == "assistant" and not content and not msg.get("tool_calls"):
             msg = dict(msg, content="")
+        if msg.get("role") not in ("system", "user", "assistant", "tool"):
+            msg = {**msg, "role": "user"}
         messages.append(msg)
     return messages
