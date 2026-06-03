@@ -172,6 +172,10 @@ html, body, #root {
   padding: 0;
 }
 
+html {
+  height: 100dvh;
+}
+
 body {
   background: var(--bg-primary);
   color: var(--text-primary);

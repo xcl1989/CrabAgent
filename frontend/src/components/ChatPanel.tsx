@@ -335,7 +335,7 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(
     }
 
     return (
-      <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-4">
+      <div className="flex-1 overflow-y-auto px-3 sm:px-6 py-3 sm:py-4">
         {!connected && messages.length > 0 && (
           <div className="flex items-center justify-center gap-2 mb-3 text-xs text-[var(--warning)] bg-[var(--warning-bg)] border border-[var(--warning-border)] rounded-lg px-3 py-1.5">
             <Loader2 size={12} className="animate-spin" />

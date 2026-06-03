@@ -9,10 +9,10 @@ import { NavBar } from "./components/NavBar";
 
 function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
   return (
-    <div className="flex flex-col h-screen">
-      <NavBar />
+    <div className="flex flex-col h-dvh overflow-hidden">
+      <NavBar onLogout={onLogout} />
       <Routes>
-        <Route path="/chat" element={<ChatPage onLogout={onLogout} />} />
+        <Route path="/chat" element={<ChatPage />} />
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/agents" element={<AgentsPage />} />
         <Route path="*" element={<Navigate to="/chat" replace />} />

@@ -65,7 +65,7 @@ export default function TodoWidget({ sessionId, refreshKey = 0 }: Props) {
       <button
         onClick={() => setExpanded(true)}
         title={`${pendingCount} pending tasks`}
-        className="fixed bottom-20 right-4 z-40 w-14 h-14 rounded-full flex flex-col items-center justify-center text-white shadow-[var(--shadow-md)] bg-[var(--accent)] hover:bg-[var(--accent-hover)] transition-colors"
+        className="fixed bottom-24 sm:bottom-20 right-3 sm:right-4 z-40 w-12 h-12 sm:w-14 sm:h-14 rounded-full flex flex-col items-center justify-center text-white shadow-[var(--shadow-md)] bg-[var(--accent)] hover:bg-[var(--accent-hover)] transition-colors"
       >
         <ListTodo size={20} />
         {pendingCount > 0 && (
@@ -78,7 +78,7 @@ export default function TodoWidget({ sessionId, refreshKey = 0 }: Props) {
   }
 
   return (
-    <div className="fixed bottom-20 right-4 z-40 w-72 max-h-80 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border)] shadow-[var(--shadow-lg)] flex flex-col animate-scale-in">
+    <div className="fixed bottom-24 sm:bottom-20 right-3 sm:right-4 z-40 w-72 max-h-80 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border)] shadow-[var(--shadow-lg)] flex flex-col animate-scale-in">
       <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--border)]">
         <span className="flex items-center gap-1.5 text-sm font-semibold text-[var(--text-primary)]">
           <ListTodo size={14} className="text-[var(--accent)]" />

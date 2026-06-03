@@ -4,10 +4,8 @@ import {
   Bot,
   ArrowUp,
   Square,
-  FolderOpen,
   PanelRightOpen,
   PanelRightClose,
-  LogOut,
   Sparkles,
   MessageSquare,
   Code,
@@ -47,7 +45,6 @@ import { useModelSelector } from "../hooks/useModelSelector";
 import { cn } from "../lib/cn";
 
 interface Props {
-  onLogout: () => void;
 }
 
 const STARTER_PROMPTS = [
@@ -57,7 +54,7 @@ const STARTER_PROMPTS = [
   { icon: <MessageSquare size={14} />, label: "Write a doc", prompt: "Write documentation for " },
 ];
 
-export default function ChatPage({ onLogout }: Props) {
+export default function ChatPage() {
   const { taskBoardTasks, handleTaskBoardEvent, clearTaskBoard } =
     useTaskBoard();
 
@@ -114,7 +111,6 @@ export default function ChatPage({ onLogout }: Props) {
   const [selectedAgent, setSelectedAgent] = useState("default");
   const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
   const [mcpStatus, setMcpStatus] = useState<McpServerStatus[]>([]);
-  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -422,18 +418,9 @@ export default function ChatPage({ onLogout }: Props) {
             variant="ghost"
             onClick={() => setShowFiles((v) => !v)}
             title={showFiles ? "Hide file browser" : "Show file browser"}
-            className={showFiles ? "text-[var(--brand)] bg-[var(--brand-bg)]" : ""}
+            className={cn(showFiles ? "text-[var(--brand)] bg-[var(--brand-bg)]" : "")}
           >
             {showFiles ? <PanelRightClose size={15} /> : <PanelRightOpen size={15} />}
-          </Button>
-          <Button
-            size="icon"
-            variant="ghost"
-            onClick={() => setShowLogoutConfirm(true)}
-            title="Logout"
-            className="text-[var(--text-tertiary)] hover:text-[var(--danger)] hover:bg-[var(--danger-bg)]"
-          >
-            <LogOut size={15} />
           </Button>
         </div>
 
@@ -477,17 +464,18 @@ export default function ChatPage({ onLogout }: Props) {
             <McpStatusBar status={mcpStatus} />
 
             <div
-              className="px-3 sm:px-4 pb-3 pt-2"
+              className="px-2 sm:px-4 pt-1 sm:pt-2"
+              style={{ paddingBottom: "max(0.5rem, env(safe-area-inset-bottom))" }}
               onDrop={handleDrop}
               onDragOver={handleDragOver}
             >
               <AgentBar onAgentClick={handleAgentBarClick} />
 
               {/* Agent + Model selectors */}
-              <div className="mb-2 flex items-center gap-2 flex-wrap">
+              <div className="mb-1 sm:mb-2 flex items-center gap-2 flex-wrap">
                 {agentProfiles.length > 0 && (
                   <div className="flex items-center gap-1.5">
-                    <span className="text-[11px] text-[var(--text-tertiary)]">
+                    <span className="text-[11px] text-[var(--text-tertiary)] hidden sm:inline">
                       Agent
                     </span>
                     <select
@@ -524,13 +512,13 @@ export default function ChatPage({ onLogout }: Props) {
                   </div>
                 ) : models.length > 0 ? (
                   <div className="flex items-center gap-1.5">
-                    <span className="text-[11px] text-[var(--text-tertiary)]">
+                    <span className="text-[11px] text-[var(--text-tertiary)] hidden sm:inline">
                       Model
                     </span>
                     <select
                       value={selectedModel}
                       onChange={(e) => setSelectedModel(e.target.value)}
-                      className="text-xs h-7 px-2 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border)] text-[var(--text-primary)] font-mono focus:outline-none focus:border-[var(--brand)] focus:ring-2 focus:ring-[var(--brand)]/30"
+                      className="text-xs h-7 px-2 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border)] text-[var(--text-primary)] font-mono focus:outline-none focus:border-[var(--brand)] focus:ring-2 focus:ring-[var(--brand)]/30 max-w-[140px] sm:max-w-none"
                     >
                       {models.map((m) => (
                         <option key={m.id} value={m.id}>
@@ -541,7 +529,7 @@ export default function ChatPage({ onLogout }: Props) {
                   </div>
                 ) : (
                   <div className="flex items-center gap-1.5">
-                    <span className="text-[11px] text-[var(--text-tertiary)]">
+                    <span className="text-[11px] text-[var(--text-tertiary)] hidden sm:inline">
                       Model
                     </span>
                     <input
@@ -549,7 +537,7 @@ export default function ChatPage({ onLogout }: Props) {
                       value={selectedModel}
                       onChange={(e) => setSelectedModel(e.target.value)}
                       placeholder="type model id…"
-                      className="text-xs h-7 px-2 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border)] text-[var(--text-primary)] font-mono focus:outline-none focus:border-[var(--brand)] focus:ring-2 focus:ring-[var(--brand)]/30 w-40 placeholder:text-[var(--text-tertiary)]"
+                      className="text-xs h-7 px-2 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border)] text-[var(--text-primary)] font-mono focus:outline-none focus:border-[var(--brand)] focus:ring-2 focus:ring-[var(--brand)]/30 w-28 sm:w-40 placeholder:text-[var(--text-tertiary)]"
                     />
                     {modelsError && (
                       <span
@@ -591,14 +579,14 @@ export default function ChatPage({ onLogout }: Props) {
               )}
 
               {/* Input row */}
-              <div className="flex gap-2 items-end">
+              <div className="flex gap-1.5 sm:gap-2 items-end">
                 <Button
                   size="icon"
                   variant="outline"
                   onClick={handleImageUpload}
                   disabled={sending || replaying || pendingImages.length >= 5}
                   title="Attach image"
-                  className="h-10 w-10"
+                  className="h-9 w-9 sm:h-10 sm:w-10"
                 >
                   <Paperclip size={15} />
                 </Button>
@@ -608,7 +596,7 @@ export default function ChatPage({ onLogout }: Props) {
                   onClick={() => setShowDelegate(true)}
                   disabled={sending || replaying}
                   title="Delegate to agent team"
-                  className="h-10 w-10 text-[var(--accent-2)] hover:text-[var(--accent-2)] hover:bg-[var(--accent-2-bg)] border-[var(--accent-2-border,var(--border))]"
+                  className="hidden sm:flex h-10 w-10 text-[var(--accent-2)] hover:text-[var(--accent-2)] hover:bg-[var(--accent-2-bg)] border-[var(--accent-2-border,var(--border))]"
                 >
                   <Bot size={15} />
                 </Button>
@@ -622,19 +610,19 @@ export default function ChatPage({ onLogout }: Props) {
                     }
                   }}
                   onPaste={handleImagePaste}
-                  placeholder="Type a message… (Shift+Enter for newline, / to focus, ⌘K new session)"
+                  placeholder="Type a message…"
                   disabled={sending || replaying}
                   ref={inputRef}
                   autoGrow
                   minRows={1}
                   maxRows={6}
-                  className="flex-1 min-h-[40px]"
+                  className="flex-1 min-h-[36px] sm:min-h-[40px]"
                 />
                 {sending ? (
                   <Button
                     variant="danger"
                     onClick={handleAbort}
-                    className="h-10 w-10"
+                    className="h-9 w-9 sm:h-10 sm:w-10"
                     size="icon"
                     title="Stop"
                   >
@@ -645,7 +633,7 @@ export default function ChatPage({ onLogout }: Props) {
                     variant="brand"
                     onClick={handleSend}
                     disabled={!input.trim() && pendingImages.length === 0}
-                    className="h-10 w-10 shrink-0"
+                    className="h-9 w-9 sm:h-10 sm:w-10 shrink-0"
                     size="icon"
                     title="Send"
                   >
@@ -799,29 +787,6 @@ export default function ChatPage({ onLogout }: Props) {
           onExport={handleExportReport}
         />
       )}
-
-      {/* Logout confirmation */}
-      <Modal
-        open={showLogoutConfirm}
-        onOpenChange={setShowLogoutConfirm}
-        title="Sign out?"
-        description="You'll need to log in again to continue."
-        size="sm"
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => setShowLogoutConfirm(false)}>
-              Cancel
-            </Button>
-            <Button variant="danger" onClick={onLogout}>
-              Sign Out
-            </Button>
-          </>
-        }
-      >
-        <div className="text-center py-2">
-          <LogOut size={32} className="mx-auto text-[var(--danger)] mb-2" />
-        </div>
-      </Modal>
     </div>
   );
 }

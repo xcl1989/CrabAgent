@@ -20,7 +20,7 @@ export function useSSE(sessionId: string | null, onEvent: (event: SSEEvent) => v
     if (!sessionId) return;
 
     const es = connectSSE(sessionId, (event) => {
-      if (event.type === "connected") {
+      if (event.type === "message_created" && event.data?.connected) {
         setConnected(true);
       }
       onEventRef.current(event);
