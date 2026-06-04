@@ -72,8 +72,9 @@ export function sendPrompt(
   model?: string,
   images?: string[],
   agent?: string,
+  reasoningEffort?: string,
 ): Promise<{ status: string }> {
-  return api.post(`/sessions/${sessionId}/prompt`, { message, model, images, agent });
+  return api.post(`/sessions/${sessionId}/prompt`, { message, model, images, agent, reasoning_effort: reasoningEffort });
 }
 
 export function switchAgent(sessionId: string, agent: string): Promise<{ status: string }> {

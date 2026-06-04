@@ -21,6 +21,7 @@ class Settings(BaseSettings):
 
     max_iterations: int = 200
     max_tokens: int = 4096
+    reasoning_effort: str = "medium"
 
     skills_dir: Path | None = None
     skills_paths: list[str] = []

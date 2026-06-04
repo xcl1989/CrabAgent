@@ -109,6 +109,7 @@ export default function ChatPage() {
   const [showFiles, setShowFiles] = useState(false);
   const [input, setInput] = useState("");
   const [pendingImages, setPendingImages] = useState<string[]>([]);
+  const [reasoningEffort, setReasoningEffort] = useState("medium");
   const [agentProfiles, setAgentProfiles] = useState<AgentProfileType[]>([]);
   const [selectedAgent, setSelectedAgent] = useState("default");
   const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
@@ -270,6 +271,7 @@ export default function ChatPage() {
         selectedModel,
         images.length > 0 ? images : undefined,
         selectedAgent,
+        reasoningEffort,
       );
     } catch {
       setSending(false);
@@ -454,6 +456,7 @@ export default function ChatPage() {
               ref={bottomRef}
               messages={messages}
               connected={connected}
+              sending={sending}
               onToolConfirm={handleToolConfirm}
               onUserInput={handleUserInput}
               onBranch={handleBranch}
@@ -547,6 +550,20 @@ export default function ChatPage() {
                     )}
                   </div>
                 )}
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[11px] text-[var(--text-tertiary)] hidden sm:inline">
+                    Effort
+                  </span>
+                  <select
+                    value={reasoningEffort}
+                    onChange={(e) => setReasoningEffort(e.target.value)}
+                    className="text-xs h-7 px-2 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border)] text-[var(--text-primary)] focus:outline-none focus:border-[var(--brand)] focus:ring-2 focus:ring-[var(--brand)]/30"
+                  >
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                  </select>
+                </div>
               </div>
 
               {/* Pending images */}

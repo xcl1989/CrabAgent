@@ -51,6 +51,7 @@ interface ChatMessage {
 interface Props {
   messages: ChatMessage[];
   connected: boolean;
+  sending?: boolean;
   onToolConfirm?: (confirmId: string, approved: boolean) => void;
   onUserInput?: (inputId: string, answer: string) => void;
   onBranch?: (messageId: string) => void;
@@ -266,6 +267,7 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(
     {
       messages,
       connected,
+      sending,
       onToolConfirm,
       onUserInput,
       onBranch,
@@ -769,12 +771,7 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(
                 </div>
               ) : (
                 <div className="max-w-[min(720px,85%)] flex-1">
-                  <div
-                    className={cn(
-                      "markdown-body",
-                      msg.isStreaming && msg.content && "streaming-caret",
-                    )}
-                  >
+                  <div className="markdown-body">
                     <ReactMarkdown
                       remarkPlugins={[remarkGfm]}
                       rehypePlugins={[rehypeHighlight]}
@@ -788,6 +785,12 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(
             </div>
           );
         })}
+
+        {sending && !replaying && (
+          <div className="flex items-center px-1 py-1">
+            <span className="text-[var(--brand)] animate-pulse select-none">🦀</span>
+          </div>
+        )}
 
         <div ref={bottomRef} />
 

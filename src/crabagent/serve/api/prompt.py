@@ -79,6 +79,7 @@ class PromptRequest(BaseModel):
     provider: str | None = None
     images: list[str] | None = None
     agent: str | None = None
+    reasoning_effort: str | None = None
 
 
 @router.post("/sessions/{session_id}/prompt", status_code=status.HTTP_202_ACCEPTED)
@@ -208,6 +209,7 @@ async def prompt_async(
     context.metadata["session_id"] = session_id
     context.metadata["branch_id"] = active_branch
     context.metadata["user_id"] = user.id
+    context.metadata["reasoning_effort"] = req.reasoning_effort or settings.reasoning_effort
 
     effective_agent = req.agent or getattr(conv, "agent", None) or "default"
     context.current_agent = effective_agent

@@ -133,6 +133,7 @@ async def run_agent(
             tool_calls_list: list[dict] = []
 
             _llm_t0 = time.time()
+            reasoning_effort = context.metadata.get("reasoning_effort", settings.reasoning_effort)
             response = await litellm.acompletion(
                 model=model,
                 **llm,
@@ -141,6 +142,8 @@ async def run_agent(
                 max_tokens=settings.max_tokens,
                 stream=True,
                 stream_options={"include_usage": True},
+                reasoning_effort=reasoning_effort,
+                allowed_openai_params=["reasoning_effort"],
             )
 
             finished = False
