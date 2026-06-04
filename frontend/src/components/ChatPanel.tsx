@@ -730,25 +730,23 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(
               )}
             >
               {isUser ? (
-                <div className="relative ml-auto">
-                  <div className="chat-bubble-user">
-                    {msg.images && msg.images.length > 0 && (
-                      <div className="flex gap-2 mb-2 flex-wrap">
-                        {msg.images.map((img, idx) => (
-                          <img
-                            key={idx}
-                            src={img}
-                            className="max-w-[200px] max-h-[200px] rounded-lg cursor-pointer object-contain"
-                            onClick={() => setPreviewImage(img)}
-                            alt=""
-                          />
-                        ))}
-                      </div>
-                    )}
-                    <p className="whitespace-pre-wrap leading-relaxed text-[14px]">
-                      {msg.content}
-                    </p>
-                  </div>
+                <div className="chat-bubble-user relative">
+                  {msg.images && msg.images.length > 0 && (
+                    <div className="flex gap-2 mb-2 flex-wrap">
+                      {msg.images.map((img, idx) => (
+                        <img
+                          key={idx}
+                          src={img}
+                          className="max-w-[200px] max-h-[200px] rounded-lg cursor-pointer object-contain"
+                          onClick={() => setPreviewImage(img)}
+                          alt=""
+                        />
+                      ))}
+                    </div>
+                  )}
+                  <p className="whitespace-pre-wrap leading-relaxed text-[14px]">
+                    {msg.content}
+                  </p>
                   {onBranch &&
                     !replaying &&
                     !msg.isStreaming &&

@@ -445,7 +445,6 @@ pre code {
   border-radius: 16px 16px 4px 16px;
   padding: 10px 14px;
   box-shadow: var(--shadow-sm);
-  align-self: flex-end;
   max-width: min(520px, 80%);
   word-wrap: break-word;
   word-break: keep-all;
