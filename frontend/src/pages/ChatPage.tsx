@@ -13,6 +13,8 @@ import {
   X,
   Menu,
   Loader2,
+  ChevronDown,
+  Check,
 } from "lucide-react";
 import * as sessionsApi from "../api/sessions";
 import * as providersApi from "../api/providers";
@@ -111,6 +113,10 @@ export default function ChatPage() {
   const [pendingImages, setPendingImages] = useState<string[]>([]);
   const [reasoningEffort, setReasoningEffort] = useState("medium");
   const [agentProfiles, setAgentProfiles] = useState<AgentProfileType[]>([]);
+  const [agentOpen, setAgentOpen] = useState(false);
+  const [effortOpen, setEffortOpen] = useState(false);
+  const agentDropdownRef = useRef<HTMLDivElement>(null);
+  const effortDropdownRef = useRef<HTMLDivElement>(null);
   const [selectedAgent, setSelectedAgent] = useState("default");
   const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
   const [mcpStatus, setMcpStatus] = useState<McpServerStatus[]>([]);
@@ -152,6 +158,31 @@ export default function ChatPage() {
     return () => window.removeEventListener("keydown", handler);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedModel, models]);
+
+  // Click outside to close agent/effort dropdowns
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (agentOpen && agentDropdownRef.current && !agentDropdownRef.current.contains(e.target as Node)) {
+        setAgentOpen(false);
+      }
+      if (effortOpen && effortDropdownRef.current && !effortDropdownRef.current.contains(e.target as Node)) {
+        setEffortOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [agentOpen, effortOpen]);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setAgentOpen(false);
+        setEffortOpen(false);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
 
   const onSelectSession = useCallback(
     async (session: Session) => {
@@ -479,35 +510,51 @@ export default function ChatPage() {
               {/* Agent + Model selectors */}
               <div className="mb-1 sm:mb-2 flex items-center gap-2 flex-wrap">
                 {agentProfiles.length > 0 && (
-                  <div className="flex items-center gap-1.5">
+                  <div ref={agentDropdownRef} className="flex items-center gap-1.5 relative">
                     <span className="text-[11px] text-[var(--text-tertiary)] hidden sm:inline">
                       Agent
                     </span>
-                    <select
-                      value={selectedAgent}
-                      onChange={async (e) => {
-                        const agent = e.target.value;
-                        setSelectedAgent(agent);
-                        if (activeSession) {
-                          try {
-                            await sessionsApi.switchAgent(
-                              activeSession.session_id,
-                              agent,
-                            );
-                          } catch {
-                            // ignore
-                          }
-                        }
-                      }}
-                      className="text-xs h-7 px-2 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border)] text-[var(--text-primary)] focus:outline-none focus:border-[var(--brand)] focus:ring-2 focus:ring-[var(--brand)]/30"
+                    <button
+                      onClick={() => setAgentOpen((v) => !v)}
+                      className="flex items-center gap-1.5 text-xs h-7 pl-2.5 pr-1.5 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border)] text-[var(--text-primary)] focus:outline-none focus:border-[var(--brand)] focus:ring-2 focus:ring-[var(--brand)]/30 transition-colors"
                     >
-                      <option value="default">🦀 default</option>
-                      {agentProfiles.map((a) => (
-                        <option key={a.name} value={a.name}>
-                          {a.icon || "🤖"} {a.display_name}
-                        </option>
-                      ))}
-                    </select>
+                      <span className="truncate max-w-[100px]">
+                        {selectedAgent === "default"
+                          ? "🦀 default"
+                          : (() => {
+                              const p = agentProfiles.find((a) => a.name === selectedAgent);
+                              return `${p?.icon || "🤖"} ${p?.display_name || selectedAgent}`;
+                            })()}
+                      </span>
+                      <ChevronDown size={13} className={cn("text-[var(--text-tertiary)] transition-transform shrink-0", agentOpen && "rotate-180")} />
+                    </button>
+                    {agentOpen && (
+                      <div className="absolute bottom-full mb-1.5 right-0 z-50 min-w-[160px] rounded-lg border border-[var(--border)] bg-[var(--bg-secondary)] shadow-[var(--shadow-lg)] py-1.5">
+                        {[{ name: "default", icon: "🦀", display_name: "default" as const }, ...agentProfiles].map((a) => {
+                          const isSelected = a.name === selectedAgent;
+                          return (
+                            <button
+                              key={a.name}
+                              onClick={async () => {
+                                setSelectedAgent(a.name);
+                                setAgentOpen(false);
+                                if (activeSession) {
+                                  try { await sessionsApi.switchAgent(activeSession.session_id, a.name); } catch {}
+                                }
+                              }}
+                              className={cn(
+                                "w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left transition-colors",
+                                isSelected ? "bg-[var(--brand-bg)] text-[var(--brand)]" : "text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]",
+                              )}
+                            >
+                              <span>{a.icon || "🤖"}</span>
+                              <span className="flex-1 truncate">{a.display_name}</span>
+                              {isSelected && <Check size={13} className="shrink-0 text-[var(--brand)]" />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 )}
                 {modelsLoading ? (
@@ -550,19 +597,41 @@ export default function ChatPage() {
                     )}
                   </div>
                 )}
-                <div className="flex items-center gap-1.5">
+                <div ref={effortDropdownRef} className="flex items-center gap-1.5 relative">
                   <span className="text-[11px] text-[var(--text-tertiary)] hidden sm:inline">
                     Effort
                   </span>
-                  <select
-                    value={reasoningEffort}
-                    onChange={(e) => setReasoningEffort(e.target.value)}
-                    className="text-xs h-7 px-2 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border)] text-[var(--text-primary)] focus:outline-none focus:border-[var(--brand)] focus:ring-2 focus:ring-[var(--brand)]/30"
+                  <button
+                    onClick={() => setEffortOpen((v) => !v)}
+                    className="flex items-center gap-1.5 text-xs h-7 pl-2.5 pr-1.5 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border)] text-[var(--text-primary)] font-mono focus:outline-none focus:border-[var(--brand)] focus:ring-2 focus:ring-[var(--brand)]/30 transition-colors"
                   >
-                    <option value="low">Low</option>
-                    <option value="medium">Medium</option>
-                    <option value="high">High</option>
-                  </select>
+                    <span>{reasoningEffort.charAt(0).toUpperCase() + reasoningEffort.slice(1)}</span>
+                    <ChevronDown size={13} className={cn("text-[var(--text-tertiary)] transition-transform shrink-0", effortOpen && "rotate-180")} />
+                  </button>
+                  {effortOpen && (
+                    <div className="absolute bottom-full mb-1.5 right-0 z-50 min-w-[120px] rounded-lg border border-[var(--border)] bg-[var(--bg-secondary)] shadow-[var(--shadow-lg)] py-1.5">
+                      {["low", "medium", "high"].map((effort) => {
+                        const label = effort.charAt(0).toUpperCase() + effort.slice(1);
+                        const isSelected = effort === reasoningEffort;
+                        return (
+                          <button
+                            key={effort}
+                            onClick={() => {
+                              setReasoningEffort(effort);
+                              setEffortOpen(false);
+                            }}
+                            className={cn(
+                              "w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left transition-colors",
+                              isSelected ? "bg-[var(--brand-bg)] text-[var(--brand)]" : "text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]",
+                            )}
+                          >
+                            <span className="flex-1">{label}</span>
+                            {isSelected && <Check size={13} className="shrink-0 text-[var(--brand)]" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               </div>
 
