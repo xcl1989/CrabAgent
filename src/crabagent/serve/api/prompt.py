@@ -507,7 +507,7 @@ async def prompt_async(
             stats_data = {
                 "elapsed_seconds": elapsed,
                 "model": resolved_model,
-                "tokens": context.total_tokens,
+                "tokens": context.visible_tokens,
                 "iterations": context.iteration,
             }
 

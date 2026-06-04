@@ -151,6 +151,24 @@ async def run_agent(
                 if hasattr(chunk, "usage") and chunk.usage is not None:
                     usage = chunk.usage
                     context.total_tokens = (usage.prompt_tokens or 0) + (usage.completion_tokens or 0)
+                    reasoning_tokens = 0
+                    if hasattr(usage, "completion_tokens_details") and usage.completion_tokens_details:
+                        reasoning_tokens = usage.completion_tokens_details.reasoning_tokens or 0
+                    context.visible_tokens = context.total_tokens - reasoning_tokens
+                    import json as _json
+                    try:
+                        _raw = _json.dumps(usage.model_dump() if hasattr(usage, "model_dump") else dict(usage))
+                    except Exception:
+                        _raw = str(usage)
+                    logger.info(
+                        "LLM usage: prompt=%s completion=%s total=%s visible=%s iter=%d raw=%s",
+                        usage.prompt_tokens,
+                        usage.completion_tokens,
+                        context.total_tokens,
+                        context.visible_tokens,
+                        context.iteration,
+                        _raw,
+                    )
 
                 if not chunk.choices:
                     if finished:

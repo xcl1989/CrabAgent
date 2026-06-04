@@ -68,6 +68,7 @@ async def compress_context(context: AgentContext, llm_params: dict, model: str) 
 
     context.messages = compressed + recent
     context.total_tokens = 0
+    context.visible_tokens = 0
 
     await context.event_bus.emit(
         AgentEvent(

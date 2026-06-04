@@ -13,6 +13,13 @@ from fastapi.middleware.cors import CORSMiddleware
 
 litellm.set_verbose = False
 
+# Log to file in crabagent config directory
+_log_file = Path.home() / ".crabagent" / "serve.log"
+_fh = logging.FileHandler(str(_log_file))
+_fh.setLevel(logging.INFO)
+_fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+logging.getLogger().addHandler(_fh)
+
 logger = logging.getLogger(__name__)
 
 logging.getLogger("LiteLLM").setLevel(logging.WARNING)
