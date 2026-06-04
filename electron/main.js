@@ -39,32 +39,33 @@ function killExistingBackend() {
   }
 }
 
+function resolvePath(cmd) {
+  try {
+    return execSync(`/bin/bash -l -c 'command -v ${cmd} 2>/dev/null'`, { encoding: 'utf-8' }).trim();
+  } catch {
+    return null;
+  }
+}
+
 function startBackend() {
   return new Promise((resolve, reject) => {
-    // Try direct command first, then python3 module
-    const cmd = 'crabagent';
-    const fallbackCmd = 'python3';
-    const fallbackArgs = ['-m', 'crabagent.cli', '--serve'];
-    const args = ['--serve'];
+    const env = { ...process.env, PYTHONUNBUFFERED: '1' };
+    const crabagentBin = resolvePath('crabagent');
+    const pythonBin = resolvePath('python3') || 'python3';
 
-    log('Starting backend...');
-    python = spawn(cmd, args, {
-      stdio: 'pipe',
-      env: { ...process.env, PYTHONUNBUFFERED: '1' },
-    });
-    python.on('error', () => {
-      log('crabagent command not found, trying python3...');
-      python = spawn(fallbackCmd, fallbackArgs, {
-        stdio: 'pipe',
-        env: { ...process.env, PYTHONUNBUFFERED: '1' },
-      });
-      python.on('error', reject);
-      python.on('exit', (c) => log(`Python done (${c})`));
-      python.stdout.on('data', (d) => d.toString().split('\n').filter(Boolean).forEach((l) => log(`[py] ${l}`)));
-      python.stderr.on('data', (d) => d.toString().split('\n').filter(Boolean).forEach((l) => log(`[py] ${l}`)));
-      setTimeout(resolve, 500);
-    });
-    python.on('exit', (c) => log(`Python done (${c})`));
+    log(`crabagent: ${crabagentBin || 'not found'}`);
+    log(`python3: ${pythonBin}`);
+
+    if (crabagentBin) {
+      log('Starting backend via crabagent...');
+      python = spawn(crabagentBin, ['--serve'], { stdio: 'pipe', env });
+    } else {
+      log('Starting backend via python3 -m crabagent.cli...');
+      python = spawn(pythonBin, ['-m', 'crabagent.cli', '--serve'], { stdio: 'pipe', env });
+    }
+
+    python.on('error', (e) => { log(`Backend error: ${e.message}`); reject(e); });
+    python.on('exit', (c) => log(`Backend exited (${c})`));
     python.stdout.on('data', (d) => d.toString().split('\n').filter(Boolean).forEach((l) => log(`[py] ${l}`)));
     python.stderr.on('data', (d) => d.toString().split('\n').filter(Boolean).forEach((l) => log(`[py] ${l}`)));
     setTimeout(resolve, 500);
