@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { PanelRightClose, X } from "lucide-react";
+import { PanelRightClose, X, RefreshCw } from "lucide-react";
 import { FileEntry, FileContent } from "../api/files";
 import { getTree, readFile, isImageFile, getImageUrl } from "../api/files";
 import FileTree from "./FileTree";
@@ -19,6 +19,7 @@ function useFileTree(workspace?: string) {
   const [fileContent, setFileContent] = useState<string | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   const isAbsolute = !!workspace;
   const rootPath = workspace || "";
@@ -29,7 +30,9 @@ function useFileTree(workspace?: string) {
       .then(setEntries)
       .catch(() => setEntries([]))
       .finally(() => setLoading(false));
-  }, [workspace, rootPath, isAbsolute]);
+  }, [workspace, rootPath, isAbsolute, refreshKey]);
+
+  const refresh = () => setRefreshKey((k) => k + 1);
 
   const handleSelect = async (path: string) => {
     setSelectedPath(path);
@@ -49,7 +52,7 @@ function useFileTree(workspace?: string) {
     }
   };
 
-  return { entries, selectedPath, fileContent, fileError, loading, handleSelect, absolute: isAbsolute };
+  return { entries, selectedPath, fileContent, fileError, loading, handleSelect, refresh, absolute: isAbsolute };
 }
 
 function FileTreePanel({
@@ -59,6 +62,7 @@ function FileTreePanel({
   fileError,
   loading,
   handleSelect,
+  onRefresh,
   sessionId,
   absolute,
 }: {
@@ -68,6 +72,7 @@ function FileTreePanel({
   fileError: string | null;
   loading: boolean;
   handleSelect: (path: string) => void;
+  onRefresh: () => void;
   sessionId: string | null;
   absolute: boolean;
 }) {
@@ -170,15 +175,24 @@ export default function FileBrowser({
           <span className="text-xs font-semibold text-[var(--text-primary)]">
             Files
           </span>
-          <button
-            onClick={onToggle}
-            className="p-1 rounded text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
-            title="Collapse"
-          >
-            <PanelRightClose size={14} />
-          </button>
+          <div className="flex items-center gap-0.5">
+            <button
+              onClick={tree.refresh}
+              className="p-1 rounded text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
+              title="Refresh"
+            >
+              <RefreshCw size={14} />
+            </button>
+            <button
+              onClick={onToggle}
+              className="p-1 rounded text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
+              title="Collapse"
+            >
+              <PanelRightClose size={14} />
+            </button>
+          </div>
         </div>
-        <FileTreePanel {...tree} sessionId={sessionId} />
+        <FileTreePanel {...tree} onRefresh={tree.refresh} sessionId={sessionId} />
       </div>
 
       {/* Mobile: overlay drawer */}
@@ -192,15 +206,24 @@ export default function FileBrowser({
             <span className="text-sm font-semibold text-[var(--text-primary)]">
               Files
             </span>
-            <button
-              onClick={onToggle}
-              className="p-1.5 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
-            >
-              <X size={16} />
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={tree.refresh}
+                className="p-1.5 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
+                title="Refresh"
+              >
+                <RefreshCw size={15} />
+              </button>
+              <button
+                onClick={onToggle}
+                className="p-1.5 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
+              >
+                <X size={16} />
+              </button>
+            </div>
           </div>
           <div className="flex-1 overflow-y-auto">
-            <FileTreePanel {...tree} sessionId={sessionId} />
+            <FileTreePanel {...tree} onRefresh={tree.refresh} sessionId={sessionId} />
           </div>
         </div>
       </div>
