@@ -730,23 +730,44 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(
               )}
             >
               {isUser ? (
-                <div className="chat-bubble-user">
-                  {msg.images && msg.images.length > 0 && (
-                    <div className="flex gap-2 mb-2 flex-wrap">
-                      {msg.images.map((img, idx) => (
-                        <img
-                          key={idx}
-                          src={img}
-                          className="max-w-[200px] max-h-[200px] rounded-lg cursor-pointer object-contain"
-                          onClick={() => setPreviewImage(img)}
-                          alt=""
-                        />
-                      ))}
-                    </div>
-                  )}
-                  <p className="whitespace-pre-wrap leading-relaxed text-[14px]">
-                    {msg.content}
-                  </p>
+                <div className="relative ml-auto">
+                  <div className="chat-bubble-user">
+                    {msg.images && msg.images.length > 0 && (
+                      <div className="flex gap-2 mb-2 flex-wrap">
+                        {msg.images.map((img, idx) => (
+                          <img
+                            key={idx}
+                            src={img}
+                            className="max-w-[200px] max-h-[200px] rounded-lg cursor-pointer object-contain"
+                            onClick={() => setPreviewImage(img)}
+                            alt=""
+                          />
+                        ))}
+                      </div>
+                    )}
+                    <p className="whitespace-pre-wrap leading-relaxed text-[14px]">
+                      {msg.content}
+                    </p>
+                  </div>
+                  {onBranch &&
+                    !replaying &&
+                    !msg.isStreaming &&
+                    msg.id.startsWith("db-") && (
+                      <button
+                        onClick={() => onBranch(msg.id)}
+                        title="Branch from here"
+                        className={cn(
+                          "absolute top-0 right-full mr-1.5",
+                          "opacity-0 group-hover/msg:opacity-100 transition-opacity",
+                          "text-xs px-2 py-1 rounded-md flex items-center gap-1",
+                          "bg-[var(--bg-secondary)] border border-[var(--border)] text-[var(--text-secondary)]",
+                          "hover:text-[var(--text-primary)] hover:border-[var(--border-strong)]",
+                        )}
+                      >
+                        <GitBranch size={11} />
+                        Branch
+                      </button>
+                    )}
                 </div>
               ) : (
                 <div className="max-w-[min(720px,85%)] flex-1">
@@ -779,26 +800,6 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(
                   </div>
                 </div>
               )}
-              {onBranch &&
-                !replaying &&
-                !msg.isStreaming &&
-                msg.id.startsWith("db-") &&
-                msg.role === "user" && (
-                  <button
-                    onClick={() => onBranch(msg.id)}
-                    title="Branch from here"
-                    className={cn(
-                      "absolute top-0 -left-2 -translate-x-full",
-                      "opacity-0 group-hover/msg:opacity-100 transition-opacity",
-                      "text-xs px-2 py-1 rounded-md flex items-center gap-1",
-                      "bg-[var(--bg-secondary)] border border-[var(--border)] text-[var(--text-secondary)]",
-                      "hover:text-[var(--text-primary)] hover:border-[var(--border-strong)]",
-                    )}
-                  >
-                    <GitBranch size={11} />
-                    Branch
-                  </button>
-                )}
             </div>
           );
         })}

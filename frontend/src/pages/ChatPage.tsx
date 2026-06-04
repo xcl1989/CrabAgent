@@ -39,6 +39,7 @@ import { AgentBar } from "../components/AgentBar";
 import { DelegateModal } from "../components/DelegateModal";
 import { ResultCompare } from "../components/ResultCompare";
 import WorkspaceSwitcher from "../components/WorkspaceSwitcher";
+import ModelSelector from "../components/ModelSelector";
 import { Modal, Button, Textarea } from "../components/ui";
 import { useChatState } from "../hooks/useChatState";
 import { useTaskBoard } from "../hooks/useTaskBoard";
@@ -90,6 +91,7 @@ export default function ChatPage() {
     providers,
     catalog,
     models,
+    providerModels,
     providersLoading,
     modelsLoading,
     modelsError,
@@ -513,22 +515,17 @@ export default function ChatPage() {
                     <Loader2 size={12} className="animate-spin text-[var(--text-tertiary)]" />
                     <span className="text-[11px] text-[var(--text-tertiary)]">Loading models…</span>
                   </div>
-                ) : models.length > 0 ? (
+                ) : providerModels.length > 0 ? (
                   <div className="flex items-center gap-1.5">
                     <span className="text-[11px] text-[var(--text-tertiary)] hidden sm:inline">
                       Model
                     </span>
-                    <select
-                      value={selectedModel}
-                      onChange={(e) => setSelectedModel(e.target.value)}
-                      className="text-xs h-7 px-2 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border)] text-[var(--text-primary)] font-mono focus:outline-none focus:border-[var(--brand)] focus:ring-2 focus:ring-[var(--brand)]/30 max-w-[140px] sm:max-w-none"
-                    >
-                      {models.map((m) => (
-                        <option key={m.id} value={m.id}>
-                          {m.id}
-                        </option>
-                      ))}
-                    </select>
+                    <ModelSelector
+                      providerModels={providerModels}
+                      selectedModel={selectedModel}
+                      onChange={setSelectedModel}
+                      disabled={modelsLoading}
+                    />
                   </div>
                 ) : (
                   <div className="flex items-center gap-1.5">

@@ -445,6 +445,8 @@ pre code {
   align-self: flex-end;
   max-width: min(720px, 80%);
   word-wrap: break-word;
+  word-break: keep-all;
+  min-width: 60px;
 }
 [data-theme="light"] .chat-bubble-user {
   background: linear-gradient(135deg, var(--brand) 0%, var(--brand-active) 100%);

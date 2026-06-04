@@ -28,7 +28,7 @@ def register_molt_tools(registry):
     )
     async def molt_diff(molt_id: str, context=None) -> str:
         ws = context.workspace.resolve() if context else os.getcwd()
-        files = await list_molt_files(molt_id)
+        files = await list_molt_files(molt_id, ws)
         if not files:
             return f"No files found for {molt_id}"
 
@@ -36,7 +36,7 @@ def register_molt_tools(registry):
         for fp in files:
             if fp == "diff.txt":
                 continue
-            old = get_snapshot_content(molt_id, fp)
+            old = get_snapshot_content(molt_id, fp, ws)
             new = get_current_content(ws, fp)
             if old != new:
                 parts.append(f"\n=== {fp} ===")

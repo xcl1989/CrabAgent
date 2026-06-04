@@ -22,6 +22,9 @@ class ToolInfo:
             self.metadata = {"source": "builtin"}
 
 
+logger = logging.getLogger(__name__)
+
+
 class ToolRegistry:
     def __init__(self):
         self._tools: dict[str, ToolInfo] = {}
@@ -101,7 +104,7 @@ class ToolRegistry:
                     method=snap["method"],
                     file_count=len(snap["files"]),
                 )
-                await prune_molts()
+                await prune_molts(workspace=ws)
         except Exception:
             pass
 
@@ -115,7 +118,10 @@ class ToolRegistry:
         _t0 = _t.monotonic()
 
         if context is not None:
-            await self._take_molt_snapshot(name, arguments, context)
+            try:
+                await self._take_molt_snapshot(name, arguments, context)
+            except Exception:
+                logger.warning("Molt snapshot failed for %s, continuing tool execution", name)
 
         if tool.requires_permission and context is not None:
             if tool.name not in context.approved_tools:

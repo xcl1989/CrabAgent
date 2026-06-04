@@ -269,14 +269,33 @@ async def run_agent(
                 )
                 return meta, result
 
-            gathered = await asyncio.gather(*[_run_and_emit(m) for m in tool_metas])
+            gathered = await asyncio.gather(*[_run_and_emit(m) for m in tool_metas], return_exceptions=True)
 
-            for meta, result in gathered:
-                result = _truncate_result(result, _MAX_TOOL_RESULT_CHARS)
+            for i in range(len(tool_metas)):
+                result_entry = gathered[i]
+                meta = tool_metas[i]
+                tc = meta["tc"]
+                if isinstance(result_entry, Exception):
+                    result = f"Tool error: {result_entry}"
+                    await context.event_bus.emit(
+                        AgentEvent(
+                            type=EventType.TOOL_RESULT,
+                            data={
+                                "name": meta["name"],
+                                "result": result[:2000],
+                                "id": tc["id"],
+                                "source": meta["source"],
+                                "server_name": meta["server"],
+                            },
+                        )
+                    )
+                else:
+                    meta, result = result_entry
+                    result = _truncate_result(result, _MAX_TOOL_RESULT_CHARS)
                 tool_msg = {
                     "role": "tool",
                     "content": result,
-                    "tool_call_id": meta["tc"]["id"],
+                    "tool_call_id": tc["id"],
                     "agent": context.current_agent,
                 }
                 context.messages.append(tool_msg)
@@ -387,4 +406,30 @@ def _build_messages(context: AgentContext) -> list[dict]:
         if msg.get("role") not in ("system", "user", "assistant", "tool"):
             msg = {**msg, "role": "user"}
         messages.append(msg)
+    return _validate_tool_calls(messages)
+
+
+def _validate_tool_calls(messages: list[dict]) -> list[dict]:
+    """Strip tool_calls from assistant messages that lack corresponding tool responses.
+
+    Protects against corrupted history where assistant tool_calls were saved to DB
+    but the corresponding tool messages were not (e.g. due to a prior crash/error).
+    """
+    for i, msg in enumerate(messages):
+        tool_calls = msg.get("tool_calls")
+        if msg.get("role") != "assistant" or not tool_calls:
+            continue
+        required_ids = {tc["id"] for tc in tool_calls if tc.get("id")}
+        if not required_ids:
+            continue
+        found_ids = set()
+        for later_msg in messages[i + 1:]:
+            if later_msg.get("role") == "tool":
+                found_ids.add(later_msg.get("tool_call_id", ""))
+        missing = required_ids - found_ids
+        if missing:
+            logger.warning(
+                "Stripping %d orphan tool_calls from assistant (missing: %s)", len(missing), missing
+            )
+            messages[i] = {k: v for k, v in msg.items() if k != "tool_calls"}
     return messages

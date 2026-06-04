@@ -19,7 +19,7 @@ class Settings(BaseSettings):
 
     workspace: Path = Path.cwd()
 
-    max_iterations: int = 50
+    max_iterations: int = 200
     max_tokens: int = 4096
 
     skills_dir: Path | None = None

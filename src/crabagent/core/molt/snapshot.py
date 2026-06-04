@@ -4,8 +4,6 @@ import asyncio
 import logging
 import shutil
 
-from crabagent.core.config import settings
-
 logger = logging.getLogger(__name__)
 
 _next_seq: int = 0
@@ -20,8 +18,12 @@ def _molt_id() -> str:
 async def take_snapshot(context, filepaths: list[str], description: str = "") -> dict | None:
     workspace = context.workspace.resolve()
     mid = _molt_id()
-    md = settings.workspace.resolve() / ".crabagent" / "molts" / mid
-    md.mkdir(parents=True, exist_ok=True)
+    md = workspace / ".crabagent" / "molts" / mid
+    try:
+        md.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        logger.warning("Cannot create molt directory %s (read-only filesystem)", md)
+        return None
 
     is_git = (workspace / ".git").exists()
     saved_files: list[str] = []

@@ -13,12 +13,13 @@ from crabagent.core.database import Molt
 logger = logging.getLogger(__name__)
 
 
-def molt_dir() -> Path:
-    return settings.workspace.resolve() / ".crabagent" / "molts"
+def molt_dir(workspace: Path | None = None) -> Path:
+    ws = workspace.resolve() if workspace else settings.workspace.resolve()
+    return ws / ".crabagent" / "molts"
 
 
-def snapshot_path(molt_id: str, filepath: str) -> Path:
-    return molt_dir() / molt_id / filepath
+def snapshot_path(molt_id: str, filepath: str, workspace: Path | None = None) -> Path:
+    return molt_dir(workspace) / molt_id / filepath
 
 
 async def list_molts(db: AsyncSession, session_id: str, limit: int = 20) -> list[dict[str, Any]]:
@@ -82,8 +83,8 @@ async def delete_molt(db: AsyncSession, molt_id: str) -> None:
         await db.commit()
 
 
-async def list_molt_files(molt_id: str) -> list[str]:
-    md = molt_dir() / molt_id
+async def list_molt_files(molt_id: str, workspace: Path | None = None) -> list[str]:
+    md = molt_dir(workspace) / molt_id
     if not md.exists():
         return []
     files = []
@@ -94,8 +95,8 @@ async def list_molt_files(molt_id: str) -> list[str]:
     return files
 
 
-def get_snapshot_content(molt_id: str, filepath: str) -> str:
-    p = snapshot_path(molt_id, filepath)
+def get_snapshot_content(molt_id: str, filepath: str, workspace: Path | None = None) -> str:
+    p = snapshot_path(molt_id, filepath, workspace)
     if p.exists():
         return p.read_text(encoding="utf-8")
     return ""
@@ -108,7 +109,7 @@ def get_current_content(workspace: Path, filepath: str) -> str:
     return ""
 
 
-async def prune_molts() -> int:
+async def prune_molts(workspace: Path | None = None) -> int:
     from crabagent.core.database import async_session_factory
 
     keep = settings.molt_keep_count
@@ -117,7 +118,7 @@ async def prune_molts() -> int:
         result = await db.execute(select(Molt).order_by(Molt.created_at.desc()).offset(keep))
         old_molts = result.scalars().all()
         for m in old_molts:
-            md = molt_dir() / m.molt_id
+            md = molt_dir(workspace) / m.molt_id
             if md.exists():
                 import shutil
 
