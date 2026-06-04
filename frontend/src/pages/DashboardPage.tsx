@@ -315,7 +315,7 @@ export default function DashboardPage() {
   return (
     <div className="flex-1 flex flex-col overflow-hidden bg-[var(--bg-primary)]">
       {/* Header */}
-      <div className="flex items-center gap-4 px-6 py-3 border-b border-[var(--border)] bg-[var(--bg-secondary)]">
+      <div className="flex items-center gap-4 px-6 h-12 border-b border-[var(--border)] bg-[var(--bg-secondary)]">
         <span className="text-sm font-semibold tracking-wide text-[var(--text-primary)] font-mono">
           DASHBOARD
         </span>

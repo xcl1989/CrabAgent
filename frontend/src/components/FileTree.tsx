@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { Folder, FolderOpen, FileText, ChevronRight, ChevronDown, Loader2 } from "lucide-react";
-import { FileEntry } from "../api/files";
+import { Folder, FolderOpen, FileText, ChevronRight, ChevronDown, Loader2, ImageIcon } from "lucide-react";
+import { FileEntry, isImageFile } from "../api/files";
 import { cn } from "../lib/cn";
 
 interface Props {
@@ -125,6 +125,8 @@ function FileTreeNode({
             ) : (
               <Folder size={13} className="text-[var(--warning)]" />
             )
+          ) : isImageFile(entry.name) ? (
+            <ImageIcon size={13} className="text-[var(--accent)]" />
           ) : (
             <FileText size={13} className="text-[var(--text-tertiary)]" />
           )}

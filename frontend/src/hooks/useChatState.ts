@@ -57,6 +57,17 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
     });
   }, []);
 
+  const populateSubAgentContents = useCallback((chatMsgs: ChatMessage[]) => {
+    for (const m of chatMsgs) {
+      if (m.role === "sub_agent" && m.content && (m.sub_agent_id || m.id)) {
+        const key = m.sub_agent_id || m.id;
+        if (!subAgentContents.current.has(key)) {
+          subAgentContents.current.set(key, m.content);
+        }
+      }
+    }
+  }, []);
+
   useEffect(() => {
     return () => {
       if (subFlushTimerRef.current) clearTimeout(subFlushTimerRef.current);
@@ -68,8 +79,29 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
   }, [activeSession]);
 
   useEffect(() => {
-    sessionsApi.listSessions(workspace).then(setSessions);
-  }, [workspace]);
+    let cancelled = false;
+    sessionsApi.listSessions(workspace).then((result) => {
+      if (cancelled) return;
+      setSessions(result);
+      setSending(false);
+      if (result.length > 0) {
+        const latest = result[0];
+        setActiveSession(latest);
+        setActiveBranch(latest.active_branch || "main");
+        sessionsApi.getMessages(latest.session_id).then((msgs) => {
+          if (!cancelled) {
+            const chatMsgs = dbMessagesToChat(msgs);
+            populateSubAgentContents(chatMsgs);
+            setMessages(chatMsgs);
+          }
+        });
+      } else {
+        setActiveSession(null);
+        setMessages([]);
+      }
+    });
+    return () => { cancelled = true; };
+  }, [workspace, populateSubAgentContents]);
 
   const handleSSEEvent = useCallback(
     (event: SSEEvent) => {
@@ -121,6 +153,7 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
           setTimeout(async () => {
             const msgs = await sessionsApi.getMessages(sid);
             const dbMsgs = dbMessagesToChat(msgs);
+            populateSubAgentContents(dbMsgs);
             setMessages((prev) => {
               const dbTotal = dbMsgs.reduce((s, m) => s + (m.content?.length || 0), 0);
               const prevTotal = prev.reduce((s, m) => s + (m.content?.length || 0), 0);
@@ -161,10 +194,12 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
       const branch = session.active_branch || "main";
       setActiveBranch(branch);
       const msgs = await sessionsApi.getMessages(session.session_id);
-      setMessages(dbMessagesToChat(msgs));
+      const chatMsgs = dbMessagesToChat(msgs);
+      populateSubAgentContents(chatMsgs);
+      setMessages(chatMsgs);
       return session.model || (models.length > 0 ? models[0].id : selectedModel);
     },
-    []
+    [populateSubAgentContents]
   );
 
   const newSession = useCallback(async (selectedModel: string, models: { id: string }[]) => {
@@ -226,9 +261,11 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
       setActiveBranch(branchId);
       setActiveSession({ ...activeSession, active_branch: branchId });
       const msgs = await sessionsApi.getMessages(activeSession.session_id);
-      setMessages(dbMessagesToChat(msgs));
+      const chatMsgs = dbMessagesToChat(msgs);
+      populateSubAgentContents(chatMsgs);
+      setMessages(chatMsgs);
     },
-    [activeSession]
+    [activeSession, populateSubAgentContents]
   );
 
   const handleBranch = useCallback(

@@ -9,6 +9,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.9.1]
+
+### Added
+- **Full sub-agent content persistence** — tool calls and results from sub-agents are now saved to DB (`detail` field in sub_agent message JSON), allowing full content display after page refresh
+- **Agents page redesign** — left-right split layout: compact agent list on the left, detail/edit panel on the right, with learning stats embedded
+- **Page tab persistence** — replaced `react-router-dom` `<Routes>` with state + CSS `hidden`, so ChatPage state survives tab switches to Dashboard/Agents
+
+### Changed
+- **User message bubble max-width** — reduced from 720px to 520px for better CJK line breaking
+- **Sidebar footer layout** — 3 tool buttons (MCP, Tasks, API Keys) now arranged horizontally instead of 2x2 grid
+- **AgentBar display name** — shows full display name instead of first word only
+- **Removed `react-router-dom`** dependency from production bundle (reduced vendor-react chunk from 49KB to 0.03KB)
+
+### Fixed
+- Sub-agent content not visible after page refresh — `subAgentContents` map now populated from DB on load
+- Missing `sub_agent_id` on DB-loaded sub-agent messages — generates stable `db-sub-${id}` keys
+- `scrollbar-none` CSS class undefined — added definition for both WebKit and Firefox
+- Hardcoded Chinese string in image fallback prompt — changed to English
+- Undefined `--accent-2-border` CSS variable reference — removed fallback, uses `--border` directly
+- AgentsPage flashing "No agents" before load — added loading spinner state
+- Inconsistent page header heights — all standardized to `h-12`
+- `shadow-lg` raw Tailwind class — replaced with `shadow-[var(--shadow-lg)]` design token
+- Learning stats grid overflow on small screens — changed to `grid-cols-2 sm:grid-cols-4`
+
+### Removed
+- Sidebar "Team" button — duplicated Agents page tab, now only accessible via top nav
+- `AgentTeamPanel.tsx` — logic consolidated into `AgentsPage.tsx`
+
+---
+
 ## [0.9.0]
 
 ### Added

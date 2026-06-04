@@ -1,14 +1,20 @@
 from __future__ import annotations
 
+import mimetypes
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from crabagent.core.database import User, get_db
 from crabagent.serve.deps import get_current_user
 
 router = APIRouter(prefix="/files", tags=["files"])
+
+_IMAGE_EXTENSIONS = frozenset(
+    {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".ico", ".bmp", ".avif"}
+)
 
 
 def _resolve_path(base: Path, raw: str) -> Path | None:
@@ -102,3 +108,43 @@ async def read_file(
         content = ""
 
     return {"path": path, "content": content, "truncated": False}
+
+
+@router.get("/image")
+async def get_image(
+    path: str = Query(..., description="Relative path from workspace, or absolute path when absolute=true"),
+    absolute: bool = Query(False, description="Treat path as absolute filesystem path"),
+    token: str = Query(..., description="JWT token for img src auth"),
+    db: AsyncSession = Depends(get_db),
+):
+    from crabagent.core.config import settings
+    from crabagent.serve.services.auth import decode_access_token, get_user_by_id
+
+    payload = decode_access_token(token)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    try:
+        user_id = int(payload["sub"])
+    except (KeyError, ValueError):
+        raise HTTPException(status_code=401, detail="Invalid token payload")
+    user = await get_user_by_id(db, user_id)
+    if not user or not user.enabled:
+        raise HTTPException(status_code=401, detail="User not found or disabled")
+
+    if absolute:
+        target = Path(path).resolve()
+    else:
+        workspace = settings.workspace.resolve()
+        t = _resolve_path(workspace, path.lstrip("/"))
+        if not t:
+            raise HTTPException(status_code=400, detail="Path outside workspace")
+        target = t
+
+    if not target.exists() or not target.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    if target.suffix.lower() not in _IMAGE_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Not an image file")
+
+    media_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+    return FileResponse(str(target), media_type=media_type)

@@ -54,8 +54,8 @@ export function AgentBar({ onAgentClick }: Props) {
               )}
             >
               <span className="text-xs">{a.icon || "🤖"}</span>
-              <span className="truncate max-w-[80px]">
-                {a.display_name.split(" ")[0]}
+              <span className="truncate max-w-[100px]">
+                {a.display_name}
               </span>
             </button>
           </Tooltip>

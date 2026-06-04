@@ -155,7 +155,7 @@ export default function ModelSelector({
             "absolute bottom-full mb-1.5 right-0 z-50",
             "min-w-[220px] max-w-[320px] max-h-[420px] overflow-y-auto",
             "rounded-lg border border-[var(--border)] bg-[var(--bg-secondary)]",
-            "shadow-lg py-1.5"
+            "shadow-[var(--shadow-lg)] py-1.5"
           )}
         >
           {providerModels.map((pm) => (

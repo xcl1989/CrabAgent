@@ -1,24 +1,20 @@
-import { NavLink } from "react-router-dom";
 import { MessageSquare, LayoutDashboard, Users, Sun, Moon, LogOut } from "lucide-react";
 import { useTheme } from "../lib/theme";
 import { cn } from "../lib/cn";
 import { useState } from "react";
 import { Modal, Button } from "./ui";
+import type { PageId } from "../App";
 
 interface NavItem {
-  to: string;
+  id: PageId;
   label: string;
   icon: React.ReactNode;
 }
 
 const items: NavItem[] = [
-  { to: "/chat", label: "Chat", icon: <MessageSquare size={15} /> },
-  {
-    to: "/dashboard",
-    label: "Dashboard",
-    icon: <LayoutDashboard size={15} />,
-  },
-  { to: "/agents", label: "Agents", icon: <Users size={15} /> },
+  { id: "chat", label: "Chat", icon: <MessageSquare size={15} /> },
+  { id: "dashboard", label: "Dashboard", icon: <LayoutDashboard size={15} /> },
+  { id: "agents", label: "Agents", icon: <Users size={15} /> },
 ];
 
 function ThemeToggle() {
@@ -39,7 +35,15 @@ function ThemeToggle() {
   );
 }
 
-export function NavBar({ onLogout }: { onLogout?: () => void }) {
+export function NavBar({
+  currentPage,
+  onNavigate,
+  onLogout,
+}: {
+  currentPage: PageId;
+  onNavigate: (page: PageId) => void;
+  onLogout?: () => void;
+}) {
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 
   return (
@@ -51,8 +55,10 @@ export function NavBar({ onLogout }: { onLogout?: () => void }) {
       )}
       style={{ paddingTop: "env(safe-area-inset-top, 0px)" }}
     >
-      {/* Brand */}
-      <NavLink to="/chat" className="flex items-center gap-2 mr-1 sm:mr-4 group">
+      <button
+        onClick={() => onNavigate("chat")}
+        className="flex items-center gap-2 mr-1 sm:mr-4 group"
+      >
         <span
           className="w-7 h-7 rounded-lg flex items-center justify-center text-base shadow-[var(--shadow-sm)]"
           style={{
@@ -65,37 +71,32 @@ export function NavBar({ onLogout }: { onLogout?: () => void }) {
         <span className="font-semibold text-sm text-[var(--text-primary)] group-hover:text-[var(--brand)] transition-colors">
           CrabAgent
         </span>
-      </NavLink>
+      </button>
 
-      {/* Nav items */}
       <nav className="flex items-center gap-0.5">
-        {items.map((item) => (
-          <NavLink
-            key={item.to}
-            to={item.to}
-            end={item.to === "/chat"}
-            className={({ isActive }) =>
-              cn(
+        {items.map((item) => {
+          const isActive = currentPage === item.id;
+          return (
+            <button
+              key={item.id}
+              onClick={() => onNavigate(item.id)}
+              className={cn(
                 "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all relative",
                 isActive
                   ? "text-[var(--text-primary)] bg-[var(--bg-tertiary)]"
                   : "text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]/60",
-              )
-            }
-          >
-            {({ isActive }) => (
-              <>
-                <span className={cn(isActive && "text-[var(--brand)]")}>
-                  {item.icon}
-                </span>
-                <span className="hidden sm:inline">{item.label}</span>
-                {isActive && (
-                  <span className="absolute -bottom-[9px] left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-[var(--brand)]" />
-                )}
-              </>
-            )}
-          </NavLink>
-        ))}
+              )}
+            >
+              <span className={cn(isActive && "text-[var(--brand)]")}>
+                {item.icon}
+              </span>
+              <span className="hidden sm:inline">{item.label}</span>
+              {isActive && (
+                <span className="absolute -bottom-[9px] left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-[var(--brand)]" />
+              )}
+            </button>
+          );
+        })}
       </nav>
 
       <div className="ml-auto flex items-center gap-1">

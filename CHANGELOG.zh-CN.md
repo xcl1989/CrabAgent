@@ -8,6 +8,36 @@ English version: [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
+## [0.9.1]
+
+### 新增
+- **子代理完整内容持久化** — 子代理的 tool 调用和结果现在保存到数据库（sub_agent 消息 JSON 的 `detail` 字段），刷新页面后仍可查看完整内容
+- **Agents 页面重新设计** — 左右分栏布局：左侧紧凑 agent 列表，右侧详情/编辑面板，学习统计内嵌显示
+- **页签状态保持** — 用 state + CSS `hidden` 替代 `react-router-dom` `<Routes>`，切换到 Dashboard/Agents 时 ChatPage 状态不会丢失
+
+### 变更
+- **用户消息气泡最大宽度** — 从 720px 缩减到 520px，CJK 文本换行更自然
+- **侧边栏底部按钮布局** — 3 个工具按钮（MCP、Tasks、API Keys）改为横向一行排列
+- **AgentBar 显示名** — 显示完整 display name 而非仅第一个词
+- **移除 `react-router-dom`** 生产依赖（vendor-react 体积从 49KB 降至 0.03KB）
+
+### 修复
+- 刷新页面后子代理内容不可见 — `subAgentContents` Map 现在从数据库加载时自动填充
+- 数据库加载的子代理消息缺少 `sub_agent_id` — 生成稳定的 `db-sub-${id}` 键
+- `scrollbar-none` CSS class 未定义 — 添加了 WebKit 和 Firefox 定义
+- 图片 fallback 提示语硬编码中文 — 改为英文
+- `--accent-2-border` CSS 变量未定义的引用 — 直接使用 `--border`
+- AgentsPage 加载前闪现"No agents" — 添加 loading spinner
+- 各页面 header 高度不一致 — 统一为 `h-12`
+- `shadow-lg` 原始 Tailwind class — 替换为 `shadow-[var(--shadow-lg)]` 设计 token
+- 学习统计 grid 小屏溢出 — 改为 `grid-cols-2 sm:grid-cols-4`
+
+### 移除
+- 侧边栏 "Team" 按钮 — 与 Agents 页签重复，仅保留顶部导航入口
+- `AgentTeamPanel.tsx` — 逻辑合并到 `AgentsPage.tsx`
+
+---
+
 ## [0.9.0]
 
 ### 新增

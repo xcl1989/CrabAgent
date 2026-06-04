@@ -159,6 +159,9 @@
   font-display: swap;
 }
 
+.scrollbar-none::-webkit-scrollbar { display: none; }
+.scrollbar-none { scrollbar-width: none; }
+
 :root {
   color-scheme: dark;
 }
@@ -443,7 +446,7 @@ pre code {
   padding: 10px 14px;
   box-shadow: var(--shadow-sm);
   align-self: flex-end;
-  max-width: min(720px, 80%);
+  max-width: min(520px, 80%);
   word-wrap: break-word;
   word-break: keep-all;
   min-width: 60px;

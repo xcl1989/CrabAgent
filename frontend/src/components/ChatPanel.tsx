@@ -771,19 +771,6 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(
                 </div>
               ) : (
                 <div className="max-w-[min(720px,85%)] flex-1">
-                  {msg.reasoning_content && (
-                    <details className="mb-2">
-                      <summary className="cursor-pointer text-xs py-1 px-2 rounded-md select-none list-none text-[var(--text-secondary)] bg-[var(--bg-tertiary)] hover:bg-[var(--bg-elevated)] transition-colors flex items-center gap-1.5 w-fit">
-                        <span className="text-[var(--accent-2)]">💭</span>
-                        Thinking
-                      </summary>
-                      <div className="mt-1 p-2 rounded-md text-xs bg-[var(--bg-tertiary)] border-l-[3px] border-l-[var(--accent-2)]">
-                        <pre className="whitespace-pre-wrap font-mono text-[12px] text-[var(--text-secondary)] m-0 bg-transparent! p-0! border-0!">
-                          {msg.reasoning_content}
-                        </pre>
-                      </div>
-                    </details>
-                  )}
                   <div
                     className={cn(
                       "markdown-body",

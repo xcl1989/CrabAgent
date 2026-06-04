@@ -506,6 +506,7 @@ async def spawn_sub_agent(
 
     _last_text_flush = [0.0]
     _text_buffer = [""]
+    _detail_lines: list[str] = []
 
     async def _bridge_events(event: AgentEvent):
         if event.type in (EventType.TEXT_DELTA,):
@@ -526,27 +527,33 @@ async def spawn_sub_agent(
                 )
                 _text_buffer[0] = ""
         elif event.type in (EventType.TOOL_CALL,):
+            tc_name = event.data.get("name", "")
+            tc_args = _json.dumps(event.data.get("arguments", {}), ensure_ascii=False)
+            _detail_lines.append(f"→ {tc_name}({tc_args[:120]})")
             await parent_context.event_bus.emit(
                 AgentEvent(
                     type=EventType.SUB_AGENT_TOOL_CALL,
                     data={
                         "sub_agent_id": sub_id,
                         "agent_name": agent_name,
-                        "name": event.data.get("name", ""),
+                        "name": tc_name,
                         "arguments": event.data.get("arguments", {}),
                         "id": event.data.get("id", ""),
                     },
                 )
             )
         elif event.type in (EventType.TOOL_RESULT,):
+            tr_name = event.data.get("name", "")
+            tr_result = str(event.data.get("result", ""))
+            _detail_lines.append(f"← {tr_name}: {tr_result[:200]}{'...' if len(tr_result) > 200 else ''}")
             await parent_context.event_bus.emit(
                 AgentEvent(
                     type=EventType.SUB_AGENT_TOOL_RESULT,
                     data={
                         "sub_agent_id": sub_id,
                         "agent_name": agent_name,
-                        "name": event.data.get("name", ""),
-                        "result": event.data.get("result", "")[:500],
+                        "name": tr_name,
+                        "result": tr_result[:500],
                     },
                 )
             )
@@ -721,9 +728,14 @@ async def spawn_sub_agent(
                 }
             )
 
+        detail_str = last_text
+        if _detail_lines:
+            detail_str = last_text + "\n" + "\n".join(_detail_lines)
+
         sub_content = _json.dumps(
             {
                 "text": last_text,
+                "detail": detail_str,
                 "agent_name": agent_name,
                 "display_name": agent_def["display_name"],
                 "elapsed": elapsed,

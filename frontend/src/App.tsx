@@ -1,22 +1,31 @@
 import { useState } from "react";
-import { HashRouter, Routes, Route, Navigate } from "react-router-dom";
 import { api } from "./api/client";
 import LoginPage from "./pages/LoginPage";
 import ChatPage from "./pages/ChatPage";
 import DashboardPage from "./pages/DashboardPage";
 import AgentsPage from "./pages/AgentsPage";
 import { NavBar } from "./components/NavBar";
+import { cn } from "./lib/cn";
+
+export type PageId = "chat" | "dashboard" | "agents";
 
 function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
+  const [page, setPage] = useState<PageId>("chat");
+
   return (
     <div className="flex flex-col h-dvh overflow-hidden">
-      <NavBar onLogout={onLogout} />
-      <Routes>
-        <Route path="/chat" element={<ChatPage />} />
-        <Route path="/dashboard" element={<DashboardPage />} />
-        <Route path="/agents" element={<AgentsPage />} />
-        <Route path="*" element={<Navigate to="/chat" replace />} />
-      </Routes>
+      <NavBar currentPage={page} onNavigate={setPage} onLogout={onLogout} />
+      <div className="flex-1 relative overflow-hidden">
+        <div className={cn("absolute inset-0", page !== "chat" && "hidden")}>
+          <ChatPage />
+        </div>
+        <div className={cn("absolute inset-0", page !== "dashboard" && "hidden")}>
+          <DashboardPage />
+        </div>
+        <div className={cn("absolute inset-0", page !== "agents" && "hidden")}>
+          <AgentsPage />
+        </div>
+      </div>
     </div>
   );
 }
@@ -37,9 +46,5 @@ export default function App() {
     return <LoginPage onLogin={handleLogin} />;
   }
 
-  return (
-    <HashRouter>
-      <AuthenticatedApp onLogout={handleLogout} />
-    </HashRouter>
-  );
+  return <AuthenticatedApp onLogout={handleLogout} />;
 }

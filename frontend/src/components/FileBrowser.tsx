@@ -1,9 +1,10 @@
 import { useState, useEffect } from "react";
 import { PanelRightClose, X } from "lucide-react";
 import { FileEntry, FileContent } from "../api/files";
-import { getTree, readFile } from "../api/files";
+import { getTree, readFile, isImageFile, getImageUrl } from "../api/files";
 import FileTree from "./FileTree";
 import MoltTimeline from "./MoltTimeline";
+import { Modal } from "./ui";
 
 interface Props {
   collapsed: boolean;
@@ -70,6 +71,8 @@ function FileTreePanel({
   sessionId: string | null;
   absolute: boolean;
 }) {
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
+
   return (
     <>
       <div className="overflow-y-auto" style={{ flex: "1 1 60%" }}>
@@ -104,6 +107,13 @@ function FileTreePanel({
           <div className="overflow-y-auto p-2 flex-1">
             {fileError ? (
               <div className="text-xs text-[var(--danger)]">{fileError}</div>
+            ) : selectedPath && isImageFile(selectedPath) ? (
+              <img
+                src={getImageUrl(selectedPath, absolute)}
+                alt={selectedPath}
+                className="max-w-full max-h-[400px] object-contain rounded-lg mx-auto cursor-zoom-in hover:opacity-90 transition-opacity"
+                onClick={() => setPreviewImage(getImageUrl(selectedPath, absolute))}
+              />
             ) : fileContent !== null ? (
               <pre className="text-xs leading-relaxed whitespace-pre-wrap text-[var(--text-primary)] font-mono">
                 {fileContent}
@@ -116,6 +126,28 @@ function FileTreePanel({
           </div>
         </div>
       )}
+
+      <Modal
+        open={!!previewImage}
+        onOpenChange={(o) => !o && setPreviewImage(null)}
+        size="full"
+        hideClose
+        title={null}
+      >
+        <div
+          className="flex items-center justify-center -mx-5 -my-4 cursor-zoom-out"
+          onClick={() => setPreviewImage(null)}
+          style={{ minHeight: "70vh" }}
+        >
+          {previewImage && (
+            <img
+              src={previewImage}
+              alt="Preview"
+              className="max-w-full max-h-[80vh] object-contain rounded-lg"
+            />
+          )}
+        </div>
+      </Modal>
     </>
   );
 }

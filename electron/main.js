@@ -1,5 +1,5 @@
 const { app, BrowserWindow } = require('electron');
-const { spawn } = require('child_process');
+const { spawn, execSync } = require('child_process');
 const path = require('path');
 const http = require('http');
 
@@ -10,6 +10,34 @@ let python = null;
 let win = null;
 
 function log(msg) { console.log(`[CrabAgent] ${msg}`); }
+
+function killExistingBackend() {
+  try {
+    const result = execSync(`lsof -ti:${PORT} 2>/dev/null || true`, { encoding: 'utf-8' });
+    const pids = result.trim().split('\n').filter(Boolean);
+    for (const pid of pids) {
+      try {
+        process.kill(Number(pid), 'SIGTERM');
+        log(`Killed existing process ${pid} on port ${PORT}`);
+      } catch (e) {
+        // process may have already exited
+      }
+    }
+    if (pids.length > 0) {
+      // wait for port to be freed
+      const deadline = Date.now() + 3000;
+      while (Date.now() < deadline) {
+        try {
+          execSync(`lsof -ti:${PORT} 2>/dev/null`);
+        } catch {
+          break;
+        }
+      }
+    }
+  } catch (e) {
+    // lsof not available, skip
+  }
+}
 
 function startBackend() {
   return new Promise((resolve, reject) => {
@@ -61,6 +89,7 @@ function waitForServer(url, maxWait = 60000) {
 }
 
 async function main() {
+  killExistingBackend();
   await startBackend();
   log('Waiting for backend...');
   await waitForServer(`${URL}/api/health`);

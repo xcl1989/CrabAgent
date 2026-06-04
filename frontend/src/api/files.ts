@@ -28,3 +28,19 @@ export async function readFile(path: string, absolute: boolean = false): Promise
   if (absolute) params.set("absolute", "true");
   return api.get<FileContent>(`/files/read?${params}`);
 }
+
+const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".ico", ".bmp", ".avif"]);
+
+export function isImageFile(path: string): boolean {
+  const ext = path.substring(path.lastIndexOf(".")).toLowerCase();
+  return IMAGE_EXTENSIONS.has(ext);
+}
+
+export function getImageUrl(path: string, absolute: boolean = false): string {
+  const token = localStorage.getItem("crab_token") || "";
+  const params = new URLSearchParams();
+  params.set("path", path);
+  params.set("absolute", String(absolute));
+  params.set("token", token);
+  return `/api/files/image?${params}`;
+}

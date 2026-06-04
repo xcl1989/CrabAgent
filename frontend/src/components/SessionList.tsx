@@ -6,7 +6,6 @@ import {
   Search,
   Plug,
   Clock,
-  Bot,
   Settings as SettingsIcon,
   GitBranch,
   MessageSquare,
@@ -26,8 +25,6 @@ interface Props {
   onOpenProviders: () => void;
   onOpenMcpServers: () => void;
   onOpenScheduledTasks: () => void;
-  onOpenAgentTeam: () => void;
-  /** Mobile drawer open state — only affects viewports < md */
   mobileOpen?: boolean;
   onMobileClose?: () => void;
 }
@@ -41,7 +38,6 @@ export default function SessionList({
   onOpenProviders,
   onOpenMcpServers,
   onOpenScheduledTasks,
-  onOpenAgentTeam,
   mobileOpen = false,
   onMobileClose,
 }: Props) {
@@ -138,12 +134,6 @@ export default function SessionList({
           onClick={onOpenScheduledTasks}
           icon={<Clock size={15} />}
           title="Scheduled Tasks"
-          color=""
-        />
-        <ToolButton
-          onClick={onOpenAgentTeam}
-          icon={<Bot size={15} />}
-          title="Agent Team"
           color=""
         />
         <ToolButton
@@ -291,11 +281,11 @@ export default function SessionList({
       </div>
 
       {/* Footer tools */}
-      <div className="p-2 border-t border-[var(--border-subtle)] grid grid-cols-2 gap-1">
+      <div className="p-2 border-t border-[var(--border-subtle)] flex gap-1">
         <button
           onClick={onOpenMcpServers}
           className={cn(
-            "flex items-center gap-1.5 px-2 py-1.5 rounded-md text-[11px] font-medium",
+            "flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-md text-[11px] font-medium",
             "bg-[var(--bg-tertiary)] border border-[var(--border)]",
             "hover:border-[var(--border-strong)] hover:text-[var(--text-primary)] transition-colors",
             "text-[var(--text-secondary)]",
@@ -308,7 +298,7 @@ export default function SessionList({
         <button
           onClick={onOpenScheduledTasks}
           className={cn(
-            "flex items-center gap-1.5 px-2 py-1.5 rounded-md text-[11px] font-medium",
+            "flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-md text-[11px] font-medium",
             "bg-[var(--bg-tertiary)] border border-[var(--border)]",
             "hover:border-[var(--border-strong)] hover:text-[var(--text-primary)] transition-colors",
             "text-[var(--text-secondary)]",
@@ -319,22 +309,9 @@ export default function SessionList({
           <span>Tasks</span>
         </button>
         <button
-          onClick={onOpenAgentTeam}
-          className={cn(
-            "flex items-center gap-1.5 px-2 py-1.5 rounded-md text-[11px] font-medium",
-            "bg-[var(--bg-tertiary)] border border-[var(--border)]",
-            "hover:border-[var(--border-strong)] hover:text-[var(--text-primary)] transition-colors",
-            "text-[var(--text-secondary)]",
-          )}
-          title="Agent Team"
-        >
-          <Bot size={12} className="text-[var(--accent-2)]" />
-          <span>Team</span>
-        </button>
-        <button
           onClick={onOpenProviders}
           className={cn(
-            "flex items-center gap-1.5 px-2 py-1.5 rounded-md text-[11px] font-medium",
+            "flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-md text-[11px] font-medium",
             "bg-[var(--bg-tertiary)] border border-[var(--border)]",
             "hover:border-[var(--border-strong)] hover:text-[var(--text-primary)] transition-colors",
             "text-[var(--text-secondary)]",

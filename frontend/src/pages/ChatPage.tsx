@@ -33,7 +33,6 @@ import FileBrowser from "../components/FileBrowser";
 import TodoWidget from "../components/TodoWidget";
 import { NotificationBell } from "../components/NotificationBell";
 import { ScheduledTaskPanel } from "../components/ScheduledTaskPanel";
-import { AgentTeamPanel } from "../components/AgentTeamPanel";
 import { TaskBoard } from "../components/TaskBoard";
 import { AgentBar } from "../components/AgentBar";
 import { DelegateModal } from "../components/DelegateModal";
@@ -104,7 +103,6 @@ export default function ChatPage() {
   const [showProviders, setShowProviders] = useState(false);
   const [showMcpServers, setShowMcpServers] = useState(false);
   const [showScheduledTasks, setShowScheduledTasks] = useState(false);
-  const [showAgentTeam, setShowAgentTeam] = useState(false);
   const [viewingSubAgent, setViewingSubAgent] = useState<string | null>(null);
   const [showDelegate, setShowDelegate] = useState(false);
   const [showResultCompare, setShowResultCompare] = useState(false);
@@ -268,7 +266,7 @@ export default function ChatPage() {
       }
       await sessionsApi.sendPrompt(
         activeSession.session_id,
-        text || "请分析这张图片",
+        text || "Please analyze this image",
         selectedModel,
         images.length > 0 ? images : undefined,
         selectedAgent,
@@ -376,7 +374,6 @@ export default function ChatPage() {
         onOpenProviders={() => setShowProviders(true)}
         onOpenMcpServers={() => setShowMcpServers(true)}
         onOpenScheduledTasks={() => setShowScheduledTasks(true)}
-        onOpenAgentTeam={() => setShowAgentTeam(true)}
         mobileOpen={mobileSidebarOpen}
         onMobileClose={() => setMobileSidebarOpen(false)}
       />
@@ -596,7 +593,7 @@ export default function ChatPage() {
                   onClick={() => setShowDelegate(true)}
                   disabled={sending || replaying}
                   title="Delegate to agent team"
-                  className="hidden sm:flex h-10 w-10 text-[var(--accent-2)] hover:text-[var(--accent-2)] hover:bg-[var(--accent-2-bg)] border-[var(--accent-2-border,var(--border))]"
+                  className="hidden sm:flex h-10 w-10 text-[var(--accent-2)] hover:text-[var(--accent-2)] hover:bg-[var(--accent-2-bg)] border-[var(--border)]"
                 >
                   <Bot size={15} />
                 </Button>
@@ -768,10 +765,6 @@ export default function ChatPage() {
           onClose={() => setShowScheduledTasks(false)}
           onSwitchSession={onSelectSessionById}
         />
-      )}
-
-      {showAgentTeam && (
-        <AgentTeamPanel onClose={() => setShowAgentTeam(false)} />
       )}
 
       {showDelegate && activeSession && (

@@ -263,10 +263,11 @@ export function dbMessagesToChat(msgs: Message[]): ChatMessage[] {
 
     if (m.role === "assistant" && m.tool_calls) {
       const tc = typeof m.tool_calls === "string" ? JSON.parse(m.tool_calls) : m.tool_calls;
-      if (m.content || m.reasoning_content) {
-        const base: ChatMessage = { id: `db-${m.id}-text`, role: "assistant", content: m.content || "" };
-        if (m.reasoning_content) base.reasoning_content = m.reasoning_content;
-        result.push(base);
+      if (m.reasoning_content) {
+        result.push({ id: `db-${m.id}-think`, role: "thinking", content: m.reasoning_content });
+      }
+      if (m.content) {
+        result.push({ id: `db-${m.id}-text`, role: "assistant", content: m.content });
       }
       for (const tcItem of tc as { function: { name?: string; arguments?: unknown }; id: string }[]) {
         const fn = tcItem.function || {};
@@ -284,13 +285,15 @@ export function dbMessagesToChat(msgs: Message[]): ChatMessage[] {
     }
 
     if (m.role === "sub_agent" && m.content) {
+      const subId = `db-sub-${m.id}`;
       try {
         const data = JSON.parse(m.content);
         if (typeof data.text === "string") {
           result.push({
             id: `db-${m.id}`,
             role: "sub_agent",
-            content: data.text,
+            content: data.detail || data.text,
+            sub_agent_id: subId,
             sub_agent_name: data.agent_name || m.name || "",
             sub_agent_display: data.display_name || data.agent_name || m.name || "",
             sub_agent_elapsed: data.elapsed,
@@ -303,6 +306,7 @@ export function dbMessagesToChat(msgs: Message[]): ChatMessage[] {
           id: `db-${m.id}`,
           role: "sub_agent",
           content: m.content,
+          sub_agent_id: subId,
           sub_agent_name: m.name || "",
           sub_agent_display: m.name || "",
         });
@@ -310,8 +314,10 @@ export function dbMessagesToChat(msgs: Message[]): ChatMessage[] {
       continue;
     }
 
+    if (m.reasoning_content && m.role === "assistant") {
+      result.push({ id: `db-${m.id}-think`, role: "thinking", content: m.reasoning_content });
+    }
     const base: ChatMessage = { id: `db-${m.id}`, role: m.role, content: m.content || "" };
-    if (m.reasoning_content) base.reasoning_content = m.reasoning_content;
     if (m.role === "user" && m.content && m.content.startsWith("[{")) {
       try {
         const blocks = JSON.parse(m.content);
