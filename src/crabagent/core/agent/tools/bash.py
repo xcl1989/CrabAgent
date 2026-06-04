@@ -56,9 +56,18 @@ async def bash_command(
     if background:
         return await _run_background(command, workdir)
 
+    # Source user profile to get correct PATH (macOS Python, homebrew, etc.)
+    _profile_cmd = (
+        "export SHELL=$(echo $SHELL 2>/dev/null || echo /bin/sh); "
+        "[ -f ~/.zprofile ] && . ~/.zprofile; "
+        "[ -f ~/.bash_profile ] && . ~/.bash_profile; "
+        "[ -f ~/.profile ] && . ~/.profile; "
+    )
+    full_command = _profile_cmd + command
+
     try:
         proc = await asyncio.create_subprocess_shell(
-            command,
+            full_command,
             stdin=subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -145,7 +154,13 @@ async def _run_background(command: str, workdir: str | None = None) -> str:
     log_dir = tempfile.gettempdir()
     log_file = os.path.join(log_dir, f"crabagent-bg-{os.getpid()}.log")
 
-    wrapped = f"nohup {command} > {log_file} 2>&1 & echo $!"
+    _profile_cmd = (
+        "export SHELL=$(echo $SHELL 2>/dev/null || echo /bin/sh); "
+        "[ -f ~/.zprofile ] && . ~/.zprofile; "
+        "[ -f ~/.bash_profile ] && . ~/.bash_profile; "
+        "[ -f ~/.profile ] && . ~/.profile; "
+    )
+    wrapped = f"nohup {_profile_cmd} {command} > {log_file} 2>&1 & echo $!"
 
     try:
         proc = await asyncio.create_subprocess_shell(
