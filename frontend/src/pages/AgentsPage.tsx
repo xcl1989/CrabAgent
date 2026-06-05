@@ -452,6 +452,7 @@ export default function AgentsPage() {
                     setSelectedName(a.name);
                     setEditing(false);
                     setShowCreate(false);
+                    setEditingDefault(false);
                   }}
                   className={cn(
                     "w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-left transition-all",
