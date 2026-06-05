@@ -598,6 +598,7 @@ export default function ChatPage() {
                     <ModelSelector
                       providerModels={providerModels}
                       selectedModel={selectedModel}
+                      selectedProvider={selectedProvider}
                       onChange={(modelId, providerName) => {
                         setSelectedModel(modelId);
                         setSelectedProvider(providerName);

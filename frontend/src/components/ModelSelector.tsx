@@ -6,6 +6,7 @@ import { ProviderModels } from "../hooks/useModelSelector";
 interface Props {
   providerModels: ProviderModels[];
   selectedModel: string;
+  selectedProvider?: string | null;
   onChange: (modelId: string, providerName: string) => void;
   disabled?: boolean;
   className?: string;
@@ -14,12 +15,18 @@ interface Props {
 export default function ModelSelector({
   providerModels,
   selectedModel,
+  selectedProvider,
   onChange,
   disabled,
   className,
 }: Props) {
   const selectedProviderRef = useRef<string | null>(null);
   const [open, setOpen] = useState(false);
+
+  // Sync ref when selectedProvider changes from outside (e.g. session load)
+  if (selectedProvider !== undefined && selectedProvider !== selectedProviderRef.current) {
+    selectedProviderRef.current = selectedProvider;
+  }
   const [highlighted, setHighlighted] = useState<string>(
     selectedProviderRef.current ? `${selectedProviderRef.current}/${selectedModel}` : selectedModel
   );
