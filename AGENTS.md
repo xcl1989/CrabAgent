@@ -1,8 +1,8 @@
 # Project Rules
 
 ## Version
-- Current: **0.8.1** (long-term memory middleware, DOM-aware browser tool with vision screenshot embedding)
-- Version in 4 places: `pyproject.toml`, `src/crabagent/serve/app.py` (`create_app` + `/health`), CLI banner in `src/crabagent/cli/__main__.py` (`_print_banner`), TUI banner in `src/crabagent/cli/tui.py`
+- Current: **0.9.3** (Project Memory, reflect signal detection, README rewrite)
+- Version in 6 places: `pyproject.toml`, `src/crabagent/serve/app.py` (`create_app` + `/health`), CLI banner in `src/crabagent/cli/__main__.py` (`_print_banner`), TUI banner in `src/crabagent/cli/tui.py`
 - Bump all four when changing version
 
 ## Commands
