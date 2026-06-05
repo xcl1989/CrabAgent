@@ -400,8 +400,12 @@ async def plan_task(task: str, context=None) -> str:
 
     agent_lines = []
     for a in agents:
-        tools_info = f" Tools: {', '.join(a.get('tools', []))}" if a.get("tools") else ""
-        agent_lines.append(f"- **{a['display_name']}** (`{a['name']}`): {a['role']}. {a['goal']}{tools_info}")
+        perms = a.get("tool_permissions", {})
+        denied = [k for k, v in perms.items() if v == "deny"]
+        perm_info = ""
+        if denied:
+            perm_info = f" (restricted: {', '.join(denied)})"
+        agent_lines.append(f"- **{a['display_name']}** (`{a['name']}`): {a['role']}. {a['goal']}{perm_info}")
     agent_text = "\n".join(agent_lines)
 
     plan_prompt = (

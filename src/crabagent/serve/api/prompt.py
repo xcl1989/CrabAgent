@@ -284,7 +284,7 @@ async def prompt_async(
         agent_def = await get_agent(effective_agent)
         if agent_def:
             context.tool_registry = filter_tool_registry(
-                context.tool_registry, agent_def.get("tools"), context.tool_permissions
+                context.tool_registry, tool_permissions=context.tool_permissions
             )
             if agent_def.get("model"):
                 context.model = agent_def["model"]

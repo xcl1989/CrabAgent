@@ -434,17 +434,11 @@ DEFAULT_AGENTS = [
             "You are an experienced web researcher with expertise in finding accurate and relevant information quickly."
         ),
         "icon": "🔍",
-        "tools": [
-            "web_search",
-            "web_scrape",
-            "browser",
-            "read",
-            "glob",
-            "grep",
-            "shared_get",
-            "shared_put",
-            "shared_list",
-        ],
+        "tool_permissions": {
+            "bash": "deny",
+            "write": "deny",
+            "edit": "deny",
+        },
     },
     {
         "name": "analyst",
@@ -453,34 +447,60 @@ DEFAULT_AGENTS = [
         "goal": (
             "Analyze data, compare findings, identify patterns, and generate structured reports with clear conclusions."
         ),
-        "backstory": ("You are a meticulous data analyst who excels at turning raw data into actionable insights."),
+        "backstory": "You are a meticulous data analyst who excels at turning raw data into actionable insights.",
         "icon": "📊",
-        "tools": ["bash", "read", "glob", "grep", "shared_get", "shared_put", "shared_list"],
+        "tool_permissions": {
+            "write": "deny",
+            "edit": "deny",
+            "web_search": "deny",
+            "web_scrape": "deny",
+            "browser": "deny",
+        },
     },
     {
         "name": "coder",
         "display_name": "Code Expert",
         "role": "Code Expert",
-        "goal": ("Write, review, debug, optimize, and refactor code. Generate clean, well-documented solutions."),
+        "goal": "Write, review, debug, optimize, and refactor code. Generate clean, well-documented solutions.",
         "backstory": (
             "You are a senior software engineer with deep expertise "
             "across multiple programming languages and frameworks."
         ),
         "icon": "💻",
-        "tools": ["bash", "read", "write", "edit", "glob", "grep", "shared_get", "shared_put", "shared_list"],
+        "tool_permissions": {
+            "web_search": "deny",
+            "web_scrape": "deny",
+            "browser": "deny",
+        },
     },
     {
         "name": "writer",
         "display_name": "Content Writer",
         "role": "Content Writer",
-        "goal": ("Write, edit, translate, and format content. Produce clear, engaging, and well-structured documents."),
+        "goal": "Write, edit, translate, and format content. Produce clear, engaging, and well-structured documents.",
         "backstory": (
             "You are a professional writer skilled at transforming complex information into clear, readable content."
         ),
         "icon": "📝",
-        "tools": ["read", "write", "edit", "glob", "grep", "web_search", "shared_get", "shared_put", "shared_list"],
+        "tool_permissions": {
+            "bash": "deny",
+        },
     },
 ]
+
+
+def _migrate_tools_to_permissions(existing, agent_data: dict, _json) -> None:
+    existing_perms = {}
+    if existing.tool_permissions:
+        try:
+            existing_perms = _json.loads(existing.tool_permissions)
+        except Exception:
+            pass
+    if existing_perms:
+        return
+    new_perms = agent_data.get("tool_permissions", {})
+    if new_perms:
+        existing.tool_permissions = _json.dumps(new_perms)
 
 
 async def _ensure_default_agents():
@@ -496,8 +516,7 @@ async def _ensure_default_agents():
                 if not existing.icon:
                     existing.icon = agent_data["icon"]
                 existing.is_default = True
-                if not existing.tools and agent_data.get("tools"):
-                    existing.tools = _json.dumps(agent_data["tools"])
+                _migrate_tools_to_permissions(existing, agent_data, _json)
                 continue
             db.add(
                 AgentProfile(
@@ -509,7 +528,7 @@ async def _ensure_default_agents():
                     backstory=agent_data["backstory"],
                     icon=agent_data["icon"],
                     is_default=True,
-                    tools=_json.dumps(agent_data.get("tools", [])),
+                    tool_permissions=_json.dumps(agent_data.get("tool_permissions", {})),
                 )
             )
         await db.commit()

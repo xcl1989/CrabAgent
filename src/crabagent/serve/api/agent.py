@@ -55,7 +55,6 @@ class CreateAgentRequest(BaseModel):
     model: str = ""
     icon: str = "🤖"
     allow_delegation: bool = True
-    tools: list[str] | None = None
     tool_permissions: dict[str, str] | None = None
 
 
@@ -68,7 +67,6 @@ class UpdateAgentRequest(BaseModel):
     icon: str | None = None
     allow_delegation: bool | None = None
     enabled: bool | None = None
-    tools: list[str] | None = None
     tool_permissions: dict[str, str] | None = None
 
 
@@ -142,7 +140,6 @@ async def create_agent_profile(
         icon=req.icon,
         allow_delegation=req.allow_delegation,
         is_default=False,
-        tools=_json.dumps(req.tools) if req.tools else "",
         tool_permissions=_json.dumps(req.tool_permissions) if req.tool_permissions else "{}",
     )
     db.add(profile)
@@ -180,11 +177,6 @@ async def update_agent_profile(
         profile.allow_delegation = req.allow_delegation
     if req.enabled is not None:
         profile.enabled = req.enabled
-    if req.tools is not None:
-        import json as _json
-
-        profile.tools = _json.dumps(req.tools) if req.tools else ""
-
     if req.tool_permissions is not None:
         import json as _json
 

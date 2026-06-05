@@ -59,7 +59,6 @@ type FormState = {
   backstory: string;
   model: string;
   icon: string;
-  tools: string[];
   tool_permissions: Record<string, Permission>;
 };
 
@@ -70,7 +69,6 @@ const emptyForm: FormState = {
   backstory: "",
   model: "",
   icon: "🤖",
-  tools: [],
   tool_permissions: {},
 };
 
@@ -165,7 +163,6 @@ export default function AgentsPage() {
       backstory: selected.backstory || "",
       model: selected.model || "",
       icon: selected.icon || "🤖",
-      tools: selected.tools || [],
       tool_permissions: (selected.tool_permissions || {}) as Record<string, Permission>,
     });
     setEditing(true);
@@ -217,7 +214,6 @@ export default function AgentsPage() {
         backstory: form.backstory,
         model: form.model,
         icon: form.icon,
-        tools: form.tools,
         tool_permissions: form.tool_permissions,
       });
       toast.success("Agent created");
@@ -372,10 +368,7 @@ export default function AgentsPage() {
                       type="button"
                       onClick={() => {
                         const tp = { ...form.tool_permissions, [ti.name]: p };
-                        const tools = p === "deny"
-                          ? form.tools.filter((x) => x !== ti.name)
-                          : form.tools.includes(ti.name) ? form.tools : [...form.tools, ti.name];
-                        setForm({ ...form, tools, tool_permissions: tp });
+                        setForm({ ...form, tool_permissions: tp });
                       }}
                       className={cn(
                         "text-[9px] px-1.5 py-0.5 rounded font-medium border transition-colors",
@@ -711,23 +704,31 @@ export default function AgentsPage() {
                         </p>
                       </div>
                     )}
-                    {selected.tools && selected.tools.length > 0 && (
-                      <div>
-                        <label className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-tertiary)]">
-                          Tools
-                        </label>
-                        <div className="flex flex-wrap gap-1 mt-1.5">
-                          {selected.tools.map((t) => (
-                            <span
-                              key={t}
-                              className="text-[10px] px-1.5 py-0.5 rounded font-mono bg-[var(--bg-tertiary)] text-[var(--text-secondary)] border border-[var(--border)]"
-                            >
-                              {t}
-                            </span>
-                          ))}
+                    {(() => {
+                      const perms = selected.tool_permissions || {};
+                      const denied = Object.entries(perms).filter(([, v]) => v === "deny");
+                      const confirmed = Object.entries(perms).filter(([, v]) => v === "confirm");
+                      if (!denied.length && !confirmed.length) return null;
+                      return (
+                        <div>
+                          <label className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-tertiary)]">
+                            Permissions
+                          </label>
+                          <div className="flex flex-wrap gap-1 mt-1.5">
+                            {confirmed.map(([t]) => (
+                              <span key={t} className="text-[10px] px-1.5 py-0.5 rounded font-mono bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                                {t} (confirm)
+                              </span>
+                            ))}
+                            {denied.map(([t]) => (
+                              <span key={t} className="text-[10px] px-1.5 py-0.5 rounded font-mono bg-red-500/15 text-red-400 border border-red-500/30 line-through">
+                                {t}
+                              </span>
+                            ))}
+                          </div>
                         </div>
-                      </div>
-                    )}
+                      );
+                    })()}
 
                     {/* Learning Stats */}
                     {learningAgents.includes(selected.name) && (

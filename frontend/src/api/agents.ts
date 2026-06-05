@@ -26,7 +26,6 @@ export interface CreateAgentRequest {
   model?: string;
   icon?: string;
   allow_delegation?: boolean;
-  tools?: string[];
   tool_permissions?: Record<string, string>;
 }
 
@@ -39,7 +38,6 @@ export interface UpdateAgentRequest {
   icon?: string;
   allow_delegation?: boolean;
   enabled?: boolean;
-  tools?: string[];
   tool_permissions?: Record<string, string>;
 }
 

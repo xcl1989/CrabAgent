@@ -162,10 +162,12 @@ async def build_team_prompt() -> str:
         "",
     ]
     for a in agents:
-        tools_info = ""
-        if a.get("tools"):
-            tools_info = f" Tools: {', '.join(a['tools'])}"
-        lines.append(f"- **{a['display_name']}** (`{a['name']}`): {a['role']}. {a['goal']}{tools_info}")
+        perms = a.get("tool_permissions", {})
+        denied = [k for k, v in perms.items() if v == "deny"]
+        perm_info = ""
+        if denied:
+            perm_info = f" (restricted: {', '.join(denied)})"
+        lines.append(f"- **{a['display_name']}** (`{a['name']}`): {a['role']}. {a['goal']}{perm_info}")
     lines.extend(
         [
             "",
@@ -394,32 +396,22 @@ async def spawn_sub_agent(
 
     sub_registry = ToolRegistry()
 
-    agent_tools = agent_def.get("tools", [])
     agent_tool_perms = agent_def.get("tool_permissions", {})
     current_depth = parent_context.metadata.get("_sub_agent_depth", 0)
     has_shared = False
     can_request_help = False
 
-    if agent_tools:
-        allowed = set(agent_tools) | _SHARED_TOOLS
-        for name, tool in parent_context.tool_registry._tools.items():
-            if name in _DELEGATION_TOOLS:
-                continue
-            if agent_tool_perms.get(name) == "deny":
-                continue
-            if name in allowed:
-                sub_registry._tools[name] = tool
-        has_shared = bool(_SHARED_TOOLS & allowed)
-    else:
-        for name, tool in parent_context.tool_registry._tools.items():
-            if name in _DELEGATION_TOOLS:
-                continue
+    for name, tool in parent_context.tool_registry._tools.items():
+        if name in _DELEGATION_TOOLS:
+            continue
+        if name in _MEMORY_TOOLS:
             sub_registry._tools[name] = tool
-        has_shared = True
+            continue
+        if agent_tool_perms.get(name) == "deny":
+            continue
+        sub_registry._tools[name] = tool
 
-    for mname, mtool in parent_context.tool_registry._tools.items():
-        if mname in _MEMORY_TOOLS and mname not in sub_registry._tools:
-            sub_registry._tools[mname] = mtool
+    has_shared = bool(_SHARED_TOOLS & set(sub_registry._tools.keys()))
 
     if agent_def.get("allow_delegation") and current_depth < max_depth:
         parent_tools = parent_context.tool_registry._tools
