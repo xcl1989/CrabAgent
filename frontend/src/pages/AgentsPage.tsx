@@ -20,6 +20,10 @@ import {
   getAgentStats,
   AgentMemoryItem,
   AgentTaskStats,
+  ToolInfo,
+  listTools,
+  getDefaultToolPermissions,
+  setDefaultToolPermissions,
 } from "../api/agents";
 import { Button, Input, Textarea, ConfirmDialog, EmptyState } from "../components/ui";
 import { toast } from "../components/ui/Toast";
@@ -46,6 +50,8 @@ const AVAILABLE_TOOLS = [
   "shared_list",
 ];
 
+type Permission = "auto" | "confirm" | "deny";
+
 type FormState = {
   display_name: string;
   role: string;
@@ -54,6 +60,7 @@ type FormState = {
   model: string;
   icon: string;
   tools: string[];
+  tool_permissions: Record<string, Permission>;
 };
 
 const emptyForm: FormState = {
@@ -64,7 +71,21 @@ const emptyForm: FormState = {
   model: "",
   icon: "🤖",
   tools: [],
+  tool_permissions: {},
 };
+
+const PERM_LABELS: Record<Permission, string> = { auto: "Auto", confirm: "Confirm", deny: "Deny" };
+const PERM_COLORS: Record<Permission, string> = {
+  auto: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
+  confirm: "bg-amber-500/15 text-amber-400 border-amber-500/30",
+  deny: "bg-red-500/15 text-red-400 border-red-500/30",
+};
+const PERM_COLORS_ACTIVE: Record<Permission, string> = {
+  auto: "bg-emerald-500 text-white border-emerald-500",
+  confirm: "bg-amber-500 text-white border-amber-500",
+  deny: "bg-red-500 text-white border-red-500",
+};
+const DEFAULT_KEY = "__default__";
 
 export default function AgentsPage() {
   const [agents, setAgents] = useState<AgentProfile[]>([]);
@@ -82,6 +103,10 @@ export default function AgentsPage() {
   const [agentMemories, setAgentMemories] = useState<AgentMemoryItem[]>([]);
   const [loadingLearn, setLoadingLearn] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
+  const [toolInfoList, setToolInfoList] = useState<ToolInfo[]>([]);
+  const [defaultPerms, setDefaultPerms] = useState<Record<string, Permission>>({});
+  const [editingDefault, setEditingDefault] = useState(false);
+  const [defaultForm, setDefaultForm] = useState<Record<string, Permission>>({});
 
   const fetchAgents = async () => {
     try {
@@ -92,6 +117,8 @@ export default function AgentsPage() {
   useEffect(() => {
     fetchAgents().then(() => setInitialLoading(false));
     listLearningAgents().then(setLearningAgents).catch(() => {});
+    listTools().then(setToolInfoList).catch(() => {});
+    getDefaultToolPermissions().then((r) => setDefaultPerms((r.tool_permissions || {}) as Record<string, Permission>)).catch(() => {});
   }, []);
 
   const selected = agents.find((a) => a.name === selectedName) || null;
@@ -139,6 +166,7 @@ export default function AgentsPage() {
       model: selected.model || "",
       icon: selected.icon || "🤖",
       tools: selected.tools || [],
+      tool_permissions: (selected.tool_permissions || {}) as Record<string, Permission>,
     });
     setEditing(true);
     setError("");
@@ -190,6 +218,7 @@ export default function AgentsPage() {
         model: form.model,
         icon: form.icon,
         tools: form.tools,
+        tool_permissions: form.tool_permissions,
       });
       toast.success("Agent created");
       await fetchAgents();
@@ -226,7 +255,32 @@ export default function AgentsPage() {
   const cancelForm = () => {
     setEditing(false);
     setShowCreate(false);
+    setEditingDefault(false);
     setError("");
+  };
+
+  const startEditDefault = () => {
+    setDefaultForm({ ...defaultPerms });
+    setEditingDefault(true);
+    setSelectedName(null);
+    setEditing(false);
+    setShowCreate(false);
+    setError("");
+  };
+
+  const handleSaveDefault = async () => {
+    setSaving(true);
+    setError("");
+    try {
+      await setDefaultToolPermissions(defaultForm);
+      setDefaultPerms({ ...defaultForm });
+      toast.success("Default permissions saved");
+      setEditingDefault(false);
+    } catch (e: any) {
+      setError(e?.message || "Save failed");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const renderForm = () => (
@@ -296,48 +350,49 @@ export default function AgentsPage() {
       />
       <div>
         <label className="block text-[11px] font-medium text-[var(--text-secondary)] mb-1.5">
-          Tools{" "}
-          {form.tools.length === 0 && (
-            <span className="font-normal text-[var(--text-tertiary)]">
-              (all enabled)
-            </span>
-          )}
+          Tool Permissions
         </label>
-        <div className="flex flex-wrap gap-1">
-          {AVAILABLE_TOOLS.map((t) => {
-            const sel = form.tools.includes(t);
+        <div className="space-y-1">
+          {(toolInfoList.length > 0 ? toolInfoList : AVAILABLE_TOOLS.map((t) => ({ name: t, description: "", default_permission: "auto" as const }))).map((ti) => {
+            const perm = form.tool_permissions[ti.name];
+            const resolved: Permission = perm || (ti.default_permission as Permission);
+            const isExplicit = !!perm;
             return (
-              <button
-                key={t}
-                type="button"
-                onClick={() =>
-                  setForm({
-                    ...form,
-                    tools: sel
-                      ? form.tools.filter((x) => x !== t)
-                      : [...form.tools, t],
-                  })
-                }
-                className={cn(
-                  "text-[10px] px-2 py-1 rounded-md font-mono transition-colors",
-                  sel
-                    ? "bg-[var(--brand)] text-white"
-                    : "bg-[var(--bg-tertiary)] text-[var(--text-secondary)] border border-[var(--border)] hover:text-[var(--text-primary)]",
-                )}
-              >
-                {t}
-              </button>
+              <div key={ti.name} className="flex items-center gap-2">
+                <span className={cn(
+                  "text-[10px] font-mono w-24 shrink-0 truncate",
+                  resolved === "deny" ? "text-[var(--text-tertiary)] line-through" : "text-[var(--text-secondary)]",
+                )}>
+                  {ti.name}
+                </span>
+                <div className="flex gap-0.5">
+                  {(["auto", "confirm", "deny"] as Permission[]).map((p) => (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => {
+                        const tp = { ...form.tool_permissions, [ti.name]: p };
+                        const tools = p === "deny"
+                          ? form.tools.filter((x) => x !== ti.name)
+                          : form.tools.includes(ti.name) ? form.tools : [...form.tools, ti.name];
+                        setForm({ ...form, tools, tool_permissions: tp });
+                      }}
+                      className={cn(
+                        "text-[9px] px-1.5 py-0.5 rounded font-medium border transition-colors",
+                        resolved === p
+                          ? PERM_COLORS_ACTIVE[p]
+                          : PERM_COLORS[p],
+                        !isExplicit && resolved === p && "opacity-60",
+                      )}
+                      title={!isExplicit && resolved === p ? "Default (click to override)" : PERM_LABELS[p]}
+                    >
+                      {PERM_LABELS[p]}
+                    </button>
+                  ))}
+                </div>
+              </div>
             );
           })}
-          {form.tools.length > 0 && (
-            <button
-              type="button"
-              onClick={() => setForm({ ...form, tools: [] })}
-              className="text-[10px] px-2 py-1 rounded-md bg-[var(--bg-tertiary)] text-[var(--text-tertiary)] border border-[var(--border)] hover:text-[var(--text-secondary)]"
-            >
-              clear
-            </button>
-          )}
         </div>
       </div>
       <div className="flex gap-2 pt-1">
@@ -439,12 +494,82 @@ export default function AgentsPage() {
               ))}
             </div>
             )}
+            {!initialLoading && (
+              <div className="mt-3 pt-3 border-t border-[var(--border)]">
+                <button
+                  onClick={startEditDefault}
+                  className={cn(
+                    "w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-left transition-all",
+                    editingDefault
+                      ? "bg-[var(--bg-tertiary)] ring-1 ring-[var(--border-strong)]"
+                      : "hover:bg-[var(--bg-tertiary)]/60",
+                  )}
+                >
+                  <span className="text-lg w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-[var(--bg-elevated)]">
+                    ⚙️
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[13px] font-medium text-[var(--text-primary)]">
+                      Default
+                    </div>
+                    <div className="text-[10px] text-[var(--text-tertiary)]">
+                      Default tool permissions
+                    </div>
+                  </div>
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
         {/* Right: detail panel */}
         <div className="flex-1 overflow-y-auto bg-[var(--bg-primary)]">
-          {!selected && !showCreate && (
+          {editingDefault && (
+            <div className="max-w-2xl mx-auto p-6">
+              <h2 className="text-lg font-semibold text-[var(--text-primary)] mb-4">
+                Default Tool Permissions
+              </h2>
+              <p className="text-xs text-[var(--text-tertiary)] mb-4">
+                These permissions apply when an agent does not have its own override.
+              </p>
+              <div className="space-y-1">
+                {(toolInfoList.length > 0 ? toolInfoList : AVAILABLE_TOOLS.map((t) => ({ name: t, description: "", default_permission: "auto" as Permission }))).map((ti) => {
+                  const perm = defaultForm[ti.name];
+                  const resolved: Permission = perm || (ti.default_permission as Permission) || "auto";
+                  return (
+                    <div key={ti.name} className="flex items-center gap-2">
+                      <span className="text-[10px] font-mono w-28 shrink-0 truncate text-[var(--text-secondary)]">
+                        {ti.name}
+                      </span>
+                      {(["auto", "confirm", "deny"] as Permission[]).map((p) => (
+                        <button
+                          key={p}
+                          type="button"
+                          onClick={() => setDefaultForm({ ...defaultForm, [ti.name]: p })}
+                          className={cn(
+                            "text-[9px] px-1.5 py-0.5 rounded font-medium border transition-colors",
+                            resolved === p ? PERM_COLORS_ACTIVE[p] : PERM_COLORS[p],
+                          )}
+                        >
+                          {PERM_LABELS[p]}
+                        </button>
+                      ))}
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="flex gap-2 pt-4">
+                <Button variant="brand" loading={saving} onClick={handleSaveDefault}>
+                  Save
+                </Button>
+                <Button variant="ghost" onClick={cancelForm}>
+                  Cancel
+                </Button>
+              </div>
+              {error && <p className="mt-2 text-xs text-red-400">{error}</p>}
+            </div>
+          )}
+          {!selected && !showCreate && !editingDefault && (
             <div className="flex items-center justify-center h-full">
               <EmptyState
                 icon={

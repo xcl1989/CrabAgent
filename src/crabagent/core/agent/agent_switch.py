@@ -14,13 +14,19 @@ _ALWAYS_BLOCKED = {
 }
 
 
-def filter_tool_registry(full_registry: ToolRegistry, agent_tools: list[str] | None) -> ToolRegistry:
+def filter_tool_registry(
+    full_registry: ToolRegistry,
+    agent_tools: list[str] | None,
+    tool_permissions: dict[str, str] | None = None,
+) -> ToolRegistry:
     filtered = ToolRegistry()
     allowed = set(agent_tools or []) | get_shared_tools() | get_memory_tools()
     blocked = get_delegation_tools() | _ALWAYS_BLOCKED
 
     for name, tool in full_registry._tools.items():
         if name in blocked:
+            continue
+        if tool_permissions and tool_permissions.get(name) == "deny":
             continue
         if name in allowed:
             filtered._tools[name] = tool

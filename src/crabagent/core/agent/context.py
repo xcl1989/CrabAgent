@@ -28,6 +28,7 @@ class AgentContext:
     total_tokens: int = 0
     visible_tokens: int = 0
     approved_tools: set[str] = field(default_factory=set)
+    tool_permissions: dict[str, str] = field(default_factory=dict)
     confirm_callback: Callable[[str, dict[str, Any]], Awaitable[bool]] | None = None
     ask_callback: Callable[[str, list[str] | None], Awaitable[str]] | None = None
     middlewares: MiddlewareChain | None = None

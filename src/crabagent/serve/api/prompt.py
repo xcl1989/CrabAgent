@@ -264,13 +264,28 @@ async def prompt_async(
     context.current_agent = effective_agent
     context.metadata["_current_agent"] = effective_agent
 
+    from crabagent.core.agent.agents import get_agent as _get_agent
+
+    if effective_agent == "default":
+        _default_profile = await _get_agent("__default__")
+        if _default_profile:
+            tp = _default_profile.get("tool_permissions", {})
+            context.tool_permissions = tp if isinstance(tp, dict) else {}
+    else:
+        agent_def = await _get_agent(effective_agent)
+        if agent_def:
+            tp = agent_def.get("tool_permissions", {})
+            context.tool_permissions = tp if isinstance(tp, dict) else {}
+
     if effective_agent != "default":
         from crabagent.core.agent.agent_switch import filter_tool_registry
         from crabagent.core.agent.agents import build_agent_switch_msg, get_agent
 
         agent_def = await get_agent(effective_agent)
         if agent_def:
-            context.tool_registry = filter_tool_registry(context.tool_registry, agent_def.get("tools"))
+            context.tool_registry = filter_tool_registry(
+                context.tool_registry, agent_def.get("tools"), context.tool_permissions
+            )
             if agent_def.get("model"):
                 context.model = agent_def["model"]
             context.messages.append(build_agent_switch_msg(agent_def))

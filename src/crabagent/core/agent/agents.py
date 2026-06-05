@@ -40,6 +40,12 @@ async def load_agent_registry() -> list[dict]:
                     tools_list = _json.loads(r.tools)
                 except Exception:
                     pass
+            tool_perms = {}
+            if r.tool_permissions:
+                try:
+                    tool_perms = _json.loads(r.tool_permissions)
+                except Exception:
+                    pass
             _registry_cache.append(
                 {
                     "name": r.name,
@@ -52,6 +58,7 @@ async def load_agent_registry() -> list[dict]:
                     "icon": r.icon or "",
                     "is_default": r.is_default,
                     "tools": tools_list,
+                    "tool_permissions": tool_perms,
                 }
             )
     _registry_loaded = True
@@ -388,6 +395,7 @@ async def spawn_sub_agent(
     sub_registry = ToolRegistry()
 
     agent_tools = agent_def.get("tools", [])
+    agent_tool_perms = agent_def.get("tool_permissions", {})
     current_depth = parent_context.metadata.get("_sub_agent_depth", 0)
     has_shared = False
     can_request_help = False
@@ -396,6 +404,8 @@ async def spawn_sub_agent(
         allowed = set(agent_tools) | _SHARED_TOOLS
         for name, tool in parent_context.tool_registry._tools.items():
             if name in _DELEGATION_TOOLS:
+                continue
+            if agent_tool_perms.get(name) == "deny":
                 continue
             if name in allowed:
                 sub_registry._tools[name] = tool
@@ -431,6 +441,7 @@ async def spawn_sub_agent(
     )
 
     sub_context.confirm_callback = None
+    sub_context.tool_permissions = agent_tool_perms
     sub_context.metadata["_sub_agent_name"] = agent_name
     sub_context.metadata["_sub_agent_depth"] = current_depth + 1
 

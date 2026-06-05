@@ -56,6 +56,16 @@ class ToolRegistry:
     def list_tools(self) -> list[ToolInfo]:
         return list(self._tools.values())
 
+    def tool_info_list(self) -> list[dict]:
+        return [
+            {
+                "name": t.name,
+                "description": t.description,
+                "default_permission": "confirm" if t.requires_permission else "auto",
+            }
+            for t in self._tools.values()
+        ]
+
     def tool_defs(self) -> list[dict[str, Any]]:
         return [
             {
@@ -115,6 +125,9 @@ class ToolRegistry:
         if not tool:
             return f"Error: unknown tool '{name}'"
 
+        if "_truncated_error" in arguments:
+            return arguments["_truncated_error"]
+
         _t0 = _t.monotonic()
 
         if context is not None:
@@ -123,17 +136,43 @@ class ToolRegistry:
             except Exception:
                 logger.warning("Molt snapshot failed for %s, continuing tool execution", name)
 
-        if tool.requires_permission and context is not None:
-            if tool.name not in context.approved_tools:
-                if context.confirm_callback:
-                    approved = await context.confirm_callback(tool.name, arguments)
-                    if not approved:
-                        return f"Tool '{tool.name}' execution denied by user."
-                context.approved_tools.add(tool.name)
+        if context is not None:
+            permission = context.tool_permissions.get(tool.name)
+            if permission is None:
+                permission = "confirm" if tool.requires_permission else "auto"
+            if permission == "deny":
+                return f"Tool '{tool.name}' is disabled."
+            if permission == "confirm":
+                if tool.name not in context.approved_tools:
+                    if context.confirm_callback:
+                        approved = await context.confirm_callback(tool.name, arguments)
+                        if not approved:
+                            return f"Tool '{tool.name}' execution denied by user."
+                    context.approved_tools.add(tool.name)
 
         try:
             sig = inspect.signature(tool.handler)
             kwargs = dict(arguments)
+            if not kwargs:
+                missing = [
+                    p_name
+                    for p_name, p in sig.parameters.items()
+                    if p_name != "context"
+                    and p.default is inspect.Parameter.empty
+                    and p.kind not in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
+                ]
+                if missing:
+                    logger.warning(
+                        "Tool '%s' called with empty arguments (missing: %s). "
+                        "This usually means the LLM failed to generate tool call arguments.",
+                        name,
+                        missing,
+                    )
+                    return (
+                        f"Error: tool '{name}' was called without any arguments. "
+                        f"Required parameters: {', '.join(missing)}. "
+                        f"Please retry the tool call with all required arguments."
+                    )
             if "context" in sig.parameters and context is not None:
                 kwargs["context"] = context
             _t1 = _t.monotonic()

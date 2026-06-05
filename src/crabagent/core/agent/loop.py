@@ -157,6 +157,7 @@ async def run_agent(
                         reasoning_tokens = usage.completion_tokens_details.reasoning_tokens or 0
                     context.visible_tokens = context.total_tokens - reasoning_tokens
                     import json as _json
+
                     try:
                         _raw = _json.dumps(usage.model_dump() if hasattr(usage, "model_dump") else dict(usage))
                     except Exception:
@@ -190,7 +191,6 @@ async def run_agent(
 
                 if delta.tool_calls:
                     for tc in delta.tool_calls:
-                        idx = getattr(tc, "index", None) or 0
                         if tc.function.name and tc.id:
                             tool_calls_list.append(
                                 {
@@ -203,10 +203,12 @@ async def run_agent(
                                 }
                             )
                         elif tool_calls_list and tc.function.arguments is not None:
-                            if idx < len(tool_calls_list):
-                                tool_calls_list[idx]["function"]["arguments"] += tc.function.arguments
+                            idx = getattr(tc, "index", None)
+                            if idx is not None and 0 <= idx < len(tool_calls_list):
+                                target = idx
                             else:
-                                tool_calls_list[-1]["function"]["arguments"] += tc.function.arguments
+                                target = len(tool_calls_list) - 1
+                            tool_calls_list[target]["function"]["arguments"] += tc.function.arguments
 
                 if chunk.choices[0].finish_reason:
                     finished = True
@@ -243,10 +245,22 @@ async def run_agent(
             for tc in tool_calls_list:
                 func = tc["function"]
                 tool_name = func["name"]
+                raw_args = func["arguments"]
                 try:
-                    args = json.loads(func["arguments"])
+                    args = json.loads(raw_args)
                 except json.JSONDecodeError:
-                    args = {}
+                    logger.warning(
+                        "Tool '%s' arguments JSON parse failed (len=%d): %.200s",
+                        tool_name,
+                        len(raw_args),
+                        raw_args,
+                    )
+                    hint = (
+                        f"Error: tool '{tool_name}' arguments were truncated by max_tokens "
+                        f"(raw length={len(raw_args)}). The JSON is incomplete and cannot be parsed. "
+                        f"Reduce the content size or break it into smaller writes, then retry."
+                    )
+                    args = {"_truncated_error": hint}
                 tool_info = context.tool_registry.get(tool_name)
                 tool_source = tool_info.metadata.get("source", "builtin") if tool_info else "builtin"
                 tool_server = tool_info.metadata.get("server_name", "") if tool_info else ""
@@ -445,13 +459,11 @@ def _validate_tool_calls(messages: list[dict]) -> list[dict]:
         if not required_ids:
             continue
         found_ids = set()
-        for later_msg in messages[i + 1:]:
+        for later_msg in messages[i + 1 :]:
             if later_msg.get("role") == "tool":
                 found_ids.add(later_msg.get("tool_call_id", ""))
         missing = required_ids - found_ids
         if missing:
-            logger.warning(
-                "Stripping %d orphan tool_calls from assistant (missing: %s)", len(missing), missing
-            )
+            logger.warning("Stripping %d orphan tool_calls from assistant (missing: %s)", len(missing), missing)
             messages[i] = {k: v for k, v in msg.items() if k != "tool_calls"}
     return messages

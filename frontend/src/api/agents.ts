@@ -13,6 +13,7 @@ export interface AgentProfile {
   icon: string;
   is_default: boolean;
   tools: string[];
+  tool_permissions: Record<string, string>;
   created_at: string;
 }
 
@@ -26,6 +27,7 @@ export interface CreateAgentRequest {
   icon?: string;
   allow_delegation?: boolean;
   tools?: string[];
+  tool_permissions?: Record<string, string>;
 }
 
 export interface UpdateAgentRequest {
@@ -38,6 +40,7 @@ export interface UpdateAgentRequest {
   allow_delegation?: boolean;
   enabled?: boolean;
   tools?: string[];
+  tool_permissions?: Record<string, string>;
 }
 
 export function listAgentProfiles(): Promise<AgentProfile[]> {
@@ -165,4 +168,22 @@ export interface PipelineHistoryItem extends AgentRunDetail {
 
 export function getPipelineHistory(limit = 10): Promise<PipelineHistoryItem[]> {
   return api.get(`/agents/pipelines/history?limit=${limit}`);
+}
+
+export interface ToolInfo {
+  name: string;
+  description: string;
+  default_permission: "auto" | "confirm";
+}
+
+export function listTools(): Promise<ToolInfo[]> {
+  return api.get("/agents/tools");
+}
+
+export function getDefaultToolPermissions(): Promise<{ tool_permissions: Record<string, string> }> {
+  return api.get("/agents/default-tool-permissions");
+}
+
+export function setDefaultToolPermissions(tool_permissions: Record<string, string>): Promise<{ tool_permissions: Record<string, string> }> {
+  return api.put("/agents/default-tool-permissions", { tool_permissions });
 }

@@ -42,6 +42,7 @@ class AgentProfileResponse(BaseModel):
     icon: str
     is_default: bool
     tools: list[str]
+    tool_permissions: dict[str, str]
     created_at: str
 
 
@@ -55,6 +56,7 @@ class CreateAgentRequest(BaseModel):
     icon: str = "🤖"
     allow_delegation: bool = True
     tools: list[str] | None = None
+    tool_permissions: dict[str, str] | None = None
 
 
 class UpdateAgentRequest(BaseModel):
@@ -67,6 +69,7 @@ class UpdateAgentRequest(BaseModel):
     allow_delegation: bool | None = None
     enabled: bool | None = None
     tools: list[str] | None = None
+    tool_permissions: dict[str, str] | None = None
 
 
 def _to_response(a: AgentProfile) -> AgentProfileResponse:
@@ -76,6 +79,12 @@ def _to_response(a: AgentProfile) -> AgentProfileResponse:
     if a.tools:
         try:
             tools_list = _json.loads(a.tools)
+        except Exception:
+            pass
+    tool_perms = {}
+    if a.tool_permissions:
+        try:
+            tool_perms = _json.loads(a.tool_permissions)
         except Exception:
             pass
     return AgentProfileResponse(
@@ -91,13 +100,16 @@ def _to_response(a: AgentProfile) -> AgentProfileResponse:
         icon=a.icon or "",
         is_default=a.is_default or False,
         tools=tools_list,
+        tool_permissions=tool_perms,
         created_at=a.created_at.isoformat() if a.created_at else "",
     )
 
 
 @router.get("", response_model=list[AgentProfileResponse])
 async def list_agent_profiles(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(AgentProfile).order_by(AgentProfile.name))
+    result = await db.execute(
+        select(AgentProfile).where(AgentProfile.name != "__default__").order_by(AgentProfile.name)
+    )
     return [_to_response(r) for r in result.scalars().all()]
 
 
@@ -131,6 +143,7 @@ async def create_agent_profile(
         allow_delegation=req.allow_delegation,
         is_default=False,
         tools=_json.dumps(req.tools) if req.tools else "",
+        tool_permissions=_json.dumps(req.tool_permissions) if req.tool_permissions else "{}",
     )
     db.add(profile)
     await db.commit()
@@ -172,6 +185,11 @@ async def update_agent_profile(
 
         profile.tools = _json.dumps(req.tools) if req.tools else ""
 
+    if req.tool_permissions is not None:
+        import json as _json
+
+        profile.tool_permissions = _json.dumps(req.tool_permissions)
+
     await db.commit()
     await db.refresh(profile)
     invalidate_cache()
@@ -197,6 +215,64 @@ async def delete_agent_profile(
     await db.commit()
     invalidate_cache()
     return {"status": "deleted", "name": agent_name}
+
+
+@router.get("/tools")
+async def list_tools():
+    from crabagent.core.agent.tools.registry import registry as _registry
+
+    return _registry.tool_info_list()
+
+
+class DefaultToolPermissionsRequest(BaseModel):
+    tool_permissions: dict[str, str]
+
+
+@router.get("/default-tool-permissions")
+async def get_default_tool_permissions(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    import json as _json
+
+    result = await db.execute(select(AgentProfile).where(AgentProfile.name == "__default__"))
+    profile = result.scalar_one_or_none()
+    if not profile:
+        return {"tool_permissions": {}}
+    tp = {}
+    if profile.tool_permissions:
+        try:
+            tp = _json.loads(profile.tool_permissions)
+        except Exception:
+            pass
+    return {"tool_permissions": tp}
+
+
+@router.put("/default-tool-permissions")
+async def set_default_tool_permissions(
+    req: DefaultToolPermissionsRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    import json as _json
+
+    result = await db.execute(select(AgentProfile).where(AgentProfile.name == "__default__"))
+    profile = result.scalar_one_or_none()
+    if not profile:
+        profile = AgentProfile(
+            user_id=user.id,
+            name="__default__",
+            display_name="Default Permissions",
+            role="default",
+            goal="default",
+            is_default=True,
+            enabled=True,
+        )
+        db.add(profile)
+    profile.tool_permissions = _json.dumps(req.tool_permissions)
+    await db.commit()
+    invalidate_cache()
+    return {"tool_permissions": req.tool_permissions}
 
 
 @router.get("/monitor")

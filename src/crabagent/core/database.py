@@ -178,6 +178,7 @@ class AgentProfile(Base):
     icon: Mapped[str] = mapped_column(String(10), default="")
     is_default: Mapped[bool] = mapped_column(Boolean, default=False)
     tools: Mapped[str] = mapped_column(Text, default="")
+    tool_permissions: Mapped[str] = mapped_column(Text, default="{}")
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
@@ -374,6 +375,8 @@ async def init_db() -> None:
             await conn.execute(text("ALTER TABLE agent_profiles ADD COLUMN is_default BOOLEAN DEFAULT 0"))
         if "tools" not in columns:
             await conn.execute(text("ALTER TABLE agent_profiles ADD COLUMN tools TEXT DEFAULT ''"))
+        if "tool_permissions" not in columns:
+            await conn.execute(text("ALTER TABLE agent_profiles ADD COLUMN tool_permissions TEXT DEFAULT '{}'"))
 
         result = await conn.execute(text("PRAGMA table_info(agent_memory)"))
         columns = [row[1] for row in result.fetchall()]
@@ -388,6 +391,7 @@ async def init_db() -> None:
 
     await _ensure_default_admin()
     await _ensure_default_agents()
+    await _ensure_default_permissions_profile()
 
     try:
         migrated = await migrate_task_records_to_agent_runs()
@@ -508,6 +512,28 @@ async def _ensure_default_agents():
                     tools=_json.dumps(agent_data.get("tools", [])),
                 )
             )
+        await db.commit()
+
+
+async def _ensure_default_permissions_profile():
+    from sqlalchemy import select
+
+    async with async_session_factory() as db:
+        result = await db.execute(select(AgentProfile).where(AgentProfile.name == "__default__"))
+        if result.scalar_one_or_none():
+            return
+        db.add(
+            AgentProfile(
+                user_id=1,
+                name="__default__",
+                display_name="Default Permissions",
+                role="default",
+                goal="default",
+                is_default=True,
+                enabled=True,
+                tool_permissions="{}",
+            )
+        )
         await db.commit()
 
 

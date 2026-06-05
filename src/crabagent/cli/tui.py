@@ -464,7 +464,7 @@ class TuiSession:
 
     def _print_banner(self):
         self.console.print(
-            f"[bold]CrabAgent v0.9.1[/bold]\n"
+            f"[bold]CrabAgent v0.9.2[/bold]\n"
             f"  provider: {self._provider_display}  "
             f"model: {self.agent_ctx.model or 'default'}\n"
             f"  workspace: {self.agent_ctx.workspace}\n"

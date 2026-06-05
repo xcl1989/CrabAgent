@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     workspace: Path = Path.cwd()
 
     max_iterations: int = 200
-    max_tokens: int = 4096
+    max_tokens: int = 16384
     reasoning_effort: str = "medium"
 
     skills_dir: Path | None = None
