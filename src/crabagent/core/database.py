@@ -496,11 +496,22 @@ def _migrate_tools_to_permissions(existing, agent_data: dict, _json) -> None:
             existing_perms = _json.loads(existing.tool_permissions)
         except Exception:
             pass
-    if existing_perms:
-        return
-    new_perms = agent_data.get("tool_permissions", {})
-    if new_perms:
-        existing.tool_permissions = _json.dumps(new_perms)
+
+    new_perms = dict(agent_data.get("tool_permissions", {}))
+
+    old_tools = []
+    if existing.tools:
+        try:
+            old_tools = _json.loads(existing.tools)
+        except Exception:
+            pass
+    for t in old_tools:
+        if t not in existing_perms and t not in new_perms:
+            new_perms[t] = "auto"
+
+    merged = {**new_perms, **existing_perms}
+    if merged and merged != existing_perms:
+        existing.tool_permissions = _json.dumps(merged)
 
 
 async def _ensure_default_agents():

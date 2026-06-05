@@ -706,10 +706,9 @@ export default function AgentsPage() {
                     )}
                     {(() => {
                       const perms = selected.tool_permissions || {};
-                      const entries = Object.entries(perms);
-                      if (!entries.length) return null;
-                      const auto = entries.filter(([, v]) => v === "auto");
-                      const confirmed = entries.filter(([, v]) => v === "confirm");
+                      const auto = Object.entries(perms).filter(([, v]) => v === "auto");
+                      const confirmed = Object.entries(perms).filter(([, v]) => v === "confirm");
+                      if (!auto.length && !confirmed.length) return null;
                       return (
                         <div>
                           <label className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-tertiary)]">
