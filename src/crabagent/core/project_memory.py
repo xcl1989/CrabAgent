@@ -136,8 +136,8 @@ class ProjectProfile:
             parts.append(f"技术栈：{' / '.join(self.tech_stack)}")
 
         if self.recent_lessons:
-            lessons = "；".join(self.recent_lessons[:5])
-            if self.lesson_count > 5:
+            lessons = "；".join(self.recent_lessons[:15])
+            if self.lesson_count > 15:
                 lessons += f" 等{self.lesson_count}条"
             parts.append(f"项目经验：{lessons}")
 
@@ -155,7 +155,7 @@ class ProjectProfile:
 async def load_project_memory(
     user_id: int,
     workspace: str | Path,
-    lesson_limit: int = 8,
+    lesson_limit: int = 20,
 ) -> ProjectProfile | None:
     """Build a :class:`ProjectProfile` for *workspace*.
 
