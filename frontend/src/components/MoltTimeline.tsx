@@ -167,26 +167,20 @@ function DiffViewer({ diff }: { diff: string }) {
   return (
     <pre className="text-[11px] leading-snug font-mono max-h-40 overflow-auto rounded-md border border-[var(--border)] bg-[var(--code-bg)] p-0 m-0">
       {lines.map((line, i) => {
-        let cls = "text-[var(--text-secondary)]";
-        let bg = "transparent";
+        let style: React.CSSProperties = {};
+        let prefix = " ";
         if (line.startsWith("+") && !line.startsWith("+++")) {
-          cls = "text-[var(--success)]";
-          bg = "var(--success-bg)";
+          style = { background: "var(--success-bg)", color: "var(--success)" };
+          prefix = "+";
         } else if (line.startsWith("-") && !line.startsWith("---")) {
-          cls = "text-[var(--danger)]";
-          bg = "var(--danger-bg)";
+          style = { background: "var(--danger-bg)", color: "var(--danger)" };
+          prefix = "-";
         } else if (line.startsWith("@@")) {
-          cls = "text-[var(--accent)]";
+          style = { color: "var(--accent)" };
         }
         return (
-          <div
-            key={i}
-            className="px-2 py-px"
-            style={{ background: bg, color: cls.replace("text-", "").replace("[", "").replace("]", "") }}
-          >
-            <span style={{ color: cls.includes("success") ? "var(--success)" : cls.includes("danger") ? "var(--danger)" : cls.includes("accent") ? "var(--accent)" : "var(--text-secondary)" }}>
-              {line || " "}
-            </span>
+          <div key={i} className="px-2 py-px" style={style}>
+            <span>{line || " "}</span>
           </div>
         );
       })}
