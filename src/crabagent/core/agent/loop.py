@@ -92,6 +92,7 @@ async def run_agent(
 ) -> list[dict]:
     _t0 = time.time()
     context.messages.append({"role": "user", "content": query, "agent": context.current_agent})
+    context.metadata["_batch_molt"] = True  # batch molts per round
 
     # Fire middleware start hooks (reflect / title / compress etc.)
     if context.middlewares:

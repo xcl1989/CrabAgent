@@ -98,6 +98,7 @@ class ToolRegistry:
         pending.add(rel)
 
     async def _flush_molt_snapshot(self, context: Any) -> None:
+        context.metadata.pop("_batch_molt", None)
         pending = context.metadata.pop("_pending_molt_files", None)
         if not pending:
             return
@@ -195,6 +196,9 @@ class ToolRegistry:
             _elapsed = _t.monotonic() - _t0
             if _elapsed > 0.5:
                 logging.getLogger(__name__).warning("tool %s SLOW %.1fs", name, _elapsed)
+            # Flush pending molts immediately for direct tool calls (outside run_agent)
+            if context is not None and not context.metadata.get("_batch_molt"):
+                await self._flush_molt_snapshot(context)
             return str(result)
         except Exception as e:
             return f"Error executing {name}: {e}"
