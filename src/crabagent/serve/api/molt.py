@@ -46,20 +46,21 @@ async def get_molt_diff(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    from crabagent.core.config import settings
     from crabagent.core.molt.store import get_current_content, get_snapshot_content, list_molt_files
 
-    files = await list_molt_files(molt_id)
+    conv = await get_owned_conversation(db, session_id, user)
+    workspace = Path(conv.workspace).resolve() if conv.workspace else Path.cwd().resolve()
+
+    files = await list_molt_files(molt_id, workspace=workspace)
     if not files:
         raise HTTPException(status_code=404, detail="Molt not found")
 
     diffs = []
-    ws = settings.workspace.resolve()
     for fp in files:
         if fp == "diff.txt":
             continue
-        old = get_snapshot_content(molt_id, fp)
-        new = get_current_content(ws, fp)
+        old = get_snapshot_content(molt_id, fp, workspace=workspace)
+        new = get_current_content(workspace, fp)
         if old != new:
             from difflib import unified_diff
 
