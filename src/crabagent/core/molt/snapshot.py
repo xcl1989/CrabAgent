@@ -8,6 +8,8 @@ logger = logging.getLogger(__name__)
 
 import time as _time
 
+_next_seq: int = 0
+
 
 def _molt_id() -> str:
     """Return a unique molt ID using timestamp + counter to survive server restarts."""
