@@ -55,6 +55,7 @@ class Conversation(Base):
     title: Mapped[str] = mapped_column(String(500), default="")
     workspace: Mapped[str] = mapped_column(Text, default="")
     model: Mapped[str] = mapped_column(String(200), default="")
+    provider: Mapped[str] = mapped_column(String(100), default="")
     tokens: Mapped[int] = mapped_column(Integer, default=0)
     active_branch: Mapped[str] = mapped_column(String(32), default="main")
     agent: Mapped[str] = mapped_column(String(100), default="default")
@@ -343,6 +344,8 @@ async def init_db() -> None:
             await conn.execute(text("ALTER TABLE conversations ADD COLUMN agent VARCHAR(100) DEFAULT 'default'"))
         if "auto_titled" not in columns:
             await conn.execute(text("ALTER TABLE conversations ADD COLUMN auto_titled BOOLEAN DEFAULT 0"))
+        if "provider" not in columns:
+            await conn.execute(text("ALTER TABLE conversations ADD COLUMN provider VARCHAR(100) DEFAULT ''"))
 
         result = await conn.execute(text("PRAGMA table_info(messages)"))
         columns = [row[1] for row in result.fetchall()]

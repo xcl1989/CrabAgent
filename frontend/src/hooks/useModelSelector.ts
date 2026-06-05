@@ -52,8 +52,8 @@ export function useModelSelector() {
 
         // Auto-select first model if nothing selected yet
         const allModels = results.flatMap((r) => r.models);
-        if (allModels.length > 0 && !selectedModel) {
-          setSelectedModel(allModels[0].id);
+        if (allModels.length > 0) {
+          setSelectedModel((prev) => prev || allModels[0].id);
         }
       })
       .catch((err) => {

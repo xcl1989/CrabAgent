@@ -31,6 +31,7 @@ class SessionResponse(BaseModel):
     title: str
     workspace: str
     model: str
+    provider: str = ""
     active_branch: str = "main"
     created_at: str | None = None
     updated_at: str | None = None
@@ -42,6 +43,7 @@ def _conv_to_response(conv) -> SessionResponse:
         title=conv.title,
         workspace=conv.workspace,
         model=conv.model,
+        provider=getattr(conv, "provider", "") or "",
         active_branch=conv.active_branch or "main",
         created_at=conv.created_at.isoformat() if conv.created_at else None,
         updated_at=conv.updated_at.isoformat() if conv.updated_at else None,

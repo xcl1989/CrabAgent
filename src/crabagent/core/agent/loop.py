@@ -98,6 +98,7 @@ async def run_agent(
     if "/" not in model:
         model = f"openai/{model}"
     context.metadata["resolved_model"] = model.split("/", 1)[-1] if "/" in model else model
+    context.metadata["resolved_provider"] = provider.name
 
     mcp_summary = [
         {"name": s["name"], "status": s["status"], "tool_count": s["tool_count"]}

@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
+import mimetypes
+import os
+import re
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -73,6 +77,43 @@ def _save_image_temp(data_url: str) -> dict:
     return {"file_path": path, "mime": mime, "size_kb": size_kb}
 
 
+_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
+_IMAGE_PATH_RE = re.compile(
+    r'(?:^|[\s(])((?:/[^\s)]+)\.(?:png|jpe?g|gif|webp|bmp))(?:[\s)]|$)',
+    re.IGNORECASE,
+)
+
+
+def _extract_local_images(message: str) -> list[dict]:
+    blocks: list[dict] = []
+    for match in _IMAGE_PATH_RE.finditer(message):
+        path_str = match.group(1)
+        if not os.path.isfile(path_str):
+            continue
+        ext = os.path.splitext(path_str)[1].lower()
+        if ext not in _IMAGE_EXTS:
+            continue
+        mime = mimetypes.guess_type(path_str)[0] or "image/png"
+        try:
+            with open(path_str, "rb") as f:
+                b64 = base64.b64encode(f.read()).decode()
+        except OSError:
+            continue
+        size_kb = os.path.getsize(path_str) // 1024
+        data_url = f"data:{mime};base64,{b64}"
+        _save_image_temp(data_url)
+        blocks.append(
+            {
+                "type": "image_url",
+                "image_url": {"url": data_url},
+                "file_path": path_str,
+                "mime": mime,
+                "size_kb": size_kb,
+            }
+        )
+    return blocks
+
+
 class PromptRequest(BaseModel):
     message: str
     model: str | None = None
@@ -99,6 +140,8 @@ async def prompt_async(
     history_msgs = await get_messages(db, conv.id, branch_id=active_branch)
     user_msg_seq = max((m.sequence for m in history_msgs), default=0) + 1
 
+    local_images = _extract_local_images(req.message)
+
     if req.images:
         import json as _json
 
@@ -114,6 +157,12 @@ async def prompt_async(
                     "size_kb": meta["size_kb"],
                 }
             )
+        content_blocks.extend(local_images)
+        db_content = _json.dumps(content_blocks)
+    elif local_images:
+        import json as _json
+
+        content_blocks = [{"type": "text", "text": req.message}] + local_images
         db_content = _json.dumps(content_blocks)
     else:
         db_content = req.message
@@ -170,7 +219,7 @@ async def prompt_async(
         system_prompt=base_prompt,
     )
 
-    if req.images:
+    if req.images or local_images:
         from crabagent.core.agent.token_limits import is_vision_model
 
         resolved = req.model or conv.model or ""
@@ -473,6 +522,9 @@ async def prompt_async(
                             "size_kb": meta["size_kb"],
                         }
                     )
+                agent_query.extend(local_images)
+            elif local_images:
+                agent_query = [{"type": "text", "text": req.message}] + local_images
             else:
                 agent_query = req.message
             if context.middlewares:
@@ -489,6 +541,7 @@ async def prompt_async(
             elapsed = round(time.time() - t0, 1)
             context.metadata["_run_elapsed"] = elapsed
             resolved_model = context.metadata.get("resolved_model", context.model or "")
+            resolved_provider = context.metadata.get("resolved_provider", "")
 
             # v0.9 — fire middleware end hooks (reflect / auto-title / etc.)
             if context.middlewares:
@@ -540,7 +593,10 @@ async def prompt_async(
 
             try:
                 async with async_session_factory() as update_db:
-                    await conv_svc.update_conversation(update_db, session_id, model=resolved_model)
+                    await conv_svc.update_conversation(
+                        update_db, session_id,
+                        model=resolved_model, provider=resolved_provider,
+                    )
             except Exception:
                 logger.exception("Failed to update conversation")
 

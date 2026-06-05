@@ -63,6 +63,25 @@ export default function ChatPage() {
     useTaskBoard();
 
   const {
+    providers,
+    catalog,
+    models,
+    providerModels,
+    providersLoading,
+    modelsLoading,
+    modelsError,
+    selectedModel,
+    setSelectedModel,
+    setProviders,
+    setProvidersLoading,
+  } = useModelSelector();
+
+  const onAutoLoadSession = useCallback((session: Session) => {
+    if (session.model) setSelectedModel(session.model);
+    if (session.provider) setSelectedProvider(session.provider);
+  }, [setSelectedModel]);
+
+  const {
     sessions,
     setSessions,
     activeSession,
@@ -86,24 +105,22 @@ export default function ChatPage() {
     handleAbort,
     handleDeleteSession,
     getSubAgentContent,
-  } = useChatState(handleTaskBoardEvent, workspace);
-
-  const {
-    providers,
-    catalog,
-    models,
-    providerModels,
-    providersLoading,
-    modelsLoading,
-    modelsError,
-    selectedModel,
-    setSelectedModel,
-    setProviders,
-    setProvidersLoading,
-  } = useModelSelector();
+  } = useChatState(handleTaskBoardEvent, workspace, onAutoLoadSession);
 
   const [showProviders, setShowProviders] = useState(false);
+  const [selectedProvider, setSelectedProvider] = useState<string | null>(null);
   const [showMcpServers, setShowMcpServers] = useState(false);
+
+  useEffect(() => {
+    if (!selectedProvider && selectedModel && providerModels.length > 0) {
+      for (const pm of providerModels) {
+        if (pm.models.some((m) => m.id === selectedModel)) {
+          setSelectedProvider(pm.provider.name);
+          break;
+        }
+      }
+    }
+  }, [selectedModel, providerModels, selectedProvider]);
   const [showScheduledTasks, setShowScheduledTasks] = useState(false);
   const [viewingSubAgent, setViewingSubAgent] = useState<string | null>(null);
   const [showDelegate, setShowDelegate] = useState(false);
@@ -188,9 +205,19 @@ export default function ChatPage() {
     async (session: Session) => {
       const model = await selectSession(session, selectedModel, models);
       setSelectedModel(model);
+      if (session.provider) {
+        setSelectedProvider(session.provider);
+      } else if (model && providerModels.length > 0) {
+        for (const pm of providerModels) {
+          if (pm.models.some((m) => m.id === model)) {
+            setSelectedProvider(pm.provider.name);
+            break;
+          }
+        }
+      }
       clearTaskBoard();
     },
-    [selectSession, selectedModel, models, setSelectedModel, clearTaskBoard],
+    [selectSession, selectedModel, models, setSelectedModel, providerModels, clearTaskBoard],
   );
 
   const onNewSession = useCallback(async () => {
@@ -303,6 +330,7 @@ export default function ChatPage() {
         images.length > 0 ? images : undefined,
         selectedAgent,
         reasoningEffort,
+        selectedProvider ?? undefined,
       );
     } catch {
       setSending(false);
@@ -363,7 +391,7 @@ export default function ChatPage() {
       } else {
         promptText = `[delegate_parallel] tasks=${JSON.stringify(tasks)}`;
       }
-      await sessionsApi.sendPrompt(activeSession.session_id, promptText, selectedModel);
+      await sessionsApi.sendPrompt(activeSession.session_id, promptText, selectedModel, undefined, undefined, undefined, selectedProvider ?? undefined);
     } catch {
       setSending(false);
     }
@@ -570,7 +598,10 @@ export default function ChatPage() {
                     <ModelSelector
                       providerModels={providerModels}
                       selectedModel={selectedModel}
-                      onChange={setSelectedModel}
+                      onChange={(modelId, providerName) => {
+                        setSelectedModel(modelId);
+                        setSelectedProvider(providerName);
+                      }}
                       disabled={modelsLoading}
                     />
                   </div>

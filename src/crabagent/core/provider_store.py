@@ -60,6 +60,7 @@ PROVIDER_CATALOG: dict[str, dict] = {
     "minimax": {"base_url": "https://api.minimax.chat/v1", "display_name": "MiniMax"},
     "volcengine": {"base_url": "https://ark.cn-beijing.volces.com/api/v3", "display_name": "火山引擎"},
     "bailian": {"base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "display_name": "阿里百炼"},
+    "kimi": {"base_url": "https://api.moonshot.cn/v1", "display_name": "Kimi (Moonshot AI)"},
 }
 
 

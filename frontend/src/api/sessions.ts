@@ -5,6 +5,7 @@ export interface Session {
   title: string;
   workspace: string;
   model: string;
+  provider: string;
   active_branch: string;
   created_at: string | null;
   updated_at: string | null;
@@ -73,8 +74,9 @@ export function sendPrompt(
   images?: string[],
   agent?: string,
   reasoningEffort?: string,
+  provider?: string,
 ): Promise<{ status: string }> {
-  return api.post(`/sessions/${sessionId}/prompt`, { message, model, images, agent, reasoning_effort: reasoningEffort });
+  return api.post(`/sessions/${sessionId}/prompt`, { message, model, provider, images, agent, reasoning_effort: reasoningEffort });
 }
 
 export function switchAgent(sessionId: string, agent: string): Promise<{ status: string }> {

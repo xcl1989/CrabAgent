@@ -6,7 +6,7 @@ import * as sessionsApi from "../api/sessions";
 import { sseEventToMessages, dbMessagesToChat } from "../lib/messageTransforms";
 import { useSSE } from "./useSSE";
 
-export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: string) {
+export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: string, onAutoLoadSession?: (session: Session) => void) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSession, setActiveSession] = useState<Session | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -88,6 +88,7 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
         const latest = result[0];
         setActiveSession(latest);
         setActiveBranch(latest.active_branch || "main");
+        if (latest.model) onAutoLoadSession?.(latest);
         sessionsApi.getMessages(latest.session_id).then((msgs) => {
           if (!cancelled) {
             const chatMsgs = dbMessagesToChat(msgs);
@@ -101,7 +102,7 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
       }
     });
     return () => { cancelled = true; };
-  }, [workspace, populateSubAgentContents]);
+  }, [workspace, populateSubAgentContents, onAutoLoadSession]);
 
   const handleSSEEvent = useCallback(
     (event: SSEEvent) => {
@@ -202,13 +203,13 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
     [populateSubAgentContents]
   );
 
-  const newSession = useCallback(async (selectedModel: string, models: { id: string }[]) => {
+  const newSession = useCallback(async (selectedModel: string, _models: { id: string }[]) => {
     setSending(false);
     const s = await sessionsApi.createSession(undefined, workspace);
     setSessions((prev) => [s, ...prev]);
     setActiveSession(s);
     setMessages([]);
-    return models.length > 0 ? models[0].id : selectedModel;
+    return selectedModel;
   }, [workspace]);
 
   const selectSessionById = useCallback(
