@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { RotateCcw, ChevronDown, ChevronUp, Loader2 } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { RotateCcw, ChevronDown, ChevronUp, Loader2, RefreshCw } from "lucide-react";
 import { Molt, MoltDiff, listMolts, getMoltDiff, rollbackMolt } from "../api/sessions";
 import { formatTimeShort } from "../api/time";
 import { ConfirmDialog, toast, LoadingState, EmptyState } from "./ui";
@@ -11,21 +11,28 @@ interface Props {
 
 export default function MoltTimeline({ sessionId }: Props) {
   const [molts, setMolts] = useState<Molt[]>([]);
-  const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [diffData, setDiffData] = useState<MoltDiff[] | null>(null);
   const [diffLoading, setDiffLoading] = useState(false);
   const [confirmTarget, setConfirmTarget] = useState<string | null>(null);
   const [rolling, setRolling] = useState(false);
+  const [refreshing, setRefreshing] = useState(true);
+
+  const load = useCallback(async () => {
+    if (!sessionId) return;
+    setRefreshing(true);
+    try {
+      const data = await listMolts(sessionId);
+      setMolts(data);
+    } catch {
+      setMolts([]);
+    }
+    setRefreshing(false);
+  }, [sessionId]);
 
   useEffect(() => {
-    if (!sessionId) return;
-    setLoading(true);
-    listMolts(sessionId)
-      .then(setMolts)
-      .catch(() => setMolts([]))
-      .finally(() => setLoading(false));
-  }, [sessionId]);
+    load();
+  }, [load]);
 
   const handleToggle = async (moltId: string) => {
     if (expandedId === moltId) {
@@ -60,7 +67,7 @@ export default function MoltTimeline({ sessionId }: Props) {
     }
   };
 
-  if (loading) {
+  if (refreshing && molts.length === 0) {
     return (
       <div className="border-t border-[var(--border)]">
         <div className="p-2 text-[11px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
@@ -75,8 +82,18 @@ export default function MoltTimeline({ sessionId }: Props) {
 
   return (
     <div className="border-t border-[var(--border)]">
-      <div className="p-2 text-[11px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
-        Molts
+      <div className="flex items-center justify-between px-2 py-1">
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
+          Molts
+        </span>
+        <button
+          onClick={load}
+          disabled={refreshing}
+          title="Refresh"
+          className="p-1 rounded text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
+        >
+          <RefreshCw size={11} className={refreshing ? "animate-spin" : ""} />
+        </button>
       </div>
       {molts.slice(0, 10).map((m) => {
         const expanded = expandedId === m.molt_id;
