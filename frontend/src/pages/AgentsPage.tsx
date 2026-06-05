@@ -706,15 +706,22 @@ export default function AgentsPage() {
                     )}
                     {(() => {
                       const perms = selected.tool_permissions || {};
-                      const denied = Object.entries(perms).filter(([, v]) => v === "deny");
-                      const confirmed = Object.entries(perms).filter(([, v]) => v === "confirm");
-                      if (!denied.length && !confirmed.length) return null;
+                      const entries = Object.entries(perms);
+                      if (!entries.length) return null;
+                      const auto = entries.filter(([, v]) => v === "auto");
+                      const confirmed = entries.filter(([, v]) => v === "confirm");
+                      const denied = entries.filter(([, v]) => v === "deny");
                       return (
                         <div>
                           <label className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-tertiary)]">
                             Permissions
                           </label>
                           <div className="flex flex-wrap gap-1 mt-1.5">
+                            {auto.map(([t]) => (
+                              <span key={t} className="text-[10px] px-1.5 py-0.5 rounded font-mono bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                                {t}
+                              </span>
+                            ))}
                             {confirmed.map(([t]) => (
                               <span key={t} className="text-[10px] px-1.5 py-0.5 rounded font-mono bg-amber-500/15 text-amber-400 border border-amber-500/30">
                                 {t} (confirm)
