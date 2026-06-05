@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,14 +30,15 @@ async def get_molt(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await get_owned_conversation(db, session_id, user)
+    conv = await get_owned_conversation(db, session_id, user)
+    workspace = Path(conv.workspace).resolve() if conv.workspace else Path.cwd().resolve()
     from crabagent.core.molt.store import get_molt as _get_molt
     from crabagent.core.molt.store import list_molt_files
 
     m = await _get_molt(db, molt_id)
     if not m:
         raise HTTPException(status_code=404, detail="Molt not found")
-    m["files"] = await list_molt_files(molt_id)
+    m["files"] = await list_molt_files(molt_id, workspace=workspace)
     return m
 
 
