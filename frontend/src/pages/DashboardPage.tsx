@@ -20,9 +20,9 @@ import {
   getPipelineHistory,
   PipelineHistoryItem,
   getProjectMemory,
-  getCurrentWorkspace,
   type ProjectMemoryData,
 } from "../api/agents";
+import { listWorkspaces, type WorkspaceInfo } from "../api/sessions";
 import AgentGrowthChart from "../components/AgentGrowthChart";
 import {
   useThemeColors,
@@ -90,16 +90,31 @@ export default function DashboardPage() {
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
   const [historyExpanded, setHistoryExpanded] = useState(false);
   const [projectMemory, setProjectMemory] = useState<ProjectMemoryData | null>(null);
+  const [workspaces, setWorkspaces] = useState<WorkspaceInfo[]>([]);
+  const [selectedWorkspace, setSelectedWorkspace] = useState<string>("");
+  const [wsOpen, setWsOpen] = useState(false);
   const esRef = useRef<EventSource | null>(null);
   const colors = useThemeColors();
 
   useEffect(() => {
     listAgentProfiles().then(setProfiles).catch(() => {});
-    // Load project memory for current workspace
-    getCurrentWorkspace()
-      .then((ws) => getProjectMemory(ws.workspace))
-      .then(setProjectMemory)
-      .catch(() => {});
+    // Load workspaces and project memory
+    (async () => {
+      try {
+        const wsList = await listWorkspaces();
+        setWorkspaces(wsList);
+        if (wsList.length === 0) return;
+        const sorted = [...wsList].sort((a, b) => {
+          if (!a.last_active) return 1;
+          if (!b.last_active) return -1;
+          return b.last_active.localeCompare(a.last_active);
+        });
+        const active = sorted[0].workspace;
+        setSelectedWorkspace(active);
+        const pm = await getProjectMemory(active);
+        if (pm) setProjectMemory(pm);
+      } catch {}
+    })();
     getPipelineHistory(10)
       .then((items) => {
         if (!items.length) return;
@@ -474,6 +489,56 @@ export default function DashboardPage() {
               </span>
             </SectionLabel>
             <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-secondary)] p-4">
+              {/* Workspace selector */}
+              {workspaces.length > 1 && (
+                <div className="relative mb-3">
+                  <button
+                    onClick={() => setWsOpen((o) => !o)}
+                    className="flex items-center gap-2 w-full px-3 py-1.5 rounded-lg text-xs text-left border border-[var(--border)] bg-[var(--bg-tertiary)] text-[var(--text-primary)] hover:border-[var(--border-strong)] transition-colors"
+                  >
+                    <FolderOpen size={12} className="text-[var(--text-tertiary)] shrink-0" />
+                    <span className="flex-1 truncate">
+                      {selectedWorkspace
+                        ? selectedWorkspace.split("/").slice(-2).join("/")
+                        : "Select workspace"}
+                    </span>
+                    <ChevronDown
+                      size={12}
+                      className={`text-[var(--text-tertiary)] transition-transform ${wsOpen ? "rotate-180" : ""}`}
+                    />
+                  </button>
+                  {wsOpen && (
+                    <div className="absolute top-full left-0 right-0 z-50 mt-1 rounded-lg border border-[var(--border)] bg-[var(--bg-secondary)] shadow-[var(--shadow-lg)] max-h-48 overflow-auto">
+                      {workspaces.map((ws) => (
+                        <button
+                          key={ws.workspace}
+                          onClick={async () => {
+                            setSelectedWorkspace(ws.workspace);
+                            setWsOpen(false);
+                            try {
+                              const pm = await getProjectMemory(ws.workspace);
+                              if (pm) setProjectMemory(pm);
+                            } catch {}
+                          }}
+                          className={`w-full flex items-center gap-2 px-3 py-2 text-xs text-left transition-colors ${
+                            ws.workspace === selectedWorkspace
+                              ? "bg-[var(--brand-bg)] text-[var(--brand)]"
+                              : "text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]"
+                          }`}
+                        >
+                          <span className="flex-1 truncate">
+                            {ws.workspace.split("/").slice(-2).join("/")}
+                          </span>
+                          <span className="text-[10px] text-[var(--text-tertiary)] shrink-0">
+                            {ws.session_count}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Tech Stack */}
               <div className="flex items-center gap-2 mb-3">
                 <Code size={14} className="text-[var(--text-tertiary)] shrink-0" />

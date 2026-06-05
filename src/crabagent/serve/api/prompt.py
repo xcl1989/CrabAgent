@@ -179,48 +179,60 @@ async def prompt_async(
     workspace = Path(conv.workspace) if conv.workspace else Path.cwd()
     workspace = workspace.resolve()
 
-    base_prompt = f"You are CrabAgent, an AI assistant. Today is {datetime.now(UTC).strftime('%Y-%m-%d %A')}. Working directory: {workspace}"
-    try:
-        from crabagent.core.agent.agents import build_team_prompt
+    # Reuse cached system prompt if available — preserves LLM prefix cache
+    if conv.system_prompt:
+        base_prompt = conv.system_prompt
+    else:
+        base_prompt = f"You are CrabAgent, an AI assistant. Today is {datetime.now(UTC).strftime('%Y-%m-%d %A')}. Working directory: {workspace}"
+        try:
+            from crabagent.core.agent.agents import build_team_prompt
 
-        team_prompt = await build_team_prompt()
-        if team_prompt:
-            base_prompt += "\n\n" + team_prompt
-    except Exception:
-        pass
+            team_prompt = await build_team_prompt()
+            if team_prompt:
+                base_prompt += "\n\n" + team_prompt
+        except Exception:
+            pass
 
-    try:
-        from crabagent.core.agent.agents import build_memory_prompt, inject_agent_lessons
+        try:
+            from crabagent.core.agent.agents import build_memory_prompt, inject_agent_lessons
 
-        mem_prompt = await build_memory_prompt(user.id, query=(req.content or "")[:500])
-        if mem_prompt:
-            base_prompt += "\n\n" + mem_prompt
-    except Exception:
-        pass
+            mem_prompt = await build_memory_prompt(user.id, query=(req.content or "")[:500])
+            if mem_prompt:
+                base_prompt += "\n\n" + mem_prompt
+        except Exception:
+            pass
 
-    # Inject per-agent lessons for the effective agent (v0.9 — A3)
-    try:
-        effective_agent_for_lessons = req.agent or getattr(conv, "agent", None) or "default"
-        base_prompt = await inject_agent_lessons(
-            base_prompt,
-            user_id=user.id,
-            agent_name=effective_agent_for_lessons,
-            task_hint=(req.content or "")[:120],
-        )
-    except Exception:
-        pass
+        # Inject per-agent lessons for the effective agent
+        try:
+            effective_agent_for_lessons = req.agent or getattr(conv, "agent", None) or "default"
+            base_prompt = await inject_agent_lessons(
+                base_prompt,
+                user_id=user.id,
+                agent_name=effective_agent_for_lessons,
+                task_hint=(req.content or "")[:120],
+            )
+        except Exception:
+            pass
 
-    # Inject project memory (zero LLM cost — built from existing lessons)
-    try:
-        from crabagent.core.project_memory import load_project_memory
+        # Inject project memory
+        try:
+            from crabagent.core.project_memory import load_project_memory
 
-        pm = await load_project_memory(user.id, workspace)
-        if pm:
-            pm_prompt = pm.to_prompt()
-            if pm_prompt:
-                base_prompt += "\n\n" + pm_prompt
-    except Exception:
-        pass
+            pm = await load_project_memory(user.id, workspace)
+            if pm:
+                pm_prompt = pm.to_prompt()
+                if pm_prompt:
+                    base_prompt += "\n\n" + pm_prompt
+        except Exception:
+            pass
+
+        # Persist for subsequent messages in the same session
+        try:
+            from crabagent.serve.services.conversation import update_conversation
+            async with async_session_factory() as save_db:
+                await update_conversation(save_db, session_id, system_prompt=base_prompt)
+        except Exception:
+            pass
 
     context = AgentContext(
         workspace=workspace,
