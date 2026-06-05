@@ -90,7 +90,15 @@ async def run_agent(
     context: AgentContext,
     query: str | list[dict],
 ) -> list[dict]:
+    _t0 = time.time()
     context.messages.append({"role": "user", "content": query, "agent": context.current_agent})
+
+    # Fire middleware start hooks (reflect / title / compress etc.)
+    if context.middlewares:
+        try:
+            await context.middlewares.run_start(context)
+        except Exception:
+            logger.debug("middleware run_start failed", exc_info=True)
 
     provider = await _resolve_provider(context.provider_name)
     llm = _litellm_params(provider)
@@ -360,6 +368,14 @@ async def run_agent(
             AgentEvent(type=EventType.BUDGET_EXHAUSTED, data={"iterations": context.iteration})
         )
         await _grace_call(context, llm, model)
+
+    # Fire middleware end hooks (reflect / title / etc.)
+    context.metadata["_run_elapsed"] = round(time.time() - _t0, 1)
+    if context.middlewares:
+        try:
+            await context.middlewares.run_end(context)
+        except Exception:
+            logger.debug("middleware run_end failed", exc_info=True)
 
     return context.messages
 

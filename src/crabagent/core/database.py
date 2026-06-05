@@ -775,6 +775,48 @@ async def agent_memory_get_by_agent(
         ]
 
 
+async def agent_memory_get_by_workspace(
+    user_id: int,
+    workspace: str,
+    memory_types: tuple[str, ...] = ("agent_lesson", "user_preference"),
+    limit: int = 5,
+) -> list[dict]:
+    """Return the most recent lessons/preferences linked to a workspace.
+
+    Uses a JOIN through ``source_session`` → ``conversations(session_id)``
+    so that only memories created while working in *workspace* are returned.
+    Ordered by ``importance DESC`` then ``created_at DESC``.
+    """
+    from sqlalchemy import select
+
+    async with async_session_factory() as db:
+        result = await db.execute(
+            select(AgentMemory)
+            .join(Conversation, AgentMemory.source_session == Conversation.session_id)
+            .where(
+                AgentMemory.user_id == user_id,
+                Conversation.workspace == workspace,
+                AgentMemory.memory_type.in_(memory_types),
+                AgentMemory.source_session != "",  # only lessons linked to a session
+            )
+            .order_by(AgentMemory.importance.desc(), AgentMemory.created_at.desc())
+            .limit(limit)
+        )
+        return [
+            {
+                "id": r.id,
+                "memory_type": r.memory_type,
+                "agent_name": r.agent_name,
+                "category": r.category,
+                "content": r.content,
+                "importance": r.importance,
+                "confidence": r.confidence,
+                "created_at": r.created_at,
+            }
+            for r in result.scalars().all()
+        ]
+
+
 async def agent_memory_search(
     user_id: int,
     query: str,

@@ -1390,6 +1390,17 @@ class TuiSession:
                 base_prompt += "\n\n" + mem_prompt
         except Exception:
             pass
+        # Inject project memory (zero LLM cost — built from existing lessons)
+        try:
+            from crabagent.core.project_memory import load_project_memory
+
+            pm = await load_project_memory(self._user.id if self._user else 0, ws)
+            if pm:
+                pm_prompt = pm.to_prompt()
+                if pm_prompt:
+                    base_prompt += "\n\n" + pm_prompt
+        except Exception:
+            pass
         ctx = AgentContext(
             workspace=ws,
             tool_registry=registry,
@@ -1403,6 +1414,15 @@ class TuiSession:
             ctx.metadata["branch_id"] = "main"
         if self._user and self._user.id:
             ctx.metadata["user_id"] = self._user.id
+        # Attach middleware (reflect + title) so TUI benefits from lesson/preference extraction too
+        try:
+            from crabagent.core.agent.middlewares import MiddlewareChain
+            from crabagent.core.agent.middlewares.reflect_middleware import ReflectMiddleware
+            from crabagent.core.agent.middlewares.title_middleware import TitleMiddleware
+
+            ctx.middlewares = MiddlewareChain([ReflectMiddleware(), TitleMiddleware()])
+        except Exception:
+            pass
         if cid and not getattr(self.args, "no_persist", False):
             from crabagent.serve.services.persistence import PersistenceListener
 

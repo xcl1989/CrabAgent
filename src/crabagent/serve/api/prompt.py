@@ -210,6 +210,18 @@ async def prompt_async(
     except Exception:
         pass
 
+    # Inject project memory (zero LLM cost — built from existing lessons)
+    try:
+        from crabagent.core.project_memory import load_project_memory
+
+        pm = await load_project_memory(user.id, workspace)
+        if pm:
+            pm_prompt = pm.to_prompt()
+            if pm_prompt:
+                base_prompt += "\n\n" + pm_prompt
+    except Exception:
+        pass
+
     context = AgentContext(
         workspace=workspace,
         tool_registry=registry,
@@ -542,11 +554,6 @@ async def prompt_async(
                 agent_query = [{"type": "text", "text": req.message}] + local_images
             else:
                 agent_query = req.message
-            if context.middlewares:
-                try:
-                    await context.middlewares.run_start(context)
-                except Exception:
-                    logger.debug("middleware run_start failed", exc_info=True)
             await run_agent(context, agent_query)
         except asyncio.CancelledError:
             logger.info("Agent task cancelled for session %s", session_id)
@@ -557,13 +564,6 @@ async def prompt_async(
             context.metadata["_run_elapsed"] = elapsed
             resolved_model = context.metadata.get("resolved_model", context.model or "")
             resolved_provider = context.metadata.get("resolved_provider", "")
-
-            # v0.9 — fire middleware end hooks (reflect / auto-title / etc.)
-            if context.middlewares:
-                try:
-                    await context.middlewares.run_end(context)
-                except Exception:
-                    logger.debug("middleware run_end failed", exc_info=True)
 
             browser_mgr = context.metadata.get("_browser_manager")
             if browser_mgr:

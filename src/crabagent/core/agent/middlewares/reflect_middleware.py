@@ -9,7 +9,7 @@ as a background task via ``asyncio.create_task`` so they never block the UI.
 
 Persisted to ``AgentMemory`` with ``source = "llm"``. Skipped when:
 - ``settings.memory_auto_extract`` is False
-- conversation was < 3 iterations (too short to learn from)
+- :func:`_has_signal` returns ``False`` (no substantive activity detected)
 - no user_id in context metadata
 - no provider configured
 """
@@ -54,8 +54,8 @@ class ReflectMiddleware:
         if not user_id:
             return
 
-        if context.iteration < 3:
-            logger.debug("ReflectMiddleware skipped: iteration=%d < 3", context.iteration)
+        if not _has_signal(context):
+            logger.debug("ReflectMiddleware skipped: no signal detected (iter=%d)", context.iteration)
             return
 
         model = context.metadata.get("_resolved_model") or context.model or ""
@@ -211,6 +211,80 @@ def _last_assistant_text(messages: list[dict]) -> str:
     return ""
 
 
+# ---------------------------------------------------------------------------
+# Signal detection — replaces the old ``iteration >= 3`` gate
+# ---------------------------------------------------------------------------
+
+_WRITE_TOOLS = frozenset({
+    "write", "edit", "delete", "create_tool", "update_tool", "delete_tool",
+    "bash",
+})
+
+_DELEGATE_TOOLS = frozenset({
+    "delegate_task", "delegate_parallel", "run_pipeline", "handoff_to",
+})
+
+_READ_TOOLS = frozenset({
+    "read", "grep", "glob", "web_search", "web_scrape",
+    "browser_navigate",
+})
+
+_KEY_WORDS = frozenset({
+    "重构", "分析", "设计", "实现", "调试",
+    "refactor", "analyze", "design", "implement", "debug",
+})
+
+
+def _count_tool_calls_by_type(messages: list[dict], tool_set: frozenset) -> int:
+    """Count how many times tools from *tool_set* were called."""
+    count = 0
+    for msg in messages:
+        if msg.get("role") != "assistant":
+            continue
+        for tc in (msg.get("tool_calls") or []):
+            func = tc.get("function", {})
+            if func.get("name") in tool_set:
+                count += 1
+    return count
+
+
+def _has_signal(context) -> bool:
+    """Signal-based gate — returns ``True`` if the conversation shows
+    enough substance to warrant reflection.
+
+    Checks five dimensions (any one can trigger):
+      1. Write/deletion tools called → high-value change
+      2. Agent delegation → multi-agent orchestration
+      3. Dense read operations (≥3) → deep research
+      4. Raw iteration count (≥5) → length-based fallback
+      5. First user message contains key action verbs → semantic hint
+    """
+    messages = context.messages
+
+    # 1. Write / destructive tools
+    if _count_tool_calls_by_type(messages, _WRITE_TOOLS) > 0:
+        return True
+
+    # 2. Agent delegation
+    if _count_tool_calls_by_type(messages, _DELEGATE_TOOLS) > 0:
+        return True
+
+    # 3. Dense reads
+    if _count_tool_calls_by_type(messages, _READ_TOOLS) >= 3:
+        return True
+
+    # 4. Length fallback
+    if context.iteration >= 5:
+        return True
+
+    # 5. Semantic hint from first user message
+    first = _first_user_message(messages) or ""
+    if any(kw in first.lower() for kw in _KEY_WORDS):
+        return True
+
+    return False
+
+
 def _format_for_preference_extraction(messages: list[dict]) -> str:
     """Render the conversation as a compact transcript for preference mining.
 
@@ -247,4 +321,4 @@ def _format_for_preference_extraction(messages: list[dict]) -> str:
     return text
 
 
-__all__ = ["ReflectMiddleware"]
+__all__ = ["ReflectMiddleware", "_has_signal", "_count_tool_calls_by_type"]

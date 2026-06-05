@@ -1,12 +1,11 @@
 # 🦀 CrabAgent
 
-> **AI 团队指挥中心** — 组建能持续学习和进化的 AI 专家团队。委派、并行、流水线，从终端或浏览器实时看板监控进度。
+> **你的 AI 知识工作平台** — 不是又一个编码助手。一个能让 AI 记住你的项目、了解你的风格、越用越聪明的平台。终端、浏览器、桌面，哪里都能用。
 
-CrabAgent 是一个本地优先的 AI Agent 平台。从任意项目目录启动，支持 CLI/TUI/Web/原生 macOS 桌面应用四种模式。数据全在本地，API Key 加密存储，自由选择任意 LLM 提供商。
+CrabAgent 是一个本地优先的知识工作平台。你带来项目和 API Key，它带来一队 AI Agent——**记住你做过什么，学会你怎么工作，用得越多越离不开。**
 
-[![PyPI version](https://badge.fury.io/py/crabagent.svg)](https://badge.fury.io/py/crabagent)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-[![License: AGPLv3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 
 **[English](README.md)** | **[中文](README.zh-CN.md)**
 
@@ -14,17 +13,109 @@ CrabAgent 是一个本地优先的 AI Agent 平台。从任意项目目录启动
 
 ## 为什么选 CrabAgent
 
-不同于其他 Agent 平台"用完即忘的临时工"，CrabAgent 的 Agent **会学习、会进化**：
+大多数 AI 工具是"临时工"——干完活就忘。CrabAgent 不一样：
 
-| 能力 | 说明 |
-|-----|------|
-| **🧠 自演化 Agent** | 每次任务完成后自动提取经验教训 — 规则引擎捕捉模式，LLM 反思分析策略。用得越多越聪明。 |
-| **🤖 AI 团队** | 自定义 Agent 画像，每个 Agent 可限制工具集、指定独立模型。委派、并行、流水线三种协作模式。 |
-| **📊 成长追踪** | 查看每个 Agent 的统计数据：任务数、成功率、经验数、常用类别。`ctrl+space agent_stats` |
-| **⏱ 定时 + 实时** | Agent 按 cron 表达式自主执行，也支持 @提及即时委派。所有 Agent 输出实时流式显示。 |
-| **🦀 快照回滚** | 修改文件前自动拍照，随时回滚，不依赖 Git。 |
-| **🖥️ 桌面应用** | 基于 Electron 的原生 macOS 应用，自动启动后端、自动登录，界面与浏览器一致。 |
-| **🔒 本地优先** | 数据全在本地，API Key 加密存储，零遥测。 |
+| 不一样在哪 | 对你意味着什么 |
+|-----------|--------------|
+| **🧠 项目记忆** | 它记得你在每个项目里做了什么。下次打开，它知道你上次停在哪。 |
+| **📈 越用越懂你** | 用得越多，它越了解你的偏好、你的代码风格、你的决策习惯。 |
+| **🤖 AI 团队协作** | 研究、编码、分析、写作——多个专业 Agent 协同工作，你只需说一句。 |
+| **🔒 本地优先** | 数据全在本地，API Key 加密存储，无遥测，无厂商锁定。 |
+
+这种差异是**随时间累积**的：
+
+```
+第 1 天：  "挺好用的 AI 工具。"
+第 1 周：  "它记得我的项目。不错。"
+第 1 月：  "我的整个工作流都跑在上面了。回不去了。"
+```
+
+---
+
+## 🧠 项目记忆 — 用过的都知道
+
+每次你在项目里工作，CrabAgent 自动从对话中提取教训和偏好。下次打开，它已经知道了：
+
+```
+=== 项目上下文 ===
+上次活跃：06-05 15:30
+技术栈：Python / FastAPI / SQLAlchemy
+项目经验：N+1 查询用 selectinload 优化；API 文档用 OpenAPI 规范
+====================
+```
+
+这不是"临时生成的摘要"。它来自 Agent 已经提取过的经验教训——**零额外 token 开销，不影响 LLM 上下文缓存。**
+
+---
+
+## 📈 自进化 Agent — 核心差异
+
+每次任务都在教会你的 Agent 一些东西。执行完成后，它会反思什么有效（什么无效），并把经验永久存下来。
+
+### 双引擎反思
+
+```
+Agent 完成任务
+    │
+    ├─ 规则引擎（即时）
+    │   └─ "迭代次数过高 → 拆分为更小步骤"
+    │
+    └─ LLM 反思（1-3 秒）
+        ├─ 提取可复用的具体经验：
+        │   "DuckDuckGo 搜中文结果少，改用英文关键词"
+        │   "不稳定的网站优先用 web_scrape 直接抓取"
+        ├─ 自动过滤泛化废话
+        └─ 失败也能学——记录错误原因和预防方法
+```
+
+### 三层记忆
+
+| 层级 | 范围 | 存储内容 |
+|------|------|---------|
+| **项目记忆** | 每个工作目录 | 近期经验、技术栈、活跃时间线 |
+| **用户偏好** | 全局用户 | 沟通风格、工具偏好、被拒绝的模式 |
+| **Agent 经验** | 每个 Agent | 技术策略、常见陷阱、有效方法 |
+
+### 查看成长
+
+```bash
+# TUI
+/agent_stats coder
+# → 总任务: 23  成功率: 91%  平均耗时: 14s
+# → lessons: 18 (规则: 3, LLM: 15)
+
+# Web UI: Agent Team → 学习统计
+```
+
+---
+
+## 🤖 AI 团队
+
+### 内置 Agent
+
+| Agent | 角色 | 适用场景 |
+|-------|------|----------|
+| 🔍 Researcher | 网络调研员 | 搜索、浏览、数据采集 |
+| 📊 Analyst | 数据分析师 | 对比分析、模式识别、报告生成 |
+| 💻 Coder | 编程专家 | 编写、审查、调试、重构 |
+| 📝 Writer | 内容写手 | 写作、编辑、翻译、格式化 |
+| 📋 Plan Creator | 任务规划师 | 将复杂任务拆解为工作流 |
+
+### 协作方式
+
+```
+委派      → @researcher "调研一下竞品定价"
+并行      → 同时让 3 个 Agent 做不同任务
+流水线    → 调研 → 分析 → 写报告（自动传数据）
+交接      → 一个 Agent 做完，另一个接着做
+```
+
+### 实时监控
+
+- 🟣 **运行中** — 实时显示步骤、耗时、工具调用
+- 🟢 **已完成** — 耗时 / Token / 迭代次数
+- 🔴 **出错** — 错误摘要
+- Web：右侧任务看板，支持分栏结果对比
 
 ---
 
@@ -35,11 +126,8 @@ pip install 'crabagent[serve]'
 
 crabagent init
 
-# TUI — 双面板交互模式（支持斜杠命令）
+# TUI — 双面板交互模式
 crabagent
-
-# TUI (旧版单面板)
-crabagent --old
 
 # Web UI
 crabagent --serve          # → http://localhost:5210
@@ -47,116 +135,32 @@ crabagent --serve          # → http://localhost:5210
 
 # CLI 单次查询
 crabagent "帮我整理这个目录"
-crabagent -p deepseek -m deepseek-chat "写一个 Python 脚本"
 ```
 
 ### 桌面应用 (macOS)
 
 ```bash
-# 从源码构建：
 cd electron && npm install && npm run build:mac
 # → electron/dist-electron/CrabAgent-0.9.0-arm64.dmg
 ```
 
-双击 `CrabAgent.app` — 自动启动 Python 后端、自动登录，在原生窗口中打开完整 Web UI。需要 Python 3.12+ 和 `crabagent[serve]`。
+双击 `CrabAgent.app` — 自动启动后端、自动登录、原生窗口中的完整 Web UI。
 
 ---
 
-## 自演化 Agent — 核心差异化
+## 功能特性
 
-Agent 不只是执行任务，**每次执行都会学习成长**。
-
-### 双引擎反思
-
-```
-子 Agent 完成任务
-    │
-    ├─ 规则引擎（即时）
-    │   └─ 迭代数过高 (>80%) → "将复杂任务拆分为更小步骤，减少每次迭代使用的工具数"
-    │
-    └─ LLM 反思（1-3 秒）
-        ├─ 提取具体的、可复用的经验：
-        │   "DuckDuckGo 搜中文内容结果较少，改用英文关键词可获得更全面的结果"
-        │   "对于不稳定的网站，优先使用 web_scrape 直接抓取而不是 web_search"
-        ├─ 自动过滤泛化废话回复（"completed in X steps"）
-        ├─ 失败也能学习——捕获错误原因及预防方法
-        └─ 来源: llm
-
-### 知识持久化
-
-- **团队知识**：技术栈、架构决策、用户偏好 — 每次启动自动注入
-- **Agent 经验**：每个 Agent 的行为模式教训 — 执行同类任务前自动加载
-- **任务记录**：每次执行完整记录（成功/失败、耗时、Token 数、迭代数）
-
-### 查看成长
-
-```bash
-# TUI 中
-/agent_stats coder
-# → 总任务: 23  成功率: 91%  平均耗时: 14s
-# → lessons: 18 (规则: 3, LLM: 15)
-
-# Web UI
-# → Agent Team → 学习统计：点击 Agent 名称查看任务统计和所有经验
-
----
-
-## AI 团队
-
-### 内置 Agent
-
-| Agent | 角色 | 适用场景 |
-|-------|------|----------|
-| 🔍 Researcher | 网络调研员 | 搜索、浏览、数据采集 |
-| 📊 Analyst | 数据分析师 | 对比分析、模式识别、报告生成 |
-| 💻 Coder | 编程专家 | 编写、审查、调试、重构代码 |
-| 📝 Writer | 内容写手 | 写作、编辑、翻译、格式化 |
-
-### 委派方式
-
-- `@researcher 找一下竞品价格` — @提及自动委派
-- 点击工具栏 Agent 头像插入提及
-- `/delegate` 命令交互式选择 Agent
-- `delegate_parallel` 多 Agent 并行执行
-- `run_pipeline` 串联多个 Agent 按依赖执行
-
-### 会话内 Agent 切换
-
-在会话中途切换当前 Agent 身份，不丢失对话历史：
-
-```bash
-# TUI
-/agent                  # 弹窗选择 5 个 Agent
-/agent researcher       # 直接切换
-/agent default          # 恢复全部工具
-
-# Web API
-POST /api/sessions/{id}/agent  {"agent": "researcher"}
-```
-
-- 每个 Agent 有不同工具集（researcher 有 web 工具，coder 有 bash+edit 等）
-- System prompt 不变 — **LLM KV 缓存不失效**
-- 所有消息自动标记 Agent 信息，历史可追溯
-- Model 跟随 Agent 画像自动切换
-- 状态栏实时显示当前 Agent：`[deepseek/chat → researcher] Msgs:5 Tok:1234`
-
-### 实时监控
-
-- 🟣 **运行中** — 实时步骤计数和计时
-- 🟢 **已完成** — 耗时 / Token / 迭代次数
-- 🔴 **出错** — 错误摘要
-- Web 端：右侧任务看板，支持分栏结果对比
-
----
-
-## 更多功能
+### 🧠 项目记忆
+跨会话记住项目上下文。零额外成本。
 
 ### 🖼️ 多模态
-粘贴/上传/拖拽图片到对话，自动检测模型是否支持视觉。
+粘贴/拖拽图片到对话，自动检测模型是否支持视觉。
 
 ### 🌐 浏览器自动化
-`pip install 'crabagent[browser]'` + `playwright install chromium`
-
+```bash
+pip install 'crabagent[browser]'
+playwright install chromium
+```
 ```
 > 打开 https://news.ycombinator.com 显示前 5 条新闻
 > 在 Google 搜索 "Python async" 提取结果
@@ -165,37 +169,39 @@ POST /api/sessions/{id}/agent  {"agent": "researcher"}
 ### 🔌 MCP 客户端
 连接外部 MCP 服务器（stdio + HTTP），工具自动发现并加前缀。
 
-### 📋 定时任务
+### ⏱ 定时任务
 ```
-> 每天早上 9 点打开 Hacker News 把前 5 条新闻截图给我
+> 每天早上 9 点打开 Hacker News，截图前 5 条发给我
 > 每 30 分钟检查商品页，价格低于 500 就通知我
 ```
 
-### 🦀 快照回滚
-修改文件前自动拍照，`/molt rollback <id>` 即可回滚。
-
-### 🔧 自定义插件
-
-在 `.crabagent/tools/` 下放 `.py` 文件即可：
-
-```python
-name = "hello"
-description = "向某人打招呼"
-parameters = {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}
-requires_permission = False
-
-def run(name: str) -> str:
-    return f"你好，{name}！"
+### 🦀 快照回滚（Molt）
+修改文件前自动拍照，随时回滚，不依赖 Git。
+```
+/molt rollback <id>
 ```
 
-**或者让 Agent 自己写工具** — AI 可以在会话中帮你编写和注册自定义工具。只需告诉它你需要什么：
+### 🔧 自定义工具
+在 `.crabagent/tools/` 下放 `.py` 文件即可。或者让 AI 在对话中帮你创建。
 
-```
-> 创建一个解析 CSV 文件并提取某列的工具
-> 创建一个查询城市天气的工具
+---
+
+## 安装
+
+```bash
+pip install 'crabagent[serve]'          # CLI + Web UI + API
+pip install 'crabagent[browser]'        # 浏览器自动化
+pip install 'crabagent[dev]'            # 测试 + lint
 ```
 
-工具自动存入 `.crabagent/tools/`，即时注册，跨会话持久化。Agent 会通过团队记忆记住自己创建的工具。
+### 开发模式
+
+```bash
+make install            # 构建前端 + 安装（可编辑模式）
+ruff check src/ tests/  # 代码检查
+ruff format src/ tests/ # 代码格式化
+pytest                   # 运行测试
+```
 
 ---
 
@@ -220,7 +226,7 @@ def run(name: str) -> str:
 | `/molt [cmd]` | 快照管理 |
 | `/todo [cmd]` | 待办管理 |
 | `/export` | 导出 Markdown |
-| `/image <path> [msg]` | 发送图片 |
+| `/image <path>` | 发送图片 |
 | `/runs [agent]` | 查看运行记录 |
 | `/abort` | 中断执行 |
 
@@ -239,37 +245,6 @@ def run(name: str) -> str:
 | `CRAB_BROWSER_HEADLESS` | `true` | 浏览器无头模式 |
 | `CRAB_WEB_PROXY` | （空） | web_search / web_scrape 的 HTTP 代理 |
 
-> 各版本更新明细请查看 [CHANGELOG.zh-CN.md](CHANGELOG.zh-CN.md)。
-
----
-
-## 安装
-
-### CLI + Web 服务
-
-```bash
-pip install 'crabagent[serve]'          # CLI + Web UI + API
-pip install 'crabagent[browser]'        # 浏览器自动化
-pip install 'crabagent[dev]'            # 测试 + lint
-```
-
-### 桌面应用
-
-克隆仓库后从源码构建（参见上文）。需要 Python 3.12+ 和 `crabagent[serve]`，以及 Node.js 20+。
-
-```bash
-cd electron && npm install && npm run build:mac
-# 输出：electron/dist-electron/CrabAgent-0.9.0-arm64.dmg
-```
-
-```bash
-# 开发模式
-make install            # 构建前端 + 安装（可编辑模式）
-ruff check src/ tests/  # 代码检查
-ruff format src/ tests/ # 代码格式化
-pytest                   # 运行测试
-```
-
 ---
 
 ## 项目结构
@@ -277,11 +252,13 @@ pytest                   # 运行测试
 ```
 CrabAgent/
 ├── src/crabagent/
-│   ├── cli/           # CLI 入口 + TUI
-│   ├── core/agent/    # Agent 循环、工具、压缩、agents
+│   ├── cli/           # CLI + TUI
+│   ├── core/agent/    # Agent 循环、工具、压缩
 │   ├── core/mcp/      # MCP 客户端管理器
+│   ├── core/          # 数据库、配置、项目记忆
 │   └── serve/         # FastAPI + API + 调度器
 ├── frontend/          # React SPA 前端
+├── electron/          # Electron 桌面应用
 └── crabagent.db       # SQLite 数据库
 ```
 
