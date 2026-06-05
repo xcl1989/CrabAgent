@@ -51,13 +51,15 @@ async def get_messages(
     stmt = select(Message).where(Message.conversation_id == conversation_id)
     if branch_id is not None:
         stmt = stmt.where(Message.branch_id == branch_id)
-    stmt = stmt.order_by(Message.id.asc())
+    stmt = stmt.order_by(Message.id.desc())
     if offset:
         stmt = stmt.offset(offset)
     if limit:
         stmt = stmt.limit(limit)
     result = await db.execute(stmt)
-    return list(result.scalars().all())
+    msgs = list(result.scalars().all())
+    msgs.reverse()
+    return msgs
 
 
 async def delete_messages(db: AsyncSession, conversation_id: int) -> int:
