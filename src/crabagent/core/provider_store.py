@@ -55,13 +55,37 @@ PROVIDER_CATALOG: dict[str, dict] = {
     "opencode-go": {"base_url": "https://opencode.ai/zen/go/v1", "display_name": "OpenCode Go"},
     "openai": {"base_url": "https://api.openai.com/v1", "display_name": "OpenAI"},
     "anthropic": {"base_url": "https://api.anthropic.com/v1", "display_name": "Anthropic"},
-    "zhipu": {"base_url": "https://open.bigmodel.cn/api/paas/v4", "display_name": "智谱 GLM"},
+    "zhipu": {
+        "base_url": "https://open.bigmodel.cn/api/paas/v4",
+        "display_name": "智谱 GLM",
+        "variants": [
+            {"id": "standard", "display_name": "标准版", "base_url": "https://open.bigmodel.cn/api/paas/v4"},
+            {"id": "coding", "display_name": "Coding Plan", "base_url": "https://open.bigmodel.cn/api/coding/paas/v4"},
+        ],
+    },
     "deepseek": {"base_url": "https://api.deepseek.com/v1", "display_name": "DeepSeek"},
-    "minimax": {"base_url": "https://api.minimax.chat/v1", "display_name": "MiniMax"},
+    "minimax": {
+        "base_url": "https://api.minimax.chat/v1",
+        "display_name": "MiniMax",
+        "variants": [
+            {"id": "cn", "display_name": "国内版", "base_url": "https://api.minimax.chat/v1"},
+            {"id": "intl", "display_name": "国际版", "base_url": "https://api.minimaxi.com/v1"},
+        ],
+    },
     "volcengine": {"base_url": "https://ark.cn-beijing.volces.com/api/v3", "display_name": "火山引擎"},
     "bailian": {"base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "display_name": "阿里百炼"},
     "kimi": {"base_url": "https://api.moonshot.cn/v1", "display_name": "Kimi (Moonshot AI)"},
 }
+
+
+def resolve_catalog_variant(provider_type: str, variant_id: str | None) -> str | None:
+    entry = PROVIDER_CATALOG.get(provider_type)
+    if not entry or not variant_id:
+        return None
+    for v in entry.get("variants", []):
+        if v["id"] == variant_id:
+            return v["base_url"]
+    return None
 
 
 def _to_info(row: ProviderConfig) -> ProviderInfo:

@@ -11,6 +11,7 @@ from crabagent.core.provider_store import (
     delete_provider,
     get_provider,
     list_providers,
+    resolve_catalog_variant,
     set_default_provider,
     update_provider,
 )
@@ -29,10 +30,17 @@ class ProviderResponse(BaseModel):
     api_key_preview: str
 
 
+class CatalogVariant(BaseModel):
+    id: str
+    display_name: str
+    base_url: str
+
+
 class CatalogEntry(BaseModel):
     type: str
     display_name: str
     base_url: str
+    variants: list[CatalogVariant] = []
 
 
 class CreateProviderRequest(BaseModel):
@@ -41,6 +49,7 @@ class CreateProviderRequest(BaseModel):
     api_key: str
     display_name: str = ""
     base_url: str = ""
+    variant_id: str | None = None
     is_default: bool = False
 
 
@@ -73,7 +82,15 @@ def _to_response(p) -> ProviderResponse:
 @router.get("/catalog", response_model=list[CatalogEntry])
 async def get_catalog(user: User = Depends(get_current_user)):
     return [
-        CatalogEntry(type=k, display_name=v["display_name"], base_url=v["base_url"])
+        CatalogEntry(
+            type=k,
+            display_name=v["display_name"],
+            base_url=v["base_url"],
+            variants=[
+                CatalogVariant(id=vv["id"], display_name=vv["display_name"], base_url=vv["base_url"])
+                for vv in v.get("variants", [])
+            ],
+        )
         for k, v in PROVIDER_CATALOG.items()
     ]
 
@@ -91,7 +108,8 @@ async def create_provider_endpoint(req: CreateProviderRequest, user: User = Depe
         raise HTTPException(status_code=409, detail="Provider already exists")
 
     catalog = PROVIDER_CATALOG.get(req.type)
-    base_url = req.base_url or (catalog["base_url"] if catalog else "")
+    variant_url = resolve_catalog_variant(req.type, req.variant_id)
+    base_url = req.base_url or variant_url or (catalog["base_url"] if catalog else "")
     display_name = req.display_name or (catalog["display_name"] if catalog else req.name)
 
     p = await create_provider(

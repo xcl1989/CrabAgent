@@ -21,6 +21,7 @@ export default function ProviderPanel({
 }: Props) {
   const [mode, setMode] = useState<"list" | "add">("list");
   const [formType, setFormType] = useState(catalog[0]?.type || "");
+  const [formVariantId, setFormVariantId] = useState<string>("");
   const [formName, setFormName] = useState("");
   const [formKey, setFormKey] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -39,12 +40,14 @@ export default function ProviderPanel({
         name: formName,
         type: formType,
         api_key: formKey,
+        variant_id: formVariantId || undefined,
       });
       toast.success("Provider added");
       onRefresh();
       setMode("list");
       setFormName("");
       setFormKey("");
+      setFormVariantId("");
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to add provider");
     } finally {
@@ -75,6 +78,8 @@ export default function ProviderPanel({
   };
 
   const selectedCatalog = catalog.find((c) => c.type === formType);
+  const selectedVariant = selectedCatalog?.variants.find((v) => v.id === formVariantId);
+  const displayBaseUrl = selectedVariant?.base_url || selectedCatalog?.base_url;
 
   return (
     <>
@@ -177,7 +182,10 @@ export default function ProviderPanel({
               </label>
               <select
                 value={formType}
-                onChange={(e) => setFormType(e.target.value)}
+                onChange={(e) => {
+                  setFormType(e.target.value);
+                  setFormVariantId("");
+                }}
                 className="w-full h-9 px-3 text-sm rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border)] text-[var(--text-primary)] focus:outline-none focus:border-[var(--brand)] focus:ring-2 focus:ring-[var(--brand)]/30"
               >
                 {catalog.map((c) => (
@@ -188,10 +196,29 @@ export default function ProviderPanel({
               </select>
               {selectedCatalog && (
                 <p className="text-[11px] text-[var(--text-tertiary)] font-mono">
-                  Base URL: {selectedCatalog.base_url}
+                  Base URL: {displayBaseUrl}
                 </p>
               )}
             </div>
+            {selectedCatalog && selectedCatalog.variants.length > 0 && (
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-[var(--text-secondary)]">
+                  Variant
+                </label>
+                <select
+                  value={formVariantId}
+                  onChange={(e) => setFormVariantId(e.target.value)}
+                  className="w-full h-9 px-3 text-sm rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border)] text-[var(--text-primary)] focus:outline-none focus:border-[var(--brand)] focus:ring-2 focus:ring-[var(--brand)]/30"
+                >
+                  <option value="">Default</option>
+                  {selectedCatalog.variants.map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {v.display_name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             <Input
               label="Name"
               value={formName}

@@ -10,10 +10,17 @@ export interface Provider {
   api_key_preview: string;
 }
 
+export interface CatalogVariant {
+  id: string;
+  display_name: string;
+  base_url: string;
+}
+
 export interface CatalogEntry {
   type: string;
   display_name: string;
   base_url: string;
+  variants: CatalogVariant[];
 }
 
 export interface ModelInfo {
@@ -35,6 +42,7 @@ export function createProvider(data: {
   api_key: string;
   display_name?: string;
   base_url?: string;
+  variant_id?: string;
   is_default?: boolean;
 }): Promise<Provider> {
   return api.post("/providers", data);
