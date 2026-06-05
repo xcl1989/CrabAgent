@@ -94,6 +94,33 @@ async def get_current_workspace():
     return {"workspace": str(Path.cwd().resolve())}
 
 
+@router.get("/project-memory")
+async def get_project_memory(
+    user: User = Depends(get_current_user),
+    workspace: str = Query("", description="Workspace path. Defaults to CWD."),
+):
+    """Return aggregated project memory for the given workspace."""
+    ws = Path(workspace).resolve() if workspace else Path.cwd().resolve()
+    from crabagent.core.project_memory import load_project_memory
+
+    pm = await load_project_memory(user.id, ws)
+    if pm is None:
+        return {
+            "workspace": str(ws),
+            "tech_stack": [],
+            "recent_lessons": [],
+            "lesson_count": 0,
+            "last_active": "",
+        }
+    return {
+        "workspace": pm.workspace,
+        "tech_stack": pm.tech_stack,
+        "recent_lessons": pm.recent_lessons,
+        "lesson_count": pm.lesson_count,
+        "last_active": pm.last_active,
+    }
+
+
 @router.post("", response_model=SessionResponse, status_code=status.HTTP_201_CREATED)
 async def create_session(
     req: CreateSessionRequest,

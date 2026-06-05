@@ -8,6 +8,10 @@ import {
   ChevronDown,
   ChevronRight,
   History as HistoryIcon,
+  FolderOpen,
+  Lightbulb,
+  Code,
+  Clock,
 } from "lucide-react";
 import { connectGlobalSSE, GlobalSSEEvent } from "../api/monitor";
 import {
@@ -15,6 +19,9 @@ import {
   AgentProfile,
   getPipelineHistory,
   PipelineHistoryItem,
+  getProjectMemory,
+  getCurrentWorkspace,
+  type ProjectMemoryData,
 } from "../api/agents";
 import AgentGrowthChart from "../components/AgentGrowthChart";
 import {
@@ -82,11 +89,17 @@ export default function DashboardPage() {
   const [pipelines, setPipelines] = useState<PipelineState[]>([]);
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
   const [historyExpanded, setHistoryExpanded] = useState(false);
+  const [projectMemory, setProjectMemory] = useState<ProjectMemoryData | null>(null);
   const esRef = useRef<EventSource | null>(null);
   const colors = useThemeColors();
 
   useEffect(() => {
     listAgentProfiles().then(setProfiles).catch(() => {});
+    // Load project memory for current workspace
+    getCurrentWorkspace()
+      .then((ws) => getProjectMemory(ws.workspace))
+      .then(setProjectMemory)
+      .catch(() => {});
     getPipelineHistory(10)
       .then((items) => {
         if (!items.length) return;
@@ -450,6 +463,88 @@ export default function DashboardPage() {
             </div>
           )}
         </section>
+
+        {/* ─── Project Memory ─── */}
+        {projectMemory && (
+          <section>
+            <SectionLabel>
+              <span className="flex items-center gap-1.5">
+                <FolderOpen size={11} />
+                PROJECT MEMORY
+              </span>
+            </SectionLabel>
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--bg-secondary)] p-4">
+              {/* Tech Stack */}
+              <div className="flex items-center gap-2 mb-3">
+                <Code size={14} className="text-[var(--text-tertiary)] shrink-0" />
+                <div className="flex flex-wrap gap-1.5">
+                  {(projectMemory.tech_stack?.length ?? 0) > 0 ? (
+                    projectMemory.tech_stack!.map((t) => (
+                      <span
+                        key={t}
+                        className="px-2 py-0.5 rounded-md text-xs font-mono font-medium"
+                        style={{
+                          background: "var(--bg-tertiary)",
+                          color: "var(--text-secondary)",
+                        }}
+                      >
+                        {t}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="text-xs text-[var(--text-tertiary)]">
+                      No tech stack detected
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Last active */}
+              {projectMemory.last_active && (
+                <div className="flex items-center gap-2 mb-3 text-xs text-[var(--text-tertiary)]">
+                  <Clock size={12} className="shrink-0" />
+                  <span>Last active: {projectMemory.last_active}</span>
+                </div>
+              )}
+
+              {/* Lessons */}
+              {(projectMemory.recent_lessons?.length ?? 0) > 0 && (
+                <div>
+                  <div className="flex items-center gap-2 mb-2">
+                    <Lightbulb size={12} className="text-[var(--text-tertiary)] shrink-0" />
+                    <span className="text-xs font-medium text-[var(--text-secondary)]">
+                      What I learned about this project
+                      {projectMemory.lesson_count > 5 &&
+                        ` (last ${projectMemory.recent_lessons!.length} of ${projectMemory.lesson_count})`}
+                    </span>
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    {projectMemory.recent_lessons!.map((l, i) => (
+                      <div
+                        key={i}
+                        className="text-xs leading-relaxed px-3 py-1.5 rounded-lg"
+                        style={{
+                          background: "var(--bg-tertiary)",
+                          color: "var(--text-secondary)",
+                        }}
+                      >
+                        {l}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Empty state */}
+              {!projectMemory.last_active &&
+                (projectMemory.recent_lessons?.length ?? 0) === 0 && (
+                  <div className="text-xs text-[var(--text-tertiary)] text-center py-2">
+                    Start working in this project to build memory.
+                  </div>
+                )}
+            </div>
+          </section>
+        )}
 
         {/* ─── Active Pipelines ─── */}
         {activePipes.length > 0 && (

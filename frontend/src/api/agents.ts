@@ -185,3 +185,22 @@ export function getDefaultToolPermissions(): Promise<{ tool_permissions: Record<
 export function setDefaultToolPermissions(tool_permissions: Record<string, string>): Promise<{ tool_permissions: Record<string, string> }> {
   return api.put("/agents/default-tool-permissions", { tool_permissions });
 }
+
+// ─── Project Memory ───
+
+export interface ProjectMemoryData {
+  workspace: string;
+  tech_stack: string[];
+  recent_lessons: string[];
+  lesson_count: number;
+  last_active: string;
+}
+
+export function getProjectMemory(workspace?: string): Promise<ProjectMemoryData> {
+  const params = workspace ? `?workspace=${encodeURIComponent(workspace)}` : "";
+  return api.get(`/sessions/project-memory${params}`);
+}
+
+export function getCurrentWorkspace(): Promise<{ workspace: string }> {
+  return api.get("/sessions/current-workspace");
+}
