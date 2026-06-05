@@ -377,6 +377,14 @@ async def run_agent(
         except Exception:
             logger.debug("middleware run_end failed", exc_info=True)
 
+    # Flush pending molts into a single snapshot per round
+    try:
+        registry = context.tool_registry
+        if hasattr(registry, "_flush_molt_snapshot"):
+            await registry._flush_molt_snapshot(context)
+    except Exception:
+        logger.debug("molt flush failed", exc_info=True)
+
     return context.messages
 
 

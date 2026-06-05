@@ -90,15 +90,25 @@ class ToolRegistry:
 
             resolved = _Path(raw).resolve()
             ws = context.workspace.resolve()
-            rel = resolved.relative_to(ws)
+            rel = str(resolved.relative_to(ws))
         except (ValueError, Exception):
+            return
+        # Collect files for batch snapshot at end of round
+        pending = context.metadata.setdefault("_pending_molt_files", set())
+        pending.add(rel)
+
+    async def _flush_molt_snapshot(self, context: Any) -> None:
+        pending = context.metadata.pop("_pending_molt_files", None)
+        if not pending:
             return
         from crabagent.core.database import async_session_factory
         from crabagent.core.molt.snapshot import take_snapshot
         from crabagent.core.molt.store import create_molt, prune_molts
 
-        files = [str(rel)]
-        snap = await take_snapshot(context, files, description=f"Before: {name} {rel}")
+        files = sorted(pending)
+        desc = f"Before: {', '.join(files[:3])}" + (f" +{len(files) - 3} more" if len(files) > 3 else "")
+        ws = context.workspace.resolve()
+        snap = await take_snapshot(context, files, description=desc)
         if not snap:
             return
         try:
