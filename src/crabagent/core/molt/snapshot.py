@@ -6,13 +6,15 @@ import shutil
 
 logger = logging.getLogger(__name__)
 
-_next_seq: int = 0
+import time as _time
 
 
 def _molt_id() -> str:
+    """Return a unique molt ID using timestamp + counter to survive server restarts."""
     global _next_seq
     _next_seq += 1
-    return f"molt_{_next_seq:04d}"
+    ts = _time.time_ns() // 1000  # microseconds
+    return f"molt_{ts}_{_next_seq:04d}"
 
 
 async def take_snapshot(context, filepaths: list[str], description: str = "") -> dict | None:
