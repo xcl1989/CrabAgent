@@ -142,8 +142,12 @@ crabagent "帮我整理这个目录"
 构建 Electron 壳（需要系统已安装 Python 和 `crabagent`）：
 
 ```bash
+# 从 git clone 项目一条命令构建：
 make desktop
 # → electron/dist-electron/CrabAgent-0.9.4-arm64.dmg
+
+# 或者从 pip 安装后：
+crabagent --build-desktop
 ```
 
 或者直接在浏览器中使用：

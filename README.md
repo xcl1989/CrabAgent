@@ -141,8 +141,12 @@ crabagent "organize this directory"
 Build the Electron wrapper (requires Python + `crabagent` installed on your system):
 
 ```bash
+# One-command build (from git clone):
 make desktop
 # → electron/dist-electron/CrabAgent-0.9.4-arm64.dmg
+
+# Or from pip install:
+crabagent --build-desktop
 ```
 
 Or run directly in your browser:
