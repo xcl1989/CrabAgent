@@ -171,7 +171,7 @@ export default function MemoryPage() {
   const agentNames = [...new Set(entries.map((e) => e.agent_name).filter(Boolean))].sort();
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden bg-[var(--bg-primary)]">
+    <div className="h-full flex flex-col overflow-hidden bg-[var(--bg-primary)]">
       {/* Header */}
       <div className="flex items-center gap-4 px-6 h-12 border-b border-[var(--border)] bg-[var(--bg-secondary)]">
         <Brain size={15} className="text-[var(--text-tertiary)]" />
@@ -184,9 +184,9 @@ export default function MemoryPage() {
         </span>
       </div>
 
-      <div className="flex-1 overflow-auto p-5">
-        {/* Tabs */}
-        <div className="flex items-center gap-1 mb-5 border-b border-[var(--border)] pb-2">
+      {/* Tabs */}
+      <div className="px-5 pt-5">
+        <div className="flex items-center gap-1 mb-4 border-b border-[var(--border)] pb-2">
           {(Object.keys(TAB_LABELS) as MemoryTab[]).map((t) => (
             <button
               key={t}
@@ -205,117 +205,113 @@ export default function MemoryPage() {
             </button>
           ))}
         </div>
+      </div>
 
-        {/* Project Memory Tab: Workspace selector + tech stack */}
-        {tab === "project" && projectMemory && (
-          <div className="mb-4">
-            {/* Workspace selector */}
-            {workspaces.length > 1 && (
-              <div className="relative mb-3">
-                <button
-                  onClick={() => setWsOpen((o) => !o)}
-                  className="flex items-center gap-2 w-full max-w-xs px-3 py-1.5 rounded-lg text-xs text-left border border-[var(--border)] bg-[var(--bg-tertiary)] text-[var(--text-primary)] hover:border-[var(--border-strong)] transition-colors"
-                >
-                  <FolderOpen size={12} className="text-[var(--text-tertiary)] shrink-0" />
-                  <span className="flex-1 truncate">
-                    {selectedWorkspace
-                      ? selectedWorkspace.split("/").slice(-2).join("/")
-                      : "Select workspace"}
-                  </span>
-                  <ChevronDown
-                    size={12}
-                    className={cn("text-[var(--text-tertiary)] transition-transform", wsOpen && "rotate-180")}
-                  />
-                </button>
-                {wsOpen && (
-                  <div className="absolute top-full left-0 z-50 mt-1 rounded-lg border border-[var(--border)] bg-[var(--bg-secondary)] shadow-[var(--shadow-lg)] max-h-48 overflow-auto max-w-xs">
-                    {workspaces.map((ws) => (
-                      <button
-                        key={ws.workspace}
-                        onClick={() => handleSwitchWorkspace(ws.workspace)}
-                        className={cn(
-                          "w-full flex items-center gap-2 px-3 py-2 text-xs text-left transition-colors",
-                          ws.workspace === selectedWorkspace
-                            ? "bg-[var(--brand-bg)] text-[var(--brand)]"
-                            : "text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]",
-                        )}
-                      >
-                        <span className="flex-1 truncate">
-                          {ws.workspace.split("/").slice(-2).join("/")}
-                        </span>
-                        <span className="text-[10px] text-[var(--text-tertiary)] shrink-0">
-                          {ws.session_count}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Tech stack */}
-            {(projectMemory.tech_stack?.length ?? 0) > 0 && (
-              <div className="flex items-center gap-2 mb-3">
-                <span className="text-xs text-[var(--text-tertiary)] font-medium">Tech Stack:</span>
-                <div className="flex flex-wrap gap-1.5">
-                  {projectMemory.tech_stack!.map((t) => (
-                    <span
-                      key={t}
-                      className="px-2 py-0.5 rounded-md text-[11px] font-mono font-medium bg-[var(--bg-tertiary)] text-[var(--text-secondary)]"
+      {/* Project Memory Tab: Workspace selector + tech stack (fixed) */}
+      {tab === "project" && projectMemory && (
+        <div className="px-5 pb-3">
+          {workspaces.length > 1 && (
+            <div className="relative mb-3">
+              <button
+                onClick={() => setWsOpen((o) => !o)}
+                className="flex items-center gap-2 w-full max-w-xs px-3 py-1.5 rounded-lg text-xs text-left border border-[var(--border)] bg-[var(--bg-tertiary)] text-[var(--text-primary)] hover:border-[var(--border-strong)] transition-colors"
+              >
+                <FolderOpen size={12} className="text-[var(--text-tertiary)] shrink-0" />
+                <span className="flex-1 truncate">
+                  {selectedWorkspace
+                    ? selectedWorkspace.split("/").slice(-2).join("/")
+                    : "Select workspace"}
+                </span>
+                <ChevronDown
+                  size={12}
+                  className={cn("text-[var(--text-tertiary)] transition-transform", wsOpen && "rotate-180")}
+                />
+              </button>
+              {wsOpen && (
+                <div className="absolute top-full left-0 z-50 mt-1 rounded-lg border border-[var(--border)] bg-[var(--bg-secondary)] shadow-[var(--shadow-lg)] max-h-48 overflow-auto max-w-xs">
+                  {workspaces.map((ws) => (
+                    <button
+                      key={ws.workspace}
+                      onClick={() => handleSwitchWorkspace(ws.workspace)}
+                      className={cn(
+                        "w-full flex items-center gap-2 px-3 py-2 text-xs text-left transition-colors",
+                        ws.workspace === selectedWorkspace
+                          ? "bg-[var(--brand-bg)] text-[var(--brand)]"
+                          : "text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]",
+                      )}
                     >
-                      {t}
-                    </span>
+                      <span className="flex-1 truncate">
+                        {ws.workspace.split("/").slice(-2).join("/")}
+                      </span>
+                      <span className="text-[10px] text-[var(--text-tertiary)] shrink-0">
+                        {ws.session_count}
+                      </span>
+                    </button>
                   ))}
                 </div>
+              )}
+            </div>
+          )}
+          {(projectMemory.tech_stack?.length ?? 0) > 0 && (
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-xs text-[var(--text-tertiary)] font-medium">Tech Stack:</span>
+              <div className="flex flex-wrap gap-1.5">
+                {projectMemory.tech_stack!.map((t) => (
+                  <span key={t} className="px-2 py-0.5 rounded-md text-[11px] font-mono font-medium bg-[var(--bg-tertiary)] text-[var(--text-secondary)]">
+                    {t}
+                  </span>
+                ))}
               </div>
-            )}
+            </div>
+          )}
+          {projectMemory.last_active && (
+            <div className="text-xs text-[var(--text-tertiary)] mb-2">
+              Last active: {projectMemory.last_active}
+            </div>
+          )}
+        </div>
+      )}
 
-            {/* Last active */}
-            {projectMemory.last_active && (
-              <div className="text-xs text-[var(--text-tertiary)] mb-2">
-                Last active: {projectMemory.last_active}
-              </div>
-            )}
-          </div>
+      {/* Search + Filter bar (fixed) */}
+      <div className="flex items-center gap-2 px-5 pb-3">
+        <div className="relative flex-1 max-w-sm">
+          <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)]" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search memories..."
+            className="w-full h-8 pl-8 pr-3 rounded-lg text-xs border border-[var(--border)] bg-[var(--bg-tertiary)] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] outline-none focus:border-[var(--brand)] transition-colors"
+          />
+          {search && (
+            <button
+              onClick={() => setSearch("")}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
+            >
+              <X size={12} />
+            </button>
+          )}
+        </div>
+
+        {tab === "agent_lesson" && agentNames.length > 0 && (
+          <select
+            value={agentFilter}
+            onChange={(e) => setAgentFilter(e.target.value)}
+            className="h-8 px-2 rounded-lg text-xs border border-[var(--border)] bg-[var(--bg-tertiary)] text-[var(--text-primary)] outline-none focus:border-[var(--brand)]"
+          >
+            <option value="">All agents</option>
+            {agentNames.map((name) => (
+              <option key={name} value={name}>{name}</option>
+            ))}
+          </select>
         )}
 
-        {/* Search + Filter bar */}
-        <div className="flex items-center gap-2 mb-4">
-          <div className="relative flex-1 max-w-sm">
-            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)]" />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search memories..."
-              className="w-full h-8 pl-8 pr-3 rounded-lg text-xs border border-[var(--border)] bg-[var(--bg-tertiary)] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] outline-none focus:border-[var(--brand)] transition-colors"
-            />
-            {search && (
-              <button
-                onClick={() => setSearch("")}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
-              >
-                <X size={12} />
-              </button>
-            )}
-          </div>
+        <Button variant="ghost" size="xs" onClick={() => setShowCreate(true)}>
+          <Plus size={13} /> Add
+        </Button>
+      </div>
 
-          {tab === "agent_lesson" && agentNames.length > 0 && (
-            <select
-              value={agentFilter}
-              onChange={(e) => setAgentFilter(e.target.value)}
-              className="h-8 px-2 rounded-lg text-xs border border-[var(--border)] bg-[var(--bg-tertiary)] text-[var(--text-primary)] outline-none focus:border-[var(--brand)]"
-            >
-              <option value="">All agents</option>
-              {agentNames.map((name) => (
-                <option key={name} value={name}>{name}</option>
-              ))}
-            </select>
-          )}
-
-          <Button variant="ghost" size="xs" onClick={() => setShowCreate(true)}>
-            <Plus size={13} /> Add
-          </Button>
-        </div>
+      {/* Memory list (scrollable) */}
+      <div className="flex-1 overflow-y-auto px-5 pb-5">
 
         {/* Memory list */}
         {loading ? (
