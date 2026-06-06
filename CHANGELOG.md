@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.9.5]
+
+### Added
+- **pip-installable desktop build** — `crabagent --build-desktop` from pip install
+- Electron source files included in wheel
+
+### Changed
+- README updated with `--build-desktop` usage
+
+---
+
 ## [0.9.4]
 
 ### Added
