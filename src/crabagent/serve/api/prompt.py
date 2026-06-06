@@ -202,18 +202,6 @@ async def prompt_async(
         except Exception:
             pass
 
-        # Inject per-agent lessons for the effective agent
-        try:
-            effective_agent_for_lessons = req.agent or getattr(conv, "agent", None) or "default"
-            base_prompt = await inject_agent_lessons(
-                base_prompt,
-                user_id=user.id,
-                agent_name=effective_agent_for_lessons,
-                task_hint=(req.content or "")[:120],
-            )
-        except Exception:
-            pass
-
         # Inject project memory
         try:
             from crabagent.core.project_memory import load_project_memory
@@ -323,6 +311,19 @@ async def prompt_async(
             if agent_def.get("model"):
                 context.model = agent_def["model"]
             context.messages.append(build_agent_switch_msg(agent_def))
+            # Inject per-agent lessons after switch (not in cached system prompt)
+            try:
+                from crabagent.core.agent.agents import inject_agent_lessons as _inject_lessons
+                lessons_block = await _inject_lessons(
+                    "",
+                    user_id=user.id,
+                    agent_name=effective_agent,
+                    task_hint=(req.content or "")[:120],
+                )
+                if lessons_block.strip():
+                    context.messages.append({"role": "user", "content": lessons_block.strip(), "agent": effective_agent})
+            except Exception:
+                pass
             try:
                 await conv_svc.update_conversation(db, session_id, agent=effective_agent)
             except Exception:

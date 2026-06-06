@@ -22,6 +22,7 @@ import {
   X,
 } from "lucide-react";
 import { Modal, CodeBlock } from "./ui";
+import ToolResultRender from "./ToolResultRender";
 import { cn } from "../lib/cn";
 
 interface ChatMessage {
@@ -392,51 +393,14 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(
                   )}
                 </summary>
 
-                <div
-                  className="mt-1.5 rounded-lg overflow-hidden bg-[var(--bg-secondary)] border border-[var(--border)]"
-                  style={{ borderLeft: `3px solid ${accentVar}` }}
-                >
-                  <div className="px-3 py-2">
-                    <div className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-tertiary)] mb-1">
-                      Arguments
-                    </div>
-                    <pre className="text-[12px] whitespace-pre-wrap break-all leading-relaxed font-mono text-[var(--text-primary)] m-0 bg-transparent! p-0! border-0!">
-                      {(() => {
-                        try {
-                          return JSON.stringify(
-                            JSON.parse(callMsg.content).arguments,
-                            null,
-                            2,
-                          );
-                        } catch {
-                          return callMsg.content;
-                        }
-                      })()}
-                    </pre>
-                  </div>
-
-                  <div className="px-3 py-2 border-t border-[var(--border-subtle)]">
-                    <div className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-tertiary)] mb-1">
-                      Result
-                    </div>
-                    <pre className="text-[12px] whitespace-pre-wrap break-all leading-relaxed font-mono text-[var(--text-secondary)] m-0 bg-transparent! p-0! border-0! max-h-48 overflow-auto">
-                      {resultMsg.content}
-                    </pre>
-                    {resultMsg.images && resultMsg.images.length > 0 && (
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        {resultMsg.images.map((img, idx) => (
-                          <img
-                            key={idx}
-                            src={img}
-                            alt={`Tool result screenshot ${idx + 1}`}
-                            className="max-w-full max-h-[320px] rounded-md object-contain cursor-pointer border border-[var(--border)] hover:border-[var(--brand-border)] transition-colors"
-                            onClick={() => setPreviewImage(img)}
-                          />
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
+                <ToolResultRender
+                  name={name}
+                  argsJson={callMsg.content}
+                  result={resultMsg.content}
+                  images={resultMsg.images}
+                  onPreviewImage={(url) => setPreviewImage(url)}
+                  accentVar={accentVar}
+                />
               </details>
             );
           }

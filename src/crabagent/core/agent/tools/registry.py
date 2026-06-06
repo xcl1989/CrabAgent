@@ -134,7 +134,7 @@ class ToolRegistry:
 
         tool = self._tools.get(name)
         if not tool:
-            return f"Error: unknown tool '{name}'"
+            return f"Error: tool '{name}' is not available (may be restricted for current agent)"
 
         if "_truncated_error" in arguments:
             return arguments["_truncated_error"]
@@ -152,7 +152,7 @@ class ToolRegistry:
             if permission is None:
                 permission = "confirm" if tool.requires_permission else "auto"
             if permission == "deny":
-                return f"Tool '{tool.name}' is disabled."
+                return f"Tool '{tool.name}' is disabled (no permission for current agent)"
             if permission == "confirm":
                 if tool.name not in context.approved_tools:
                     if context.confirm_callback:

@@ -22,4 +22,6 @@ async def list_messages(
     conv = await get_owned_conversation(db, session_id, user)
     branch_id = branch or conv.active_branch or "main"
     msgs = await get_messages(db, conv.id, limit=limit, offset=offset, branch_id=branch_id)
+    # Filter out internal agent_switch messages from frontend display
+    msgs = [m for m in msgs if m.role != "agent_switch"]
     return [message_to_response(m) for m in msgs]

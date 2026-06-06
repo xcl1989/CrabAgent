@@ -72,6 +72,9 @@ async def delete_messages(db: AsyncSession, conversation_id: int) -> int:
 
 def message_to_dict(msg: Message) -> dict:
     d: dict = {"role": msg.role}
+    # agent_switch messages are user messages for the LLM
+    if d["role"] == "agent_switch":
+        d["role"] = "user"
 
     if msg.content:
         if msg.content.startswith("["):

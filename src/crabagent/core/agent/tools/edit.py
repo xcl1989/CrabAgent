@@ -36,6 +36,10 @@ def edit_file(file_path: str, old_string: str, new_string: str) -> str:
     except Exception as e:
         return f"Error reading file: {e}"
 
+    # Find line number of old_string
+    index = content.index(old_string)
+    line_num = content[:index].count("\n") + 1
+
     count = content.count(old_string)
     if count == 0:
         return f"Error: old_string not found in {file_path}"
@@ -44,4 +48,4 @@ def edit_file(file_path: str, old_string: str, new_string: str) -> str:
 
     new_content = content.replace(old_string, new_string, 1)
     path.write_text(new_content, encoding="utf-8")
-    return f"Successfully replaced 1 occurrence in {file_path}"
+    return f"Successfully replaced 1 occurrence in {file_path} @ L{line_num}"
