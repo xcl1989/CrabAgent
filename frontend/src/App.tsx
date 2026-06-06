@@ -2,12 +2,12 @@ import { useState } from "react";
 import { api } from "./api/client";
 import LoginPage from "./pages/LoginPage";
 import ChatPage from "./pages/ChatPage";
-import DashboardPage from "./pages/DashboardPage";
 import AgentsPage from "./pages/AgentsPage";
+import MemoryPage from "./pages/MemoryPage";
 import { NavBar } from "./components/NavBar";
 import { cn } from "./lib/cn";
 
-export type PageId = "chat" | "dashboard" | "agents";
+export type PageId = "chat" | "agents" | "memory";
 
 function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
   const [page, setPage] = useState<PageId>("chat");
@@ -19,11 +19,11 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
         <div className={cn("absolute inset-0", page !== "chat" && "hidden")}>
           <ChatPage />
         </div>
-        <div className={cn("absolute inset-0", page !== "dashboard" && "hidden")}>
-          <DashboardPage />
-        </div>
         <div className={cn("absolute inset-0", page !== "agents" && "hidden")}>
           <AgentsPage />
+        </div>
+        <div className={cn("absolute inset-0", page !== "memory" && "hidden")}>
+          <MemoryPage />
         </div>
       </div>
     </div>

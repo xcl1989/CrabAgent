@@ -1,4 +1,4 @@
-import { MessageSquare, LayoutDashboard, Users, Sun, Moon, LogOut } from "lucide-react";
+import { MessageSquare, Users, Brain, Sun, Moon, LogOut } from "lucide-react";
 import { useTheme } from "../lib/theme";
 import { cn } from "../lib/cn";
 import { useState } from "react";
@@ -13,8 +13,8 @@ interface NavItem {
 
 const items: NavItem[] = [
   { id: "chat", label: "Chat", icon: <MessageSquare size={15} /> },
-  { id: "dashboard", label: "Dashboard", icon: <LayoutDashboard size={15} /> },
   { id: "agents", label: "Agents", icon: <Users size={15} /> },
+  { id: "memory", label: "Memory", icon: <Brain size={15} /> },
 ];
 
 function ThemeToggle() {

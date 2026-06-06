@@ -204,3 +204,50 @@ export function getProjectMemory(workspace?: string): Promise<ProjectMemoryData>
 export function getCurrentWorkspace(): Promise<{ workspace: string }> {
   return api.get("/sessions/current-workspace");
 }
+
+// ─── Memory Management (new API) ───
+
+export interface MemoryEntry {
+  id: number;
+  memory_type: string;
+  agent_name: string;
+  category: string;
+  key: string;
+  content: string;
+  importance: number;
+  confidence: number;
+  access_count: number;
+  updated_at: string;
+}
+
+export function listMemories(params?: {
+  memory_type?: string;
+  category?: string;
+  agent_name?: string;
+  q?: string;
+}): Promise<MemoryEntry[]> {
+  const search = new URLSearchParams();
+  if (params?.memory_type) search.set("memory_type", params.memory_type);
+  if (params?.category) search.set("category", params.category);
+  if (params?.agent_name) search.set("agent_name", params.agent_name);
+  if (params?.q) search.set("q", params.q);
+  const qs = search.toString();
+  return api.get(`/memory${qs ? `?${qs}` : ""}`);
+}
+
+export function createMemory(req: {
+  memory_type: string;
+  agent_name: string;
+  category: string;
+  key: string;
+  content: string;
+  importance?: number;
+}): Promise<{ status: string; key: string }> {
+  return api.post("/memory", req);
+}
+
+export function updateMemory(key: string, content: string, importance?: number): Promise<{ status: string; key: string }> {
+  const params = new URLSearchParams({ content });
+  if (importance !== undefined) params.set("importance", String(importance));
+  return api.patch(`/memory/${encodeURIComponent(key)}?${params.toString()}`, {});
+}

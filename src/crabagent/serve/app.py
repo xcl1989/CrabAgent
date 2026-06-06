@@ -106,6 +106,7 @@ def create_app() -> FastAPI:
     from crabagent.serve.api.files import router as files_router
     from crabagent.serve.api.input import router as input_router
     from crabagent.serve.api.mcp_server import router as mcp_server_router
+    from crabagent.serve.api.memory import router as memory_router
     from crabagent.serve.api.message import router as message_router
     from crabagent.serve.api.molt import router as molt_router
     from crabagent.serve.api.notification import router as notification_router
@@ -120,6 +121,7 @@ def create_app() -> FastAPI:
     app.include_router(agent_router, prefix="/api")
     app.include_router(auth_router, prefix="/api")
     app.include_router(session_router, prefix="/api")
+    app.include_router(memory_router, prefix="/api")
     app.include_router(message_router, prefix="/api")
     app.include_router(prompt_router, prefix="/api")
     app.include_router(event_router, prefix="/api")

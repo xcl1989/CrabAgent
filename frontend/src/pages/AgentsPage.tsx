@@ -7,6 +7,11 @@ import {
   ToggleLeft,
   ToggleRight,
   Bot,
+  Activity,
+  Check,
+  X,
+  Circle,
+  Clock,
 } from "lucide-react";
 import {
   AgentProfile,
@@ -18,13 +23,18 @@ import {
   listAgentMemory,
   deleteAgentMemory,
   getAgentStats,
+  getAgentGrowth,
+  listAgentRuns,
   AgentMemoryItem,
   AgentTaskStats,
+  AgentRunSummary,
+  GrowthPoint,
   ToolInfo,
   listTools,
   getDefaultToolPermissions,
   setDefaultToolPermissions,
 } from "../api/agents";
+import AgentGrowthChart from "../components/AgentGrowthChart";
 import { Button, Input, Textarea, ConfirmDialog, EmptyState } from "../components/ui";
 import { toast } from "../components/ui/Toast";
 import { cn } from "../lib/cn";
@@ -106,6 +116,11 @@ export default function AgentsPage() {
   const [editingDefault, setEditingDefault] = useState(false);
   const [defaultForm, setDefaultForm] = useState<Record<string, Permission>>({});
 
+  // New: stats + recent runs
+  const [growthData, setGrowthData] = useState<GrowthPoint[]>([]);
+  const [recentRuns, setRecentRuns] = useState<AgentRunSummary[]>([]);
+  const [loadingRuns, setLoadingRuns] = useState(false);
+
   const fetchAgents = async () => {
     try {
       setAgents(await listAgentProfiles());
@@ -127,23 +142,33 @@ export default function AgentsPage() {
     } else {
       setAgentStats(null);
       setAgentMemories([]);
+      setGrowthData([]);
+      setRecentRuns([]);
     }
   }, [selectedName, learningAgents]);
 
   const loadLearning = async (agentName: string) => {
     setLoadingLearn(true);
+    setLoadingRuns(true);
     try {
-      const [stats, memories] = await Promise.all([
+      const [stats, memories, growth, runs] = await Promise.all([
         getAgentStats(agentName),
         listAgentMemory(agentName, 20),
+        getAgentGrowth(agentName, 30).catch(() => []),
+        listAgentRuns({ agent_name: agentName, limit: 10 }),
       ]);
       setAgentStats(stats);
       setAgentMemories(memories);
+      setGrowthData(growth);
+      setRecentRuns(runs);
     } catch {
       setAgentStats(null);
       setAgentMemories([]);
+      setGrowthData([]);
+      setRecentRuns([]);
     } finally {
       setLoadingLearn(false);
+      setLoadingRuns(false);
     }
   };
 
@@ -603,7 +628,7 @@ export default function AgentsPage() {
           )}
 
           {selected && !showCreate && (
-            <div className="max-w-lg mx-auto p-6">
+            <div className="p-6">
               {error && (
                 <div className="mb-3 px-3 py-2 rounded-lg bg-[var(--danger-bg)] border border-[var(--danger-border)] text-xs text-[var(--danger)]">
                   {error}
@@ -731,104 +756,107 @@ export default function AgentsPage() {
                       );
                     })()}
 
-                    {/* Learning Stats */}
+                    {/* Stats + Growth Chart */}
                     {learningAgents.includes(selected.name) && (
                       <div className="mt-2 pt-4 border-t border-[var(--border)]">
                         <div className="flex items-center gap-2 mb-3">
-                          <span className="text-sm">🧠</span>
+                          <Activity size={13} className="text-[var(--text-tertiary)]" />
                           <span className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
-                            Learning Stats
+                            Statistics
                           </span>
                         </div>
                         {loadingLearn && (
                           <div className="flex items-center gap-2 py-2 text-xs text-[var(--text-tertiary)]">
-                            <Loader2 size={12} className="animate-spin" />{" "}
-                            Loading…
+                            <Loader2 size={12} className="animate-spin" /> Loading…
                           </div>
                         )}
                         {agentStats && !loadingLearn && (
-                          <div className="space-y-3">
-                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                          <div className="flex flex-col lg:flex-row gap-4">
+                            {/* Stats grid */}
+                            <div className="grid grid-cols-2 gap-2 min-w-[200px]">
                               <div className="rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border)] px-3 py-2 text-center">
                                 <div className="text-lg font-semibold text-[var(--text-primary)]">
                                   {agentStats.total}
                                 </div>
-                                <div className="text-[10px] text-[var(--text-tertiary)]">
-                                  Tasks
-                                </div>
+                                <div className="text-[10px] text-[var(--text-tertiary)]">Tasks</div>
                               </div>
                               <div className="rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border)] px-3 py-2 text-center">
                                 <div className="text-lg font-semibold text-[var(--success)]">
                                   {agentStats.success_rate}%
                                 </div>
-                                <div className="text-[10px] text-[var(--text-tertiary)]">
-                                  Success
-                                </div>
+                                <div className="text-[10px] text-[var(--text-tertiary)]">Success</div>
                               </div>
                               <div className="rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border)] px-3 py-2 text-center">
                                 <div className="text-lg font-semibold text-[var(--text-primary)]">
                                   {agentStats.avg_elapsed}s
                                 </div>
-                                <div className="text-[10px] text-[var(--text-tertiary)]">
-                                  Avg Time
-                                </div>
+                                <div className="text-[10px] text-[var(--text-tertiary)]">Avg Time</div>
                               </div>
                               <div className="rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border)] px-3 py-2 text-center">
                                 <div className="text-lg font-semibold text-[var(--text-primary)]">
                                   {agentStats.avg_tokens}
                                 </div>
-                                <div className="text-[10px] text-[var(--text-tertiary)]">
-                                  Avg Tokens
-                                </div>
+                                <div className="text-[10px] text-[var(--text-tertiary)]">Avg Tokens</div>
                               </div>
                             </div>
-                            {agentMemories.length > 0 && (
-                              <div>
-                                <div className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-tertiary)] mb-1.5">
-                                  Memory ({agentMemories.length})
-                                </div>
-                                <div className="space-y-1 max-h-48 overflow-y-auto">
-                                  {agentMemories.map((m) => (
-                                    <div
-                                      key={m.key}
-                                      className="flex items-start gap-1.5 group"
-                                    >
-                                      <span
-                                        className={cn(
-                                          "text-[9px] px-1.5 py-0.5 rounded shrink-0 font-mono",
-                                          m.source === "llm"
-                                            ? "bg-[var(--accent-bg)] text-[var(--accent)]"
-                                            : "bg-[var(--bg-secondary)] text-[var(--text-tertiary)]",
-                                        )}
-                                      >
-                                        {m.source || "rule"}
-                                      </span>
-                                      <span className="text-[11px] flex-1 leading-relaxed truncate text-[var(--text-secondary)]">
-                                        {m.content}
-                                      </span>
-                                      <button
-                                        onClick={() =>
-                                          handleDeleteMemory(m.key)
-                                        }
-                                        className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0 p-0.5 rounded text-[var(--danger)] hover:bg-[var(--danger-bg)]"
-                                        title="Delete"
-                                      >
-                                        <Trash2 size={10} />
-                                      </button>
-                                    </div>
-                                  ))}
-                                </div>
+                            {/* Growth chart */}
+                            {growthData.length > 0 && (
+                              <div className="flex-1 min-w-0">
+                                <AgentGrowthChart
+                                  agentName={selected.name}
+                                  displayName={selected.display_name}
+                                />
                               </div>
                             )}
                           </div>
                         )}
-                        {!agentStats &&
-                          !loadingLearn &&
-                          learningAgents.includes(selected.name) && (
-                            <p className="text-[11px] text-[var(--text-tertiary)]">
-                              No data available
-                            </p>
-                          )}
+                        {!agentStats && !loadingLearn && (
+                          <p className="text-[11px] text-[var(--text-tertiary)]">No data available</p>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Recent Runs */}
+                    {learningAgents.includes(selected.name) && (
+                      <div className="mt-2 pt-4 border-t border-[var(--border)]">
+                        <div className="flex items-center gap-2 mb-3">
+                          <Clock size={13} className="text-[var(--text-tertiary)]" />
+                          <span className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
+                            Recent Runs
+                          </span>
+                        </div>
+                        {loadingRuns && (
+                          <div className="flex items-center gap-2 py-2 text-xs text-[var(--text-tertiary)]">
+                            <Loader2 size={12} className="animate-spin" /> Loading…
+                          </div>
+                        )}
+                        {!loadingRuns && recentRuns.length === 0 && (
+                          <p className="text-[11px] text-[var(--text-tertiary)]">No runs yet</p>
+                        )}
+                        {!loadingRuns && recentRuns.length > 0 && (
+                          <div className="space-y-1">
+                            {recentRuns.map((run) => (
+                              <div
+                                key={run.id}
+                                className="flex items-center gap-3 px-3 py-2 rounded-lg bg-[var(--bg-tertiary)]"
+                              >
+                                {run.status === "completed" ? (
+                                  <Check size={12} className="shrink-0 text-[var(--success)]" />
+                                ) : run.status === "failed" || run.status === "interrupted" ? (
+                                  <X size={12} className="shrink-0 text-[var(--danger)]" />
+                                ) : (
+                                  <Circle size={8} className="shrink-0 text-[var(--text-tertiary)]" />
+                                )}
+                                <span className="text-xs flex-1 truncate text-[var(--text-secondary)]">
+                                  {run.task_summary || "(no summary)"}
+                                </span>
+                                <span className="text-[10px] font-mono tabular-nums text-[var(--text-tertiary)] shrink-0">
+                                  {run.elapsed?.toFixed(1)}s
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
