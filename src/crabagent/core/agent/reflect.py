@@ -16,6 +16,7 @@ Public surface:
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import time
 from typing import Any
@@ -130,7 +131,7 @@ def rule_extract_lesson(
     if iterations >= max_iterations * 0.8 and result:
         return {
             "category": "failed_approach",
-            "key": f"lesson:{agent_name}:rule:high_iterations:{int(time.time())}",
+            "key": f"lesson:{agent_name}:rule:high_iterations",
             "content": (
                 f"Exhausted {iterations}/{max_iterations} iterations on: {task[:100]}. "
                 "Next time: decompose complex tasks, narrow scope, or use fewer tools per iteration."
@@ -219,7 +220,7 @@ async def llm_reflect_lesson(
 
         return {
             "category": "failed_approach" if error_msg else "effective_strategy",
-            "key": f"lesson:{agent_name}:llm:{int(time.time())}",
+            "key": f"lesson:{agent_name}:llm:{hashlib.md5(insight.encode()).hexdigest()[:12]}",
             "content": insight,
             "importance": 0.8 if error_msg else 0.7,
             "source": "llm",
@@ -329,7 +330,7 @@ async def llm_extract_user_preferences(
                 continue
             prefs.append(
                 {
-                    "key": f"user_pref:{cat}:{int(time.time() * 1000) % 1_000_000}",
+                    "key": f"user_pref:{cat}:{hashlib.md5(pref.encode()).hexdigest()[:12]}",
                     "content": pref[:500],
                     "category": cat[:50],
                     "importance": 0.7,

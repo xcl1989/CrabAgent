@@ -226,6 +226,7 @@ export function listMemories(params?: {
   agent_name?: string;
   workspace?: string;
   q?: string;
+  limit?: number;
 }): Promise<MemoryEntry[]> {
   const search = new URLSearchParams();
   if (params?.memory_type) search.set("memory_type", params.memory_type);
@@ -233,6 +234,7 @@ export function listMemories(params?: {
   if (params?.agent_name) search.set("agent_name", params.agent_name);
   if (params?.workspace) search.set("workspace", params.workspace);
   if (params?.q) search.set("q", params.q);
+  if (params?.limit !== undefined) search.set("limit", String(params.limit));
   const qs = search.toString();
   return api.get(`/memory${qs ? `?${qs}` : ""}`);
 }

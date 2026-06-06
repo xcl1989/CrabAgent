@@ -34,6 +34,7 @@ async def list_memories(
     category: str = Query("", description="Filter by category"),
     agent_name: str = Query("", description="Filter by agent name"),
     workspace: str = Query("", description="Filter by workspace path"),
+    limit: int = Query(50, ge=1, le=500, description="Max results"),
     q: str = Query("", description="Search in content"),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -60,7 +61,7 @@ async def list_memories(
     if agent_name:
         query = query.where(AgentMemory.agent_name == agent_name)
 
-    query = query.order_by(AgentMemory.importance.desc())
+    query = query.order_by(AgentMemory.updated_at.desc()).limit(limit)
 
     result = await db.execute(query)
     items = [

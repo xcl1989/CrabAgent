@@ -239,34 +239,10 @@ async def switch_agent(
 
     await conv_svc.update_conversation(db, session_id, agent=req.agent)
 
-    # Persist agent_switch_msg to messages so it survives page reload
-    if req.agent != "default":
-        try:
-            from crabagent.core.agent.agents import build_agent_switch_msg, get_agent
-            from crabagent.serve.services.message import save_message
-            from sqlalchemy import func, select
-
-            agent_def = await get_agent(req.agent)
-            if agent_def:
-                result = await db.execute(
-                    select(func.coalesce(func.max(Message.sequence), 0))
-                    .where(Message.conversation_id == conv.id)
-                )
-                next_seq = (result.scalar_one() or 0) + 1
-
-                msg_content = build_agent_switch_msg(agent_def)["content"]
-                await save_message(
-                    db,
-                    conversation_id=conv.id,
-                    sequence=next_seq,
-                    role="agent_switch",
-                    content=msg_content,
-                    agent=req.agent,
-                    branch_id=conv.active_branch or "main",
-                )
-        except Exception:
-            import logging
-            logging.getLogger(__name__).warning("Failed to persist agent_switch_msg", exc_info=True)
-            pass
+    # NOTE: agent_switch is NOT persisted here anymore — it's deferred to the next
+    # user prompt (prompt.py) to avoid interleaving with in-flight tool_calls/tool
+    # responses. The prompt handler compares the last active agent from message
+    # history with the current effective_agent and only inserts a switch message
+    # when the agent actually changed, placing it before the user's new message.
 
     return {"status": "ok", "session_id": session_id, "agent": req.agent}

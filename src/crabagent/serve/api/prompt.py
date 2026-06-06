@@ -140,6 +140,64 @@ async def prompt_async(
     history_msgs = await get_messages(db, conv.id, branch_id=active_branch)
     user_msg_seq = max((m.sequence for m in history_msgs), default=0) + 1
 
+    # --- Determine effective agent and whether a switch message is needed ---
+    effective_agent = req.agent or getattr(conv, "agent", None) or "default"
+
+    last_agent = "default"
+    for m in reversed(history_msgs):
+        if m.role == "stats":
+            continue
+        agent = getattr(m, "agent", None) or "default"
+        if agent != "default":
+            last_agent = agent
+            break
+
+    agent_changed = (last_agent != effective_agent)
+
+    # If agent changed, persist agent_switch BEFORE the user message
+    if agent_changed and effective_agent != "default":
+        from crabagent.core.agent.agents import build_agent_switch_msg, get_agent
+
+        agent_profile = await get_agent(effective_agent)
+        if agent_profile:
+            switch_msg = build_agent_switch_msg(agent_profile)
+            switch_seq = user_msg_seq
+            await save_message(
+                db,
+                conversation_id=conv.id,
+                sequence=switch_seq,
+                role="agent_switch",
+                content=switch_msg["content"],
+                agent=effective_agent,
+                branch_id=active_branch,
+            )
+            user_msg_seq += 1  # make room for the user message
+    elif agent_changed and effective_agent == "default":
+        # Switching from a specific agent back to default
+        from crabagent.core.agent.agents import build_agent_switch_msg, get_agent
+
+        default_profile = await get_agent("__default__")
+        if default_profile:
+            switch_msg = build_agent_switch_msg(default_profile)
+            switch_seq = user_msg_seq
+            await save_message(
+                db,
+                conversation_id=conv.id,
+                sequence=switch_seq,
+                role="agent_switch",
+                content=switch_msg["content"],
+                agent="default",
+                branch_id=active_branch,
+            )
+            user_msg_seq += 1
+
+    if agent_changed:
+        try:
+            await conv_svc.update_conversation(db, session_id, agent=effective_agent)
+        except Exception:
+            pass
+
+    # --- Build content & save user message (with updated seq if switch was inserted) ---
     local_images = _extract_local_images(req.message)
 
     if req.images:
@@ -196,7 +254,7 @@ async def prompt_async(
         try:
             from crabagent.core.agent.agents import build_memory_prompt, inject_agent_lessons
 
-            mem_prompt = await build_memory_prompt(user.id, query=(req.content or "")[:500])
+            mem_prompt = await build_memory_prompt(user.id, query=(req.message or "")[:500])
             if mem_prompt:
                 base_prompt += "\n\n" + mem_prompt
         except Exception:
@@ -282,11 +340,12 @@ async def prompt_async(
     context.metadata["user_id"] = user.id
     context.metadata["reasoning_effort"] = req.reasoning_effort or settings.reasoning_effort
 
-    effective_agent = req.agent or getattr(conv, "agent", None) or "default"
     context.current_agent = effective_agent
     context.metadata["_current_agent"] = effective_agent
 
     from crabagent.core.agent.agents import get_agent as _get_agent
+    from crabagent.core.agent.agents import build_agent_switch_msg, get_agent, inject_agent_lessons as _inject_lessons
+    from crabagent.core.agent.agent_switch import filter_tool_registry
 
     if effective_agent == "default":
         _default_profile = await _get_agent("__default__")
@@ -294,40 +353,39 @@ async def prompt_async(
             tp = _default_profile.get("tool_permissions", {})
             context.tool_permissions = tp if isinstance(tp, dict) else {}
     else:
-        agent_def = await _get_agent(effective_agent)
+        agent_def = await get_agent(effective_agent)
         if agent_def:
             tp = agent_def.get("tool_permissions", {})
             context.tool_permissions = tp if isinstance(tp, dict) else {}
-
-    if effective_agent != "default":
-        from crabagent.core.agent.agent_switch import filter_tool_registry
-        from crabagent.core.agent.agents import build_agent_switch_msg, get_agent
-
-        agent_def = await get_agent(effective_agent)
-        if agent_def:
             context.tool_registry = filter_tool_registry(
                 context.tool_registry, tool_permissions=context.tool_permissions
             )
             if agent_def.get("model"):
                 context.model = agent_def["model"]
-            context.messages.append(build_agent_switch_msg(agent_def))
-            # Inject per-agent lessons after switch (not in cached system prompt)
-            try:
-                from crabagent.core.agent.agents import inject_agent_lessons as _inject_lessons
-                lessons_block = await _inject_lessons(
-                    "",
-                    user_id=user.id,
-                    agent_name=effective_agent,
-                    task_hint=(req.content or "")[:120],
-                )
-                if lessons_block.strip():
-                    context.messages.append({"role": "user", "content": lessons_block.strip(), "agent": effective_agent})
-            except Exception:
-                pass
-            try:
-                await conv_svc.update_conversation(db, session_id, agent=effective_agent)
-            except Exception:
-                pass
+
+    # Add agent_switch message to context (persisted to DB above if agent changed)
+    if agent_changed:
+        if effective_agent == "default":
+            default_profile = await get_agent("__default__")
+            if default_profile:
+                context.messages.append(build_agent_switch_msg(default_profile))
+        else:
+            agent_def = await get_agent(effective_agent)
+            if agent_def:
+                context.messages.append(build_agent_switch_msg(agent_def))
+
+        # Inject per-agent lessons (not cached in system prompt)
+        try:
+            lessons_block = await _inject_lessons(
+                "",
+                user_id=user.id,
+                agent_name=effective_agent,
+                task_hint=(req.message or "")[:120],
+            )
+            if lessons_block.strip():
+                context.messages.append({"role": "user", "content": lessons_block.strip(), "agent": effective_agent})
+        except Exception:
+            pass
 
     for msg_record in history_msgs:
         if msg_record.role == "stats":

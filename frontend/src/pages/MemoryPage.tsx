@@ -19,6 +19,7 @@ import {
   updateMemory,
   deleteAgentMemory,
   getProjectMemory,
+  listAgentProfiles,
   type MemoryEntry,
   type ProjectMemoryData,
 } from "../api/agents";
@@ -65,6 +66,9 @@ export default function MemoryPage() {
   const [projectMemory, setProjectMemory] = useState<ProjectMemoryData | null>(null);
   const [wsOpen, setWsOpen] = useState(false);
 
+  // Agent filter
+  const [allAgentNames, setAllAgentNames] = useState<string[]>([]);
+
   // CRUD modals
   const [editingEntry, setEditingEntry] = useState<MemoryEntry | null>(null);
   const [editContent, setEditContent] = useState("");
@@ -93,11 +97,16 @@ export default function MemoryPage() {
     fetchEntries();
   }, [fetchEntries]);
 
-  // Load workspaces and project memory
+  // Load workspaces, project memory, and agent names
   useEffect(() => {
     (async () => {
       try {
-        const wsList = await listWorkspaces();
+        const [wsList, profiles] = await Promise.all([
+          listWorkspaces(),
+          listAgentProfiles().catch(() => []),
+        ]);
+        setAllAgentNames(profiles.map((p) => p.name).filter(Boolean));
+
         setWorkspaces(wsList);
         if (wsList.length > 0) {
           const sorted = [...wsList].sort((a, b) => {
@@ -167,8 +176,8 @@ export default function MemoryPage() {
     }
   };
 
-  // Collect unique agent names for filter
-  const agentNames = [...new Set(entries.map((e) => e.agent_name).filter(Boolean))].sort();
+  // Agent names for filter (from agent profiles, not from current results)
+  const displayAgentNames = allAgentNames;
 
   return (
     <div className="h-full flex flex-col overflow-hidden bg-[var(--bg-primary)]">
@@ -243,9 +252,6 @@ export default function MemoryPage() {
                       <span className="flex-1 truncate">
                         {ws.workspace.split("/").slice(-2).join("/")}
                       </span>
-                      <span className="text-[10px] text-[var(--text-tertiary)] shrink-0">
-                        {ws.session_count}
-                      </span>
                     </button>
                   ))}
                 </div>
@@ -292,14 +298,14 @@ export default function MemoryPage() {
           )}
         </div>
 
-        {tab === "agent_lesson" && agentNames.length > 0 && (
+        {tab === "agent_lesson" && displayAgentNames.length > 0 && (
           <select
             value={agentFilter}
             onChange={(e) => setAgentFilter(e.target.value)}
             className="h-8 px-2 rounded-lg text-xs border border-[var(--border)] bg-[var(--bg-tertiary)] text-[var(--text-primary)] outline-none focus:border-[var(--brand)]"
           >
             <option value="">All agents</option>
-            {agentNames.map((name) => (
+            {displayAgentNames.map((name) => (
               <option key={name} value={name}>{name}</option>
             ))}
           </select>
