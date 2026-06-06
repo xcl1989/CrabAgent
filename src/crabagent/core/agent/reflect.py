@@ -252,6 +252,7 @@ async def llm_extract_user_preferences(
     model: str,
     provider_name: str | None = None,
     max_prefs: int = 3,
+    existing_preferences: list[dict] | None = None,
 ) -> list[dict]:
     """Extract user preferences / behavioural rules from a conversation.
 
@@ -265,6 +266,9 @@ async def llm_extract_user_preferences(
             "source": "llm",
             "memory_type": "user_preference",
         }
+
+    If ``existing_preferences`` is provided, the LLM is instructed to avoid
+    re-extracting preferences that are already known.
     """
 
     if len(conversation_text) < 80:
@@ -285,7 +289,23 @@ async def llm_extract_user_preferences(
             "Rules:\n"
             "- Each preference must be DIRECTLY observable from the conversation.\n"
             "- Be specific and actionable. Avoid vague statements like 'user is friendly'.\n"
-            "- If no preference is clearly observable, respond with just: NONE\n\n"
+            "- If no preference is clearly observable, respond with just: NONE\n"
+        )
+
+        # Inject existing preferences to avoid duplicates
+        if existing_preferences:
+            existing_text = "\n".join(
+                f"- [{p.get('category','?')}] {p.get('content','')[:200]}"
+                for p in existing_preferences
+            )
+            prompt += (
+                "\nIMPORTANT — These preferences are ALREADY KNOWN. "
+                "Do NOT extract them again:\n"
+                f"{existing_text}\n\n"
+                "Only extract NEW preferences that are distinct from the above.\n"
+            )
+
+        prompt += (
             "Conversation:\n"
             f"{conversation_text[:4000]}\n\n"
             "Respond in this exact format (one preference per block):\n"
@@ -386,17 +406,9 @@ async def persist_preferences(
         return 0
     from crabagent.core.database import agent_memory_upsert
 
-    # Fetch existing preferences for similarity check
-    existing = await _load_existing_preferences(user_id)
-
     saved = 0
     for pref in preferences:
         try:
-            # Skip if a similar preference already exists
-            if _is_similar_preference(pref, existing):
-                logger.debug("Skipping similar preference: %s", pref.get("content", "")[:80])
-                continue
-
             await agent_memory_upsert(
                 user_id=user_id,
                 memory_type=pref.get("memory_type", "user_preference"),
@@ -411,59 +423,9 @@ async def persist_preferences(
                 task_category="",
             )
             saved += 1
-            existing.append(pref)  # Track newly saved for subsequent checks
         except Exception:
             logger.debug("Failed to persist preference %s", pref.get("key"), exc_info=True)
     return saved
-
-
-def _normalize_pref_text(text: str) -> str:
-    """Normalize preference text for comparison."""
-    t = text.lower().strip()
-    for prefix in ["the user prefers ", "user prefers ", "prefers ", "the user "]:
-        if t.startswith(prefix):
-            t = t[len(prefix):]
-    for suffix in [".", "!", "?"]:
-        if t.endswith(suffix):
-            t = t[:-1]
-    return t.strip()
-
-
-def _is_similar_preference(new_pref: dict, existing: list[dict]) -> bool:
-    """Check if new preference is semantically similar to any existing one."""
-    new_text = _normalize_pref_text(new_pref.get("content", ""))
-    new_cat = new_pref.get("category", "")
-
-    for ex in existing:
-        if ex.get("category", "") != new_cat:
-            continue
-
-        ex_text = _normalize_pref_text(ex.get("content", ""))
-
-        # 1. Exact match after normalization
-        if new_text == ex_text:
-            return True
-
-        # 2. One contains the other (substring check)
-        if len(new_text) >= 20 and (new_text in ex_text or ex_text in new_text):
-            return True
-
-        # 3. First 40 chars match (same sentence start)
-        if len(new_text) >= 40 and len(ex_text) >= 40:
-            if new_text[:40] == ex_text[:40]:
-                return True
-
-    return False
-
-
-async def _load_existing_preferences(user_id: int) -> list[dict]:
-    """Load existing user_preference entries for dedup checking."""
-    try:
-        from crabagent.core.database import agent_memory_list_all
-
-        return await agent_memory_list_all(user_id, memory_type="user_preference")
-    except Exception:
-        return []
 
 
 # ---------------------------------------------------------------------------

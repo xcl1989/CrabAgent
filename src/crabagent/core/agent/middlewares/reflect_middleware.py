@@ -158,11 +158,20 @@ class ReflectMiddleware:
 
         async def _extract_prefs():
             try:
+                # Load existing preferences to avoid duplicates
+                existing = []
+                try:
+                    from crabagent.core.database import agent_memory_list_all
+                    existing = await agent_memory_list_all(user_id, memory_type="user_preference")
+                except Exception:
+                    pass
+
                 prefs = await llm_extract_user_preferences(
                     conversation_text=conversation_text,
                     model=model,
                     provider_name=provider_name,
                     max_prefs=3,
+                    existing_preferences=existing,
                 )
                 if prefs:
                     saved = await persist_preferences(
