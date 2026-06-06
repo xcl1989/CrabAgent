@@ -226,6 +226,16 @@ async def prompt_async(
         except Exception:
             pass
 
+        # Inject AGENTS.md (workspace-level project rules)
+        try:
+            from crabagent.core.project_memory import load_agents_md
+
+            agents_md = load_agents_md(workspace)
+            if agents_md:
+                base_prompt += "\n\n## Project Rules (AGENTS.md)\n\n" + agents_md
+        except Exception:
+            pass
+
         # Persist for subsequent messages in the same session
         try:
             from crabagent.serve.services.conversation import update_conversation

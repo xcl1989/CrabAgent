@@ -6,6 +6,9 @@ using **zero** additional LLM calls. All data comes from:
 - Project file heuristics (``pyproject.toml``, ``package.json``, …)
 - ``conversations`` table timestamps
 
+Also loads ``AGENTS.md`` from the workspace root (if present) and
+injects it into the system prompt.
+
 Usage::
 
     pm = await ProjectMemory.load(user_id, workspace)
@@ -148,6 +151,46 @@ class ProjectProfile:
 
 
 # ---------------------------------------------------------------------------
+# AGENTS.md loader
+# ---------------------------------------------------------------------------
+
+
+def load_agents_md(workspace: Path) -> str:
+    """Load ``AGENTS.md`` from workspace root.
+
+    Returns the file content if present, stripped of leading/trailing
+    whitespace.  Returns empty string if the file does not exist.
+    """
+    agents_md = workspace / "AGENTS.md"
+    if not agents_md.is_file():
+        return ""
+    try:
+        text = agents_md.read_text(encoding="utf-8").strip()
+    except Exception:
+        return ""
+    if not text:
+        return ""
+    # Truncate to prevent excessive context
+    MAX_AGENTS_MD = 8000
+    if len(text) > MAX_AGENTS_MD:
+        text = text[:MAX_AGENTS_MD] + "\n... (truncated)"
+    return text
+
+
+def save_agents_md(workspace: Path, content: str) -> str:
+    """Save ``AGENTS.md`` to workspace root.
+
+    Creates or overwrites the file.  Returns a status message.
+    """
+    agents_md = workspace / "AGENTS.md"
+    try:
+        agents_md.write_text(content.strip() + "\n", encoding="utf-8")
+        return f"AGENTS.md saved ({len(content)} chars) to {agents_md}"
+    except Exception as e:
+        return f"Error saving AGENTS.md: {e}"
+
+
+# ---------------------------------------------------------------------------
 # Main loader
 # ---------------------------------------------------------------------------
 
@@ -201,6 +244,8 @@ async def load_project_memory(
 
 __all__ = [
     "get_tech_stack",
+    "load_agents_md",
     "load_project_memory",
     "ProjectProfile",
+    "save_agents_md",
 ]

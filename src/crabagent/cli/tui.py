@@ -1401,6 +1401,15 @@ class TuiSession:
                     base_prompt += "\n\n" + pm_prompt
         except Exception:
             pass
+        # Inject AGENTS.md (workspace-level project rules)
+        try:
+            from crabagent.core.project_memory import load_agents_md
+
+            agents_md = load_agents_md(ws)
+            if agents_md:
+                base_prompt += "\n\n## Project Rules (AGENTS.md)\n\n" + agents_md
+        except Exception:
+            pass
         ctx = AgentContext(
             workspace=ws,
             tool_registry=registry,

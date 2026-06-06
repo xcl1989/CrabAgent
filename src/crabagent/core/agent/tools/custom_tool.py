@@ -136,6 +136,7 @@ async def create_tool(
         "request_help",
         "list_agents",
         "skill",
+        "update_agents_md",
     ):
         return f"Error: '{name}' is a reserved built-in tool name"
 

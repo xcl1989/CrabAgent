@@ -39,3 +39,35 @@ def write_file(file_path: str, content: str) -> str:
         return f"Successfully wrote {len(content)} bytes to {file_path}"
     except Exception as e:
         return f"Error writing file: {e}"
+
+
+@registry.register(
+    name="update_agents_md",
+    description=(
+        "Update the project's AGENTS.md file — the workspace-level rules file "
+        "that is automatically loaded into every session's system prompt. "
+        "Use this to persist project conventions, build commands, architecture notes, "
+        "or any context that should be available in future sessions."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "content": {
+                "type": "string",
+                "description": "The full Markdown content for AGENTS.md.",
+            },
+        },
+        "required": ["content"],
+    },
+    requires_permission=True,
+    metadata={"source": "builtin", "category": "file_management"},
+)
+def update_agents_md(content: str, context=None) -> str:
+    if not content or not content.strip():
+        return "Error: content must be a non-empty string"
+    if context is None:
+        return "Error: update_agents_md requires an active session"
+
+    from crabagent.core.project_memory import save_agents_md
+
+    return save_agents_md(context.workspace, content)

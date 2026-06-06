@@ -38,6 +38,8 @@ def grep_files(pattern: str, path: str = ".", include: str | None = None) -> str
 
     results = []
     glob_pattern = include or "**/*"
+    if glob_pattern and not glob_pattern.startswith("**/"):
+        glob_pattern = f"**/{glob_pattern}"
     for file_path in root.glob(glob_pattern):
         if not file_path.is_file():
             continue

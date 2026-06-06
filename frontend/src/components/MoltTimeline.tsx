@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { RotateCcw, ChevronDown, ChevronUp, Loader2, RefreshCw } from "lucide-react";
+import { RotateCcw, ChevronDown, ChevronUp, ChevronRight, Loader2, RefreshCw } from "lucide-react";
 import { Molt, MoltDiff, listMolts, getMoltDiff, rollbackMolt } from "../api/sessions";
 import { formatTimeShort } from "../api/time";
 import { ConfirmDialog, toast, LoadingState, EmptyState } from "./ui";
@@ -7,9 +7,10 @@ import { cn } from "../lib/cn";
 
 interface Props {
   sessionId: string;
+  collapsible?: boolean;
 }
 
-export default function MoltTimeline({ sessionId }: Props) {
+export default function MoltTimeline({ sessionId, collapsible }: Props) {
   const [molts, setMolts] = useState<Molt[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [diffData, setDiffData] = useState<MoltDiff[] | null>(null);
@@ -67,6 +68,8 @@ export default function MoltTimeline({ sessionId }: Props) {
     }
   };
 
+  const [sectionOpen, setSectionOpen] = useState(true);
+
   if (refreshing && molts.length === 0) {
     return (
       <div className="border-t border-[var(--border)]">
@@ -78,16 +81,29 @@ export default function MoltTimeline({ sessionId }: Props) {
     );
   }
 
-  if (molts.length === 0) return null;
+  if (!collapsible && molts.length === 0) return null;
 
   return (
     <div className="border-t border-[var(--border)]">
-      <div className="flex items-center justify-between px-2 py-1">
-        <span className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
-          Molts
-        </span>
+      <div
+        className={cn("flex items-center justify-between px-2 py-1", collapsible && "cursor-pointer hover:bg-[var(--bg-tertiary)] transition-colors select-none")}
+        onClick={collapsible ? () => setSectionOpen((o) => !o) : undefined}
+      >
+        <div className="flex items-center gap-1.5">
+          {collapsible && (sectionOpen ? (
+            <ChevronRight size={11} className="text-[var(--text-tertiary)] rotate-90" />
+          ) : (
+            <ChevronRight size={11} className="text-[var(--text-tertiary)]" />
+          ))}
+          <span className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
+            Molts
+          </span>
+          {molts.length > 0 && (
+            <span className="text-[10px] text-[var(--text-tertiary)]">({molts.length})</span>
+          )}
+        </div>
         <button
-          onClick={load}
+          onClick={(e) => { e.stopPropagation(); load(); }}
           disabled={refreshing}
           title="Refresh"
           className="p-1 rounded text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
@@ -95,7 +111,7 @@ export default function MoltTimeline({ sessionId }: Props) {
           <RefreshCw size={11} className={refreshing ? "animate-spin" : ""} />
         </button>
       </div>
-      {molts.slice(0, 10).map((m) => {
+      {(!collapsible || sectionOpen) && molts.slice(0, 10).map((m) => {
         const expanded = expandedId === m.molt_id;
         return (
           <div key={m.molt_id}>

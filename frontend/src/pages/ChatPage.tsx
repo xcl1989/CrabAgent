@@ -816,7 +816,7 @@ export default function ChatPage() {
         collapsed={!showFiles}
         onToggle={() => setShowFiles((v) => !v)}
         sessionId={activeSession?.session_id || null}
-        workspace={workspace || undefined}
+        workspace={activeSession?.workspace || workspace || undefined}
       />
 
       <TaskBoard
