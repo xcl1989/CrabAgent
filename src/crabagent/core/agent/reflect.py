@@ -158,6 +158,7 @@ async def llm_reflect_lesson(
     model: str,
     provider_name: str | None = None,
     error_msg: str = "",
+    existing_lessons: list[dict] | None = None,
 ) -> dict | None:
     try:
         if error_msg:
@@ -174,6 +175,22 @@ async def llm_reflect_lesson(
             "Identify one specific tip, pitfall, or technique that would help in future similar tasks. "
             "Be specific and actionable. Do not give generic praise.\n\n"
             f"Category (pick one): {task_category}\n\n"
+        )
+
+        # Inject existing lessons to avoid duplicates
+        if existing_lessons:
+            existing_text = "\n".join(
+                f"- {l.get('content','')[:200]}"
+                for l in existing_lessons
+            )
+            prompt += (
+                "IMPORTANT — These lessons are ALREADY KNOWN. "
+                "Do NOT extract them again:\n"
+                f"{existing_text}\n\n"
+                "Only extract a NEW lesson that is distinct from the above.\n"
+            )
+
+        prompt += (
             "If there is truly nothing worth noting, respond with just the word: NONE\n"
             "Otherwise respond with:\n"
             "Category: {category}\n"

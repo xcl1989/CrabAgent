@@ -137,6 +137,15 @@ class ReflectMiddleware:
 
         async def _extract_lesson():
             try:
+                # Load existing lessons for this agent to avoid duplicates
+                existing_lessons = []
+                try:
+                    from crabagent.core.database import agent_memory_list_all
+                    all_lessons = await agent_memory_list_all(user_id, memory_type="agent_lesson")
+                    existing_lessons = [l for l in all_lessons if l.get("agent_name", "").lower() == agent_name.lower()]
+                except Exception:
+                    pass
+
                 llm_lesson = await llm_reflect_lesson(
                     agent_name=agent_name,
                     task=task,
@@ -145,6 +154,7 @@ class ReflectMiddleware:
                     stats=stats,
                     model=model,
                     provider_name=provider_name,
+                    existing_lessons=existing_lessons,
                 )
                 if llm_lesson:
                     await persist_lesson(
