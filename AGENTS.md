@@ -4,9 +4,9 @@
 > Keep it concise — max ~8000 chars. Use `update_agents_md` tool to update it.
 
 ## Version
-- Current: **0.9.5** (Grep optimization, UI redesign, desktop build pipeline)
-- Version in 6 places: `pyproject.toml`, `src/crabagent/serve/app.py` (`create_app` + `/health`), CLI banner in `src/crabagent/cli/__main__.py` (`_print_banner`), TUI banner in `src/crabagent/cli/tui.py`
-- Bump all four when changing version
+- Current: **0.9.5** (Desktop build pipeline, pip-installable, memory dedup)
+- Version in 7 places: `pyproject.toml`, `src/crabagent/serve/app.py` (`create_app` + `/health`), CLI banner in `src/crabagent/cli/__main__.py` (`_print_banner`), TUI banner in `src/crabagent/cli/tui.py`, `AGENTS.md`, `electron/package.json`, `src/crabagent/electron/package.json`
+- Bump all seven when changing version
 
 ## Commands
 
@@ -53,6 +53,7 @@ crabagent                     # interactive CLI
 crabagent "query"             # single-shot
 crabagent --serve             # web UI on :5210
 crabagent --serve --port 8080
+crabagent --build-desktop     # build .dmg from pip install
 ```
 
 ### Lint / Format
