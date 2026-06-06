@@ -63,6 +63,7 @@ def main():
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
     parser.add_argument("--no-persist", action="store_true", help="Disable conversation persistence")
     parser.add_argument("--old", action="store_true", help="Use legacy single-panel TUI")
+    parser.add_argument("--build-desktop", action="store_true", help="Build desktop .dmg package")
 
     args = parser.parse_args()
     subcmd_words = {"init", "provider", "skill", "models"}
@@ -78,6 +79,10 @@ def main():
     import litellm
 
     litellm.set_verbose = False
+
+    if args.build_desktop:
+        _run_build_desktop()
+        return
 
     if args.serve:
         _run_serve(args)
@@ -1517,6 +1522,76 @@ async def _handle_skill_show_slash(arg: str):
         print(f"Skill '{arg}' not found. Available: {names}")
         return
     print(format_skill_content(skill))
+
+
+def _run_build_desktop():
+    """Build the desktop .dmg package from pip-installed crabagent."""
+    import shutil, subprocess, tempfile
+
+    import crabagent as _ca
+    pkg_dir = Path(_ca.__file__).parent
+    electron_src = pkg_dir / "electron"
+    spec_src = pkg_dir / "crabagent.spec"
+
+    if not electron_src.exists() or not spec_src.exists():
+        print("Error: Desktop build files not found. Reinstall with: pip install 'crabagent[serve]'")
+        sys.exit(1)
+
+    work_dir = Path(tempfile.mkdtemp(prefix="crabagent-build-"))
+    print(f"Working directory: {work_dir}")
+
+    try:
+        shutil.copytree(electron_src, work_dir / "electron")
+        shutil.copy2(spec_src, work_dir / "crabagent.spec")
+
+        print("\n[1/4] Installing Electron dependencies...")
+        npm_result = subprocess.run(["npm", "install", "--silent"], cwd=str(work_dir / "electron"),
+                                   capture_output=True, text=True, timeout=120)
+        if npm_result.returncode != 0:
+            print("npm install failed:", npm_result.stderr[-300:])
+            sys.exit(1)
+        print("   Done.")
+
+        print("\n[2/4] Compiling Python backend with PyInstaller...")
+        pyi = subprocess.run([sys.executable, "-m", "pip", "install", "pyinstaller", "-q"],
+                           capture_output=True, timeout=60)
+        pyi_result = subprocess.run(["pyinstaller", str(work_dir / "crabagent.spec"), "--clean", "--noconfirm"],
+                                   capture_output=True, text=True, timeout=600)
+        if pyi_result.returncode != 0:
+            print("PyInstaller failed:", pyi_result.stderr[-400:])
+            sys.exit(1)
+        print("   Done.")
+
+        print("\n[3/4] Assembling app bundle...")
+        backend_bin = work_dir / "dist" / "crabagent-backend"
+        resources_dir = work_dir / "electron" / "resources"
+        resources_dir.mkdir(exist_ok=True)
+        shutil.copy2(backend_bin, resources_dir / "crabagent-backend")
+        print("   Done.")
+
+        print("\n[4/4] Building Electron .dmg...")
+        electron_result = subprocess.run(["npx", "electron-builder", "--mac", "--dir"],
+            cwd=str(work_dir / "electron"), capture_output=True, text=True, timeout=300,
+            env={**dict(os.environ), "CSC_IDENTITY_AUTO_DISCOVERY": "false"})
+        if electron_result.returncode != 0:
+            print("Electron build failed:", electron_result.stderr[-400:])
+            sys.exit(1)
+        print("   Done.")
+
+        dist_dirs = list((work_dir / "electron" / "dist-electron").glob("*.app"))
+        if dist_dirs:
+            size = subprocess.run(["du", "-sh", str(dist_dirs[0])], capture_output=True, text=True).stdout.strip()
+            print(f"\n✅ Build complete: {dist_dirs[0]}")
+            print(f"   Size: {size}")
+            print(f"   Open with: open {dist_dirs[0]}")
+        else:
+            print(f"\n✅ Build complete. Check: {work_dir / 'electron' / 'dist-electron'}")
+
+    except Exception as e:
+        print(f"\nBuild failed: {e}")
+        sys.exit(1)
+    finally:
+        print(f"\nBuild directory: {work_dir}")
 
 
 def _run_serve(args):
