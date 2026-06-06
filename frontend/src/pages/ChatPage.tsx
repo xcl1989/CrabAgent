@@ -1,9 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import ChatInput from "../components/ChatInput";
 import {
-  Paperclip,
   Bot,
-  ArrowUp,
-  Square,
   PanelRightOpen,
   PanelRightClose,
   Sparkles,
@@ -41,7 +39,7 @@ import { DelegateModal } from "../components/DelegateModal";
 import { ResultCompare } from "../components/ResultCompare";
 import WorkspaceSwitcher from "../components/WorkspaceSwitcher";
 import ModelSelector from "../components/ModelSelector";
-import { Modal, Button, Textarea } from "../components/ui";
+import { Modal, Button } from "../components/ui";
 import { useChatState } from "../hooks/useChatState";
 import { useTaskBoard } from "../hooks/useTaskBoard";
 import { useModelSelector } from "../hooks/useModelSelector";
@@ -126,7 +124,6 @@ export default function ChatPage() {
   const [showDelegate, setShowDelegate] = useState(false);
   const [showResultCompare, setShowResultCompare] = useState(false);
   const [showFiles, setShowFiles] = useState(false);
-  const [input, setInput] = useState("");
   const [pendingImages, setPendingImages] = useState<string[]>([]);
   const [reasoningEffort, setReasoningEffort] = useState("medium");
   const [agentProfiles, setAgentProfiles] = useState<AgentProfileType[]>([]);
@@ -138,8 +135,6 @@ export default function ChatPage() {
   const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
   const [mcpStatus, setMcpStatus] = useState<McpServerStatus[]>([]);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-
-  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     mcpServersApi.listMcpServers().then(setMcpServers);
@@ -164,7 +159,7 @@ export default function ChatPage() {
         target.isContentEditable;
       if (e.key === "/" && !isTyping) {
         e.preventDefault();
-        inputRef.current?.focus();
+        document.querySelector<HTMLTextAreaElement>('[placeholder="Type a message…"]')?.focus();
       }
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
         e.preventDefault();
@@ -291,12 +286,10 @@ export default function ChatPage() {
     return matches;
   };
 
-  const handleSend = async () => {
-    if ((!input.trim() && pendingImages.length === 0) || !activeSession || sending)
+  const handleSend = async (text: string) => {
+    if ((!text.trim() && pendingImages.length === 0) || !activeSession || sending)
       return;
-    let text = input.trim();
     const images = [...pendingImages];
-    setInput("");
     setPendingImages([]);
     setMessages((prev) => [
       ...prev,
@@ -398,12 +391,7 @@ export default function ChatPage() {
   };
 
   const handleAgentBarClick = (agent: AgentProfileType) => {
-    setInput((prev) => {
-      const mention = `@${agent.name} `;
-      if (prev.includes(mention.trim())) return prev;
-      return prev ? `${prev} ${mention}` : mention;
-    });
-    inputRef.current?.focus();
+    document.querySelector<HTMLTextAreaElement>('[placeholder="Type a message…"]')?.focus();
   };
 
   const handleExportReport = async () => {
@@ -695,66 +683,16 @@ export default function ChatPage() {
 
               {/* Input row */}
               <div className="flex gap-1.5 sm:gap-2 items-end">
-                <Button
-                  size="icon"
-                  variant="outline"
-                  onClick={handleImageUpload}
-                  disabled={sending || replaying || pendingImages.length >= 5}
-                  title="Attach image"
-                  className="h-9 w-9 sm:h-10 sm:w-10"
-                >
-                  <Paperclip size={15} />
-                </Button>
-                <Button
-                  size="icon"
-                  variant="outline"
-                  onClick={() => setShowDelegate(true)}
-                  disabled={sending || replaying}
-                  title="Delegate to agent team"
-                  className="hidden sm:flex h-10 w-10 text-[var(--accent-2)] hover:text-[var(--accent-2)] hover:bg-[var(--accent-2-bg)] border-[var(--border)]"
-                >
-                  <Bot size={15} />
-                </Button>
-                <Textarea
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      handleSend();
-                    }
-                  }}
-                  onPaste={handleImagePaste}
-                  placeholder="Type a message…"
-                  disabled={sending || replaying}
-                  ref={inputRef}
-                  autoGrow
-                  minRows={1}
-                  maxRows={6}
-                  className="flex-1 min-h-[36px] sm:min-h-[40px]"
+                <ChatInput
+                  sending={sending}
+                  replaying={replaying}
+                  onSend={handleSend}
+                  onAbort={handleAbort}
+                  onImageUpload={handleImageUpload}
+                  onImagePaste={handleImagePaste}
+                  onDelegateOpen={() => setShowDelegate(true)}
+                  showDelegate={true}
                 />
-                {sending ? (
-                  <Button
-                    variant="danger"
-                    onClick={handleAbort}
-                    className="h-9 w-9 sm:h-10 sm:w-10"
-                    size="icon"
-                    title="Stop"
-                  >
-                    <Square size={14} fill="currentColor" />
-                  </Button>
-                ) : (
-                  <Button
-                    variant="brand"
-                    onClick={handleSend}
-                    disabled={!input.trim() && pendingImages.length === 0}
-                    className="h-9 w-9 sm:h-10 sm:w-10 shrink-0"
-                    size="icon"
-                    title="Send"
-                  >
-                    <ArrowUp size={16} />
-                  </Button>
-                )}
               </div>
             </div>
           </>
@@ -783,10 +721,6 @@ export default function ChatPage() {
                     key={i}
                     onClick={() => {
                       onNewSession();
-                      setTimeout(() => {
-                        setInput(p.prompt);
-                        inputRef.current?.focus();
-                      }, 100);
                     }}
                     className={cn(
                       "flex items-center gap-2 px-3 py-2.5 rounded-xl text-left",

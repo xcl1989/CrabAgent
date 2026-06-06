@@ -8,6 +8,27 @@ English version: [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
+## [0.9.4]
+
+### Added
+- Desktop build pipeline: `make desktop` 一条命令构建 PyInstaller 后端 + Electron .dmg
+- Memory 页面：浏览/编辑/搜索项目记忆、Agent 经验、用户偏好的独立页面
+- LLM 去重：提取时用 LLM 判断是否已有相似内容，避免重复积累
+- ChatInput 独立组件：修复消息多时打字卡顿问题
+
+### Changed
+- 导航重构：删除 Dashboard，新增 Memory 页签；Agents 增强（统计 + 运行记录）
+- 桌面程序打包：新增 `scripts/build-desktop.sh` 一键构建脚本
+- 版本号：更新到 0.9.4
+
+### Fixed
+- grep 工具：从 glob 改为 os.walk + 剪枝，新增 ignore_dirs/max_depth/文件上限
+- 记忆去重：lesson/preference key 从时间戳改为内容 MD5 哈希
+- Agent lessons 爆炸：提取时 LLM 去重
+- MemoryPage 布局：仅列表滚动，页签和搜索栏固定
+
+---
+
 ## [0.9.1]
 
 ### 新增

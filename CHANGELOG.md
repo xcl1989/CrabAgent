@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.9.4]
+
+### Added
+- **Desktop build pipeline** — `make desktop` builds PyInstaller binary + Electron .dmg in one command
+- **Memory page** — dedicated UI for browsing/editing/searching project memory, agent lessons, user preferences
+- **LLM-based dedup** — prevent duplicate lessons and preferences at extraction time
+- **ChatInput component** — extracted input area to fix re-render lag with many messages
+
+### Changed
+- **UI navigation** — removed Dashboard, added Memory tab; Agents page enhanced with stats + recent runs
+- **Desktop app packaging** — new `scripts/build-desktop.sh` one-command build
+- **Version** — bumped to 0.9.4
+
+### Fixed
+- **grep tool** — switched from glob to os.walk with pruning, added ignore_dirs, max_depth, file limit
+- **Duplicate memory entries** — lesson/preference keys now use content hash instead of timestamp
+- **Agent lessons explosion** — LLM-based dedup at extraction time
+- **MemoryPage layout** — only list scrolls, tabs and search bar stay fixed
+
+---
+
 ## [0.9.1]
 
 ### Added

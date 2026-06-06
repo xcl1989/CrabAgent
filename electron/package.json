@@ -1,6 +1,6 @@
 {
   "name": "crabagent-desktop",
-  "version": "0.9.0",
+  "version": "0.9.4",
   "description": "CrabAgent Desktop - AI Agent Platform",
   "main": "main.js",
   "author": "Xie Congling",
@@ -31,12 +31,6 @@
       "preload.js",
       "package.json",
       "node_modules/**/*"
-    ],
-    "extraResources": [
-      {
-        "from": "crabagent-backend",
-        "to": "crabagent-backend"
-      }
     ],
     "mac": {
       "category": "public.app-category.developer-tools",

@@ -137,14 +137,21 @@ crabagent --serve          # → http://localhost:5210
 crabagent "帮我整理这个目录"
 ```
 
-### 桌面应用 (macOS)
+### 桌面应用 (macOS, 开发模式)
+
+构建 Electron 壳（需要系统已安装 Python 和 `crabagent`）：
 
 ```bash
-cd electron && npm install && npm run build:mac
-# → electron/dist-electron/CrabAgent-0.9.0-arm64.dmg
+make desktop
+# → electron/dist-electron/CrabAgent-0.9.4-arm64.dmg
 ```
 
-双击 `CrabAgent.app` — 自动启动后端、自动登录、原生窗口中的完整 Web UI。
+或者直接在浏览器中使用：
+
+```bash
+crabagent --serve          # → http://localhost:5210
+                           # 默认登录：admin / xcl1989
+```
 
 ---
 
@@ -259,6 +266,8 @@ CrabAgent/
 │   └── serve/         # FastAPI + API + 调度器
 ├── frontend/          # React SPA 前端
 ├── electron/          # Electron 桌面应用
+├── scripts/           # 构建脚本
+├── crabagent.spec     # PyInstaller 编译配置
 └── crabagent.db       # SQLite 数据库
 ```
 

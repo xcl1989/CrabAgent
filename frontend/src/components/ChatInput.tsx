@@ -1,0 +1,107 @@
+import { useState, useRef, useCallback } from "react";
+import { ArrowUp, Square, Paperclip, Bot } from "lucide-react";
+import { Button, Textarea } from "./ui";
+
+interface Props {
+  sending: boolean;
+  replaying: boolean;
+  onSend: (text: string) => void;
+  onAbort: () => void;
+  onImageUpload: () => void;
+  onImagePaste: (e: React.ClipboardEvent) => void;
+  onDelegateOpen: () => void;
+  showDelegate?: boolean;
+}
+
+export default function ChatInput({
+  sending,
+  replaying,
+  onSend,
+  onAbort,
+  onImageUpload,
+  onImagePaste,
+  onDelegateOpen,
+  showDelegate,
+}: Props) {
+  const [input, setInput] = useState("");
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  const handleSend = useCallback(() => {
+    const text = input.trim();
+    if (!text) return;
+    onSend(text);
+    setInput("");
+  }, [input, onSend]);
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        handleSend();
+      }
+    },
+    [handleSend],
+  );
+
+  return (
+    <>
+      <Button
+        size="icon"
+        variant="outline"
+        onClick={onImageUpload}
+        disabled={sending || replaying}
+        title="Attach image"
+        className="h-9 w-9 sm:h-10 sm:w-10"
+      >
+        <Paperclip size={15} />
+      </Button>
+      {showDelegate && (
+        <Button
+          size="icon"
+          variant="outline"
+          onClick={onDelegateOpen}
+          disabled={sending || replaying}
+          title="Delegate to agent team"
+          className="hidden sm:flex h-10 w-10 text-[var(--accent-2)] hover:text-[var(--accent-2)] hover:bg-[var(--accent-2-bg)] border-[var(--border)]"
+        >
+          <Bot size={15} />
+        </Button>
+      )}
+      <Textarea
+        value={input}
+        onChange={(e) => setInput(e.target.value)}
+        onKeyDown={handleKeyDown}
+        onPaste={onImagePaste}
+        placeholder="Type a message…"
+        disabled={sending || replaying}
+        ref={inputRef}
+        autoGrow
+        minRows={1}
+        maxRows={6}
+        className="flex-1 min-h-[36px] sm:min-h-[40px]"
+      />
+      {sending ? (
+        <Button
+          variant="danger"
+          onClick={onAbort}
+          className="h-9 w-9 sm:h-10 sm:w-10"
+          size="icon"
+          title="Stop"
+        >
+          <Square size={14} fill="currentColor" />
+        </Button>
+      ) : (
+        <Button
+          variant="brand"
+          onClick={handleSend}
+          disabled={!input.trim()}
+          className="h-9 w-9 sm:h-10 sm:w-10 shrink-0"
+          size="icon"
+          title="Send"
+        >
+          <ArrowUp size={16} />
+        </Button>
+      )}
+    </>
+  );
+}

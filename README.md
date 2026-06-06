@@ -136,14 +136,20 @@ crabagent --serve          # → http://localhost:5210
 crabagent "organize this directory"
 ```
 
-### Desktop App (macOS)
+### Desktop App (macOS, development)
+
+Build the Electron wrapper (requires Python + `crabagent` installed on your system):
 
 ```bash
-cd electron && npm install && npm run build:mac
-# → electron/dist-electron/CrabAgent-0.9.0-arm64.dmg
+make desktop
+# → electron/dist-electron/CrabAgent-0.9.4-arm64.dmg
 ```
 
-Double-click `CrabAgent.app` — auto-starts the Python backend, auto-login, full Web UI in a native window.
+Or run directly in your browser:
+
+```bash
+crabagent --serve          # → http://localhost:5210
+```
 
 ---
 
@@ -258,6 +264,8 @@ CrabAgent/
 │   └── serve/         # FastAPI + API + scheduler
 ├── frontend/          # React SPA
 ├── electron/          # Electron desktop app
+├── scripts/           # Build scripts
+├── crabagent.spec     # PyInstaller config
 └── crabagent.db       # SQLite database
 ```
 
