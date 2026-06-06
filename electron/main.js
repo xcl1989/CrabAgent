@@ -50,18 +50,28 @@ function resolvePath(cmd) {
 function startBackend() {
   return new Promise((resolve, reject) => {
     const env = { ...process.env, PYTHONUNBUFFERED: '1' };
-    const crabagentBin = resolvePath('crabagent');
-    const pythonBin = resolvePath('python3') || 'python3';
 
-    log(`crabagent: ${crabagentBin || 'not found'}`);
-    log(`python3: ${pythonBin}`);
-
-    if (crabagentBin) {
-      log('Starting backend via crabagent...');
-      python = spawn(crabagentBin, ['--serve'], { stdio: 'pipe', env });
+    // In packaged mode, use the bundled backend binary
+    if (app.isPackaged) {
+      const bundledPath = path.join(process.resourcesPath, 'crabagent-backend');
+      env.CRAB_DB_URL = `sqlite+aiosqlite:///${app.getPath('userData')}/crabagent.db`;
+      env.CRAB_SERVE_PORT = String(PORT);
+      log(`Starting bundled backend: ${bundledPath}`);
+      python = spawn(bundledPath, ['--serve'], { stdio: 'pipe', env });
     } else {
-      log('Starting backend via python3 -m crabagent.cli...');
-      python = spawn(pythonBin, ['-m', 'crabagent.cli', '--serve'], { stdio: 'pipe', env });
+      // Dev mode: look for crabagent in PATH, fall back to python -m
+      const crabagentBin = resolvePath('crabagent');
+      const pythonBin = resolvePath('python3') || 'python3';
+      log(`crabagent: ${crabagentBin || 'not found'}`);
+      log(`python3: ${pythonBin}`);
+
+      if (crabagentBin) {
+        log('Starting backend via crabagent...');
+        python = spawn(crabagentBin, ['--serve'], { stdio: 'pipe', env });
+      } else {
+        log('Starting backend via python3 -m crabagent.cli...');
+        python = spawn(pythonBin, ['-m', 'crabagent.cli', '--serve'], { stdio: 'pipe', env });
+      }
     }
 
     python.on('error', (e) => { log(`Backend error: ${e.message}`); reject(e); });
