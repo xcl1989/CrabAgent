@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from crabagent.core.database import (
     AgentMemory,
+    Conversation,
     User,
     agent_memory_delete,
     agent_memory_upsert,
@@ -32,22 +33,36 @@ async def list_memories(
     memory_type: str = Query("", description="Filter by memory type"),
     category: str = Query("", description="Filter by category"),
     agent_name: str = Query("", description="Filter by agent name"),
+    workspace: str = Query("", description="Filter by workspace path"),
     q: str = Query("", description="Search in content"),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """List all memories with optional filters. Returns full content."""
-    conditions = [AgentMemory.user_id == user.id]
-    if memory_type:
-        conditions.append(AgentMemory.memory_type == memory_type)
-    if category:
-        conditions.append(AgentMemory.category == category)
-    if agent_name:
-        conditions.append(AgentMemory.agent_name == agent_name)
+    query = select(AgentMemory).where(AgentMemory.user_id == user.id)
 
-    result = await db.execute(
-        select(AgentMemory).where(*conditions).order_by(AgentMemory.importance.desc())
-    )
+    if workspace:
+        # Workspace-scoped: join through Conversation.source_session
+        query = (
+            select(AgentMemory)
+            .join(Conversation, AgentMemory.source_session == Conversation.session_id)
+            .where(
+                AgentMemory.user_id == user.id,
+                Conversation.workspace == workspace,
+                AgentMemory.source_session != "",
+            )
+        )
+
+    if memory_type:
+        query = query.where(AgentMemory.memory_type == memory_type)
+    if category:
+        query = query.where(AgentMemory.category == category)
+    if agent_name:
+        query = query.where(AgentMemory.agent_name == agent_name)
+
+    query = query.order_by(AgentMemory.importance.desc())
+
+    result = await db.execute(query)
     items = [
         {
             "id": r.id,

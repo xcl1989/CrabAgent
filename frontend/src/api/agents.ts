@@ -224,12 +224,14 @@ export function listMemories(params?: {
   memory_type?: string;
   category?: string;
   agent_name?: string;
+  workspace?: string;
   q?: string;
 }): Promise<MemoryEntry[]> {
   const search = new URLSearchParams();
   if (params?.memory_type) search.set("memory_type", params.memory_type);
   if (params?.category) search.set("category", params.category);
   if (params?.agent_name) search.set("agent_name", params.agent_name);
+  if (params?.workspace) search.set("workspace", params.workspace);
   if (params?.q) search.set("q", params.q);
   const qs = search.toString();
   return api.get(`/memory${qs ? `?${qs}` : ""}`);

@@ -77,7 +77,7 @@ export default function MemoryPage() {
       const type = TAB_TYPES[tab];
       const params: Record<string, string> = {};
       if (type) params.memory_type = type;
-      if (tab === "project") params.category = "project_context";
+      if (tab === "project" && selectedWorkspace) params.workspace = selectedWorkspace;
       if (search) params.q = search;
       if (agentFilter && tab === "agent_lesson") params.agent_name = agentFilter;
       const items = await listMemories(params);
@@ -87,7 +87,7 @@ export default function MemoryPage() {
     } finally {
       setLoading(false);
     }
-  }, [tab, search, agentFilter]);
+  }, [tab, search, agentFilter, selectedWorkspace]);
 
   useEffect(() => {
     fetchEntries();
