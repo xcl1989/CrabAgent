@@ -270,7 +270,7 @@ export function ScheduledTaskPanel({ onClose, onSwitchSession }: Props) {
         ) : tasks.length === 0 ? (
           <EmptyState
             icon={<Clock size={32} />}
-            title="No scheduled tasks"
+            title={t("scheduledTask.noTasks")}
             description={t("scheduledTask.title")}
             action={
               <Button

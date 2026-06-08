@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { ChevronDown, Check, Search } from "lucide-react";
 import { cn } from "../lib/cn";
 import { ProviderModels } from "../hooks/useModelSelector";
@@ -20,6 +21,7 @@ export default function ModelSelector({
   disabled,
   className,
 }: Props) {
+  const { t } = useTranslation();
   const selectedProviderRef = useRef<string | null>(null);
   const [open, setOpen] = useState(false);
 
@@ -237,7 +239,7 @@ export default function ModelSelector({
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="Search models…"
+                placeholder={t("modelSelector.searchPlaceholder")}
                 className="flex-1 bg-transparent text-xs font-mono text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] outline-none"
               />
             </div>

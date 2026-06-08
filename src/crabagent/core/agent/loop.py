@@ -427,15 +427,6 @@ def _build_messages(context: AgentContext) -> list[dict]:
     if context.system_prompt:
         messages.append({"role": "system", "content": context.system_prompt})
 
-    # Inject locale instruction as a second system message for language control
-    locale = context.metadata.get("locale", context.locale)
-    if locale and locale != "en":
-        from crabagent.core.i18n import get_locale_instruction
-
-        lang_instruction = get_locale_instruction(locale)
-        if lang_instruction:
-            messages.append({"role": "system", "content": lang_instruction})
-
     for msg in context.messages:
         content = msg.get("content")
         if isinstance(content, list):

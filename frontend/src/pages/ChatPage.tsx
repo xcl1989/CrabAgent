@@ -32,7 +32,7 @@ import McpStatusBar from "../components/McpStatusBar";
 import BranchSelector from "../components/BranchSelector";
 import FileBrowser from "../components/FileBrowser";
 import TodoWidget from "../components/TodoWidget";
-import { NotificationBell } from "../components/NotificationBell";
+import NotificationBell from "../components/NotificationBell";
 import { ScheduledTaskPanel } from "../components/ScheduledTaskPanel";
 import { TaskBoard } from "../components/TaskBoard";
 import { AgentBar } from "../components/AgentBar";
@@ -56,8 +56,8 @@ const STARTER_PROMPTS = [
   { icon: <MessageSquare size={14} />, labelKey: "chat.writeDocLabel", promptKey: "chat.writeDocPrompt" },
 ];
 
-export default function ChatPage() {
-  const { t } = useTranslation();
+export default function ChatPage({ onActiveSessionChange }: { onActiveSessionChange?: (sessionId: string | null) => void }) {
+  const { t, i18n } = useTranslation();
   const [workspace, setWorkspace] = useState<string>("");
   const { taskBoardTasks, handleTaskBoardEvent, clearTaskBoard } =
     useTaskBoard();
@@ -79,12 +79,14 @@ export default function ChatPage() {
   const onAutoLoadSession = useCallback((session: Session) => {
     if (session.model) setSelectedModel(session.model);
     if (session.provider) setSelectedProvider(session.provider);
+    if (session.workspace) setWorkspace(session.workspace);
   }, [setSelectedModel]);
 
   const {
     sessions,
     setSessions,
     activeSession,
+    setActiveSession,
     messages,
     setMessages,
     sending,
@@ -106,6 +108,11 @@ export default function ChatPage() {
     handleDeleteSession,
     getSubAgentContent,
   } = useChatState(handleTaskBoardEvent, workspace, onAutoLoadSession);
+
+  // Sync active session ID to parent (for NavBar language switcher reset)
+  useEffect(() => {
+    onActiveSessionChange?.(activeSession?.session_id || null);
+  }, [activeSession?.session_id, onActiveSessionChange]);
 
   const [showProviders, setShowProviders] = useState(false);
   const [selectedProvider, setSelectedProvider] = useState<string | null>(null);
@@ -134,6 +141,7 @@ export default function ChatPage() {
   const agentDropdownRef = useRef<HTMLDivElement>(null);
   const effortDropdownRef = useRef<HTMLDivElement>(null);
   const [selectedAgent, setSelectedAgent] = useState("default");
+  const [localeMismatch, setLocaleMismatch] = useState<{ pendingText: string; pendingImages: string[] } | null>(null);
   const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
   const [mcpStatus, setMcpStatus] = useState<McpServerStatus[]>([]);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -288,11 +296,8 @@ export default function ChatPage() {
     return matches;
   };
 
-  const handleSend = async (text: string) => {
-    if ((!text.trim() && pendingImages.length === 0) || !activeSession || sending)
-      return;
-    const images = [...pendingImages];
-    setPendingImages([]);
+  const doSend = async (text: string, images: string[]) => {
+    if (!activeSession || sending) return;
     setMessages((prev) => [
       ...prev,
       {
@@ -330,6 +335,36 @@ export default function ChatPage() {
     } catch {
       setSending(false);
     }
+  };
+
+  const handleSend = async (text: string) => {
+    if ((!text.trim() && pendingImages.length === 0) || !activeSession || sending)
+      return;
+
+    // Check locale mismatch
+    const currentLocale = i18n.language;
+    if (activeSession.prompt_locale && activeSession.prompt_locale !== currentLocale) {
+      setLocaleMismatch({ pendingText: text, pendingImages: [...pendingImages] });
+      return;
+    }
+
+    const images = [...pendingImages];
+    setPendingImages([]);
+    doSend(text, images);
+  };
+
+  const handleSendWithLocale = async (text: string, images: string[], locale: string) => {
+    // Reset cached system prompt then send
+    try {
+      const { api } = await import("../api/client");
+      await api.post(`/sessions/${activeSession?.session_id}/reset-system-prompt`, {});
+    } catch (e) {
+      console.error("Failed to reset system prompt:", e);
+    }
+    if (activeSession) {
+      setActiveSession({ ...activeSession, prompt_locale: locale });
+    }
+    doSend(text, images);
   };
 
   const handleToolConfirm = async (confirmId: string, approved: boolean) => {
@@ -583,7 +618,7 @@ export default function ChatPage() {
                 ) : providerModels.length > 0 ? (
                   <div className="flex items-center gap-1.5">
                     <span className="text-[11px] text-[var(--text-tertiary)] hidden sm:inline">
-                      Model
+                      {t("chatPage.model")}
                     </span>
                     <ModelSelector
                       providerModels={providerModels}
@@ -599,13 +634,13 @@ export default function ChatPage() {
                 ) : (
                   <div className="flex items-center gap-1.5">
                     <span className="text-[11px] text-[var(--text-tertiary)] hidden sm:inline">
-                      Model
+                      {t("chatPage.model")}
                     </span>
                     <input
                       type="text"
                       value={selectedModel}
                       onChange={(e) => setSelectedModel(e.target.value)}
-                      placeholder="type model id…"
+                      placeholder={t("chatPage.modelPlaceholder")}
                       className="text-xs h-7 px-2 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border)] text-[var(--text-primary)] font-mono focus:outline-none focus:border-[var(--brand)] focus:ring-2 focus:ring-[var(--brand)]/30 w-28 sm:w-40 placeholder:text-[var(--text-tertiary)]"
                     />
                     {modelsError && (
@@ -614,26 +649,27 @@ export default function ChatPage() {
                         title={modelsError}
                         onClick={() => window.location.reload()}
                       >
-                        Retry
+                        {t("chatPage.retry")}
                       </span>
                     )}
                   </div>
                 )}
                 <div ref={effortDropdownRef} className="flex items-center gap-1.5 relative">
                   <span className="text-[11px] text-[var(--text-tertiary)] hidden sm:inline">
-                    Effort
+                    {t("chatPage.effort")}
                   </span>
                   <button
                     onClick={() => setEffortOpen((v) => !v)}
                     className="flex items-center gap-1.5 text-xs h-7 pl-2.5 pr-1.5 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border)] text-[var(--text-primary)] font-mono focus:outline-none focus:border-[var(--brand)] focus:ring-2 focus:ring-[var(--brand)]/30 transition-colors"
                   >
-                    <span>{reasoningEffort.charAt(0).toUpperCase() + reasoningEffort.slice(1)}</span>
+                    <span>{t(`chatPage.reasoning${reasoningEffort.charAt(0).toUpperCase() + reasoningEffort.slice(1)}`)}</span>
                     <ChevronDown size={13} className={cn("text-[var(--text-tertiary)] transition-transform shrink-0", effortOpen && "rotate-180")} />
                   </button>
                   {effortOpen && (
                     <div className="absolute bottom-full mb-1.5 right-0 z-50 min-w-[120px] rounded-lg border border-[var(--border)] bg-[var(--bg-secondary)] shadow-[var(--shadow-lg)] py-1.5">
-                      {["low", "medium", "high"].map((effort) => {
-                        const label = effort.charAt(0).toUpperCase() + effort.slice(1);
+                      {["reasoningLow", "reasoningMedium", "reasoningHigh"].map((key) => {
+                        const label = t(`chatPage.${key}`);
+                        const effort = key.replace("reasoning", "").toLowerCase();
                         const isSelected = effort === reasoningEffort;
                         return (
                           <button
@@ -674,7 +710,7 @@ export default function ChatPage() {
                           )
                         }
                         className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full flex items-center justify-center bg-[var(--danger)] text-white hover:bg-[var(--danger-hover)] transition-colors"
-                        aria-label="Remove image"
+                        aria-label={t("chatPage.removeImage")}
                       >
                         <X size={11} />
                       </button>
@@ -712,7 +748,7 @@ export default function ChatPage() {
                 🦀
               </div>
               <h2 className="text-xl font-semibold text-[var(--text-primary)] mb-1">
-                Welcome to CrabAgent
+                {t("chatPage.welcome")}
               </h2>
               <p className="text-sm text-[var(--text-tertiary)] mb-6">
                 Start a conversation or pick a quick template below
@@ -770,7 +806,7 @@ export default function ChatPage() {
         <Modal
           open={true}
           onOpenChange={() => {}}
-          title="Welcome to CrabAgent"
+          title={t("chatPage.welcome")}
           description={t("provider.addProvider")}
           size="sm"
           hideClose
@@ -834,6 +870,49 @@ export default function ChatPage() {
           onClose={() => setShowResultCompare(false)}
           onExport={handleExportReport}
         />
+      )}
+
+      {localeMismatch && (
+        <Modal
+          open={true}
+          onOpenChange={(o) => !o && setLocaleMismatch(null)}
+          title={t("localeMismatch.title")}
+          description={t("localeMismatch.desc")}
+          size="sm"
+          footer={
+            <div className="flex gap-2">
+              <Button
+                variant="brand"
+                onClick={async () => {
+                  const { pendingText, pendingImages: imgs } = localeMismatch;
+                  setLocaleMismatch(null);
+                  await handleSendWithLocale(pendingText, imgs, i18n.language);
+                }}
+              >
+                {t("localeMismatch.rebuild")}
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={async () => {
+                  const { pendingText } = localeMismatch;
+                  setLocaleMismatch(null);
+                  setPendingImages([]);
+                  doSend(pendingText, []);
+                }}
+              >
+                {t("localeMismatch.keep")}
+              </Button>
+              <Button variant="ghost" onClick={() => setLocaleMismatch(null)}>
+                {t("common.cancel")}
+              </Button>
+            </div>
+          }
+        >
+          <div className="text-sm text-[var(--text-secondary)] space-y-2">
+            <p>{t("localeMismatch.current", { locale: i18n.language })}</p>
+            <p>{t("localeMismatch.stored", { locale: activeSession?.prompt_locale || "en" })}</p>
+          </div>
+        </Modal>
       )}
     </div>
   );

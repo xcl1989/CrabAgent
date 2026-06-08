@@ -102,63 +102,90 @@ def get_delegation_tools() -> set[str]:
     return _DELEGATION_TOOLS
 
 
-def build_agent_switch_msg(agent_def: dict) -> dict:
+def _translate_agent_field(agent_name: str, field: str, original: str, locale: str) -> str:
+    """Return translated agent field if available, otherwise the original."""
+    from crabagent.core.i18n import t
+
+    return t(f"agents.{agent_name}.{field}", locale) or original
+
+
+def build_agent_switch_msg(agent_def: dict, locale: str = "en") -> dict:
+    from crabagent.core.i18n import t
+
+    agent_name = agent_def["name"]
     icon = agent_def.get("icon", "")
+    _d = _translate_agent_field(agent_name, "display_name", agent_def["display_name"], locale)
+    _r = _translate_agent_field(agent_name, "role", agent_def["role"], locale)
+    _g = _translate_agent_field(agent_name, "goal", agent_def["goal"], locale)
+    _b = _translate_agent_field(agent_name, "backstory", agent_def.get("backstory", ""), locale)
     lines = [
-        f"[Agent Switch] You are now acting as {icon} **{agent_def['display_name']}**.",
-        f"Role: {agent_def['role']}",
-        f"Goal: {agent_def['goal']}",
+        t("agent_switch.header", locale, icon=icon, display_name=_d),
+        t("agent_switch.role", locale, role=_r),
+        t("agent_switch.goal", locale, goal=_g),
     ]
-    if agent_def.get("backstory"):
-        lines.append(f"Background: {agent_def['backstory']}")
-    lines.append("Use only the tools available to you for this role. Respond accordingly.")
-    return {"role": "user", "content": "\n".join(lines), "agent": agent_def["name"]}
+    if _b:
+        lines.append(t("agent_switch.backstory", locale, backstory=_b))
+    lines.append(t("agent_switch.footer", locale))
+    return {"role": "user", "content": "\n".join(lines), "agent": agent_name}
 
 
 def _build_system_prompt(
     agent_def: dict,
     has_shared: bool = False,
     can_request_help: bool = False,
+    locale: str = "en",
 ) -> str:
+    from crabagent.core.i18n import t
+
+    agent_name = agent_def["name"]
+    _r = _translate_agent_field(agent_name, "role", agent_def["role"], locale)
+    _g = _translate_agent_field(agent_name, "goal", agent_def["goal"], locale)
+    _b = _translate_agent_field(agent_name, "backstory", agent_def.get("backstory", ""), locale)
     parts = [
-        f"Role: {agent_def['role']}",
-        f"Goal: {agent_def['goal']}",
+        t("agent_system.role", locale, role=_r),
+        t("agent_system.goal", locale, goal=_g),
     ]
-    if agent_def.get("backstory"):
-        parts.append(f"Backstory: {agent_def['backstory']}")
-    parts.append(
-        "Complete the task assigned to you. Be thorough and provide clear results. "
-        "Do NOT ask questions to the user — you must work independently. "
-        "When you finish, provide a complete summary of your findings."
-    )
+    if _b:
+        parts.append(t("agent_system.backstory", locale, backstory=_b))
+    parts.append(t("agent_system.task_instruction", locale))
     if has_shared:
-        parts.append(
-            "You have access to a shared team workspace. "
-            "Use `shared_put(key, value)` to save important findings. "
-            "Other team members can read them with `shared_get(key)`. "
-            "Use `shared_list()` to see all shared notes. "
-            "Always save your key findings before finishing."
-        )
+        parts.append(t("agent_system.shared_instruction", locale))
     if can_request_help:
-        parts.append(
-            "If you encounter a task that requires different expertise, "
-            "you can use `request_help(agent_name, question)` "
-            "to ask another agent for assistance."
-        )
+        parts.append(t("agent_system.help_instruction", locale))
     return "\n".join(parts)
 
 
-async def build_team_prompt() -> str:
+def _load_list(locale: str, key: str) -> list[str]:
+    """Load a list translation by dot-notation key, falling back to English."""
+    from crabagent.core.i18n import _load
+
+    for loc in (locale, "en"):
+        data = _load(loc)
+        parts = key.split(".")
+        node = data
+        for p in parts:
+            if isinstance(node, dict):
+                node = node.get(p)
+            else:
+                node = None
+                break
+        if isinstance(node, list):
+            return node
+    return []
+
+
+async def build_team_prompt(locale: str = "en") -> str:
+    from crabagent.core.i18n import t
+
     agents = await load_agent_registry()
     if not agents:
         return ""
     lines = [
-        "## Agent Team",
+        t("team_prompt.title", locale),
         "",
-        "You have a team of specialized agents you can delegate tasks to. "
-        "Use them when a task benefits from specialized expertise or parallel execution.",
+        t("team_prompt.intro", locale),
         "",
-        "### Available Agents",
+        t("team_prompt.available_agents", locale),
         "",
     ]
     for a in agents:
@@ -166,44 +193,49 @@ async def build_team_prompt() -> str:
         denied = [k for k, v in perms.items() if v == "deny"]
         perm_info = ""
         if denied:
-            perm_info = f" (restricted: {', '.join(denied)})"
-        lines.append(f"- **{a['display_name']}** (`{a['name']}`): {a['role']}. {a['goal']}{perm_info}")
+            denied_str = ", ".join(denied)
+            perm_info = " " + t("team_prompt.restricted", locale, tools=denied_str)
+        # Use translated agent fields when available
+        agent_name = a["name"]
+        display_name = t(f"agents.{agent_name}.display_name", locale) or a["display_name"]
+        role = t(f"agents.{agent_name}.role", locale) or a["role"]
+        goal = t(f"agents.{agent_name}.goal", locale) or a["goal"]
+        lines.append(f"- **{display_name}** (`{agent_name}`): {role}. {goal}{perm_info}")
     lines.extend(
         [
             "",
-            "### Delegation Tools",
-            "",
-            "- `list_agents`: List all available agents with details",
-            "- `plan_task(task)`: Analyze a complex task and produce an execution plan (does not execute)",
-            "- `delegate_task(agent_name, task)`: Delegate a task to a specific agent",
-            "- `delegate_parallel(tasks)`: Run multiple independent agent tasks simultaneously (no ordering)",
-            "- `handoff_to(agent_name, summary)`: Hand off work to another agent with context",
-            "- `run_pipeline(steps)`: Multi-step workflow with dependencies. "
-            "Steps without depends_on run in parallel. Prefer for complex workflows.",
-            "",
-            "### Shared Workspace",
-            "",
-            "- `shared_put(key, value)`: Save findings to shared workspace",
-            "- `shared_get(key)`: Read findings from other agents",
-            "- `shared_list()`: List all shared notes",
-            "",
-            "### When to Delegate",
-            "",
-            "- Web research, searching, browsing -> `researcher`",
-            "- Data analysis, comparison, report generation -> `analyst`",
-            "- Code writing, debugging, refactoring -> `coder`",
-            "- Content writing, editing, translation -> `writer`",
-            "- Multiple independent subtasks (no ordering needed) -> `delegate_parallel`",
-            "- Multi-step workflow with ordering or data flow (e.g., research -> analyze -> write) -> `run_pipeline`",
-            "- User asks for multiple sub-agents or parallel execution -> "
-            "use `delegate_parallel` or `run_pipeline`, not sequential `delegate_task`",
+            t("team_prompt.delegation_tools", locale),
             "",
         ]
     )
+    for key in ("list_agents", "plan_task", "delegate_task", "delegate_parallel", "handoff_to", "run_pipeline"):
+        lines.append(f"- {t(f'team_prompt.tools.{key}', locale)}")
+    lines.extend(
+        [
+            "",
+            t("team_prompt.shared_workspace", locale),
+            "",
+        ]
+    )
+    for key in ("shared_put", "shared_get", "shared_list"):
+        lines.append(f"- {t(f'team_prompt.shared.{key}', locale)}")
+    lines.extend(
+        [
+            "",
+            t("team_prompt.when_to_delegate", locale),
+            "",
+        ]
+    )
+    when_list = _load_list(locale, "team_prompt.when")
+    for item in when_list:
+        lines.append(f"- {item}")
+    lines.append("")
     return "\n".join(lines)
 
 
-async def _load_shared_context(session_id: str) -> str:
+async def _load_shared_context(session_id: str, locale: str = "en") -> str:
+    from crabagent.core.i18n import t
+
     if not session_id:
         return ""
     from crabagent.core.database import shared_memory_get_all
@@ -211,7 +243,7 @@ async def _load_shared_context(session_id: str) -> str:
     items = await shared_memory_get_all(session_id)
     if not items:
         return ""
-    lines = ["## Shared Team Knowledge", ""]
+    lines = [t("shared_context.title", locale), ""]
     for item in items:
         author_tag = f" (by {item['author']})" if item["author"] else ""
         lines.append(f"### {item['key']}{author_tag}")
@@ -220,7 +252,7 @@ async def _load_shared_context(session_id: str) -> str:
     return "\n".join(lines)
 
 
-async def build_memory_prompt(user_id: int, query: str = "") -> str:
+async def build_memory_prompt(user_id: int, query: str = "", locale: str = "en") -> str:
     if not user_id:
         return ""
     from crabagent.core.config import settings
@@ -228,6 +260,7 @@ async def build_memory_prompt(user_id: int, query: str = "") -> str:
         agent_memory_get_by_type,
         agent_memory_search,
     )
+    from crabagent.core.i18n import t
 
     parts: list[str] = []
 
@@ -236,15 +269,12 @@ async def build_memory_prompt(user_id: int, query: str = "") -> str:
         total_chars = sum(len(m["content"]) for m in team_memories)
         if total_chars > 3000:
             team_memories = team_memories[:5]
-        lines = ["## Team Knowledge", ""]
+        lines = [t("memory_prompt.team_knowledge_title", locale), ""]
         for m in team_memories:
             cat = m["category"]
             lines.append(f"- **{m['key']}** ({cat}): {m['content']}")
         lines.append("")
-        lines.append(
-            "You can save new knowledge with `memory_save(memory_type='team', ...)`. "
-            "When the user makes a choice or rejects an option, record it."
-        )
+        lines.append(t("memory_prompt.save_instruction", locale))
         lines.append("")
         parts.append("\n".join(lines))
 
@@ -419,6 +449,7 @@ async def spawn_sub_agent(
             sub_registry._tools["request_help"] = parent_tools["request_help"]
             can_request_help = True
 
+    sub_locale = parent_context.metadata.get("locale", parent_context.locale or "en")
     sub_context = AgentContext(
         workspace=parent_context.workspace,
         tool_registry=sub_registry,
@@ -429,6 +460,7 @@ async def spawn_sub_agent(
             agent_def,
             has_shared=has_shared,
             can_request_help=can_request_help,
+            locale=sub_locale,
         ),
     )
 
@@ -436,6 +468,8 @@ async def spawn_sub_agent(
     sub_context.tool_permissions = agent_tool_perms
     sub_context.metadata["_sub_agent_name"] = agent_name
     sub_context.metadata["_sub_agent_depth"] = current_depth + 1
+    sub_context.locale = sub_locale
+    sub_context.metadata["locale"] = sub_locale
 
     parent_user_id = parent_context.metadata.get("user_id", 0)
     if parent_user_id:
@@ -457,7 +491,7 @@ async def spawn_sub_agent(
         except Exception:
             logger.debug("Failed to inject lessons for sub-agent %s", agent_name, exc_info=True)
 
-    shared_context = await _load_shared_context(session_id)
+    shared_context = await _load_shared_context(session_id, locale=sub_locale)
 
     if include_history and parent_context.messages:
         recent = parent_context.messages[-20:]

@@ -10,6 +10,10 @@ import {
   GitBranch, Zap, Check, X, AlertTriangle, ChevronDown,
 } from "lucide-react";
 import { cn } from "../lib/cn";
+import i18n from "../i18n";
+
+// Shorthand for i18n in non-component functions
+const _t = (key: string, opts?: Record<string, unknown>) => i18n.t(key, opts);
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -152,12 +156,12 @@ function EditRender({ args, result, accentVar }: { args: Record<string, unknown>
 
   return (
     <Container accentVar={accentVar}>
-      <Header icon={<Pencil size={13} />} title="Edit" subtitle={filePath} />
+      <Header icon={<Pencil size={13} />} title={_t("toolResult.edit")} subtitle={filePath} />
       <div className="flex text-[12px] font-mono leading-[1.5]">
         {/* Left: Original */}
         <div className="flex-1 min-w-0 border-r border-[var(--border)]">
           <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-tertiary)] bg-[var(--bg-tertiary)] border-b border-[var(--border-subtle)] sticky top-0">
-            Original
+            {_t("toolResult.original")}
           </div>
           {hasOld ? oldLines.map((line, i) => (
             <div key={i} className="flex px-1" style={{ background: "var(--danger-bg)" }}>
@@ -173,7 +177,7 @@ function EditRender({ args, result, accentVar }: { args: Record<string, unknown>
         {/* Right: New */}
         <div className="flex-1 min-w-0">
           <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-tertiary)] bg-[var(--bg-tertiary)] border-b border-[var(--border-subtle)] sticky top-0">
-            New
+            {_t("toolResult.new")}
           </div>
           {newLines.map((line, i) => (
             <div key={i} className="flex px-1" style={{ background: "var(--success-bg)" }}>
@@ -220,7 +224,7 @@ function WriteRender({ args, result, accentVar }: { args: Record<string, unknown
 
   return (
     <Container accentVar={accentVar}>
-      <Header icon={<Pencil size={13} />} title="Write" subtitle={`${filePath} · ${formatBytes(content.length)}`} />
+      <Header icon={<Pencil size={13} />} title={_t("toolResult.write")} subtitle={`${filePath} · ${_t("toolResult.bytes", { size: formatBytes(content.length) })}`} />
       {err ? (
         <div className="px-3 py-2 text-[12px] text-[var(--danger)]">{result}</div>
       ) : (
@@ -241,7 +245,7 @@ function ReadRender({ args, result, accentVar }: { args: Record<string, unknown>
 
   return (
     <Container accentVar={accentVar}>
-      <Header icon={<FileText size={13} />} title="Read" subtitle={filePath} />
+      <Header icon={<FileText size={13} />} title={_t("toolResult.read")} subtitle={filePath} />
       {err ? (
         <div className="px-3 py-2 text-[12px] text-[var(--danger)]">{result}</div>
       ) : (
@@ -279,7 +283,7 @@ function FileContentLines({ lines, maxLines = 20 }: { lines: string[]; maxLines?
           className="w-full flex items-center justify-center gap-1 py-1.5 border-t border-[var(--border-subtle)] text-[11px] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
         >
           <ChevronDown size={12} className={cn(expanded && "rotate-180 transition-transform")} />
-          {expanded ? "Collapse" : `Show ${lines.length - maxLines} more lines`}
+          {expanded ? _t("toolResult.collapse") : _t("toolResult.showMoreLines", { count: lines.length - maxLines })}
         </button>
       )}
     </>
@@ -307,7 +311,7 @@ function BashRender({ args, result, accentVar }: { args: Record<string, unknown>
 
   return (
     <Container accentVar={accentVar}>
-      <Header icon={<Terminal size={13} />} title="Terminal" />
+      <Header icon={<Terminal size={13} />} title={_t("toolResult.terminal")} />
       {/* Command line */}
       {command && (
         <div className="px-3 py-1.5 bg-[var(--code-bg)] border-b border-[var(--border-subtle)]">
@@ -329,7 +333,7 @@ function BashRender({ args, result, accentVar }: { args: Record<string, unknown>
           className="w-full flex items-center justify-center gap-1 py-1.5 border-t border-[var(--border-subtle)] text-[11px] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
         >
           <ChevronDown size={12} className={cn(expanded && "rotate-180 transition-transform")} />
-          {expanded ? "Collapse" : `Show ${lines.length - maxOutputLines} more lines`}
+          {expanded ? _t("toolResult.collapse") : _t("toolResult.showMoreLines", { count: lines.length - maxOutputLines })}
         </button>
       )}
       {/* Exit status */}
@@ -354,7 +358,7 @@ function GrepRender({ args, result, accentVar }: { args: Record<string, unknown>
   if (err) {
     return (
       <Container accentVar={accentVar}>
-        <Header icon={<Search size={13} />} title="Grep" subtitle={pattern} />
+        <Header icon={<Search size={13} />} title={_t("toolResult.grep")} subtitle={pattern} />
         <div className="px-3 py-2 text-[12px] text-[var(--danger)]">{result}</div>
       </Container>
     );
@@ -372,9 +376,9 @@ function GrepRender({ args, result, accentVar }: { args: Record<string, unknown>
 
   return (
     <Container accentVar={accentVar}>
-      <Header icon={<Search size={13} />} title="Grep" subtitle={`${pattern} → ${isNoMatch ? "0" : parsed.length} matches`} />
+      <Header icon={<Search size={13} />} title={_t("toolResult.grep")} subtitle={`${pattern} → ${isNoMatch ? "0" : parsed.length} ${_t("toolResult.matches")}`} />
       {isNoMatch ? (
-        <div className="px-3 py-3 text-[12px] text-[var(--text-tertiary)] text-center">No matches found</div>
+        <div className="px-3 py-3 text-[12px] text-[var(--text-tertiary)] text-center">{_t("toolResult.noMatches")}</div>
       ) : (
         <MatchList items={parsed} pattern={pattern} />
       )}
@@ -406,7 +410,7 @@ function MatchList({ items, pattern }: { items: { file: string; lineNum: string;
           className="w-full flex items-center justify-center gap-1 py-1.5 border-t border-[var(--border-subtle)] text-[11px] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
         >
           <ChevronDown size={12} className={cn(expanded && "rotate-180 transition-transform")} />
-          {expanded ? "Collapse" : `+${items.length - max} more matches`}
+          {expanded ? _t("toolResult.collapse") : _t("toolResult.showMoreMatches", { count: items.length - max })}
         </button>
       )}
     </>
@@ -446,7 +450,7 @@ function GlobRender({ args, result, accentVar }: { args: Record<string, unknown>
   if (err) {
     return (
       <Container accentVar={accentVar}>
-        <Header icon={<FolderOpen size={13} />} title="Glob" subtitle={pattern} />
+        <Header icon={<FolderOpen size={13} />} title={_t("toolResult.glob")} subtitle={pattern} />
         <div className="px-3 py-2 text-[12px] text-[var(--danger)]">{result}</div>
       </Container>
     );
@@ -457,9 +461,9 @@ function GlobRender({ args, result, accentVar }: { args: Record<string, unknown>
 
   return (
     <Container accentVar={accentVar}>
-      <Header icon={<FolderOpen size={13} />} title="Glob" subtitle={`${pattern} → ${isNoMatch ? "0" : lines.length} files`} />
+      <Header icon={<FolderOpen size={13} />} title={_t("toolResult.glob")} subtitle={`${pattern} → ${isNoMatch ? "0" : lines.length} ${_t("toolResult.files")}`} />
       {isNoMatch ? (
-        <div className="px-3 py-3 text-[12px] text-[var(--text-tertiary)] text-center">No files found</div>
+        <div className="px-3 py-3 text-[12px] text-[var(--text-tertiary)] text-center">{_t("toolResult.noFiles")}</div>
       ) : (
         <FileList lines={lines} />
       )}
@@ -488,7 +492,7 @@ function FileList({ lines }: { lines: string[] }) {
           className="w-full flex items-center justify-center gap-1 py-1.5 border-t border-[var(--border-subtle)] text-[11px] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
         >
           <ChevronDown size={12} className={cn(expanded && "rotate-180 transition-transform")} />
-          {expanded ? "Collapse" : `+${lines.length - max} more files`}
+          {expanded ? _t("toolResult.collapse") : _t("toolResult.showMoreFiles", { count: lines.length - max })}
         </button>
       )}
     </>
@@ -515,11 +519,11 @@ function MemoryRender({ name, args, result, accentVar }: { name: string; args: R
 
   return (
     <Container accentVar={accentVar}>
-      <Header icon={<Save size={13} />} title={name.replace("memory_", "Memory ")} />
+      <Header icon={<Save size={13} />} title={`${_t("toolResult.memory")} ${name.replace("memory_", "")}`} />
       <div className="px-3 py-2 space-y-1 text-[12px]">
-        {memType && <KVRow label="Type" value={memType} />}
-        {category && <KVRow label="Category" value={category} />}
-        {key && <KVRow label="Key" value={key} />}
+        {memType && <KVRow label={_t("toolResult.type")} value={memType} />}
+        {category && <KVRow label={_t("toolResult.category")} value={category} />}
+        {key && <KVRow label={_t("toolResult.key")} value={key} />}
       </div>
       {!err && content && (
         <div className="px-3 py-2 border-t border-[var(--border-subtle)]">
@@ -545,7 +549,7 @@ function WebRender({ name, args, result, accentVar }: { name: string; args: Reco
 
   return (
     <Container accentVar={accentVar}>
-      <Header icon={<Globe size={13} />} title={name === "web_search" ? "Web Search" : "Web Scrape"} subtitle={query.slice(0, 60)} />
+      <Header icon={<Globe size={13} />} title={name === "web_search" ? _t("toolResult.webSearch") : _t("toolResult.webScrape")} subtitle={query.slice(0, 60)} />
       <div className="px-3 py-2">
         {err ? (
           <div className="text-[12px] text-[var(--danger)]">{result}</div>
@@ -571,7 +575,7 @@ function DelegateRender({ name, args, result, accentVar }: { name: string; args:
   const stepsArr: Array<Record<string, unknown>> | null = Array.isArray(steps) ? steps as Array<Record<string, unknown>> : null;
   const err = isError(result);
   const isPipeline = name === "run_pipeline" || name === "delegate_parallel";
-  const displayName = isPipeline ? "Pipeline" : "Delegate";
+  const displayName = isPipeline ? _t("toolResult.pipeline") : _t("toolResult.delegate");
 
   return (
     <Container accentVar={accentVar}>

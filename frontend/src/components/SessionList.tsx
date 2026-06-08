@@ -110,7 +110,7 @@ export default function SessionList({
       >
         <button
           onClick={() => setCollapsed(false)}
-          title="Expand sidebar"
+          title={t("session.expandSidebar")}
           className="p-2 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
         >
           <MessageSquare size={16} />
@@ -182,7 +182,7 @@ export default function SessionList({
         </Button>
         <button
           onClick={() => setCollapsed(true)}
-          title="Collapse sidebar"
+          title={t("session.collapseSidebar")}
           className="p-1.5 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
         >
           <ChevronLeft size={14} />

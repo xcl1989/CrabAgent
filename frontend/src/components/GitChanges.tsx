@@ -106,7 +106,7 @@ export default function GitChanges({ workspace, collapsible }: Props) {
         <button
           onClick={(e) => { e.stopPropagation(); load(); }}
           disabled={loading}
-          title="Refresh"
+          title={t("git.refresh")}
           className="p-1 rounded text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
         >
           <RefreshCw size={11} className={loading ? "animate-spin" : ""} />
@@ -161,7 +161,7 @@ export default function GitChanges({ workspace, collapsible }: Props) {
                 ) : (
                   <EmptyState
                     compact
-                    title="No diff"
+                    title={t("git.noDiff")}
                     icon={<span className="text-xs">∅</span>}
                   />
                 )}

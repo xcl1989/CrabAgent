@@ -155,17 +155,34 @@ class ProjectProfile:
 # ---------------------------------------------------------------------------
 
 
-def load_agents_md(workspace: Path) -> str:
+def _agents_md_path(workspace: Path, locale: str = "en") -> Path:
+    """Return the AGENTS.md path for the given locale.
+
+    For non-English locales the file is named ``AGENTS.<locale>.md``
+    (e.g. ``AGENTS.zh-CN.md``).  English uses the plain ``AGENTS.md``.
+    """
+    if locale and locale != "en":
+        return workspace / f"AGENTS.{locale}.md"
+    return workspace / "AGENTS.md"
+
+
+def load_agents_md(workspace: Path, locale: str = "en") -> str:
     """Load ``AGENTS.md`` from workspace root.
 
-    Returns the file content if present, stripped of leading/trailing
-    whitespace.  Returns empty string if the file does not exist.
+    For non-English *locale*, tries ``AGENTS.<locale>.md`` first, then
+    falls back to the default ``AGENTS.md``.  Returns the file content
+    if present, stripped of leading/trailing whitespace.  Returns empty
+    string if no suitable file exists.
     """
-    agents_md = workspace / "AGENTS.md"
-    if not agents_md.is_file():
+    # Try locale-specific file first
+    path = _agents_md_path(workspace, locale)
+    if not path.is_file() and locale != "en":
+        # Fallback to default
+        path = workspace / "AGENTS.md"
+    if not path.is_file():
         return ""
     try:
-        text = agents_md.read_text(encoding="utf-8").strip()
+        text = path.read_text(encoding="utf-8").strip()
     except Exception:
         return ""
     if not text:
@@ -177,15 +194,17 @@ def load_agents_md(workspace: Path) -> str:
     return text
 
 
-def save_agents_md(workspace: Path, content: str) -> str:
+def save_agents_md(workspace: Path, content: str, locale: str = "en") -> str:
     """Save ``AGENTS.md`` to workspace root.
 
-    Creates or overwrites the file.  Returns a status message.
+    For non-English *locale*, writes to ``AGENTS.<locale>.md`` instead
+    of the default ``AGENTS.md``.  Creates or overwrites the file.
+    Returns a status message.
     """
-    agents_md = workspace / "AGENTS.md"
+    path = _agents_md_path(workspace, locale)
     try:
-        agents_md.write_text(content.strip() + "\n", encoding="utf-8")
-        return f"AGENTS.md saved ({len(content)} chars) to {agents_md}"
+        path.write_text(content.strip() + "\n", encoding="utf-8")
+        return f"AGENTS.md saved ({len(content)} chars) to {path}"
     except Exception as e:
         return f"Error saving AGENTS.md: {e}"
 

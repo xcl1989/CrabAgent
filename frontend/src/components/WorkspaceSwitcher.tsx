@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { FolderOpen, ChevronDown, Plus, Check, Home } from "lucide-react";
 import { listWorkspaces, getCurrentWorkspace, type WorkspaceInfo } from "../api/sessions";
 import { cn } from "../lib/cn";
@@ -10,6 +11,7 @@ interface Props {
 }
 
 export default function WorkspaceSwitcher({ current, onChange }: Props) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [workspaces, setWorkspaces] = useState<WorkspaceInfo[]>([]);
   const [currentWorkspacePath, setCurrentWorkspacePath] = useState<string>("");
@@ -41,7 +43,7 @@ export default function WorkspaceSwitcher({ current, onChange }: Props) {
 
   const displayName = current
     ? current.split("/").pop() || current
-    : (currentWorkspacePath.split("/").pop() || currentWorkspacePath || "Directory");
+    : (currentWorkspacePath.split("/").pop() || currentWorkspacePath || t("workspaceSwitcher.directory"));
 
   const handlePickerSelect = (path: string) => {
     onChange(path);
@@ -86,7 +88,7 @@ export default function WorkspaceSwitcher({ current, onChange }: Props) {
           >
             <Home size={12} />
             <span className="flex-1 truncate" title={currentWorkspacePath}>
-              {currentWorkspacePath.split("/").pop() || currentWorkspacePath || "Directory"}
+              {currentWorkspacePath.split("/").pop() || currentWorkspacePath || t("workspaceSwitcher.directory")}
             </span>
             {!current && <Check size={12} />}
           </button>
@@ -144,7 +146,7 @@ export default function WorkspaceSwitcher({ current, onChange }: Props) {
             )}
           >
             <Plus size={12} />
-            <span>Choose directory…</span>
+            <span>{t("workspaceSwitcher.chooseDirectory")}</span>
           </button>
         </div>
       )}

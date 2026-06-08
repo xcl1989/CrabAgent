@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import { Bell } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import {
   listNotifications,
   unreadCount,
@@ -29,7 +30,8 @@ function relativeTime(d: string | null | undefined): string {
   return date.toLocaleDateString();
 }
 
-export function NotificationBell({ onSwitchSession }: Props) {
+export default function NotificationBell({ onSwitchSession }: Props) {
+  const { t } = useTranslation();
   const [count, setCount] = useState(0);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [open, setOpen] = useState(false);
@@ -105,8 +107,8 @@ export function NotificationBell({ onSwitchSession }: Props) {
           "text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)]",
         )}
-        title="Notifications"
-        aria-label={`Notifications${count > 0 ? ` (${count} unread)` : ""}`}
+        title={t("notification.title")}
+        aria-label={`${t("notification.title")}${count > 0 ? ` (${count} ${t("notification.unread").toLowerCase()})` : ""}`}
       >
         <Bell size={15} />
         {count > 0 && (
@@ -126,16 +128,15 @@ export function NotificationBell({ onSwitchSession }: Props) {
           style={{ maxHeight: "440px" }}
         >
           <div className="flex items-center shrink-0 border-b border-[var(--border-subtle)]">
-            {(["unread", "read"] as Tab[]).map((t) => {
-              const isActive = tab === t;
-              const label =
-                t === "unread"
-                  ? `Unread${unreadItems.length > 0 ? ` (${unreadItems.length})` : ""}`
-                  : "Read";
+            {(["unread", "read"] as Tab[]).map((tabKey) => {
+              const isActive = tab === tabKey;
+              const label = tabKey === "unread"
+                  ? `${t("notification.unread")}${unreadItems.length > 0 ? ` (${unreadItems.length})` : ""}`
+                  : `${t("notification.read")}${readItems.length > 0 ? ` (${readItems.length})` : ""}`;
               return (
                 <button
-                  key={t}
-                  onClick={() => setTab(t)}
+                  key={tabKey}
+                  onClick={() => setTab(tabKey)}
                   className={cn(
                     "flex-1 px-3 py-2 text-xs font-medium transition-colors relative",
                     isActive
@@ -155,7 +156,7 @@ export function NotificationBell({ onSwitchSession }: Props) {
                 onClick={handleMarkAll}
                 className="px-3 py-2 text-[10px] shrink-0 text-[var(--brand)] hover:underline"
               >
-                Mark all
+                {t("notification.markAll")}
               </button>
             )}
           </div>
@@ -163,8 +164,8 @@ export function NotificationBell({ onSwitchSession }: Props) {
             {displayItems.length === 0 ? (
               <div className="px-4 py-8 text-center text-xs text-[var(--text-tertiary)]">
                 {tab === "unread"
-                  ? "No unread notifications"
-                  : "No read notifications"}
+                  ? t("notification.noUnread")
+                  : t("notification.noRead")}
               </div>
             ) : (
               displayItems.slice(0, 20).map((n) => (

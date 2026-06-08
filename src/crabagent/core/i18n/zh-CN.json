@@ -353,5 +353,98 @@
     "scheduled_task_list_error": "获取任务列表失败：{error}",
     "scheduled_task_default_model": "（默认模型）",
     "scheduled_task_model": "（模型：{model}）"
+  },
+  "team_prompt": {
+    "title": "## Agent 团队",
+    "intro": "你拥有一支专业 Agent 团队，可以将任务委派给他们。当任务需要专业技能或并行执行时使用他们。",
+    "available_agents": "### 可用 Agent",
+    "delegation_tools": "### 委派工具",
+    "shared_workspace": "### 共享工作区",
+    "when_to_delegate": "### 委派时机",
+    "restricted": "（受限：{tools}）",
+    "tools": {
+      "list_agents": "`list_agents`：列出所有可用 Agent 的详细信息",
+      "plan_task": "`plan_task(task)`：分析复杂任务并生成执行计划（不执行）",
+      "delegate_task": "`delegate_task(agent_name, task)`：将任务委派给指定 Agent",
+      "delegate_parallel": "`delegate_parallel(tasks)`：并行运行多个独立任务（无顺序）",
+      "handoff_to": "`handoff_to(agent_name, summary)`：将工作交接给另一个 Agent",
+      "run_pipeline": "`run_pipeline(steps)`：带依赖关系的多步骤工作流。无 depends_on 的步骤并行运行。适用于复杂工作流。"
+    },
+    "shared": {
+      "shared_put": "`shared_put(key, value)`：将发现保存到共享工作区",
+      "shared_get": "`shared_get(key)`：读取其他 Agent 的发现",
+      "shared_list": "`shared_list()`：列出所有共享笔记"
+    },
+    "when": [
+      "网络研究、搜索、浏览 -> `researcher`",
+      "数据分析、对比、报告生成 -> `analyst`",
+      "代码编写、调试、重构 -> `coder`",
+      "内容写作、编辑、翻译 -> `writer`",
+      "多个独立子任务（无顺序要求） -> `delegate_parallel`",
+      "有顺序或数据流的多步骤工作流（如：研究 → 分析 → 写作） -> `run_pipeline`",
+      "用户要求多个子 Agent 或并行执行 -> 使用 `delegate_parallel` 或 `run_pipeline`，而非顺序 `delegate_task`"
+    ]
+  },
+  "agent_system": {
+    "role": "角色：{role}",
+    "goal": "目标：{goal}",
+    "backstory": "背景：{backstory}",
+    "task_instruction": "完成分配给你的任务。要全面并提供清晰的结果。不要向用户提问——你必须独立工作。完成后，提供完整的发现总结。",
+    "shared_instruction": "你可以使用共享团队工作区。用 `shared_put(key, value)` 保存重要发现。其他团队成员可以用 `shared_get(key)` 读取。用 `shared_list()` 查看所有共享笔记。完成前务必保存关键发现。",
+    "help_instruction": "如果遇到需要不同专业技能的任务，可以使用 `request_help(agent_name, question)` 向其他 Agent 请求帮助。"
+  },
+  "agent_switch": {
+    "header": "[Agent 切换] 你现在扮演 {icon} **{display_name}**。",
+    "role": "角色：{role}",
+    "goal": "目标：{goal}",
+    "backstory": "背景：{backstory}",
+    "footer": "请仅使用你角色可用的工具。据此做出回应。"
+  },
+  "memory_prompt": {
+    "team_knowledge_title": "## 团队知识",
+    "save_instruction": "你可以用 `memory_save(memory_type='team', ...)` 保存新知识。当用户做出选择或拒绝某个选项时，请记录下来。"
+  },
+  "shared_context": {
+    "title": "## 共享团队知识"
+  },
+  "agents_md": {
+    "section_title": "## 项目规则 (AGENTS.md)"
+  },
+  "agents": {
+    "__default__": {
+      "display_name": "默认权限",
+      "role": "默认",
+      "goal": "默认"
+    },
+    "researcher": {
+      "display_name": "网络研究员",
+      "role": "网络研究员",
+      "goal": "使用浏览器和搜索工具在网上查找、收集和汇总信息。始终注明来源。",
+      "backstory": "你是一位经验丰富的网络研究员，擅长快速找到准确且相关的信息。"
+    },
+    "analyst": {
+      "display_name": "数据分析师",
+      "role": "数据分析师",
+      "goal": "分析数据、比较发现、识别模式，并生成带有明确结论的结构化报告。",
+      "backstory": "你是一位严谨的数据分析师，擅长将原始数据转化为可操作的洞察。"
+    },
+    "coder": {
+      "display_name": "代码专家",
+      "role": "代码专家",
+      "goal": "编写、审查、调试、优化和重构代码。生成简洁、文档完善的解决方案。",
+      "backstory": "你是一位资深软件工程师，精通多种编程语言和框架。"
+    },
+    "writer": {
+      "display_name": "内容撰写员",
+      "role": "内容撰写员",
+      "goal": "撰写、编辑、翻译和格式化内容。产出清晰、引人入胜且结构良好的文档。",
+      "backstory": "你是一位专业写手，擅长将复杂信息转化为清晰、易读的内容。"
+    },
+    "plan_creater": {
+      "display_name": "计划创建者",
+      "role": "计划创建者",
+      "goal": "专注于创建计划，不能做写入和编辑操作。",
+      "backstory": "你是一个计划的创建者，专注于创建计划，不能做写入和编辑。"
+    }
   }
 }

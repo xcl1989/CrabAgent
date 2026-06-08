@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.9.7]
+
+### Added
+- **Multi-language support** — full i18n across UI, CLI, and agent system prompts
+- README optimized with dedicated multi-language section
+
+### Changed
+- Version bumped to 0.9.7 across all 11 locations
+
+---
+
+## [0.9.6]
+
+### Added
+- **i18n multi-language support** — English + Chinese (中文) with per-session language switching
+- Language preference persistence across sessions
+- Locale mismatch detection and rebuild prompt
+
+### Fixed
+- Language switch now properly updates `User.locale` and `AppSetting`
+- Console error logging for language switch failures
+
+---
+
 ## [0.9.5]
 
 ### Added

@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { AgentProfile, listAgentProfiles } from "../api/agents";
 import { Modal, Button, Textarea, Input } from "./ui";
 import { cn } from "../lib/cn";
@@ -9,6 +10,7 @@ interface Props {
 }
 
 export function DelegateModal({ onClose, onDelegate }: Props) {
+  const { t } = useTranslation();
   const [agents, setAgents] = useState<AgentProfile[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [task, setTask] = useState("");
@@ -42,20 +44,20 @@ export function DelegateModal({ onClose, onDelegate }: Props) {
     <Modal
       open={true}
       onOpenChange={(o) => !o && onClose()}
-      title="Delegate to Team"
-      description="Run a task on multiple agents in parallel"
+      title={t("delegate.title")}
+      description={t("delegate.description")}
       size="md"
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button
             variant="primary"
             onClick={handleDelegate}
             disabled={selected.size === 0 || !task.trim()}
           >
-            Delegate to {selected.size} agent{selected.size !== 1 ? "s" : ""}
+            {t("delegate.delegateTo", { count: selected.size })}
           </Button>
         </>
       }
@@ -63,7 +65,7 @@ export function DelegateModal({ onClose, onDelegate }: Props) {
       <div className="space-y-4">
         <div>
           <label className="block text-[11px] font-semibold uppercase tracking-wider mb-2 text-[var(--text-secondary)]">
-            Select Agents
+            {t("delegate.selectAgents")}
           </label>
           <div className="flex flex-wrap gap-1.5">
             {agents.map((a) => {
@@ -88,21 +90,21 @@ export function DelegateModal({ onClose, onDelegate }: Props) {
         </div>
 
         <Textarea
-          label="Task Description"
+          label={t("delegate.taskDescription")}
           value={task}
           onChange={(e) => setTask(e.target.value)}
           rows={3}
-          placeholder="Describe what you want the agent(s) to do…"
+          placeholder={t("delegate.taskPlaceholder")}
           autoFocus
         />
 
         {selected.size > 1 && (
           <div>
             <label className="block text-[11px] font-semibold uppercase tracking-wider mb-2 text-[var(--text-secondary)]">
-              Custom Tasks (optional)
+              {t("delegate.customTasks")}
             </label>
             <p className="text-[11px] text-[var(--text-tertiary)] mb-2">
-              Override the task for specific agents. Leave blank to use the description above.
+              {t("delegate.customTasksHint")}
             </p>
             <div className="space-y-2">
               {Array.from(selected).map((name) => {
@@ -118,7 +120,7 @@ export function DelegateModal({ onClose, onDelegate }: Props) {
                       onChange={(e) =>
                         setCustomTasks({ ...customTasks, [name]: e.target.value })
                       }
-                      placeholder="Same as above if empty"
+                      placeholder={t("delegate.sameAsAbove")}
                     />
                   </div>
                 );

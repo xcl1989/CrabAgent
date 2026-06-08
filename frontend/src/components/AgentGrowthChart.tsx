@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import {
   BarChart,
   Bar,
@@ -29,6 +30,7 @@ export default function AgentGrowthChart({
   const [data, setData] = useState<GrowthPoint[]>([]);
   const [loading, setLoading] = useState(true);
   const [mode, setMode] = useState<ViewMode>("overview");
+  const { t } = useTranslation();
   const colors = useThemeColors();
 
   useEffect(() => {
@@ -95,10 +97,10 @@ export default function AgentGrowthChart({
               onClick={() => setMode(m)}
             >
               {m === "overview"
-                ? "Tasks+Rate"
+                ? t("agentChart.tasksRate")
                 : m === "elapsed"
-                  ? "Avg Time"
-                  : "Avg Tokens"}
+                  ? t("agentChart.avgTime")
+                  : t("agentChart.avgTokens")}
             </button>
           ))}
         </div>
@@ -135,7 +137,7 @@ export default function AgentGrowthChart({
               <Bar
                 yAxisId="left"
                 dataKey="total"
-                name="Tasks"
+                name={t("agentChart.tasks")}
                 fill={colors.accent}
                 radius={[2, 2, 0, 0]}
               />
@@ -143,7 +145,7 @@ export default function AgentGrowthChart({
                 yAxisId="right"
                 type="monotone"
                 dataKey="success_rate"
-                name="Success Rate"
+                name={t("agentChart.successRate")}
                 stroke={colors.success}
                 strokeWidth={2}
                 dot={{ r: 2, fill: colors.success }}
@@ -165,12 +167,12 @@ export default function AgentGrowthChart({
               <YAxis tick={axisTick} />
               <Tooltip
                 contentStyle={tooltipStyle}
-                formatter={(value) => [`${value}s`, "Avg Elapsed"]}
+                formatter={(value) => [`${value}s`, t("agentChart.avgElapsed")]}
               />
               <Line
                 type="monotone"
                 dataKey="avg_elapsed"
-                name="Avg Elapsed"
+                name={t("agentChart.avgElapsed")}
                 stroke={colors.warning}
                 strokeWidth={2}
                 dot={{ r: 2, fill: colors.warning }}
@@ -194,7 +196,7 @@ export default function AgentGrowthChart({
               <Line
                 type="monotone"
                 dataKey="avg_tokens"
-                name="Avg Tokens"
+                name={t("agentChart.avgTokens")}
                 stroke={colors.accent2}
                 strokeWidth={2}
                 dot={{ r: 2, fill: colors.accent2 }}

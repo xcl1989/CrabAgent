@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { PanelRightClose, X, RefreshCw, ChevronDown, ChevronRight } from "lucide-react";
+import i18n from "../i18n";
 import { FileEntry, FileContent } from "../api/files";
 import { getTree, readFile, isImageFile, getImageUrl } from "../api/files";
 import FileTree from "./FileTree";
@@ -48,7 +49,7 @@ function useFileTree(workspace?: string) {
       }
     } catch (e: unknown) {
       setFileError(
-        e instanceof Error ? e.message : "Failed to read file",
+        i18n.t("fileBrowser.readFailed"),
       );
     }
   };
@@ -176,14 +177,14 @@ export default function FileBrowser({
             <button
               onClick={tree.refresh}
               className="p-1 rounded text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
-              title="Refresh"
+              title={i18n.t("fileBrowser.refresh")}
             >
               <RefreshCw size={14} />
             </button>
             <button
               onClick={onToggle}
               className="p-1 rounded text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
-              title="Close"
+              title={i18n.t("fileBrowser.close")}
             >
               <PanelRightClose size={14} />
             </button>
@@ -236,7 +237,7 @@ export default function FileBrowser({
               <button
                 onClick={tree.refresh}
                 className="p-1.5 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
-                title="Refresh"
+                title={i18n.t("fileBrowser.refresh")}
               >
                 <RefreshCw size={15} />
               </button>

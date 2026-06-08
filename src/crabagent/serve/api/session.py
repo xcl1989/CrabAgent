@@ -33,6 +33,7 @@ class SessionResponse(BaseModel):
     model: str
     provider: str = ""
     active_branch: str = "main"
+    prompt_locale: str = ""
     created_at: str | None = None
     updated_at: str | None = None
 
@@ -45,6 +46,7 @@ def _conv_to_response(conv) -> SessionResponse:
         model=conv.model,
         provider=getattr(conv, "provider", "") or "",
         active_branch=conv.active_branch or "main",
+        prompt_locale=getattr(conv, "prompt_locale", "") or "",
         created_at=conv.created_at.isoformat() if conv.created_at else None,
         updated_at=conv.updated_at.isoformat() if conv.updated_at else None,
     )
@@ -258,5 +260,6 @@ async def reset_system_prompt(
     conv = await get_owned_conversation(db, session_id, user)
     if conv.system_prompt:
         conv.system_prompt = ""
+        conv.prompt_locale = ""
         await db.commit()
     return {"status": "ok", "session_id": session_id}

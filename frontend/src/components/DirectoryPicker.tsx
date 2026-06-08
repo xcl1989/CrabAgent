@@ -106,7 +106,7 @@ export default function DirectoryPicker({ open, onClose, onSelect }: Props) {
           <button
             onClick={() => navigateTo("/")}
             className="shrink-0 p-0.5 rounded text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]"
-            title="Root"
+            title={t("directoryPicker.root")}
           >
             <Home size={13} />
           </button>
@@ -133,7 +133,7 @@ export default function DirectoryPicker({ open, onClose, onSelect }: Props) {
             onClick={goUp}
             disabled={currentPath === "/"}
             className="ml-auto shrink-0 p-1 rounded text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] disabled:opacity-30 disabled:hover:bg-transparent"
-            title="Parent directory"
+            title={t("directoryPicker.parentDir")}
           >
             <ArrowUp size={13} />
           </button>

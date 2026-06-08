@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { GitBranch, ChevronDown, Play } from "lucide-react";
 import * as sessionsApi from "../api/sessions";
 import { BranchInfo } from "../api/sessions";
+import { useTranslation } from "react-i18next";
 import { cn } from "../lib/cn";
 
 interface Props {
@@ -17,6 +18,7 @@ export default function BranchSelector({
   onSwitch,
   onReplay,
 }: Props) {
+  const { t } = useTranslation();
   const [branches, setBranches] = useState<BranchInfo[]>([]);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -124,7 +126,7 @@ export default function BranchSelector({
                       setOpen(false);
                     }}
                     className="opacity-0 group-hover:opacity-100 p-1.5 mr-1 rounded text-[var(--text-tertiary)] hover:text-[var(--success)] hover:bg-[var(--success-bg)] transition-all"
-                    title="Replay this branch"
+                    title={t("branch.replay")}
                   >
                     <Play size={11} />
                   </button>

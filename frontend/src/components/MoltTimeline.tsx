@@ -174,7 +174,7 @@ export default function MoltTimeline({ sessionId, collapsible }: Props) {
                 ) : (
                   <EmptyState
                     compact
-                    title="No changes"
+                    title={t("molt.noChanges")}
                     icon={<span className="text-xs">∅</span>}
                   />
                 )}

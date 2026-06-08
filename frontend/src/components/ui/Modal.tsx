@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import {
   Close as DialogClose,
   Content as DialogContent,
@@ -48,6 +49,7 @@ export function Modal({
   disableBackdropClose = false,
   children,
 }: ModalProps) {
+  const { t } = useTranslation();
   return (
     <DialogRoot
       open={open}
@@ -98,7 +100,7 @@ export function Modal({
                     "text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]",
                     "transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)]",
                   )}
-                  aria-label="Close"
+                  aria-label={t("modal.close")}
                 >
                   <X size={16} />
                 </DialogClose>

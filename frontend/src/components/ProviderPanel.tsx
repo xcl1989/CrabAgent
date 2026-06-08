@@ -116,7 +116,7 @@ export default function ProviderPanel({
           <div className="space-y-2">
             {providers.length === 0 ? (
               <EmptyState
-                title="No providers configured"
+                title={t("provider.noProviders")}
                 description="Add an LLM provider to start using CrabAgent."
                 action={
                   <Button variant="brand" size="sm" onClick={() => setMode("add")}>
@@ -152,7 +152,7 @@ export default function ProviderPanel({
                         variant="ghost"
                         size="sm"
                         onClick={() => handleSetDefault(p.name)}
-                        title="Set as default"
+                        title={t("provider.setAsDefault")}
                       >
                         <StarOff size={14} />
                       </Button>
@@ -161,7 +161,7 @@ export default function ProviderPanel({
                       variant="ghost"
                       size="sm"
                       onClick={() => setDeleteTarget(p.name)}
-                      title="Delete"
+                      title={t("common.delete")}
                       className="text-[var(--danger)] hover:text-[var(--danger)] hover:bg-[var(--danger-bg)]"
                     >
                       <Trash2 size={14} />
@@ -222,13 +222,13 @@ export default function ProviderPanel({
               </div>
             )}
             <Input
-              label="Name"
+              label={t("provider.name")}
               value={formName}
               onChange={(e) => setFormName(e.target.value)}
               placeholder="my-provider"
             />
             <PasswordInput
-              label="API Key"
+              label={t("provider.apiKey")}
               value={formKey}
               onChange={(e) => setFormKey(e.target.value)}
               placeholder="sk-…"

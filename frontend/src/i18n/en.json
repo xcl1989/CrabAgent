@@ -41,7 +41,7 @@
     "passwordPlaceholder": "At least 6 characters",
     "createAccount": "Create Account",
     "defaultHint": "Default: admin / xcl1989",
-    "version": "v0.9.6 · Local-first AI agent platform"
+    "version": "v0.9.7 · Local-first AI agent platform"
   },
   "chat": {
     "placeholder": "Type a message…",
@@ -97,7 +97,10 @@
     "saveFailed": "Save failed",
     "createFailed": "Create failed",
     "deleteFailed": "Delete failed",
-    "allFieldsRequired": "Name, display name, role and goal are required"
+    "allFieldsRequired": "Name, display name, role and goal are required",
+    "permissionAuto": "Auto",
+    "permissionConfirm": "Confirm",
+    "permissionDeny": "Deny"
   },
   "memory": {
     "title": "Memory",
@@ -112,7 +115,36 @@
     "noMemories": "No memories yet",
     "deleteConfirm": "Delete this memory?",
     "deleted": "Memory deleted",
-    "deleteFailed": "Failed to delete"
+    "deleteFailed": "Failed to delete",
+    "entries": "{{count}} entries",
+    "searchPlaceholder": "Search memories...",
+    "allAgents": "All agents",
+    "add": "Add",
+    "noMatching": "No matching memories",
+    "noMemoriesYet": "No memories yet",
+    "tryDifferent": "Try a different search term",
+    "startWorking": "Start working in a project to build memory",
+    "agentLessonsAuto": "Agent lessons appear automatically after tasks",
+    "userPrefsLearned": "User preferences are learned over time",
+    "editTitle": "Edit Memory",
+    "save": "Save",
+    "cancel": "Cancel",
+    "keyLabel": "Key:",
+    "addMemory": "Add Memory",
+    "create": "Create",
+    "category": "Category",
+    "key": "Key",
+    "content": "Content",
+    "contentPlaceholder": "Enter memory content...",
+    "keyPlaceholder": "e.g. lesson:my_tip",
+    "categoryPlaceholder": "e.g. tech_stack, architecture",
+    "memoryUpdated": "Memory updated",
+    "memoryCreated": "Memory created",
+    "failedUpdate": "Failed to update",
+    "failedCreate": "Failed to create",
+    "keyContentRequired": "Key and content are required",
+    "edit": "Edit",
+    "delete": "Delete"
   },
   "scheduledTask": {
     "title": "Scheduled Tasks",
@@ -173,7 +205,13 @@
     "testFailed": "Test failed",
     "testSuccess": "Connection successful",
     "connecting": "Connecting…",
-    "error": "Error"
+    "error": "Error",
+    "displayName": "Display name",
+    "displayNamePlaceholder": "My MCP Server",
+    "noServers": "No MCP servers configured",
+    "transportStdio": "Stdio (local)",
+    "transportHttp": "HTTP (remote)",
+    "serverAdded": "MCP server added"
   },
   "provider": {
     "title": "LLM Providers",
@@ -209,7 +247,9 @@
     "today": "Today",
     "yesterday": "Yesterday",
     "thisWeek": "This Week",
-    "older": "Older"
+    "older": "Older",
+    "expandSidebar": "Expand sidebar",
+    "collapseSidebar": "Collapse sidebar"
   },
   "molt": {
     "title": "Snapshots",
@@ -239,7 +279,9 @@
     "modified": "Modified",
     "added": "Added",
     "deleted": "Deleted",
-    "untracked": "Untracked"
+    "untracked": "Untracked",
+    "refresh": "Refresh",
+    "noDiff": "No diff"
   },
   "fileTree": {
     "loading": "Loading…",
@@ -268,7 +310,9 @@
   "directoryPicker": {
     "title": "Select Directory",
     "loading": "Loading…",
-    "select": "Select"
+    "select": "Select",
+    "root": "Root",
+    "parentDir": "Parent directory"
   },
   "workspace": {
     "switchWorkspace": "Switch Workspace",
@@ -277,6 +321,182 @@
   "notification": {
     "title": "Notifications",
     "noNotifications": "No notifications",
-    "markAllRead": "Mark all as read"
+    "markAllRead": "Mark all as read",
+    "unread": "Unread",
+    "read": "Read",
+    "noUnread": "No unread notifications",
+    "noRead": "No read notifications",
+    "markAll": "Mark all"
+  },
+  "chatPanel": {
+    "toolRequiresPermission": "{{tool}} requires permission",
+    "typeAnswer": "Type your answer…",
+    "branchFromHere": "Branch from here"
+  },
+  "delegate": {
+    "title": "Delegate to Team",
+    "description": "Run a task on multiple agents in parallel",
+    "selectAgents": "Select Agents",
+    "taskDescription": "Task Description",
+    "taskPlaceholder": "Describe what you want the agent(s) to do…",
+    "customTasks": "Custom Tasks (optional)",
+    "customTasksHint": "Override the task for specific agents. Leave blank to use the description above.",
+    "sameAsAbove": "Same as above if empty",
+    "delegateTo": "Delegate to {{count}} agent(s)"
+  },
+  "toolResult": {
+    "edit": "Edit",
+    "write": "Write",
+    "read": "Read",
+    "terminal": "Terminal",
+    "grep": "Grep",
+    "glob": "Glob",
+    "original": "Original",
+    "new": "New",
+    "collapse": "Collapse",
+    "showMoreLines": "Show {{count}} more lines",
+    "showMoreMatches": "+{{count}} more matches",
+    "showMoreFiles": "+{{count}} more files",
+    "noMatches": "No matches found.",
+    "noFiles": "No files found.",
+    "files": "files",
+    "matches": "matches",
+    "webSearch": "Web Search",
+    "webScrape": "Web Scrape",
+    "pipeline": "Pipeline",
+    "delegate": "Delegate",
+    "memory": "Memory",
+    "type": "Type",
+    "category": "Category",
+    "key": "Key",
+    "bytes": "{{size}} bytes"
+  },
+  "resultCompare": {
+    "completed": "Completed",
+    "failed": "Failed",
+    "task": "Task"
+  },
+  "agentChart": {
+    "tasksRate": "Tasks+Rate",
+    "avgTime": "Avg Time",
+    "avgTokens": "Avg Tokens",
+    "tasks": "Tasks",
+    "successRate": "Success Rate",
+    "avgElapsed": "Avg Elapsed"
+  },
+  "cron": {
+    "every30min": "Every 30 min",
+    "hourly": "Hourly",
+    "daily9am": "Daily 9am",
+    "weekdays9am": "Weekdays 9am",
+    "weeklyMon": "Weekly Mon",
+    "monthly1st": "Monthly 1st",
+    "sun": "Sun",
+    "mon": "Mon",
+    "tue": "Tue",
+    "wed": "Wed",
+    "thu": "Thu",
+    "fri": "Fri",
+    "sat": "Sat"
+  },
+  "workspaceSwitcher": {
+    "chooseDirectory": "Choose directory…",
+    "directory": "Directory"
+  },
+  "branch": {
+    "replay": "Replay this branch"
+  },
+  "fileBrowser": {
+    "refresh": "Refresh",
+    "close": "Close",
+    "readFailed": "Failed to read file"
+  },
+  "modelSelector": {
+    "searchPlaceholder": "Search models…"
+  },
+  "agentForm": {
+    "role": "Role",
+    "goal": "Goal",
+    "backstory": "Backstory",
+    "backstoryPlaceholder": "Optional personality and expertise context",
+    "modelOverride": "Model Override",
+    "modelPlaceholder": "Leave empty to use default"
+  },
+  "chatPage": {
+    "model": "Model",
+    "effort": "Effort",
+    "modelPlaceholder": "type model id…",
+    "reasoningLow": "low",
+    "reasoningMedium": "medium",
+    "reasoningHigh": "high",
+    "retry": "Retry",
+    "removeImage": "Remove image",
+    "welcome": "Welcome to CrabAgent"
+  },
+  "agentForm": {
+    "role": "Role",
+    "goal": "Goal",
+    "backstory": "Backstory",
+    "backstoryPlaceholder": "Optional personality and expertise context",
+    "modelOverride": "Model Override",
+    "modelPlaceholder": "Leave empty to use default",
+    "agentId": "Agent ID",
+    "agentIdPlaceholder": "e.g. designer, translator",
+    "displayName": "Display Name",
+    "icon": "Icon",
+    "toolPermissions": "Tool Permissions",
+    "defaultOverride": "Default (click to override)",
+    "cancel": "Cancel",
+    "save": "Save",
+    "create": "Create"
+  },
+  "agentsPage": {
+    "title": "Agent Team",
+    "activeCount": "{{active}}/{{total}} active",
+    "newAgent": "New Agent",
+    "noAgents": "No agents",
+    "createFirstAgent": "Create your first agent.",
+    "createFirstAgentDesc": "Get started",
+    "loading": "Loading…",
+    "selectAgent": "Select an agent",
+    "selectAgentDesc": "Choose from the list to view details",
+    "createNew": "New Agent",
+    "editAgent": "Edit {{name}}",
+    "enable": "Enable",
+    "disable": "Disable",
+    "on": "On",
+    "off": "Off",
+    "detailRole": "Role",
+    "detailGoal": "Goal",
+    "detailBackstory": "Backstory",
+    "detailPermissions": "Permissions",
+    "permissionConfirm": " (confirm)",
+    "statistics": "Statistics",
+    "statTasks": "Tasks",
+    "statSuccess": "Success",
+    "statAvgTime": "Avg Time",
+    "statAvgTokens": "Avg Tokens",
+    "noData": "No data available",
+    "recentRuns": "Recent Runs",
+    "noRuns": "No runs yet",
+    "noSummary": "(no summary)",
+    "defaultPermissions": "Default Tool Permissions",
+    "defaultPermissionsDesc": "These permissions apply when an agent does not have its own override.",
+    "deleteConfirm": "Delete agent \"{{name}}\"?",
+    "deleteDesc": "This permanently removes the agent profile and its learning data."
+  },
+  "codeBlock": {
+    "copy": "Copy code"
+  },
+  "modal": {
+    "close": "Close"
+  },
+  "localeMismatch": {
+    "title": "Language mismatch",
+    "desc": "Your current language differs from the one used to build this conversation's prompt.",
+    "current": "Current: {{locale}}",
+    "stored": "Session: {{locale}}",
+    "rebuild": "Switch & Send",
+    "keep": "Send as-is"
   }
 }

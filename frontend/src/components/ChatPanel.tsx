@@ -1,4 +1,5 @@
 import { forwardRef, useEffect, useRef, useState, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
@@ -104,6 +105,7 @@ function UserInputField({
   inputId: string;
   onSubmit: (id: string, answer: string) => void;
 }) {
+  const { t } = useTranslation();
   const [value, setValue] = useState("");
   const submit = (answer?: string) => {
     const text = answer || value.trim();
@@ -123,7 +125,7 @@ function UserInputField({
             submit();
           }
         }}
-        placeholder="Type your answer…"
+        placeholder={t("chatPanel.typeAnswer")}
         autoFocus
         className="flex-1 h-8 px-3 text-xs rounded-md bg-[var(--bg-tertiary)] border border-[var(--border)] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--brand)] focus:ring-2 focus:ring-[var(--brand)]/30"
       />
@@ -279,6 +281,7 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(
     },
     bottomRef,
   ) => {
+    const { t } = useTranslation();
     const [previewImage, setPreviewImage] = useState<string | null>(null);
     const [activeSubAgentId, setActiveSubAgentId] = useState<string | null>(
       null,
@@ -517,7 +520,7 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(
                   <div className="flex items-center gap-2 mb-1.5">
                     <AlertTriangle size={14} className="text-[var(--warning)]" />
                     <span className="font-medium text-[var(--text-primary)]">
-                      {msg.tool_name || "Tool"} requires permission
+                      {t("chatPanel.toolRequiresPermission", { tool: msg.tool_name || t("toolResult.tool") })}
                     </span>
                     {resolved && (
                       <span
@@ -719,7 +722,7 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(
                     msg.id.startsWith("db-") && (
                       <button
                         onClick={() => onBranch(msg.id)}
-                        title="Branch from here"
+                        title={t("chatPanel.branchFromHere")}
                         className={cn(
                           "absolute top-0 right-full mr-1.5",
                           "opacity-0 group-hover/msg:opacity-100 transition-opacity",

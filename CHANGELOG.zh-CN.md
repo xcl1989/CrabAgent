@@ -8,6 +8,41 @@ English version: [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
+## [0.9.7]
+
+### 新增
+- **多语言支持 (i18n)** — UI、CLI 和 Agent system prompt 全面国际化
+- README 优化，新增多语言专区
+
+### 变更
+- 版本号更新到 0.9.7（共 11 处）
+
+---
+
+## [0.9.6]
+
+### 新增
+- **i18n 多语言支持** — 英文 (English) + 中文，支持按会话切换语言
+- 语言偏好跨会话持久保存
+- 语言环境不匹配检测及重建提示
+
+### 修复
+- 语言切换现在正确更新 `User.locale` 和 `AppSetting`
+- 语言切换失败时添加 console.error 日志
+
+---
+
+## [0.9.5]
+
+### 新增
+- **pip 可安装的桌面构建** — 从 pip 安装后执行 `crabagent --build-desktop`
+- Electron 源文件包含在 wheel 中
+
+### 变更
+- README 更新，增加 `--build-desktop` 用法说明
+
+---
+
 ## [0.9.4]
 
 ### Added

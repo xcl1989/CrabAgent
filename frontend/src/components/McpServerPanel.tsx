@@ -124,7 +124,7 @@ export default function McpServerPanel({
         env: parsedEnv,
         headers: parsedHeaders,
       });
-      toast.success("MCP server added");
+      toast.success(t("mcp.serverAdded"));
       onRefresh();
       setMode("list");
       resetForm();
@@ -223,7 +223,7 @@ export default function McpServerPanel({
       <Modal
         open={true}
         onOpenChange={(o) => !o && onClose()}
-        title="MCP Servers"
+        title={t("mcp.title")}
         description={t("mcp.addServerDesc")}
         size="lg"
       >
@@ -301,7 +301,7 @@ export default function McpServerPanel({
             {servers.length === 0 ? (
               <EmptyState
                 icon={<Plug size={28} />}
-                title="No MCP servers configured"
+                title={t("mcp.noServers")}
                 description="Add an MCP server to connect external tools."
                 action={
                   <Button variant="brand" size="sm" onClick={() => setMode("add")}>
@@ -421,28 +421,28 @@ export default function McpServerPanel({
               placeholder="my-mcp-server"
             />
             <Input
-              label="Display name"
+              label={t("mcp.displayName")}
               value={formDisplayName}
               onChange={(e) => setFormDisplayName(e.target.value)}
-              placeholder="My MCP Server"
+              placeholder={t("mcp.displayNamePlaceholder")}
             />
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-[var(--text-secondary)]">
-                Transport
+                {t("mcp.transport")}
               </label>
               <div className="flex gap-1 p-1 bg-[var(--bg-tertiary)] rounded-lg">
-                {(["stdio", "http"] as const).map((t) => (
+                {(["stdio", "http"] as const).map((transportType) => (
                   <button
-                    key={t}
-                    onClick={() => setFormTransport(t)}
+                    key={transportType}
+                    onClick={() => setFormTransport(transportType)}
                     className={cn(
                       "flex-1 py-1.5 rounded-md text-xs font-medium transition-all",
-                      formTransport === t
+                      formTransport === transportType
                         ? "bg-[var(--bg-secondary)] text-[var(--text-primary)] shadow-[var(--shadow-sm)]"
                         : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]",
                     )}
                   >
-                    {t === "stdio" ? "Stdio (local)" : "HTTP (remote)"}
+                    {transportType === "stdio" ? t("mcp.transportStdio") : t("mcp.transportHttp")}
                   </button>
                 ))}
               </div>
@@ -465,7 +465,7 @@ export default function McpServerPanel({
               </>
             ) : (
               <Input
-                label="URL"
+                label={t("mcp.url")}
                 value={formUrl}
                 onChange={(e) => setFormUrl(e.target.value)}
                 placeholder="https://example.com/mcp"
@@ -473,7 +473,7 @@ export default function McpServerPanel({
             )}
 
             <Textarea
-              label="Environment Variables (JSON object)"
+              label={t("mcp.environment")}
               value={formEnv}
               onChange={(e) => setFormEnv(e.target.value)}
               placeholder='{"API_KEY": "sk-xxx"}'
@@ -482,7 +482,7 @@ export default function McpServerPanel({
 
             {formTransport === "http" && (
               <Textarea
-                label="Headers (JSON object)"
+                label={t("mcp.headers")}
                 value={formHeaders}
                 onChange={(e) => setFormHeaders(e.target.value)}
                 placeholder='{"Authorization": "Bearer xxx"}'

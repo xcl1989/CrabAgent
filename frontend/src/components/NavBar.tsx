@@ -38,7 +38,7 @@ function ThemeToggle() {
   );
 }
 
-function LanguageSwitcher() {
+function LanguageSwitcher({ sessionId }: { sessionId?: string | null }) {
   const { i18n, t } = useTranslation();
   const [showConfirm, setShowConfirm] = useState(false);
   const [pendingLang, setPendingLang] = useState<LanguageCode>("en");
@@ -67,6 +67,15 @@ function LanguageSwitcher() {
     } catch (e) {
       console.error("[i18n] Failed to update user locale:", e);
     }
+    // Reset cached system prompt for current session so next message uses new locale
+    if (sessionId) {
+      try {
+        const { api } = await import("../api/client");
+        await api.post(`/sessions/${sessionId}/reset-system-prompt`, {});
+      } catch (e) {
+        console.error("[i18n] Failed to reset system prompt:", e);
+      }
+    }
     setShowConfirm(false);
   };
 
@@ -74,7 +83,7 @@ function LanguageSwitcher() {
     <>
       <button
         className={cn(
-          "p-1.5 rounded-lg transition-colors",
+          "flex items-center gap-0.5 p-1.5 rounded-lg transition-colors",
           "text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)]",
         )}
@@ -87,6 +96,9 @@ function LanguageSwitcher() {
         }}
       >
         <Globe size={15} />
+        <span className="text-[10px] font-semibold ml-0.5 text-[var(--text-tertiary)]">
+          {currentLang === "zh-CN" ? "中" : "EN"}
+        </span>
       </button>
 
       <Modal
@@ -121,10 +133,12 @@ export function NavBar({
   currentPage,
   onNavigate,
   onLogout,
+  sessionId,
 }: {
   currentPage: PageId;
   onNavigate: (page: PageId) => void;
   onLogout?: () => void;
+  sessionId?: string | null;
 }) {
   const { t } = useTranslation();
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
@@ -196,7 +210,7 @@ export function NavBar({
             <LogOut size={15} />
           </button>
         )}
-        <LanguageSwitcher />
+        <LanguageSwitcher sessionId={sessionId} />
         <ThemeToggle />
       </div>
 

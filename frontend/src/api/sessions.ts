@@ -7,6 +7,7 @@ export interface Session {
   model: string;
   provider: string;
   active_branch: string;
+  prompt_locale: string;
   created_at: string | null;
   updated_at: string | null;
 }

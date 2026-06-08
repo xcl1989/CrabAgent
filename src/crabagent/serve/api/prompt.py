@@ -140,6 +140,9 @@ async def prompt_async(
     history_msgs = await get_messages(db, conv.id, branch_id=active_branch)
     user_msg_seq = max((m.sequence for m in history_msgs), default=0) + 1
 
+    # Determine locale early for agent switch messages
+    locale = getattr(user, "locale", None) or settings.language or "en"
+
     # --- Determine effective agent and whether a switch message is needed ---
     effective_agent = req.agent or getattr(conv, "agent", None) or "default"
 
@@ -160,7 +163,7 @@ async def prompt_async(
 
         agent_profile = await get_agent(effective_agent)
         if agent_profile:
-            switch_msg = build_agent_switch_msg(agent_profile)
+            switch_msg = build_agent_switch_msg(agent_profile, locale=locale)
             switch_seq = user_msg_seq
             await save_message(
                 db,
@@ -178,7 +181,7 @@ async def prompt_async(
 
         default_profile = await get_agent("__default__")
         if default_profile:
-            switch_msg = build_agent_switch_msg(default_profile)
+            switch_msg = build_agent_switch_msg(default_profile, locale=locale)
             switch_seq = user_msg_seq
             await save_message(
                 db,
@@ -237,13 +240,26 @@ async def prompt_async(
     workspace = Path(conv.workspace) if conv.workspace else Path.cwd()
     workspace = workspace.resolve()
 
-    # Determine locale for this user/session
-    locale = getattr(user, "locale", None) or settings.language or "en"
-
     # Reuse cached system prompt if available — preserves LLM prefix cache
+    # Also check if prompt contains locale instruction (for migration from old cache)
+    _use_cache = False
     if conv.system_prompt:
-        base_prompt = conv.system_prompt
-    else:
+        _use_cache = True
+        if locale != "en":
+            from crabagent.core.i18n import get_locale_instruction
+            lang_inst = get_locale_instruction(locale)
+            if lang_inst and lang_inst not in conv.system_prompt:
+                _use_cache = False
+                logger.info("[CACHE] Session %s: MISS (old cache without locale instruction, current locale='%s')",
+                            session_id, locale)
+        if _use_cache:
+            base_prompt = conv.system_prompt
+            logger.info("[CACHE] Session %s: HIT (prompt_len=%d, prompt_locale='%s', current locale='%s')",
+                        session_id, len(conv.system_prompt), getattr(conv, 'prompt_locale', ''), locale)
+
+    if not _use_cache:
+        logger.info("[CACHE] Session %s: MISS (prompt_locale='%s', current locale='%s')",
+                    session_id, getattr(conv, 'prompt_locale', ''), locale)
         from crabagent.core.i18n import get_system_prompt_template
 
         template = get_system_prompt_template(locale)
@@ -267,7 +283,7 @@ async def prompt_async(
         try:
             from crabagent.core.agent.agents import build_team_prompt
 
-            team_prompt = await build_team_prompt()
+            team_prompt = await build_team_prompt(locale=locale)
             if team_prompt:
                 base_prompt += "\n\n" + team_prompt
         except Exception:
@@ -276,7 +292,7 @@ async def prompt_async(
         try:
             from crabagent.core.agent.agents import build_memory_prompt
 
-            mem_prompt = await build_memory_prompt(user.id, query=(req.message or "")[:500])
+            mem_prompt = await build_memory_prompt(user.id, query=(req.message or "")[:500], locale=locale)
             if mem_prompt:
                 base_prompt += "\n\n" + mem_prompt
         except Exception:
@@ -296,11 +312,22 @@ async def prompt_async(
 
         # Inject AGENTS.md (workspace-level project rules)
         try:
+            from crabagent.core.i18n import t
             from crabagent.core.project_memory import load_agents_md
 
-            agents_md = load_agents_md(workspace)
+            agents_md = load_agents_md(workspace, locale=locale)
             if agents_md:
-                base_prompt += "\n\n## Project Rules (AGENTS.md)\n\n" + agents_md
+                section_title = t("agents_md.section_title", locale)
+                base_prompt += f"\n\n{section_title}\n\n" + agents_md
+        except Exception:
+            pass
+
+        # Append locale instruction to the cached prompt (single system message)
+        try:
+            from crabagent.core.i18n import get_locale_instruction
+            lang_inst = get_locale_instruction(locale)
+            if lang_inst:
+                base_prompt += "\n\n" + lang_inst
         except Exception:
             pass
 
@@ -308,9 +335,11 @@ async def prompt_async(
         try:
             from crabagent.serve.services.conversation import update_conversation
             async with async_session_factory() as save_db:
-                await update_conversation(save_db, session_id, system_prompt=base_prompt)
-        except Exception:
-            pass
+                await update_conversation(save_db, session_id, system_prompt=base_prompt, prompt_locale=locale)
+            logger.info("[CACHE] Session %s: SAVED (prompt_len=%d, prompt_locale='%s')",
+                        session_id, len(base_prompt), locale)
+        except Exception as e:
+            logger.warning("[CACHE] Session %s: SAVE FAILED: %s", session_id, e)
 
     context = AgentContext(
         workspace=workspace,
@@ -393,11 +422,11 @@ async def prompt_async(
         if effective_agent == "default":
             default_profile = await get_agent("__default__")
             if default_profile:
-                context.messages.append(build_agent_switch_msg(default_profile))
+                context.messages.append(build_agent_switch_msg(default_profile, locale=locale))
         else:
             agent_def = await get_agent(effective_agent)
             if agent_def:
-                context.messages.append(build_agent_switch_msg(agent_def))
+                context.messages.append(build_agent_switch_msg(agent_def, locale=locale))
 
         # Inject per-agent lessons (not cached in system prompt)
         try:

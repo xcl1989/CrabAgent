@@ -11,13 +11,14 @@ export type PageId = "chat" | "agents" | "memory";
 
 function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
   const [page, setPage] = useState<PageId>("chat");
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
 
   return (
     <div className="flex flex-col h-dvh overflow-hidden">
-      <NavBar currentPage={page} onNavigate={setPage} onLogout={onLogout} />
+      <NavBar currentPage={page} onNavigate={setPage} onLogout={onLogout} sessionId={activeSessionId} />
       <div className="flex-1 relative overflow-hidden">
         <div className={cn("absolute inset-0", page !== "chat" && "hidden")}>
-          <ChatPage />
+          <ChatPage onActiveSessionChange={setActiveSessionId} />
         </div>
         <div className={cn("absolute inset-0", page !== "agents" && "hidden")}>
           <AgentsPage />

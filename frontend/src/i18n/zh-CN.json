@@ -41,7 +41,7 @@
     "passwordPlaceholder": "至少 6 个字符",
     "createAccount": "创建账号",
     "defaultHint": "默认：admin / xcl1989",
-    "version": "v0.9.6 · 本地优先的 AI Agent 平台"
+    "version": "v0.9.7 · 本地优先的 AI Agent 平台"
   },
   "chat": {
     "placeholder": "输入消息…",
@@ -97,7 +97,10 @@
     "saveFailed": "保存失败",
     "createFailed": "创建失败",
     "deleteFailed": "删除失败",
-    "allFieldsRequired": "名称、显示名称、角色和目标为必填项"
+    "allFieldsRequired": "名称、显示名称、角色和目标为必填项",
+    "permissionAuto": "自动",
+    "permissionConfirm": "需确认",
+    "permissionDeny": "拒绝"
   },
   "memory": {
     "title": "记忆",
@@ -112,7 +115,36 @@
     "noMemories": "暂无记忆",
     "deleteConfirm": "删除这条记忆？",
     "deleted": "记忆已删除",
-    "deleteFailed": "删除失败"
+    "deleteFailed": "删除失败",
+    "entries": "{{count}} 条记录",
+    "searchPlaceholder": "搜索记忆…",
+    "allAgents": "所有 Agent",
+    "add": "添加",
+    "noMatching": "无匹配记忆",
+    "noMemoriesYet": "暂无记忆",
+    "tryDifferent": "请尝试其他搜索词",
+    "startWorking": "在项目中开始工作以构建记忆",
+    "agentLessonsAuto": "Agent 经验会在任务后自动出现",
+    "userPrefsLearned": "用户偏好会随时间学习",
+    "editTitle": "编辑记忆",
+    "save": "保存",
+    "cancel": "取消",
+    "keyLabel": "键名：",
+    "addMemory": "添加记忆",
+    "create": "创建",
+    "category": "分类",
+    "key": "键名",
+    "content": "内容",
+    "contentPlaceholder": "输入记忆内容…",
+    "keyPlaceholder": "例如：lesson:my_tip",
+    "categoryPlaceholder": "例如：tech_stack、architecture",
+    "memoryUpdated": "记忆已更新",
+    "memoryCreated": "记忆已创建",
+    "failedUpdate": "更新失败",
+    "failedCreate": "创建失败",
+    "keyContentRequired": "键名和内容为必填项",
+    "edit": "编辑",
+    "delete": "删除"
   },
   "scheduledTask": {
     "title": "定时任务",
@@ -173,7 +205,16 @@
     "testFailed": "测试失败",
     "testSuccess": "连接成功",
     "connecting": "连接中…",
-    "error": "错误"
+    "error": "错误",
+    "displayName": "显示名称",
+    "displayNamePlaceholder": "我的 MCP 服务器",
+    "noServers": "暂无 MCP 服务器",
+    "transportStdio": "Stdio（本地）",
+    "transportHttp": "HTTP（远程）",
+    "serverAdded": "MCP 服务器已添加",
+    "environment": "环境变量",
+    "headers": "请求头",
+    "transport": "传输方式"
   },
   "provider": {
     "title": "LLM 提供商",
@@ -239,7 +280,9 @@
     "modified": "已修改",
     "added": "已添加",
     "deleted": "已删除",
-    "untracked": "未跟踪"
+    "untracked": "未跟踪",
+    "refresh": "刷新",
+    "noDiff": "无差异"
   },
   "fileTree": {
     "loading": "加载中…",
@@ -268,7 +311,9 @@
   "directoryPicker": {
     "title": "选择目录",
     "loading": "加载中…",
-    "select": "选择"
+    "select": "选择",
+    "root": "根目录",
+    "parentDir": "上级目录"
   },
   "workspace": {
     "switchWorkspace": "切换工作区",
@@ -277,6 +322,176 @@
   "notification": {
     "title": "通知",
     "noNotifications": "暂无通知",
-    "markAllRead": "全部标为已读"
+    "markAllRead": "全部标为已读",
+    "unread": "未读",
+    "read": "已读",
+    "noUnread": "暂无未读通知",
+    "noRead": "暂无已读通知",
+    "markAll": "全部已读"
+  },
+  "chatPanel": {
+    "toolRequiresPermission": "{{tool}} 需要授权",
+    "typeAnswer": "输入你的回答…",
+    "branchFromHere": "从此处分支"
+  },
+  "delegate": {
+    "title": "委派给团队",
+    "description": "并行运行多个 Agent 任务",
+    "selectAgents": "选择 Agent",
+    "taskDescription": "任务描述",
+    "taskPlaceholder": "描述你希望 Agent 完成的工作…",
+    "customTasks": "自定义任务（可选）",
+    "customTasksHint": "为特定 Agent 覆盖任务描述。留空则使用上方的通用描述。",
+    "sameAsAbove": "留空则使用通用描述",
+    "delegateTo": "委派给 {{count}} 个 Agent"
+  },
+  "toolResult": {
+    "edit": "编辑",
+    "write": "写入",
+    "read": "读取",
+    "terminal": "终端",
+    "grep": "搜索",
+    "glob": "文件搜索",
+    "original": "原始",
+    "new": "新",
+    "collapse": "收起",
+    "showMoreLines": "显示更多 {{count}} 行",
+    "showMoreMatches": "+{{count}} 个更多匹配",
+    "showMoreFiles": "+{{count}} 个更多文件",
+    "noMatches": "无匹配",
+    "noFiles": "无文件",
+    "files": "个文件",
+    "matches": "个匹配",
+    "webSearch": "网络搜索",
+    "webScrape": "网页抓取",
+    "pipeline": "流水线",
+    "delegate": "委派",
+    "memory": "记忆",
+    "type": "类型",
+    "category": "分类",
+    "key": "键名",
+    "bytes": "{{size}} 字节"
+  },
+  "resultCompare": {
+    "completed": "已完成",
+    "failed": "失败",
+    "task": "任务"
+  },
+  "agentChart": {
+    "tasksRate": "任务+成功率",
+    "avgTime": "平均耗时",
+    "avgTokens": "平均 Token",
+    "tasks": "任务数",
+    "successRate": "成功率",
+    "avgElapsed": "平均耗时"
+  },
+  "cron": {
+    "every30min": "每 30 分钟",
+    "hourly": "每小时",
+    "daily9am": "每天 9 点",
+    "weekdays9am": "工作日 9 点",
+    "weeklyMon": "每周一",
+    "monthly1st": "每月 1 号",
+    "sun": "日",
+    "mon": "一",
+    "tue": "二",
+    "wed": "三",
+    "thu": "四",
+    "fri": "五",
+    "sat": "六"
+  },
+  "workspaceSwitcher": {
+    "chooseDirectory": "选择目录…",
+    "directory": "目录"
+  },
+  "branch": {
+    "replay": "回放此分支"
+  },
+  "fileBrowser": {
+    "refresh": "刷新",
+    "close": "关闭",
+    "readFailed": "读取文件失败"
+  },
+  "modelSelector": {
+    "searchPlaceholder": "搜索模型…"
+  },
+  "agentForm": {
+    "role": "角色",
+    "goal": "目标",
+    "backstory": "背景",
+    "backstoryPlaceholder": "可选的个性化和专业背景描述",
+    "modelOverride": "模型覆盖",
+    "modelPlaceholder": "留空则使用默认模型"
+  },
+  "chatPage": {
+    "model": "模型",
+    "effort": "思考强度",
+    "modelPlaceholder": "输入模型 ID…",
+    "reasoningLow": "低",
+    "reasoningMedium": "中",
+    "reasoningHigh": "高",
+    "retry": "重试",
+    "removeImage": "移除图片",
+    "welcome": "欢迎使用 CrabAgent"
+  },
+  "localeMismatch": {
+    "title": "语言环境不匹配",
+    "desc": "当前语言与构建此会话提示词时的语言不同。",
+    "current": "当前语言：{{locale}}",
+    "stored": "会话语言：{{locale}}",
+    "rebuild": "切换语言并发送",
+    "keep": "保持原样发送"
+  },
+  "agentForm": {
+    "role": "角色",
+    "goal": "目标",
+    "backstory": "背景",
+    "backstoryPlaceholder": "可选的个性化和专业背景描述",
+    "modelOverride": "模型覆盖",
+    "modelPlaceholder": "留空则使用默认模型",
+    "agentId": "Agent ID",
+    "agentIdPlaceholder": "例如：designer、translator",
+    "displayName": "显示名称",
+    "icon": "图标",
+    "toolPermissions": "工具权限",
+    "defaultOverride": "默认值（点击可覆盖）",
+    "cancel": "取消",
+    "save": "保存",
+    "create": "创建"
+  },
+  "agentsPage": {
+    "title": "Agent 团队",
+    "activeCount": "{{active}}/{{total}} 个活跃",
+    "newAgent": "新建 Agent",
+    "noAgents": "暂无 Agent",
+    "createFirstAgent": "创建你的第一个 Agent",
+    "createFirstAgentDesc": "立即开始",
+    "loading": "加载中…",
+    "selectAgent": "选择一个 Agent",
+    "selectAgentDesc": "从列表中选择以查看详情",
+    "createNew": "新建 Agent",
+    "editAgent": "编辑 {{name}}",
+    "enable": "启用",
+    "disable": "禁用",
+    "on": "开",
+    "off": "关",
+    "detailRole": "角色",
+    "detailGoal": "目标",
+    "detailBackstory": "背景",
+    "detailPermissions": "权限",
+    "permissionConfirm": "（需确认）",
+    "statistics": "统计",
+    "statTasks": "任务数",
+    "statSuccess": "成功率",
+    "statAvgTime": "平均耗时",
+    "statAvgTokens": "平均 Token",
+    "noData": "暂无数据",
+    "recentRuns": "最近运行",
+    "noRuns": "暂无运行记录",
+    "noSummary": "（无摘要）",
+    "defaultPermissions": "默认工具权限",
+    "defaultPermissionsDesc": "当 Agent 没有自己的覆盖设置时，将应用这些权限。",
+    "deleteConfirm": "删除 Agent「{{name}}」？",
+    "deleteDesc": "这将永久删除该 Agent 配置及其学习数据。"
   }
 }

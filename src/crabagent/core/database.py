@@ -62,6 +62,7 @@ class Conversation(Base):
     agent: Mapped[str] = mapped_column(String(100), default="default")
     auto_titled: Mapped[bool] = mapped_column(Boolean, default=False)
     system_prompt: Mapped[str] = mapped_column(Text, default="")
+    prompt_locale: Mapped[str] = mapped_column(String(10), default="")
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
@@ -356,6 +357,8 @@ async def init_db() -> None:
             await conn.execute(text("ALTER TABLE conversations ADD COLUMN provider VARCHAR(100) DEFAULT ''"))
         if "system_prompt" not in columns:
             await conn.execute(text("ALTER TABLE conversations ADD COLUMN system_prompt TEXT DEFAULT ''"))
+        if "prompt_locale" not in columns:
+            await conn.execute(text("ALTER TABLE conversations ADD COLUMN prompt_locale VARCHAR(10) DEFAULT ''"))
 
         result = await conn.execute(text("PRAGMA table_info(messages)"))
         columns = [row[1] for row in result.fetchall()]

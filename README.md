@@ -143,7 +143,7 @@ Build the Electron wrapper (requires Python + `crabagent` installed on your syst
 ```bash
 # One-command build (from git clone):
 make desktop
-# → electron/dist-electron/CrabAgent-0.9.4-arm64.dmg
+# → electron/dist-electron/CrabAgent-0.9.7-arm64.dmg
 
 # Or from pip install:
 crabagent --build-desktop

@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { Check, Copy, ChevronDown, ChevronUp } from "lucide-react";
 import { cn } from "../../lib/cn";
 
@@ -24,6 +25,7 @@ export function CodeBlock({
 }: CodeBlockProps) {
   const [copied, setCopied] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const { t } = useTranslation();
 
   const lines = code.split("\n");
   const shouldCollapse = lines.length > collapseAfter + 2;
@@ -62,7 +64,7 @@ export function CodeBlock({
                 "text-[10px] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]",
                 "transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)]",
               )}
-              aria-label="Copy code"
+              aria-label={t("codeBlock.copy")}
             >
               {copied ? (
                 <>
