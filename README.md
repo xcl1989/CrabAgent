@@ -122,7 +122,7 @@ Handoff       → Pass context from one agent to another
 ## Quick Start
 
 ```bash
-pip install 'crabagent[serve]'
+pip install crabagent
 
 crabagent init
 
@@ -198,7 +198,7 @@ Drop a `.py` file in `.crabagent/tools/` — or let the AI create one for you in
 ## Installation
 
 ```bash
-pip install 'crabagent[serve]'          # CLI + Web UI + API
+pip install crabagent                    # CLI + Web UI + API (all-in-one)
 pip install 'crabagent[browser]'        # Browser automation
 pip install 'crabagent[dev]'            # Testing + linting
 ```
@@ -281,3 +281,4 @@ GNU Affero General Public License v3 (AGPLv3) for non-commercial use.
 Commercial use requires a separate license. Contact the author.
 
 See [LICENSE](LICENSE).
+ee [LICENSE](LICENSE).

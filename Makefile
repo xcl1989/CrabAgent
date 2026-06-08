@@ -10,7 +10,7 @@ static: frontend
 	cp -R frontend/dist/index.html frontend/dist/assets src/crabagent/static/
 
 install: static
-	pip install -e '.[serve,dev]'
+	pip install -e '.[dev]'
 
 dev: install
 

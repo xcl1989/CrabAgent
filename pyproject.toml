@@ -37,14 +37,12 @@ dependencies = [
     "bcrypt>=4.0,<5.0",
     "mcp>=1.0",
     "apscheduler>=3.10",
-]
-
-[project.optional-dependencies]
-serve = [
     "fastapi>=0.110",
     "uvicorn>=0.29",
     "redis>=5.0",
 ]
+
+[project.optional-dependencies]
 browser = [
     "playwright>=1.40",
 ]

@@ -1534,7 +1534,7 @@ def _run_build_desktop():
     spec_src = pkg_dir / "crabagent.spec"
 
     if not electron_src.exists() or not spec_src.exists():
-        print("Error: Desktop build files not found. Reinstall with: pip install 'crabagent[serve]'")
+        print("Error: Desktop build files not found. Reinstall with: pip install crabagent")
         sys.exit(1)
 
     work_dir = Path(tempfile.mkdtemp(prefix="crabagent-build-"))
@@ -1598,8 +1598,8 @@ def _run_serve(args):
     try:
         import uvicorn
     except ImportError:
-        print("Error: 'serve' mode requires additional dependencies.")
-        print("Install with: pip install 'crabagent[serve]'")
+        print("Error: 'serve' mode dependencies not found.")
+        print("Install with: pip install crabagent")
         sys.exit(1)
 
     from crabagent.serve.app import create_app

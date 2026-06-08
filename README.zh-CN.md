@@ -122,7 +122,7 @@ Agent 完成任务
 ## 快速开始
 
 ```bash
-pip install 'crabagent[serve]'
+pip install crabagent
 
 crabagent init
 
@@ -200,7 +200,7 @@ playwright install chromium
 ## 安装
 
 ```bash
-pip install 'crabagent[serve]'          # CLI + Web UI + API
+pip install crabagent                    # CLI + Web UI + API（开箱即用）
 pip install 'crabagent[browser]'        # 浏览器自动化
 pip install 'crabagent[dev]'            # 测试 + lint
 ```

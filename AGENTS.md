@@ -12,12 +12,12 @@
 
 ### Install (full, with frontend)
 ```
-make install          # builds frontend -> copies to static -> pip install -e '.[serve,dev]'
+make install          # builds frontend -> copies to static -> pip install -e '.[dev]'
 ```
 
 ### Install (backend only, no frontend)
 ```
-pip install -e '.[serve,dev]'
+pip install -e '.[dev]'
 ```
 
 ### Frontend build only (sandbox / no-shell-access)
