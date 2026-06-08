@@ -51,19 +51,17 @@ function LanguageSwitcher() {
     setShowConfirm(true);
   };
 
-  const handleConfirm = () => {
+  const handleConfirm = async () => {
     i18n.changeLanguage(pendingLang);
     localStorage.setItem("crabagent-language", pendingLang);
-    // Notify backend about language change
+    // Notify backend: update both AppSetting and User.locale
     try {
-      fetch("/api/settings", {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${localStorage.getItem("crabagent-token")}`,
-        },
-        body: JSON.stringify({ settings: { language: pendingLang } }),
-      }).catch(() => {});
+      const { updateSettings } = await import("../api/settings");
+      await updateSettings({ language: pendingLang });
+    } catch {}
+    try {
+      const { api } = await import("../api/client");
+      await api.patch("/auth/user", { locale: pendingLang });
     } catch {}
     setShowConfirm(false);
   };
