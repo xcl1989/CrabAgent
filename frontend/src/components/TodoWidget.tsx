@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { ListTodo, X as XIcon, Plus } from "lucide-react";
 import { TodoItem, listTodos, addTodo, markTodoDone } from "../api/sessions";
@@ -8,6 +9,7 @@ interface Props {
 }
 
 export default function TodoWidget({ sessionId, refreshKey = 0 }: Props) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const [todos, setTodos] = useState<TodoItem[]>([]);
   const [newTask, setNewTask] = useState("");

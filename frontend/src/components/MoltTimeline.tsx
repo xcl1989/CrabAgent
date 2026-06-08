@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useState, useEffect, useCallback } from "react";
 import { RotateCcw, ChevronDown, ChevronUp, ChevronRight, Loader2, RefreshCw } from "lucide-react";
 import { Molt, MoltDiff, listMolts, getMoltDiff, rollbackMolt } from "../api/sessions";
@@ -11,6 +12,7 @@ interface Props {
 }
 
 export default function MoltTimeline({ sessionId, collapsible }: Props) {
+  const { t } = useTranslation();
   const [molts, setMolts] = useState<Molt[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [diffData, setDiffData] = useState<MoltDiff[] | null>(null);
@@ -57,11 +59,11 @@ export default function MoltTimeline({ sessionId, collapsible }: Props) {
     setRolling(true);
     try {
       const result = await rollbackMolt(sessionId, moltId);
-      toast.success("Rolled back", {
+      toast.success(t("molt.rollback"), {
         description: `${result.restored} files restored`,
       });
     } catch {
-      toast.error("Rollback failed");
+      toast.error(t("molt.rollback"));
     } finally {
       setRolling(false);
       setConfirmTarget(null);
@@ -76,7 +78,7 @@ export default function MoltTimeline({ sessionId, collapsible }: Props) {
         <div className="p-2 text-[11px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
           Molts
         </div>
-        <LoadingState compact title="Loading molts…" />
+        <LoadingState compact title={t("molt.loading")} />
       </div>
     );
   }
@@ -105,7 +107,7 @@ export default function MoltTimeline({ sessionId, collapsible }: Props) {
         <button
           onClick={(e) => { e.stopPropagation(); load(); }}
           disabled={refreshing}
-          title="Refresh"
+          title={t("common.retry")}
           className="p-1 rounded text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
         >
           <RefreshCw size={11} className={refreshing ? "animate-spin" : ""} />
@@ -138,7 +140,7 @@ export default function MoltTimeline({ sessionId, collapsible }: Props) {
                     setConfirmTarget(m.molt_id);
                   }}
                   disabled={rolling}
-                  title="Rollback to this molt"
+                  title={t("molt.rollback")}
                   className={cn(
                     "p-1 rounded text-[var(--text-tertiary)] hover:text-[var(--brand)] hover:bg-[var(--brand-bg)]",
                     "transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)]",
@@ -185,9 +187,9 @@ export default function MoltTimeline({ sessionId, collapsible }: Props) {
       <ConfirmDialog
         open={!!confirmTarget}
         onOpenChange={(o) => !o && !rolling && setConfirmTarget(null)}
-        title="Rollback to this molt?"
-        description="This will overwrite current files with the snapshot. Recent changes may be lost."
-        confirmText="Rollback"
+        title={t("molt.rollbackConfirm")}
+        description={t("molt.rollbackDesc")}
+        confirmText={t("molt.rollback")}
         tone="danger"
         onConfirm={() => { if (confirmTarget) handleRollback(confirmTarget); }}
       />

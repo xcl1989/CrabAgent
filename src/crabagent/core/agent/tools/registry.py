@@ -66,18 +66,45 @@ class ToolRegistry:
             for t in self._tools.values()
         ]
 
-    def tool_defs(self) -> list[dict[str, Any]]:
-        return [
-            {
-                "type": "function",
-                "function": {
-                    "name": t.name,
-                    "description": t.description,
-                    "parameters": t.parameters,
-                },
-            }
-            for t in self._tools.values()
-        ]
+    def tool_defs(self, locale: str = "en") -> list[dict[str, Any]]:
+        """Return tool definitions for LLM function calling.
+
+        When locale != 'en', overrides descriptions from i18n translation files.
+        """
+        from crabagent.core.i18n import translate_tool
+
+        result = []
+        for t in self._tools.values():
+            desc = t.description
+            params = t.parameters
+
+            if locale != "en":
+                translated = translate_tool(t.name, locale)
+                if translated:
+                    desc = translated.get("description", desc)
+                    if "params" in translated and "properties" in params:
+                        # Deep copy params to avoid mutating registered defaults
+                        import copy
+
+                        params = copy.deepcopy(params)
+                        for pname, ptrans in translated["params"].items():
+                            if pname in params.get("properties", {}):
+                                # ptrans can be a dict with "description" key, or a plain string
+                                desc_text = ptrans.get("description", "") if isinstance(ptrans, dict) else str(ptrans)
+                                if desc_text:
+                                    params["properties"][pname]["description"] = desc_text
+
+            result.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": t.name,
+                        "description": desc,
+                        "parameters": params,
+                    },
+                }
+            )
+        return result
 
     async def _take_molt_snapshot(self, name: str, arguments: dict[str, Any], context: Any) -> None:
         if name not in ("write", "edit"):

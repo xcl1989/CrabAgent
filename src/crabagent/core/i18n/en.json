@@ -1,0 +1,357 @@
+{
+  "system_prompt": {
+    "prefix": "You are CrabAgent, an AI assistant. Today is {date} {weekday}. Working directory: {workspace}",
+    "locale_instruction": null
+  },
+  "tools": {
+    "bash": {
+      "description": "Execute a bash command. For long-running services (dev servers, watchers), set background=true to run in background and return immediately. Do NOT use osascript or open new Terminal windows.",
+      "params": {
+        "command": "The bash command to execute.",
+        "timeout": "Timeout in milliseconds. Default: 120000.",
+        "background": "Set true for long-running commands (dev servers, watchers, etc.). Runs in background, returns immediately with PID."
+      }
+    },
+    "read": {
+      "description": "Read a file or directory from the filesystem. Returns file contents with line numbers, or directory listing.",
+      "params": {
+        "file_path": "Absolute path to the file or directory to read.",
+        "offset": "Line number to start reading from (1-indexed). Default: 1.",
+        "limit": "Maximum number of lines to read. Default: 2000."
+      }
+    },
+    "write": {
+      "description": "Write content to a file. Creates parent directories if needed. Overwrites existing files. Both file_path and content are required and must be non-empty.",
+      "params": {
+        "file_path": "Absolute file system path to the file to create or overwrite.",
+        "content": "The full text content to write to the file. Must be a non-empty string."
+      }
+    },
+    "update_agents_md": {
+      "description": "Update the project's AGENTS.md file — the workspace-level rules file that is automatically loaded into every session's system prompt. Use this to persist project conventions, build commands, architecture notes, or any context that should be available in future sessions.",
+      "params": {
+        "content": "The full Markdown content for AGENTS.md."
+      }
+    },
+    "edit": {
+      "description": "Perform exact string replacement in a file. The old_string must match exactly.",
+      "params": {
+        "file_path": "Absolute path to the file to edit.",
+        "old_string": "Exact text to find and replace.",
+        "new_string": "Text to replace it with."
+      }
+    },
+    "glob": {
+      "description": "Find files matching a glob pattern. Returns sorted file paths.",
+      "params": {
+        "pattern": "Glob pattern (e.g. '**/*.py', 'src/**/*.tsx').",
+        "path": "Directory to search in. Default: current directory."
+      }
+    },
+    "grep": {
+      "description": "Search file contents using regular expressions. Returns matching file paths and line numbers. Supports skipping common build/dependency directories and a configurable maximum search depth to avoid runaway traversals.",
+      "params": {
+        "pattern": "The regex pattern to search for.",
+        "path": "Directory to search in. Default: current directory.",
+        "include": "File glob pattern to include (e.g. '*.py', '*.{ts,js}').",
+        "ignore_dirs": "Directory names to skip during recursive search.",
+        "max_depth": "Maximum directory recursion depth. Default: 15."
+      }
+    },
+    "web_search": {
+      "description": "Search the web. Returns a list of results with titles, URLs, and snippets. Uses SearXNG if configured, otherwise falls back to DuckDuckGo.",
+      "params": {
+        "query": "The search query string.",
+        "limit": "Maximum number of results to return. Default: 5, max: 10."
+      }
+    },
+    "web_scrape": {
+      "description": "Fetch and extract the main text content from a web page URL. Returns the page content in a readable format.",
+      "params": {
+        "url": "The URL of the web page to fetch.",
+        "max_length": "Maximum length of extracted text. Default: 10000."
+      }
+    },
+    "browser_navigate": {
+      "description": "Navigate to a URL in a headless browser. Returns page title, URL, content preview, a screenshot, and a numbered list of interactive elements. Use browser_click_index(index=N) to click element [N] from the list — this is much more reliable than guessing CSS selectors.",
+      "params": {
+        "url": "The URL to navigate to.",
+        "wait_until": "When to consider navigation complete. Options: 'domcontentloaded', 'load', 'networkidle'. Default: 'domcontentloaded'."
+      }
+    },
+    "browser_click": {
+      "description": "Click an element on the current page. Prefer browser_click_index after a browser_navigate — only fall back to this tool when you already know the exact selector. Use either selector OR text.",
+      "params": {
+        "selector": "CSS selector of the element to click (e.g., '#submit-btn', 'a.login').",
+        "text": "Visible text of the element to click (alternative to selector)."
+      }
+    },
+    "browser_click_index": {
+      "description": "Click an interactive element by its numbered index from the most recent browser_navigate / browser_click / browser_type call. The index corresponds to the [N] labels shown in the 'Interactive Elements' section of the previous tool result. This is the recommended way to click — it is faster and more reliable than guessing CSS selectors.",
+      "params": {
+        "index": "1-based index from the [N] list in the previous browser tool result."
+      }
+    },
+    "browser_type": {
+      "description": "Type text into an input field. After typing, the page is re-labelled so the next browser_click_index call uses fresh [N] indices.",
+      "params": {
+        "selector": "CSS selector of the input field (e.g., '#search', 'input[name=\"q\"]').",
+        "text": "The text to type into the field.",
+        "submit": "Whether to press Enter after typing to submit the form. Default: false."
+      }
+    },
+    "browser_screenshot": {
+      "description": "Take a screenshot of the current page. Returns the file path; for vision models the image is embedded directly into the conversation.",
+      "params": {
+        "full_page": "Whether to capture the full scrollable page. Default: false."
+      }
+    },
+    "browser_extract": {
+      "description": "Extract text content from the current page (optionally a specific element).",
+      "params": {
+        "selector": "CSS selector. If omitted, extracts from the full page body.",
+        "max_length": "Maximum length of extracted text. Default: 10000."
+      }
+    },
+    "browser_scroll": {
+      "description": "Scroll the current page up or down. Re-labels interactive elements after scrolling.",
+      "params": {
+        "direction": "Direction to scroll: 'up' or 'down'. Default: 'down'.",
+        "amount": "Number of pixels to scroll. Default: 500."
+      }
+    },
+    "browser_close": {
+      "description": "Close the browser and release all resources."
+    },
+    "memory_save": {
+      "description": "Save a memory to long-term storage. Use 'team' type for project knowledge all agents should know (tech stack, architecture, conventions, decisions). Use 'lesson' type for behavioral patterns (what works, what doesn't, user preferences). If the user makes a choice or rejects something, record it. Memories persist across sessions and are automatically loaded on startup.",
+      "params": {
+        "memory_type": "\"team\" for project knowledge shared by all agents, \"lesson\" for behavioral patterns and experience",
+        "category": "team: tech_stack, architecture, convention, api, dependency, decision, user_preference. lesson: effective_strategy, failed_approach, user_preference, tool_tip",
+        "key": "Unique identifier, e.g. 'tech_stack:framework', 'user_preference:language', 'lesson:coder:efficiency'",
+        "content": "The memory content. Be specific and actionable.",
+        "importance": "0.0-1.0. Higher = more important. Default: 0.5.",
+        "confidence": "0.0-1.0. How certain is this memory. Default: 1.0."
+      }
+    },
+    "memory_recall": {
+      "description": "Search long-term memory by keyword. Returns matching memories sorted by importance. Use this to recall project knowledge or past lessons.",
+      "params": {
+        "query": "Search term to find in memory keys or content.",
+        "memory_type": "Filter by type: 'team' or 'lesson'. Empty for all.",
+        "limit": "Max results to return. Default: 5."
+      }
+    },
+    "memory_replace": {
+      "description": "Replace part of an existing memory's content. Use this to update or correct a specific part of a memory without rewriting the whole thing.",
+      "params": {
+        "key": "The memory key to update.",
+        "old_text": "The exact text to find and replace.",
+        "new_text": "The replacement text."
+      }
+    },
+    "memory_list": {
+      "description": "List all memories, optionally filtered by type or category."
+    },
+    "memory_forget": {
+      "description": "Delete a specific memory by key.",
+      "params": {
+        "key": "The memory key to delete."
+      }
+    },
+    "shared_put": {
+      "description": "Save an important finding or note to the shared team workspace. Other agents in the same session can read it with shared_get. Use this to pass knowledge between team members.",
+      "params": {
+        "key": "A descriptive key for this note, e.g. 'research_findings', 'api_endpoints', 'decisions'",
+        "value": "The content to save. Keep it concise and well-structured."
+      }
+    },
+    "shared_get": {
+      "description": "Read a note from the shared team workspace. Returns the value saved by any team member for the given key.",
+      "params": {
+        "key": "The key to look up in the shared workspace."
+      }
+    },
+    "shared_list": {
+      "description": "List all notes in the shared team workspace. Shows keys, authors, and a preview of each note."
+    },
+    "delegate_task": {
+      "description": "Delegate a task to a specialized sub-agent. The sub-agent works independently with its own tools and reports back. Use for research, analysis, coding, writing, or any task that benefits from a dedicated expert. Multiple delegates can be called in sequence for multi-step workflows.",
+      "params": {
+        "agent_name": "Name of the agent to delegate to.",
+        "task": "Task description for the agent."
+      }
+    },
+    "list_agents": {
+      "description": "List all available agent team members with their roles, goals, and capabilities."
+    },
+    "handoff_to": {
+      "description": "Hand off the current task to another agent. The receiving agent continues the work based on the conversation so far. Use when another agent's expertise is better suited for the next step.",
+      "params": {
+        "agent_name": "Name of the agent to hand off to.",
+        "summary": "Summary of current progress and context for the next agent."
+      }
+    },
+    "delegate_parallel": {
+      "description": "Run multiple independent tasks in parallel using different agents. All agents start at the same time and results are collected when all finish. Example: search 3 different topics with researcher agents simultaneously.",
+      "params": {
+        "tasks": "List of {agent_name, task} objects to run in parallel."
+      }
+    },
+    "request_help": {
+      "description": "Request help from another agent when you encounter something beyond your expertise. Use this when your current task requires different skills. The helper agent works independently and returns results to you.",
+      "params": {
+        "agent_name": "Name of the agent to ask for help.",
+        "question": "The question or problem description."
+      }
+    },
+    "run_pipeline": {
+      "description": "Execute a multi-step agent workflow with automatic dependency ordering. Steps WITHOUT depends_on run in parallel; steps WITH depends_on wait for those to finish first. Each step receives results from its dependencies automatically. Prefer this over delegate_parallel when steps have ordering or data dependencies. Example: research → analyze → write (each step depends on the previous one).",
+      "params": {
+        "steps": "Ordered list of pipeline steps with optional dependencies."
+      }
+    },
+    "plan_task": {
+      "description": "Analyze a complex task and produce an execution plan with agent assignments. Does NOT execute anything — only returns a plan. After getting the plan, use `run_pipeline` (or `delegate_parallel` for independent steps) to execute. Use this when you're unsure which agents to involve or how to break down a complex task.",
+      "params": {
+        "task": "The complex task to plan. Be specific."
+      }
+    },
+    "scheduled_task_create": {
+      "description": "Create a scheduled task that sends a question to AI at specified cron intervals.",
+      "params": {
+        "name": "Task name, e.g. 'Daily project status check'.",
+        "question": "The complete question to send to AI, e.g. 'Query project count and summarize'.",
+        "cron_expression": "APScheduler cron expression, 5 fields separated by spaces: min(0-59) hour(0-23) day(1-31) month(1-12) weekday(0-6). E.g. '0 9 * * *' = daily at 9am, '0 5 1 * *' = 1st of month at 5am, '*/30 * * * *' = every 30 min. Must be exactly 5 fields.",
+        "model": "Optional, specify model ID. Leave empty for default model."
+      }
+    },
+    "scheduled_task_list": {
+      "description": "List all scheduled tasks for the current user, including enabled status, cron expression, last execution time, etc."
+    },
+    "scheduled_task_update": {
+      "description": "Update an existing scheduled task's name, question, or execution time. Only pass the fields you want to change.",
+      "params": {
+        "task_id": "The task ID to update.",
+        "name": "New task name.",
+        "question": "New question content.",
+        "cron_expression": "New cron expression."
+      }
+    },
+    "scheduled_task_delete": {
+      "description": "Delete a scheduled task.",
+      "params": {
+        "task_id": "The task ID to delete."
+      }
+    },
+    "scheduled_task_pause": {
+      "description": "Pause a scheduled task. It will not auto-execute but can be resumed at any time.",
+      "params": {
+        "task_id": "The task ID to pause."
+      }
+    },
+    "scheduled_task_resume": {
+      "description": "Resume a paused scheduled task.",
+      "params": {
+        "task_id": "The task ID to resume."
+      }
+    },
+    "hello": {
+      "description": "Say hello — a sample custom tool. Edit or remove this file to add your own tools.",
+      "params": {
+        "name": "Name to greet."
+      }
+    },
+    "ask_question": {
+      "description": "Ask the user a question and get their response. Use when you need clarification, more information, or a decision from the user before proceeding.",
+      "params": {
+        "question": "The question to ask the user.",
+        "options": "Optional list of choices for the user to pick from."
+      }
+    },
+    "molt_diff": {
+      "description": "Show the diff between the current file state and a previous molt snapshot. Use when the user asks 'what changed', 'show diff', or references a specific molt ID.",
+      "params": {
+        "molt_id": "Molt ID like molt_0001."
+      }
+    },
+    "molt_rollback": {
+      "description": "Roll back files to a previous molt snapshot. Use when the user says 'undo', 'revert', 'go back', or references rolling back to a specific molt.",
+      "params": {
+        "molt_id": "Molt ID like molt_0001.",
+        "files_only": "Only restore files, keep conversation context. Default: true."
+      }
+    },
+    "todo_add": {
+      "description": "Add a task to the todo list. Use when the user asks to remember something, add a task, or create a todo item.",
+      "params": {
+        "task": "The task description."
+      }
+    },
+    "todo_list": {
+      "description": "List todo items. Use when the user asks 'what do I need to do', 'show my tasks', or 'what's pending'.",
+      "params": {
+        "filter": "Filter tasks: all, pending (default), or done."
+      }
+    },
+    "todo_done": {
+      "description": "Mark a todo item as completed. Use when the user says something is done, completed, or finished.",
+      "params": {
+        "id": "The todo item ID."
+      }
+    },
+    "todo_delete": {
+      "description": "Delete a todo item. Use when the user wants to remove or discard a task.",
+      "params": {
+        "id": "The todo item ID."
+      }
+    },
+    "create_tool": {
+      "description": "Create a new custom tool as a Python file in the workspace's .crabagent/tools/ directory. The tool will be automatically registered and available for use.",
+      "params": {
+        "name": "The tool name (e.g. 'weather_lookup'). Will be used as filename.",
+        "description": "What the tool does. This becomes the tool's description shown to the AI.",
+        "parameters": "JSON Schema of the tool's parameters.",
+        "code": "The Python function body for the tool handler."
+      }
+    },
+    "update_tool": {
+      "description": "Update an existing custom tool's code, description, or parameters.",
+      "params": {
+        "name": "The tool name to update.",
+        "description": "New description for the tool.",
+        "parameters": "New JSON Schema parameters.",
+        "code": "New Python function body."
+      }
+    },
+    "delete_tool": {
+      "description": "Delete a custom tool by removing its Python file from .crabagent/tools/.",
+      "params": {
+        "name": "The tool name to delete."
+      }
+    }
+  },
+  "messages": {
+    "scheduled_task_created": "Scheduled task created: #{id} '{name}' — cron: `{cron}`{model}. Task is enabled and will auto-execute at the scheduled time.",
+    "scheduled_task_create_error": "Failed to create scheduled task: {error}",
+    "scheduled_task_cron_error": "Error: cron expression must have 5 fields (min hour day month weekday), separated by spaces. Current input: '{cron}'",
+    "scheduled_task_no_tasks": "No scheduled tasks.",
+    "scheduled_task_list_title": "# Scheduled Task List\n",
+    "scheduled_task_last_run": " Last: {time} ({status})",
+    "scheduled_task_prompt_label": "   Prompt: ",
+    "scheduled_task_last_error": "   Last error: ",
+    "scheduled_task_not_found": "Task #{id} does not exist.",
+    "scheduled_task_no_changes": "Task #{id} was not modified.",
+    "scheduled_task_updated": "Task #{id} updated: {changes}",
+    "scheduled_task_update_error": "Failed to update task: {error}",
+    "scheduled_task_deleted": "Scheduled task #{id} deleted.",
+    "scheduled_task_delete_error": "Failed to delete task: {error}",
+    "scheduled_task_paused": "Task #{id} '{name}' paused.",
+    "scheduled_task_pause_error": "Failed to pause task: {error}",
+    "scheduled_task_resumed": "Task #{id} '{name}' resumed, cron: `{cron}`",
+    "scheduled_task_resume_error": "Failed to resume task: {error}",
+    "scheduled_task_list_error": "Failed to get task list: {error}",
+    "scheduled_task_default_model": " (default model)",
+    "scheduled_task_model": " (model: {model})"
+  }
+}

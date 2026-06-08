@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useState, useEffect, useCallback } from "react";
 import {
   FolderOpen,
@@ -54,6 +55,7 @@ function formatDate(iso: string): string {
 }
 
 export default function MemoryPage() {
+  const { t } = useTranslation();
   const [tab, setTab] = useState<MemoryTab>("project");
   const [entries, setEntries] = useState<MemoryEntry[]>([]);
   const [loading, setLoading] = useState(false);
@@ -134,10 +136,10 @@ export default function MemoryPage() {
   const handleDelete = async (entry: MemoryEntry) => {
     try {
       await deleteAgentMemory(entry.key);
-      toast.success("Memory deleted");
+      toast.success(t("memory.deleted"));
       fetchEntries();
     } catch {
-      toast.error("Failed to delete");
+      toast.error(t("memory.deleteFailed"));
     }
   };
 

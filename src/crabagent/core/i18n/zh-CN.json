@@ -1,0 +1,357 @@
+{
+  "system_prompt": {
+    "prefix": "你是 CrabAgent，一个 AI 助手。今天是 {date} {weekday}。工作目录：{workspace}",
+    "locale_instruction": "## 语言要求\n请使用简体中文回复。所有对用户的回复、总结、说明都应使用简体中文。\n代码注释和文件内容保持原文，文件路径、命令等技术术语保持原文。"
+  },
+  "tools": {
+    "bash": {
+      "description": "执行 bash 命令。对于长时间运行的服务（开发服务器、监控器），设置 background=true 可在后台运行并立即返回。不要使用 osascript 或打开新的终端窗口。",
+      "params": {
+        "command": "要执行的 bash 命令。",
+        "timeout": "超时时间（毫秒）。默认：120000。",
+        "background": "设为 true 用于长时间运行的命令（开发服务器、监控器等）。在后台运行，立即返回进程 PID。"
+      }
+    },
+    "read": {
+      "description": "读取文件或目录。返回带行号的文件内容，或目录列表。",
+      "params": {
+        "file_path": "要读取的文件或目录的绝对路径。",
+        "offset": "起始行号（从1开始）。默认：1。",
+        "limit": "最大读取行数。默认：2000。"
+      }
+    },
+    "write": {
+      "description": "写入文件。自动创建父目录。覆盖已有文件。file_path 和 content 都必填且不能为空。",
+      "params": {
+        "file_path": "要创建或覆盖的文件绝对路径。",
+        "content": "要写入的完整文本内容。必须是非空字符串。"
+      }
+    },
+    "update_agents_md": {
+      "description": "更新项目的 AGENTS.md 文件——工作区级规则文件，会自动加载到每个会话的 system prompt 中。用于持久化项目约定、构建命令、架构说明或任何需要在后续会话中使用的上下文。",
+      "params": {
+        "content": "AGENTS.md 的完整 Markdown 内容。"
+      }
+    },
+    "edit": {
+      "description": "在文件中执行精确字符串替换。old_string 必须完全匹配。",
+      "params": {
+        "file_path": "要编辑的文件绝对路径。",
+        "old_string": "要查找并替换的原始文本。",
+        "new_string": "替换后的新文本。"
+      }
+    },
+    "glob": {
+      "description": "按 glob 模式查找文件。返回排序后的文件路径。",
+      "params": {
+        "pattern": "Glob 模式（如 '**/*.py'、'src/**/*.tsx'）。",
+        "path": "搜索目录。默认：当前目录。"
+      }
+    },
+    "grep": {
+      "description": "使用正则表达式搜索文件内容。返回匹配的文件路径和行号。支持跳过常见构建/依赖目录，可配置最大搜索深度以避免过度遍历。",
+      "params": {
+        "pattern": "要搜索的正则表达式模式。",
+        "path": "搜索目录。默认：当前目录。",
+        "include": "文件 glob 过滤模式（如 '*.py'）。",
+        "ignore_dirs": "递归搜索时要跳过的目录名。",
+        "max_depth": "最大目录递归深度。默认：15。"
+      }
+    },
+    "web_search": {
+      "description": "搜索互联网。返回带标题、URL 和摘要的结果列表。优先使用 SearXNG（如已配置），否则回退到 DuckDuckGo。",
+      "params": {
+        "query": "搜索查询关键词。",
+        "limit": "最大返回结果数。默认：5，最大：10。"
+      }
+    },
+    "web_scrape": {
+      "description": "获取并提取网页的正文内容。返回可读格式的页面内容。",
+      "params": {
+        "url": "要获取的网页 URL。",
+        "max_length": "提取文本的最大长度。默认：10000。"
+      }
+    },
+    "browser_navigate": {
+      "description": "在无头浏览器中导航到 URL。返回页面标题、URL、内容预览、截图和编号的交互元素列表。使用 browser_click_index(index=N) 点击列表中的 [N] 元素——这比猜测 CSS 选择器可靠得多。",
+      "params": {
+        "url": "要导航到的 URL。",
+        "wait_until": "何时认为导航完成。选项：'domcontentloaded'、'load'、'networkidle'。默认：'domcontentloaded'。"
+      }
+    },
+    "browser_click": {
+      "description": "点击页面上的元素。优先在 browser_navigate 后使用 browser_click_index——仅在已知确切选择器时才回退到此工具。使用 selector 或 text 参数。",
+      "params": {
+        "selector": "要点击元素的 CSS 选择器（如 '#submit-btn'、'a.login'）。",
+        "text": "要点击元素的可见文本（selector 的替代方案）。"
+      }
+    },
+    "browser_click_index": {
+      "description": "通过编号索引点击交互元素。索引对应上次 browser_navigate / browser_click / browser_type 调用结果中的 [N] 标签。这是推荐的点击方式——比猜测 CSS 选择器更快更可靠。",
+      "params": {
+        "index": "上次浏览器工具结果中 [N] 列表的 1-based 索引。"
+      }
+    },
+    "browser_type": {
+      "description": "在输入框中输入文本。输入后页面会重新标记，以便下次 browser_click_index 调用使用最新的 [N] 索引。",
+      "params": {
+        "selector": "输入框的 CSS 选择器（如 '#search'、'input[name=\"q\"]'）。",
+        "text": "要输入的文本。",
+        "submit": "输入后是否按 Enter 提交表单。默认：false。"
+      }
+    },
+    "browser_screenshot": {
+      "description": "对当前页面截图。返回文件路径；对于视觉模型，图片会直接嵌入到对话中。",
+      "params": {
+        "full_page": "是否截取完整可滚动页面。默认：false。"
+      }
+    },
+    "browser_extract": {
+      "description": "提取当前页面的文本内容（可选指定特定元素）。",
+      "params": {
+        "selector": "CSS 选择器。省略则提取整个页面正文。",
+        "max_length": "提取文本的最大长度。默认：10000。"
+      }
+    },
+    "browser_scroll": {
+      "description": "向上或向下滚动页面。滚动后会重新标记交互元素。",
+      "params": {
+        "direction": "滚动方向：'up' 或 'down'。默认：'down'。",
+        "amount": "滚动像素数。默认：500。"
+      }
+    },
+    "browser_close": {
+      "description": "关闭浏览器并释放所有资源。"
+    },
+    "memory_save": {
+      "description": "保存记忆到长期存储。'team' 类型用于所有 Agent 应知的项目知识（技术栈、架构、约定、决策）。'lesson' 类型用于行为模式（有效方法、失败经验、用户偏好）。当用户做出选择或拒绝某项时，请记录下来。记忆跨会话持久化，启动时自动加载。",
+      "params": {
+        "memory_type": "\"team\" 用于所有 Agent 共享的项目知识，\"lesson\" 用于行为模式和经验",
+        "category": "team: tech_stack, architecture, convention, api, dependency, decision, user_preference。lesson: effective_strategy, failed_approach, user_preference, tool_tip",
+        "key": "唯一标识符，如 'tech_stack:framework'、'user_preference:language'、'lesson:coder:efficiency'",
+        "content": "记忆内容。要具体且可操作。",
+        "importance": "0.0-1.0。数值越高越重要。默认：0.5。",
+        "confidence": "0.0-1.0。对这条记忆的确定程度。默认：1.0。"
+      }
+    },
+    "memory_recall": {
+      "description": "按关键词搜索长期记忆。返回按重要性排序的匹配结果。用于回忆项目知识或过往经验。",
+      "params": {
+        "query": "在记忆键或内容中搜索的关键词。",
+        "memory_type": "按类型过滤：'team' 或 'lesson'。留空搜索全部。",
+        "limit": "最大返回数量。默认：5。"
+      }
+    },
+    "memory_replace": {
+      "description": "替换已有记忆的部分内容。用于更新或修正记忆的特定部分，无需重写整条记忆。",
+      "params": {
+        "key": "要更新的记忆键名。",
+        "old_text": "要查找并替换的原始文本。",
+        "new_text": "替换后的新文本。"
+      }
+    },
+    "memory_list": {
+      "description": "列出所有记忆，可选按类型或类别过滤。"
+    },
+    "memory_forget": {
+      "description": "按 key 删除特定记忆。",
+      "params": {
+        "key": "要删除的记忆键名。"
+      }
+    },
+    "shared_put": {
+      "description": "将重要发现或笔记保存到共享团队工作区。同一会话中的其他 Agent 可用 shared_get 读取。用于在团队成员之间传递知识。",
+      "params": {
+        "key": "笔记的描述性键名，如 'research_findings'、'api_endpoints'、'decisions'",
+        "value": "要保存的内容。保持简洁且结构清晰。"
+      }
+    },
+    "shared_get": {
+      "description": "从共享团队工作区读取笔记。返回任意团队成员为指定 key 保存的值。",
+      "params": {
+        "key": "要在共享工作区中查找的 key。"
+      }
+    },
+    "shared_list": {
+      "description": "列出共享团队工作区中的所有笔记。显示键名、作者和每条笔记的预览。"
+    },
+    "delegate_task": {
+      "description": "将任务委派给专业子 Agent。子 Agent 独立工作，使用自己的工具并汇报结果。适用于研究、分析、编程、写作或任何需要专业人员的任务。可以按顺序多次委派以实现多步骤工作流。",
+      "params": {
+        "agent_name": "要委派给的 Agent 名称。",
+        "task": "给 Agent 的任务描述。"
+      }
+    },
+    "list_agents": {
+      "description": "列出所有可用的 Agent 团队成员，包括角色、目标和能力。"
+    },
+    "handoff_to": {
+      "description": "将当前任务交接给另一个 Agent。接收方 Agent 基于已有对话继续工作。当另一个 Agent 的专业技能更适合下一步时使用。",
+      "params": {
+        "agent_name": "要交接到的 Agent 名称。",
+        "summary": "当前进展和给下个 Agent 的上下文摘要。"
+      }
+    },
+    "delegate_parallel": {
+      "description": "使用不同 Agent 并行运行多个独立任务。所有 Agent 同时启动，全部完成后收集结果。例如：用研究员 Agent 同时搜索 3 个不同主题。",
+      "params": {
+        "tasks": "要并行运行的 {agent_name, task} 对象列表。"
+      }
+    },
+    "request_help": {
+      "description": "当遇到超出自身专业范围的问题时，向其他 Agent 请求帮助。当当前任务需要不同技能时使用。帮助者 Agent 独立工作并将结果返回给你。",
+      "params": {
+        "agent_name": "要请求帮助的 Agent 名称。",
+        "question": "问题或问题描述。"
+      }
+    },
+    "run_pipeline": {
+      "description": "执行带自动依赖排序的多步骤 Agent 工作流。没有 depends_on 的步骤并行运行；有 depends_on 的步骤等待依赖完成。每个步骤自动接收依赖的结果。当步骤有顺序或数据依赖时优先使用此工具而非 delegate_parallel。示例：研究 → 分析 → 写作（每步依赖前一步）。",
+      "params": {
+        "steps": "带可选依赖的有序流水线步骤列表。"
+      }
+    },
+    "plan_task": {
+      "description": "分析复杂任务并生成带 Agent 分配的执行计划。不执行任何操作——只返回计划。获取计划后，使用 `run_pipeline`（或对独立步骤使用 `delegate_parallel`）来执行。当你不确定需要哪些 Agent 或如何拆分复杂任务时使用。",
+      "params": {
+        "task": "要规划的复杂任务。要具体明确。"
+      }
+    },
+    "scheduled_task_create": {
+      "description": "创建定时任务，按 cron 表达式定时发送问题给 AI 执行。",
+      "params": {
+        "name": "任务名称，如'每日在建项目查询'。",
+        "question": "要发送给 AI 的完整问题，如'查询在建项目数量并汇总'。",
+        "cron_expression": "APScheduler cron 表达式，5个字段用空格分隔：分(0-59) 时(0-23) 日(1-31) 月(1-12) 周(0-6)。例如 '0 9 * * *' 每天9点，'0 5 1 * *' 每月1日5点，'0 9 * * 1-5' 工作日9点，'*/30 * * * *' 每30分钟。必须是5个字段。",
+        "model": "可选，指定模型 ID。不填使用默认模型。"
+      }
+    },
+    "scheduled_task_list": {
+      "description": "列出当前用户的所有定时任务，包括启用状态、cron 表达式、上次执行时间等。"
+    },
+    "scheduled_task_update": {
+      "description": "修改已有定时任务的名称、问题或执行时间。只需传入要修改的字段。",
+      "params": {
+        "task_id": "要修改的任务 ID。",
+        "name": "新的任务名称。",
+        "question": "新的问题内容。",
+        "cron_expression": "新的 cron 表达式。"
+      }
+    },
+    "scheduled_task_delete": {
+      "description": "删除一个定时任务。",
+      "params": {
+        "task_id": "要删除的任务 ID。"
+      }
+    },
+    "scheduled_task_pause": {
+      "description": "暂停一个定时任务，暂停后不会自动执行，但可以随时恢复。",
+      "params": {
+        "task_id": "要暂停的任务 ID。"
+      }
+    },
+    "scheduled_task_resume": {
+      "description": "恢复一个已暂停的定时任务。",
+      "params": {
+        "task_id": "要恢复的任务 ID。"
+      }
+    },
+    "hello": {
+      "description": "打个招呼——示例自定义工具。编辑或删除此文件来添加你自己的工具。",
+      "params": {
+        "name": "要打招呼的名字。"
+      }
+    },
+    "ask_question": {
+      "description": "向用户提问并获取回复。当你需要澄清、更多信息或在继续之前需要用户做决定时使用。",
+      "params": {
+        "question": "要向用户提出的问题。",
+        "options": "可选的用户选项列表。"
+      }
+    },
+    "molt_diff": {
+      "description": "显示当前文件状态与之前快照之间的差异。当用户问'改了什么'、'显示差异'或引用特定快照 ID 时使用。",
+      "params": {
+        "molt_id": "快照 ID，如 molt_0001。"
+      }
+    },
+    "molt_rollback": {
+      "description": "将文件回滚到之前的快照。当用户说'撤销'、'回退'、'恢复'或引用回滚到特定快照时使用。",
+      "params": {
+        "molt_id": "快照 ID，如 molt_0001。",
+        "files_only": "仅恢复文件，保留对话上下文。默认：true。"
+      }
+    },
+    "todo_add": {
+      "description": "添加任务到待办列表。当用户要求记住某事、添加任务或创建待办项时使用。",
+      "params": {
+        "task": "任务描述。"
+      }
+    },
+    "todo_list": {
+      "description": "列出待办事项。当用户问'我需要做什么'、'显示任务'或'有什么待办'时使用。",
+      "params": {
+        "filter": "过滤任务：all（全部）、pending（待办，默认）或 done（已完成）。"
+      }
+    },
+    "todo_done": {
+      "description": "将待办事项标记为已完成。当用户说某事已完成、完成或结束时使用。",
+      "params": {
+        "id": "待办事项 ID。"
+      }
+    },
+    "todo_delete": {
+      "description": "删除待办事项。当用户想移除或丢弃任务时使用。",
+      "params": {
+        "id": "待办事项 ID。"
+      }
+    },
+    "create_tool": {
+      "description": "在工作区的 .crabagent/tools/ 目录中创建新的自定义工具（Python 文件）。工具会自动注册并可供使用。",
+      "params": {
+        "name": "工具名称（如 'weather_lookup'）。将用作文件名。",
+        "description": "工具功能描述。这会成为展示给 AI 的工具说明。",
+        "parameters": "工具参数的 JSON Schema。",
+        "code": "工具处理函数的 Python 代码。"
+      }
+    },
+    "update_tool": {
+      "description": "更新已有自定义工具的代码、描述或参数。",
+      "params": {
+        "name": "要更新的工具名称。",
+        "description": "工具的新描述。",
+        "parameters": "新的 JSON Schema 参数。",
+        "code": "新的 Python 函数代码。"
+      }
+    },
+    "delete_tool": {
+      "description": "通过删除 .crabagent/tools/ 中的 Python 文件来删除自定义工具。",
+      "params": {
+        "name": "要删除的工具名称。"
+      }
+    }
+  },
+  "messages": {
+    "scheduled_task_created": "定时任务已创建：#{id} '{name}' — cron: `{cron}`{model}。任务已启用，到时间会自动执行。",
+    "scheduled_task_create_error": "创建定时任务失败：{error}",
+    "scheduled_task_cron_error": "错误：cron 表达式必须包含5个字段（分 时 日 月 周），用空格分隔。当前输入：'{cron}'",
+    "scheduled_task_no_tasks": "没有定时任务。",
+    "scheduled_task_list_title": "# 定时任务列表\n",
+    "scheduled_task_last_run": " 上次：{time} ({status})",
+    "scheduled_task_prompt_label": "   提示词：",
+    "scheduled_task_last_error": "   上次错误：",
+    "scheduled_task_not_found": "任务 #{id} 不存在。",
+    "scheduled_task_no_changes": "任务 #{id} 未做任何修改。",
+    "scheduled_task_updated": "任务 #{id} 已更新：{changes}",
+    "scheduled_task_update_error": "修改任务失败：{error}",
+    "scheduled_task_deleted": "定时任务 #{id} 已删除。",
+    "scheduled_task_delete_error": "删除任务失败：{error}",
+    "scheduled_task_paused": "任务 #{id} '{name}' 已暂停。",
+    "scheduled_task_pause_error": "暂停任务失败：{error}",
+    "scheduled_task_resumed": "任务 #{id} '{name}' 已恢复，cron：`{cron}`",
+    "scheduled_task_resume_error": "恢复任务失败：{error}",
+    "scheduled_task_list_error": "获取任务列表失败：{error}",
+    "scheduled_task_default_model": "（默认模型）",
+    "scheduled_task_model": "（模型：{model}）"
+  }
+}

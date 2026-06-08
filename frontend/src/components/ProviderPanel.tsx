@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useState } from "react";
 import { Plus, Trash2, Star, StarOff } from "lucide-react";
 import { Provider, CatalogEntry } from "../api/providers";
@@ -19,6 +20,7 @@ export default function ProviderPanel({
   onClose,
   onRefresh,
 }: Props) {
+  const { t } = useTranslation();
   const [mode, setMode] = useState<"list" | "add">("list");
   const [formType, setFormType] = useState(catalog[0]?.type || "");
   const [formVariantId, setFormVariantId] = useState<string>("");
@@ -42,7 +44,7 @@ export default function ProviderPanel({
         api_key: formKey,
         variant_id: formVariantId || undefined,
       });
-      toast.success("Provider added");
+      toast.success(t("provider.providerAdded"));
       onRefresh();
       setMode("list");
       setFormName("");
@@ -68,7 +70,7 @@ export default function ProviderPanel({
   const handleDelete = async (name: string) => {
     try {
       await providersApi.deleteProvider(name);
-      toast.success("Provider deleted");
+      toast.success(t("provider.providerDeleted"));
       onRefresh();
     } catch {
       toast.error("Failed to delete provider");

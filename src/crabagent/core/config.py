@@ -37,6 +37,8 @@ class Settings(BaseSettings):
 
     web_proxy: str = ""
 
+    language: str = "en"
+
     encryption_key: str = ""
 
     auto_approve_tools: bool = False

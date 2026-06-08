@@ -11,6 +11,7 @@ import {
   MessageSquare,
   X as XIcon,
 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Session } from "../api/sessions";
 import { formatDate } from "../api/time";
 import { Button, EmptyState, ConfirmDialog } from "./ui";
@@ -41,6 +42,7 @@ export default function SessionList({
   mobileOpen = false,
   onMobileClose,
 }: Props) {
+  const { t } = useTranslation();
   const [collapsed, setCollapsed] = useState(false);
   const [query, setQuery] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<Session | null>(null);
@@ -48,7 +50,6 @@ export default function SessionList({
   // Auto-close mobile drawer when a session is selected
   useEffect(() => {
     if (mobileOpen && onMobileClose) {
-      // close on escape
       const handler = (e: KeyboardEvent) => {
         if (e.key === "Escape") onMobileClose();
       };
@@ -118,7 +119,7 @@ export default function SessionList({
           size="icon"
           variant="brand"
           onClick={handleNew}
-          title="New session (⌘K)"
+          title={`${t("session.newChat")} (⌘K)`}
           className="my-1"
         >
           <Plus size={16} />
@@ -127,19 +128,19 @@ export default function SessionList({
         <ToolButton
           onClick={onOpenMcpServers}
           icon={<Plug size={15} />}
-          title="MCP Servers"
+          title={t("mcp.title")}
           color=""
         />
         <ToolButton
           onClick={onOpenScheduledTasks}
           icon={<Clock size={15} />}
-          title="Scheduled Tasks"
+          title={t("scheduledTask.title")}
           color=""
         />
         <ToolButton
           onClick={onOpenProviders}
           icon={<SettingsIcon size={15} />}
-          title="Providers"
+          title={t("provider.title")}
           color=""
         />
       </div>
@@ -150,18 +151,17 @@ export default function SessionList({
     <div
       className={cn(
         "flex flex-col h-full bg-[var(--bg-secondary)] w-64 lg:w-72",
-        // Desktop: inline sidebar with right border
         "md:border-r md:border-[var(--border)] md:shrink-0",
       )}
     >
       {/* Mobile header */}
       <div className="md:hidden p-2.5 flex items-center gap-2 border-b border-[var(--border-subtle)]">
         <span className="text-sm font-semibold text-[var(--text-primary)] flex-1">
-          Conversations
+          {t("session.sessions")}
         </span>
         <button
           onClick={onMobileClose}
-          title="Close"
+          title={t("common.close")}
           className="p-1.5 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
         >
           <XIcon size={14} />
@@ -170,13 +170,13 @@ export default function SessionList({
       {/* Desktop header */}
       <div className="hidden md:flex p-2.5 items-center gap-2 border-b border-[var(--border-subtle)]">
         <span className="text-sm font-semibold text-[var(--text-primary)] flex-1">
-          Conversations
+          {t("session.sessions")}
         </span>
         <Button
           size="icon"
           variant="brand"
           onClick={handleNew}
-          title="New session (⌘K)"
+          title={`${t("session.newChat")} (⌘K)`}
         >
           <Plus size={14} />
         </Button>
@@ -200,7 +200,7 @@ export default function SessionList({
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search…"
+              placeholder={t("session.searchPlaceholder")}
               className="w-full h-7 pl-7 pr-2 text-xs rounded-md bg-[var(--bg-tertiary)] border border-[var(--border)] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--brand)] focus:ring-2 focus:ring-[var(--brand)]/30"
             />
           </div>
@@ -213,12 +213,12 @@ export default function SessionList({
           <EmptyState
             compact
             icon={<MessageSquare size={24} />}
-            title="No conversations"
-            description="Start a new session to begin."
+            title={t("common.noResults")}
+            description=""
           />
         ) : filtered.length === 0 ? (
           <div className="p-4 text-xs text-center text-[var(--text-tertiary)]">
-            No matches
+            {t("common.noResults")}
           </div>
         ) : (
           filtered.map((s) => {
@@ -246,7 +246,7 @@ export default function SessionList({
                       )}
                     >
                       <span className="truncate">
-                        {s.title || "(untitled)"}
+                        {s.title || `(${t("session.untitled")})`}
                       </span>
                       {s.active_branch && s.active_branch !== "main" && (
                         <span className="inline-flex items-center gap-0.5 text-[9px] px-1 py-px rounded font-mono bg-[var(--warning-bg)] text-[var(--warning)] shrink-0">
@@ -264,7 +264,7 @@ export default function SessionList({
                       e.stopPropagation();
                       setDeleteTarget(s);
                     }}
-                    title="Delete session"
+                    title={t("session.deleteSession")}
                     className={cn(
                       "shrink-0 p-1 rounded transition-all",
                       "opacity-0 group-hover:opacity-100",
@@ -290,7 +290,7 @@ export default function SessionList({
             "hover:border-[var(--border-strong)] hover:text-[var(--text-primary)] transition-colors",
             "text-[var(--text-secondary)]",
           )}
-          title="MCP Servers"
+          title={t("mcp.title")}
         >
           <Plug size={12} className="text-[var(--accent-2)]" />
           <span>MCP</span>
@@ -303,7 +303,7 @@ export default function SessionList({
             "hover:border-[var(--border-strong)] hover:text-[var(--text-primary)] transition-colors",
             "text-[var(--text-secondary)]",
           )}
-          title="Scheduled Tasks"
+          title={t("scheduledTask.title")}
         >
           <Clock size={12} className="text-[var(--warning)]" />
           <span>Tasks</span>
@@ -316,19 +316,19 @@ export default function SessionList({
             "hover:border-[var(--border-strong)] hover:text-[var(--text-primary)] transition-colors",
             "text-[var(--text-secondary)]",
           )}
-          title="Providers"
+          title={t("provider.title")}
         >
           <SettingsIcon size={12} className="text-[var(--text-tertiary)]" />
-          <span>API Keys</span>
+          <span>API</span>
         </button>
       </div>
 
       <ConfirmDialog
         open={!!deleteTarget}
         onOpenChange={(o) => !o && setDeleteTarget(null)}
-        title={`Delete conversation "${deleteTarget?.title || "untitled"}"?`}
-        description="This permanently removes the session and its message history."
-        confirmText="Delete"
+        title={t("session.deleteConfirm", { title: deleteTarget?.title || t("session.untitled") })}
+        description=""
+        confirmText={t("common.delete")}
         tone="danger"
         onConfirm={handleDelete}
       />
@@ -337,11 +337,9 @@ export default function SessionList({
 
   return (
     <>
-      {/* Desktop: inline — only render when not in mobile drawer mode */}
       {!mobileOpen && (
         <div className="hidden md:contents">{sidebar}</div>
       )}
-      {/* Mobile: drawer with overlay */}
       {mobileOpen && (
         <>
           <div

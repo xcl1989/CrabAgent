@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useState, useEffect } from "react";
 import { ChevronRight, ChevronDown, Folder, FolderOpen, X, Check, ArrowUp, Home } from "lucide-react";
 import { FileEntry, getTree } from "../api/files";
@@ -10,6 +11,7 @@ interface Props {
 }
 
 export default function DirectoryPicker({ open, onClose, onSelect }: Props) {
+  const { t } = useTranslation();
   const [currentPath, setCurrentPath] = useState("/");
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [loading, setLoading] = useState(false);

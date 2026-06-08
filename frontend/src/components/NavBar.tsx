@@ -1,29 +1,32 @@
-import { MessageSquare, Users, Brain, Sun, Moon, LogOut } from "lucide-react";
+import { MessageSquare, Users, Brain, Sun, Moon, LogOut, Globe } from "lucide-react";
 import { useTheme } from "../lib/theme";
 import { cn } from "../lib/cn";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Modal, Button } from "./ui";
 import type { PageId } from "../App";
+import { SUPPORTED_LANGUAGES, type LanguageCode } from "../i18n";
 
 interface NavItem {
   id: PageId;
-  label: string;
+  labelKey: string;
   icon: React.ReactNode;
 }
 
 const items: NavItem[] = [
-  { id: "chat", label: "Chat", icon: <MessageSquare size={15} /> },
-  { id: "agents", label: "Agents", icon: <Users size={15} /> },
-  { id: "memory", label: "Memory", icon: <Brain size={15} /> },
+  { id: "chat", labelKey: "nav.chat", icon: <MessageSquare size={15} /> },
+  { id: "agents", labelKey: "nav.agents", icon: <Users size={15} /> },
+  { id: "memory", labelKey: "nav.memory", icon: <Brain size={15} /> },
 ];
 
 function ThemeToggle() {
   const { theme, toggleTheme } = useTheme();
+  const { t } = useTranslation();
   return (
     <button
       onClick={toggleTheme}
-      aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
-      title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+      aria-label={theme === "dark" ? t("nav.switchToLight") : t("nav.switchToDark")}
+      title={theme === "dark" ? t("nav.switchToLight") : t("nav.switchToDark")}
       className={cn(
         "p-1.5 rounded-lg transition-colors",
         "text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]",
@@ -32,6 +35,83 @@ function ThemeToggle() {
     >
       {theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
     </button>
+  );
+}
+
+function LanguageSwitcher() {
+  const { i18n, t } = useTranslation();
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [pendingLang, setPendingLang] = useState<LanguageCode>("en");
+
+  const currentLang = i18n.language;
+
+  const handleLangClick = (code: LanguageCode) => {
+    if (code === currentLang) return;
+    setPendingLang(code);
+    setShowConfirm(true);
+  };
+
+  const handleConfirm = () => {
+    i18n.changeLanguage(pendingLang);
+    localStorage.setItem("crabagent-language", pendingLang);
+    // Notify backend about language change
+    try {
+      fetch("/api/settings", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${localStorage.getItem("crabagent-token")}`,
+        },
+        body: JSON.stringify({ settings: { language: pendingLang } }),
+      }).catch(() => {});
+    } catch {}
+    setShowConfirm(false);
+  };
+
+  return (
+    <>
+      <button
+        className={cn(
+          "p-1.5 rounded-lg transition-colors",
+          "text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)]",
+        )}
+        title={t("language.title")}
+        onClick={() => {
+          // Quick cycle through languages
+          const idx = SUPPORTED_LANGUAGES.findIndex((l) => l.code === currentLang);
+          const next = SUPPORTED_LANGUAGES[(idx + 1) % SUPPORTED_LANGUAGES.length];
+          handleLangClick(next.code);
+        }}
+      >
+        <Globe size={15} />
+      </button>
+
+      <Modal
+        open={showConfirm}
+        onOpenChange={setShowConfirm}
+        title={t("language.switchTitle")}
+        description={t("language.switchDesc")}
+        size="sm"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setShowConfirm(false)}>
+              {t("common.cancel")}
+            </Button>
+            <Button variant="brand" onClick={handleConfirm}>
+              {t("language.switchConfirm")}
+            </Button>
+          </>
+        }
+      >
+        <div className="text-sm text-[var(--text-secondary)]">
+          {SUPPORTED_LANGUAGES.find((l) => l.code === pendingLang)?.label}
+          <p className="mt-2 text-xs text-[var(--text-tertiary)]">
+            {t("language.currentSession")}
+          </p>
+        </div>
+      </Modal>
+    </>
   );
 }
 
@@ -44,6 +124,7 @@ export function NavBar({
   onNavigate: (page: PageId) => void;
   onLogout?: () => void;
 }) {
+  const { t } = useTranslation();
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 
   return (
@@ -90,7 +171,7 @@ export function NavBar({
               <span className={cn(isActive && "text-[var(--brand)]")}>
                 {item.icon}
               </span>
-              <span className="hidden sm:inline">{item.label}</span>
+              <span className="hidden sm:inline">{t(item.labelKey)}</span>
               {isActive && (
                 <span className="absolute -bottom-[9px] left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-[var(--brand)]" />
               )}
@@ -103,8 +184,8 @@ export function NavBar({
         {onLogout && (
           <button
             onClick={() => setShowLogoutConfirm(true)}
-            aria-label="Logout"
-            title="Logout"
+            aria-label={t("nav.logout")}
+            title={t("nav.logout")}
             className={cn(
               "p-1.5 rounded-lg transition-colors",
               "text-[var(--text-tertiary)] hover:text-[var(--danger)] hover:bg-[var(--danger-bg)]",
@@ -113,6 +194,7 @@ export function NavBar({
             <LogOut size={15} />
           </button>
         )}
+        <LanguageSwitcher />
         <ThemeToggle />
       </div>
 
@@ -120,16 +202,16 @@ export function NavBar({
         <Modal
           open={showLogoutConfirm}
           onOpenChange={setShowLogoutConfirm}
-          title="Sign out?"
-          description="You'll need to log in again to continue."
+          title={t("nav.signOut")}
+          description={t("nav.signOutDesc")}
           size="sm"
           footer={
             <>
               <Button variant="ghost" onClick={() => setShowLogoutConfirm(false)}>
-                Cancel
+                {t("common.cancel")}
               </Button>
               <Button variant="danger" onClick={onLogout}>
-                Sign Out
+                {t("nav.signOutBtn")}
               </Button>
             </>
           }

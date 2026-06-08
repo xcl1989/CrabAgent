@@ -24,6 +24,7 @@ class AgentContext:
     provider_name: str | None = None
     current_agent: str = "default"
     system_prompt: str | None = None
+    locale: str = "en"
     metadata: dict[str, Any] = field(default_factory=dict)
     total_tokens: int = 0
     visible_tokens: int = 0

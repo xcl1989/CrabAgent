@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import ChatInput from "../components/ChatInput";
 import {
   Bot,
@@ -49,13 +50,14 @@ interface Props {
 }
 
 const STARTER_PROMPTS = [
-  { icon: <Code size={14} />, label: "Debug an error", prompt: "Help me debug this error: " },
-  { icon: <Compass size={14} />, label: "Explain a concept", prompt: "Explain how " },
-  { icon: <Sparkles size={14} />, label: "Brainstorm ideas", prompt: "Brainstorm some ideas for " },
-  { icon: <MessageSquare size={14} />, label: "Write a doc", prompt: "Write documentation for " },
+  { icon: <Code size={14} />, labelKey: "chat.debugLabel", promptKey: "chat.debugPrompt" },
+  { icon: <Compass size={14} />, labelKey: "chat.explainLabel", promptKey: "chat.explainPrompt" },
+  { icon: <Sparkles size={14} />, labelKey: "chat.brainstormLabel", promptKey: "chat.brainstormPrompt" },
+  { icon: <MessageSquare size={14} />, labelKey: "chat.writeDocLabel", promptKey: "chat.writeDocPrompt" },
 ];
 
 export default function ChatPage() {
+  const { t } = useTranslation();
   const [workspace, setWorkspace] = useState<string>("");
   const { taskBoardTasks, handleTaskBoardEvent, clearTaskBoard } =
     useTaskBoard();
@@ -436,7 +438,7 @@ export default function ChatPage() {
             size="icon"
             variant="ghost"
             onClick={() => setMobileSidebarOpen(true)}
-            title="Conversations"
+            title={t("session.sessions")}
             className="md:hidden"
           >
             <Menu size={16} />
@@ -458,7 +460,7 @@ export default function ChatPage() {
               size="icon"
               variant="ghost"
               onClick={() => setShowResultCompare(true)}
-              title="View agent results"
+              title={t("taskBoard.title")}
               className="text-[var(--accent-2)] hover:text-[var(--accent-2)] hover:bg-[var(--accent-2-bg)]"
             >
               <Bot size={15} />
@@ -468,7 +470,7 @@ export default function ChatPage() {
             size="icon"
             variant="ghost"
             onClick={() => setShowFiles((v) => !v)}
-            title={showFiles ? "Hide file browser" : "Show file browser"}
+            title={showFiles ? t("fileTree.hide") : t("fileTree.show")}
             className={cn(showFiles ? "text-[var(--brand)] bg-[var(--brand-bg)]" : "")}
           >
             {showFiles ? <PanelRightClose size={15} /> : <PanelRightOpen size={15} />}
@@ -733,7 +735,7 @@ export default function ChatPage() {
                       {p.icon}
                     </span>
                     <span className="text-xs text-[var(--text-secondary)] group-hover:text-[var(--text-primary)]">
-                      {p.label}
+                      {t(p.labelKey)}
                     </span>
                   </button>
                 ))}
@@ -769,7 +771,7 @@ export default function ChatPage() {
           open={true}
           onOpenChange={() => {}}
           title="Welcome to CrabAgent"
-          description="Set up your first LLM provider to get started"
+          description={t("provider.addProvider")}
           size="sm"
           hideClose
           disableBackdropClose

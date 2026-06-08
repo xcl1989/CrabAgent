@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useState, useEffect, useCallback } from "react";
 import { GitBranch, RefreshCw, ChevronDown, ChevronUp, ChevronRight, Loader2, FilePlus, FileMinus, FilePen } from "lucide-react";
 import { GitStatusResult, GitDiffResult, getGitStatus, getGitDiff } from "../api/files";
@@ -10,6 +11,7 @@ interface Props {
 }
 
 export default function GitChanges({ workspace, collapsible }: Props) {
+  const { t } = useTranslation();
   const [status, setStatus] = useState<GitStatusResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [expandedFile, setExpandedFile] = useState<string | null>(null);
@@ -56,7 +58,7 @@ export default function GitChanges({ workspace, collapsible }: Props) {
         <div className="p-2 text-[11px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
           Git Changes
         </div>
-        <LoadingState compact title="Loading…" />
+        <LoadingState compact title={t("git.loading")} />
       </div>
     );
   }

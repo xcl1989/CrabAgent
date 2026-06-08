@@ -42,6 +42,7 @@ class User(Base):
     username: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(String(200), nullable=False)
     role: Mapped[str] = mapped_column(String(20), default="user")
+    locale: Mapped[str] = mapped_column(String(10), default="en")
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
 
@@ -335,6 +336,11 @@ async def init_db() -> None:
     async with engine.begin() as conn:
         await conn.execute(text("PRAGMA journal_mode=WAL"))
         await conn.run_sync(Base.metadata.create_all)
+
+        result = await conn.execute(text("PRAGMA table_info(users)"))
+        columns = [row[1] for row in result.fetchall()]
+        if "locale" not in columns:
+            await conn.execute(text("ALTER TABLE users ADD COLUMN locale VARCHAR(10) DEFAULT 'en'"))
 
         result = await conn.execute(text("PRAGMA table_info(conversations)"))
         columns = [row[1] for row in result.fetchall()]

@@ -124,7 +124,8 @@ async def run_agent(
         context.iteration += 1
         await context.event_bus.emit(AgentEvent(type=EventType.ITERATION_START, data={"iteration": context.iteration}))
 
-        tools = context.tool_registry.tool_defs() or None
+        locale = context.metadata.get("locale", context.locale)
+        tools = context.tool_registry.tool_defs(locale=locale) or None
 
         # Context compression: prefer middleware if attached, fall back to direct call
         max_context = get_model_token_limit(model)
@@ -425,6 +426,16 @@ def _build_messages(context: AgentContext) -> list[dict]:
     messages = []
     if context.system_prompt:
         messages.append({"role": "system", "content": context.system_prompt})
+
+    # Inject locale instruction as a second system message for language control
+    locale = context.metadata.get("locale", context.locale)
+    if locale and locale != "en":
+        from crabagent.core.i18n import get_locale_instruction
+
+        lang_instruction = get_locale_instruction(locale)
+        if lang_instruction:
+            messages.append({"role": "system", "content": lang_instruction})
+
     for msg in context.messages:
         content = msg.get("content")
         if isinstance(content, list):

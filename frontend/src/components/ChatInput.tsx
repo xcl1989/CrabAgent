@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback } from "react";
 import { ArrowUp, Square, Paperclip, Bot } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Button, Textarea } from "./ui";
 
 interface Props {
@@ -23,6 +24,7 @@ export default function ChatInput({
   onDelegateOpen,
   showDelegate,
 }: Props) {
+  const { t } = useTranslation();
   const [input, setInput] = useState("");
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -50,7 +52,7 @@ export default function ChatInput({
         variant="outline"
         onClick={onImageUpload}
         disabled={sending || replaying}
-        title="Attach image"
+        title={t("chat.attachImage")}
         className="h-9 w-9 sm:h-10 sm:w-10"
       >
         <Paperclip size={15} />
@@ -61,7 +63,7 @@ export default function ChatInput({
           variant="outline"
           onClick={onDelegateOpen}
           disabled={sending || replaying}
-          title="Delegate to agent team"
+          title={t("chat.delegate")}
           className="hidden sm:flex h-10 w-10 text-[var(--accent-2)] hover:text-[var(--accent-2)] hover:bg-[var(--accent-2-bg)] border-[var(--border)]"
         >
           <Bot size={15} />
@@ -72,7 +74,7 @@ export default function ChatInput({
         onChange={(e) => setInput(e.target.value)}
         onKeyDown={handleKeyDown}
         onPaste={onImagePaste}
-        placeholder="Type a message…"
+        placeholder={t("chat.placeholder")}
         disabled={sending || replaying}
         ref={inputRef}
         autoGrow
@@ -86,7 +88,7 @@ export default function ChatInput({
           onClick={onAbort}
           className="h-9 w-9 sm:h-10 sm:w-10"
           size="icon"
-          title="Stop"
+          title={t("common.stop")}
         >
           <Square size={14} fill="currentColor" />
         </Button>
@@ -97,7 +99,7 @@ export default function ChatInput({
           disabled={!input.trim()}
           className="h-9 w-9 sm:h-10 sm:w-10 shrink-0"
           size="icon"
-          title="Send"
+          title={t("common.send")}
         >
           <ArrowUp size={16} />
         </Button>

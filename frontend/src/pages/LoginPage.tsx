@@ -1,15 +1,18 @@
 import { useState } from "react";
 import { Loader2, AlertCircle } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { api } from "../api/client";
 import * as authApi from "../api/auth";
 import { Input, PasswordInput, Button } from "../components/ui";
 import { cn } from "../lib/cn";
+import { SUPPORTED_LANGUAGES } from "../i18n";
 
 interface Props {
   onLogin: () => void;
 }
 
 export default function LoginPage({ onLogin }: Props) {
+  const { t, i18n } = useTranslation();
   const [mode, setMode] = useState<"login" | "register">("login");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -69,10 +72,10 @@ export default function LoginPage({ onLogin }: Props) {
             🦀
           </div>
           <h1 className="text-2xl font-semibold tracking-tight text-[var(--text-primary)]">
-            CrabAgent
+            {t("login.title")}
           </h1>
           <p className="text-xs text-[var(--text-tertiary)] mt-1">
-            Your AI coding companion
+            {t("login.subtitle")}
           </p>
         </div>
 
@@ -99,26 +102,26 @@ export default function LoginPage({ onLogin }: Props) {
                     : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]",
                 )}
               >
-                {m === "login" ? "Sign In" : "Sign Up"}
+                {m === "login" ? t("login.signIn") : t("login.signUp")}
               </button>
             ))}
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <Input
-              label="Username"
+              label={t("login.username")}
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              placeholder="Choose a username"
+              placeholder={t("login.usernamePlaceholder")}
               required
               minLength={2}
               autoComplete="username"
             />
             <PasswordInput
-              label="Password"
+              label={t("login.password")}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="At least 6 characters"
+              placeholder={t("login.passwordPlaceholder")}
               required
               minLength={6}
               autoComplete={
@@ -143,18 +146,40 @@ export default function LoginPage({ onLogin }: Props) {
               fullWidth
               loading={loading}
             >
-              {mode === "login" ? "Sign In" : "Create Account"}
+              {mode === "login" ? t("login.signIn") : t("login.createAccount")}
             </Button>
           </form>
 
           <p className="text-[11px] text-[var(--text-tertiary)] text-center mt-4">
-            {mode === "login" ? "Default: admin / xcl1989" : ""}
+            {mode === "login" ? t("login.defaultHint") : ""}
           </p>
         </div>
 
-        <p className="text-[11px] text-center mt-6 text-[var(--text-tertiary)]">
-          v0.7.2 · Local-first AI agent platform
-        </p>
+        <div className="flex items-center justify-between mt-6">
+          <p className="text-[11px] text-[var(--text-tertiary)]">
+            {t("login.version")}
+          </p>
+          {/* Language switch on login page */}
+          <div className="flex gap-1">
+            {SUPPORTED_LANGUAGES.map((lang) => (
+              <button
+                key={lang.code}
+                onClick={() => {
+                  i18n.changeLanguage(lang.code);
+                  localStorage.setItem("crabagent-language", lang.code);
+                }}
+                className={cn(
+                  "text-[11px] px-2 py-0.5 rounded transition-colors",
+                  i18n.language === lang.code
+                    ? "text-[var(--brand)] bg-[var(--brand-bg)]"
+                    : "text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]",
+                )}
+              >
+                {lang.label}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
     </div>
   );

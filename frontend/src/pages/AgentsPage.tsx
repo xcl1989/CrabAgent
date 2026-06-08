@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useState, useEffect } from "react";
 import {
   Plus,
@@ -96,6 +97,7 @@ const PERM_COLORS_ACTIVE: Record<Permission, string> = {
 const DEFAULT_KEY = "__default__";
 
 export default function AgentsPage() {
+  const { t } = useTranslation();
   const [agents, setAgents] = useState<AgentProfile[]>([]);
   const [selectedName, setSelectedName] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
@@ -208,11 +210,11 @@ export default function AgentsPage() {
     setError("");
     try {
       await updateAgentProfile(selected.name, form);
-      toast.success("Agent saved");
+      toast.success(t("agents.saved"));
       await fetchAgents();
       setEditing(false);
     } catch (e: any) {
-      setError(e?.message || "Save failed");
+      setError(e?.message || t("agents.saveFailed"));
     } finally {
       setSaving(false);
     }
@@ -225,7 +227,7 @@ export default function AgentsPage() {
       !form.role.trim() ||
       !form.goal.trim()
     ) {
-      setError("Name, display name, role and goal are required");
+      setError(t("agents.allFieldsRequired"));
       return;
     }
     setSaving(true);
@@ -241,12 +243,12 @@ export default function AgentsPage() {
         icon: form.icon,
         tool_permissions: form.tool_permissions,
       });
-      toast.success("Agent created");
+      toast.success(t("agents.created"));
       await fetchAgents();
       setShowCreate(false);
       setSelectedName(created.name);
     } catch (e: any) {
-      setError(e?.message || "Create failed");
+      setError(e?.message || t("agents.createFailed"));
     } finally {
       setSaving(false);
     }
@@ -256,11 +258,11 @@ export default function AgentsPage() {
     if (!deleteTarget) return;
     try {
       await deleteAgentProfile(deleteTarget.name);
-      toast.success("Agent deleted");
+      toast.success(t("agents.deleted"));
       if (selectedName === deleteTarget.name) setSelectedName(null);
       await fetchAgents();
     } catch (e: any) {
-      toast.error(e?.message || "Delete failed");
+      toast.error(e?.message || t("agents.deleteFailed"));
     } finally {
       setDeleteTarget(null);
     }
@@ -295,10 +297,10 @@ export default function AgentsPage() {
     try {
       await setDefaultToolPermissions(defaultForm);
       setDefaultPerms({ ...defaultForm });
-      toast.success("Default permissions saved");
+      toast.success(t("agents.permsSaved"));
       setEditingDefault(false);
     } catch (e: any) {
-      setError(e?.message || "Save failed");
+      setError(e?.message || t("agents.saveFailed"));
     } finally {
       setSaving(false);
     }
@@ -419,7 +421,7 @@ export default function AgentsPage() {
           loading={saving}
           onClick={showCreate ? handleCreate : handleSave}
         >
-          {showCreate ? "Create" : "Save"}
+          {showCreate ? t("common.create") : t("common.save")}
         </Button>
         <Button variant="ghost" onClick={cancelForm}>
           Cancel
@@ -872,7 +874,7 @@ export default function AgentsPage() {
         onOpenChange={(o) => !o && setDeleteTarget(null)}
         title={`Delete agent "${deleteTarget?.display_name}"?`}
         description="This permanently removes the agent profile and its learning data."
-        confirmText="Delete"
+        confirmText={t("common.delete")}
         tone="danger"
         onConfirm={handleDelete}
       />

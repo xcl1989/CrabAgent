@@ -237,11 +237,33 @@ async def prompt_async(
     workspace = Path(conv.workspace) if conv.workspace else Path.cwd()
     workspace = workspace.resolve()
 
+    # Determine locale for this user/session
+    locale = getattr(user, "locale", None) or settings.language or "en"
+
     # Reuse cached system prompt if available — preserves LLM prefix cache
     if conv.system_prompt:
         base_prompt = conv.system_prompt
     else:
-        base_prompt = f"You are CrabAgent, an AI assistant. Today is {datetime.now(UTC).strftime('%Y-%m-%d %A')}. Working directory: {workspace}"
+        from crabagent.core.i18n import get_system_prompt_template
+
+        template = get_system_prompt_template(locale)
+        if template:
+            now = datetime.now(UTC)
+            from crabagent.core.i18n import _WEEKDAY_NAMES
+
+            weekday = _WEEKDAY_NAMES.get(locale, {}).get(now.weekday(), now.strftime("%A"))
+            base_prompt = template.format(
+                date=now.strftime("%Y-%m-%d"),
+                weekday=weekday,
+                workspace=workspace,
+            )
+        else:
+            now = datetime.now(UTC)
+            base_prompt = (
+                f"You are CrabAgent, an AI assistant. "
+                f"Today is {now.strftime('%Y-%m-%d %A')}. "
+                f"Working directory: {workspace}"
+            )
         try:
             from crabagent.core.agent.agents import build_team_prompt
 
@@ -252,7 +274,7 @@ async def prompt_async(
             pass
 
         try:
-            from crabagent.core.agent.agents import build_memory_prompt, inject_agent_lessons
+            from crabagent.core.agent.agents import build_memory_prompt
 
             mem_prompt = await build_memory_prompt(user.id, query=(req.message or "")[:500])
             if mem_prompt:
@@ -297,7 +319,9 @@ async def prompt_async(
         model=req.model or conv.model or None,
         provider_name=req.provider,
         system_prompt=base_prompt,
+        locale=locale,
     )
+    context.metadata["locale"] = locale
 
     if req.images or local_images:
         from crabagent.core.agent.token_limits import is_vision_model
@@ -343,9 +367,10 @@ async def prompt_async(
     context.current_agent = effective_agent
     context.metadata["_current_agent"] = effective_agent
 
-    from crabagent.core.agent.agents import get_agent as _get_agent
-    from crabagent.core.agent.agents import build_agent_switch_msg, get_agent, inject_agent_lessons as _inject_lessons
     from crabagent.core.agent.agent_switch import filter_tool_registry
+    from crabagent.core.agent.agents import build_agent_switch_msg, get_agent
+    from crabagent.core.agent.agents import get_agent as _get_agent
+    from crabagent.core.agent.agents import inject_agent_lessons as _inject_lessons
 
     if effective_agent == "default":
         _default_profile = await _get_agent("__default__")
@@ -583,7 +608,11 @@ async def prompt_async(
 
     @context.tool_registry.register(
         name="ask_question",
-        description="Ask the user a question and get their response. Use when you need clarification, more information, or a decision from the user before proceeding.",
+        description=(
+            "Ask the user a question and get their response. "
+            "Use when you need clarification, more information, "
+            "or a decision from the user before proceeding."
+        ),
         parameters={
             "type": "object",
             "properties": {

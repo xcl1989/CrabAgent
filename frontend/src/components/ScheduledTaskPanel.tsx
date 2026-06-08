@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useState, useEffect } from "react";
 import { Plus, Play, Pencil, Trash2, Clock } from "lucide-react";
 import {
@@ -65,6 +66,7 @@ const PRESETS: { label: string; cron: string }[] = [
 ];
 
 export function ScheduledTaskPanel({ onClose, onSwitchSession }: Props) {
+  const { t } = useTranslation();
   const [tasks, setTasks] = useState<ScheduledTask[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -100,12 +102,12 @@ export function ScheduledTaskPanel({ onClose, onSwitchSession }: Props) {
 
   const handleSubmit = async () => {
     if (!form.name.trim() || !form.prompt.trim() || !form.cron_expression.trim()) {
-      setError("All fields are required");
+      setError(t("scheduledTask.allFieldsRequired"));
       return;
     }
     const parts = form.cron_expression.trim().split(/\s+/);
     if (parts.length !== 5) {
-      setError("Cron expression requires 5 fields: min hour day month weekday");
+      setError(t("scheduledTask.cronFieldsRequired"));
       return;
     }
     setLoading(true);
@@ -113,15 +115,15 @@ export function ScheduledTaskPanel({ onClose, onSwitchSession }: Props) {
     try {
       if (editingId) {
         await updateScheduledTask(editingId, form);
-        toast.success("Task updated");
+        toast.success(t("scheduledTask.taskUpdated"));
       } else {
         await createScheduledTask(form);
-        toast.success("Task created");
+        toast.success(t("scheduledTask.taskCreated"));
       }
       await fetchTasks();
       resetForm();
     } catch (e: any) {
-      setError(e?.message || e?.detail || "Operation failed");
+      setError(e?.message || e?.detail || t("scheduledTask.operationFailed"));
     } finally {
       setLoading(false);
     }
@@ -131,10 +133,10 @@ export function ScheduledTaskPanel({ onClose, onSwitchSession }: Props) {
     setActing(id);
     try {
       await deleteScheduledTask(id);
-      toast.success("Task deleted");
+      toast.success(t("scheduledTask.taskDeleted"));
       await fetchTasks();
     } catch {
-      toast.error("Delete failed");
+      toast.error(t("scheduledTask.operationFailed"));
     } finally {
       setActing(null);
       setDeleteTarget(null);
@@ -157,9 +159,9 @@ export function ScheduledTaskPanel({ onClose, onSwitchSession }: Props) {
     setActing(id);
     try {
       await runScheduledTask(id);
-      toast.success("Task triggered");
+      toast.success(t("scheduledTask.taskCreated"));
     } catch (e: any) {
-      toast.error(e?.message || "Run failed");
+      toast.error(e?.message || t("scheduledTask.operationFailed"));
     } finally {
       setActing(null);
     }
@@ -182,8 +184,8 @@ export function ScheduledTaskPanel({ onClose, onSwitchSession }: Props) {
       <Modal
         open={true}
         onOpenChange={(o) => !o && onClose()}
-        title="Scheduled Tasks"
-        description="Run prompts on a recurring schedule"
+        title={t("scheduledTask.title")}
+        description={t("scheduledTask.title")}
         size="lg"
         footer={
           !showForm ? (
@@ -202,7 +204,7 @@ export function ScheduledTaskPanel({ onClose, onSwitchSession }: Props) {
                 Cancel
               </Button>
               <Button variant="brand" loading={loading} onClick={handleSubmit}>
-                {editingId ? "Save Changes" : "Create Task"}
+                {editingId ? t("scheduledTask.saveChanges") : t("scheduledTask.createTask")}
               </Button>
             </>
           )
@@ -217,21 +219,21 @@ export function ScheduledTaskPanel({ onClose, onSwitchSession }: Props) {
         {showForm ? (
           <div className="space-y-3">
             <Input
-              label="Name"
+              label={t("scheduledTask.taskName")}
               value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
               placeholder="e.g. Morning news summary"
             />
             <Textarea
-              label="Prompt"
+              label={t("scheduledTask.taskQuestion")}
               value={form.prompt}
               onChange={(e) => setForm({ ...form, prompt: e.target.value })}
               rows={3}
-              placeholder="The question to send to the AI"
+              placeholder={t("scheduledTask.questionPlaceholder")}
             />
             <div>
               <Input
-                label="Cron Expression"
+                label={t("scheduledTask.cronExpression")}
                 value={form.cron_expression}
                 onChange={(e) =>
                   setForm({ ...form, cron_expression: e.target.value })
@@ -259,17 +261,17 @@ export function ScheduledTaskPanel({ onClose, onSwitchSession }: Props) {
               </div>
             </div>
             <Input
-              label="Model (optional)"
+              label={t("scheduledTask.model")}
               value={form.model}
               onChange={(e) => setForm({ ...form, model: e.target.value })}
-              placeholder="Leave empty to use default"
+              placeholder={t("scheduledTask.cronPlaceholder")}
             />
           </div>
         ) : tasks.length === 0 ? (
           <EmptyState
             icon={<Clock size={32} />}
             title="No scheduled tasks"
-            description="Create recurring prompts that run automatically."
+            description={t("scheduledTask.title")}
             action={
               <Button
                 variant="brand"
@@ -285,51 +287,51 @@ export function ScheduledTaskPanel({ onClose, onSwitchSession }: Props) {
           />
         ) : (
           <div className="space-y-2">
-            {tasks.map((t) => (
+            {tasks.map((task) => (
               <div
-                key={t.id}
+                key={task.id}
                 className="p-3 rounded-xl bg-[var(--bg-tertiary)] border border-[var(--border)] hover:border-[var(--border-strong)] transition-colors"
               >
                 <div className="flex items-center justify-between gap-2 mb-1">
                   <span className="text-sm font-semibold text-[var(--text-primary)] truncate">
-                    {t.name}
+                    {task.name}
                   </span>
                   <button
-                    onClick={() => handleToggle(t)}
-                    disabled={acting === t.id}
+                    onClick={() => handleToggle(task)}
+                    disabled={acting === task.id}
                     className={cn(
                       "shrink-0 text-[10px] px-2 py-0.5 rounded-full font-medium border transition-colors",
-                      t.enabled
+                      task.enabled
                         ? "bg-[var(--success-bg)] text-[var(--success)] border-[var(--success-border)] hover:bg-[var(--success)] hover:text-white"
                         : "bg-[var(--bg-elevated)] text-[var(--text-tertiary)] border-[var(--border)] hover:text-[var(--text-secondary)]",
                     )}
                   >
-                    {t.enabled ? "Active" : "Paused"}
+                    {task.enabled ? t("scheduledTask.active") : t("scheduledTask.paused")}
                   </button>
                 </div>
                 <div className="text-xs text-[var(--text-secondary)] mb-1 flex items-center gap-1.5 flex-wrap">
                   <span className="font-mono text-[var(--accent)]">
-                    {t.cron_expression}
+                    {task.cron_expression}
                   </span>
                   <span className="text-[var(--text-tertiary)]">·</span>
-                  <span>{cronToHuman(t.cron_expression)}</span>
-                  {t.model && (
+                  <span>{cronToHuman(task.cron_expression)}</span>
+                  {task.model && (
                     <>
                       <span className="text-[var(--text-tertiary)]">·</span>
-                      <span className="font-mono text-[10px]">{t.model}</span>
+                      <span className="font-mono text-[10px]">{task.model}</span>
                     </>
                   )}
                 </div>
                 <div className="text-xs text-[var(--text-tertiary)] mb-2 truncate">
-                  {t.prompt}
+                  {task.prompt}
                 </div>
-                {t.last_run_at && (
+                {task.last_run_at && (
                   <div className="text-[10px] mb-2 text-[var(--text-tertiary)] font-mono">
-                    Last: {new Date(t.last_run_at).toLocaleString()}
-                    {t.last_status === "error" && (
+                    Last: {new Date(task.last_run_at).toLocaleString()}
+                    {task.last_status === "error" && (
                       <span className="text-[var(--danger)] ml-1">(failed)</span>
                     )}
-                    {t.last_status === "success" && (
+                    {task.last_status === "success" && (
                       <span className="text-[var(--success)] ml-1">(ok)</span>
                     )}
                   </div>
@@ -338,17 +340,17 @@ export function ScheduledTaskPanel({ onClose, onSwitchSession }: Props) {
                   <Button
                     size="xs"
                     variant="primary"
-                    onClick={() => handleRun(t.id)}
-                    loading={acting === t.id}
+                    onClick={() => handleRun(task.id)}
+                    loading={acting === task.id}
                   >
                     <Play size={11} /> Run
                   </Button>
-                  {t.last_conversation_id && (
+                  {task.last_conversation_id && (
                     <Button
                       size="xs"
                       variant="ghost"
                       onClick={() => {
-                        onSwitchSession(t.last_conversation_id);
+                        onSwitchSession(task.last_conversation_id);
                         onClose();
                       }}
                     >
@@ -358,14 +360,14 @@ export function ScheduledTaskPanel({ onClose, onSwitchSession }: Props) {
                   <Button
                     size="xs"
                     variant="ghost"
-                    onClick={() => startEdit(t)}
+                    onClick={() => startEdit(task)}
                   >
                     <Pencil size={11} /> Edit
                   </Button>
                   <Button
                     size="xs"
                     variant="ghost"
-                    onClick={() => setDeleteTarget(t.id)}
+                    onClick={() => setDeleteTarget(task.id)}
                     className="text-[var(--danger)] hover:text-[var(--danger)] hover:bg-[var(--danger-bg)]"
                   >
                     <Trash2 size={11} />
@@ -380,9 +382,9 @@ export function ScheduledTaskPanel({ onClose, onSwitchSession }: Props) {
       <ConfirmDialog
         open={!!deleteTarget}
         onOpenChange={(o) => !o && setDeleteTarget(null)}
-        title="Delete this task?"
-        description="This will permanently remove the scheduled task."
-        confirmText="Delete"
+        title={t("scheduledTask.deleteConfirm")}
+        description=""
+        confirmText={t("common.delete")}
         tone="danger"
         onConfirm={() => {
           if (deleteTarget != null) handleDelete(deleteTarget);

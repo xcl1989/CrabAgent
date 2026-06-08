@@ -11,9 +11,11 @@
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.15",
     "@radix-ui/react-tooltip": "^1.2.8",
+    "i18next": "^26.3.1",
     "lucide-react": "^0.474.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "react-i18next": "^17.0.8",
     "react-markdown": "^9.0.3",
     "react-router-dom": "^7.15.1",
     "recharts": "^3.8.1",
