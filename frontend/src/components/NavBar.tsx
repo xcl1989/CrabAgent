@@ -58,11 +58,15 @@ function LanguageSwitcher() {
     try {
       const { updateSettings } = await import("../api/settings");
       await updateSettings({ language: pendingLang });
-    } catch {}
+    } catch (e) {
+      console.error("[i18n] Failed to update settings:", e);
+    }
     try {
       const { api } = await import("../api/client");
       await api.patch("/auth/user", { locale: pendingLang });
-    } catch {}
+    } catch (e) {
+      console.error("[i18n] Failed to update user locale:", e);
+    }
     setShowConfirm(false);
   };
 
