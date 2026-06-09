@@ -257,10 +257,10 @@ export default function McpServerPanel({
         {tab === "settings" ? (
           <div className="space-y-3">
             <Input
-              label="SearXNG URL (optional)"
+              label={t("mcp.searxngUrlOptional")}
               value={searxngUrl}
               onChange={(e) => setSearxngUrl(e.target.value)}
-              placeholder="http://localhost:8888"
+              placeholder={t("mcp.searxngUrlPlaceholder")}
               disabled={!settingsLoaded}
               hint="If set, web_search uses SearXNG first. Otherwise DuckDuckGo is used (no API key needed)."
             />
@@ -302,10 +302,10 @@ export default function McpServerPanel({
               <EmptyState
                 icon={<Plug size={28} />}
                 title={t("mcp.noServers")}
-                description="Add an MCP server to connect external tools."
+                description={t("mcp.addServerDesc")}
                 action={
                   <Button variant="brand" size="sm" onClick={() => setMode("add")}>
-                    <Plus size={14} /> Add Server
+                    <Plus size={14} /> {t("mcp.addServer")}
                   </Button>
                 }
               />
@@ -407,7 +407,7 @@ export default function McpServerPanel({
                     setMode("add");
                   }}
                 >
-                  <Plus size={14} /> Add MCP Server
+                  <Plus size={14} /> {t("mcp.addMcpServer")}
                 </Button>
               </>
             )}
@@ -418,7 +418,7 @@ export default function McpServerPanel({
               label={t("mcp.name")}
               value={formName}
               onChange={(e) => setFormName(e.target.value)}
-              placeholder="my-mcp-server"
+              placeholder={t("mcp.namePlaceholder")}
             />
             <Input
               label={t("mcp.displayName")}
@@ -454,10 +454,10 @@ export default function McpServerPanel({
                   label={t("mcp.command")}
                   value={formCommand}
                   onChange={(e) => setFormCommand(e.target.value)}
-                  placeholder="npx / uvx / python"
+                  placeholder={t("mcp.commandPlaceholder")}
                 />
                 <Input
-                  label="Args (JSON array)"
+                  label={t("mcp.argsLabel")}
                   value={formArgs}
                   onChange={(e) => setFormArgs(e.target.value)}
                   placeholder='["-y", "@modelcontextprotocol/server-filesystem", "/path"]'
@@ -468,7 +468,7 @@ export default function McpServerPanel({
                 label={t("mcp.url")}
                 value={formUrl}
                 onChange={(e) => setFormUrl(e.target.value)}
-                placeholder="https://example.com/mcp"
+                placeholder={t("mcp.urlPlaceholder")}
               />
             )}
 

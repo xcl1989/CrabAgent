@@ -196,12 +196,12 @@ export function ScheduledTaskPanel({ onClose, onSwitchSession }: Props) {
                 setShowForm(true);
               }}
             >
-              <Plus size={14} /> New Task
+              <Plus size={14} /> {t("scheduledTask.newTask")}
             </Button>
           ) : (
             <>
               <Button variant="ghost" onClick={resetForm}>
-                Cancel
+                {t("common.cancel")}
               </Button>
               <Button variant="brand" loading={loading} onClick={handleSubmit}>
                 {editingId ? t("scheduledTask.saveChanges") : t("scheduledTask.createTask")}
@@ -222,7 +222,7 @@ export function ScheduledTaskPanel({ onClose, onSwitchSession }: Props) {
               label={t("scheduledTask.taskName")}
               value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
-              placeholder="e.g. Morning news summary"
+              placeholder={t("scheduledTask.namePlaceholder2")}
             />
             <Textarea
               label={t("scheduledTask.taskQuestion")}
@@ -238,7 +238,7 @@ export function ScheduledTaskPanel({ onClose, onSwitchSession }: Props) {
                 onChange={(e) =>
                   setForm({ ...form, cron_expression: e.target.value })
                 }
-                placeholder="0 9 * * *"
+                placeholder={t("scheduledTask.cronPlaceholder2")}
                 hint={`→ ${cronToHuman(form.cron_expression)}`}
               />
               <div className="flex flex-wrap gap-1 mt-2">
@@ -281,7 +281,7 @@ export function ScheduledTaskPanel({ onClose, onSwitchSession }: Props) {
                   setShowForm(true);
                 }}
               >
-                <Plus size={14} /> New Task
+                <Plus size={14} /> {t("scheduledTask.newTask")}
               </Button>
             }
           />

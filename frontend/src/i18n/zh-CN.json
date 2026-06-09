@@ -3,6 +3,7 @@
     "chat": "对话",
     "agents": "Agent 团队",
     "memory": "记忆",
+    "settings": "设置",
     "signOut": "确定退出登录？",
     "signOutDesc": "退出后需要重新登录才能继续使用。",
     "signOutBtn": "退出登录",
@@ -41,7 +42,7 @@
     "passwordPlaceholder": "至少 6 个字符",
     "createAccount": "创建账号",
     "defaultHint": "默认：admin / xcl1989",
-    "version": "v0.9.7 · 本地优先的 AI Agent 平台"
+    "version": "v0.9.8 · 本地优先的 AI Agent 平台"
   },
   "chat": {
     "placeholder": "输入消息…",
@@ -78,7 +79,10 @@
     "brainstormLabel": "头脑风暴",
     "brainstormPrompt": "为以下主题头脑风暴：",
     "writeDocLabel": "写文档",
-    "writeDocPrompt": "为以下内容编写文档："
+    "writeDocPrompt": "为以下内容编写文档：",
+    "replayingBranch": "回放分支",
+    "welcomeSubtitle": "开始对话或选择一个快速模板",
+    "startNewConversation": "开始新对话"
   },
   "agents": {
     "title": "Agent 团队",
@@ -100,7 +104,8 @@
     "allFieldsRequired": "名称、显示名称、角色和目标为必填项",
     "permissionAuto": "自动",
     "permissionConfirm": "需确认",
-    "permissionDeny": "拒绝"
+    "permissionDeny": "拒绝",
+    "loading": "加载中…"
   },
   "memory": {
     "title": "记忆",
@@ -132,9 +137,6 @@
     "keyLabel": "键名：",
     "addMemory": "添加记忆",
     "create": "创建",
-    "category": "分类",
-    "key": "键名",
-    "content": "内容",
     "contentPlaceholder": "输入记忆内容…",
     "keyPlaceholder": "例如：lesson:my_tip",
     "categoryPlaceholder": "例如：tech_stack、architecture",
@@ -173,7 +175,10 @@
     "taskUpdated": "任务更新成功",
     "taskDeleted": "任务已删除",
     "namePlaceholder": "每日项目检查",
-    "questionPlaceholder": "查询项目状态并汇总"
+    "questionPlaceholder": "查询项目状态并汇总",
+    "namePlaceholder2": "例如：每日新闻摘要",
+    "cronPlaceholder2": "0 9 * * *",
+    "newTask": "新任务"
   },
   "mcp": {
     "title": "MCP 服务器",
@@ -212,9 +217,12 @@
     "transportStdio": "Stdio（本地）",
     "transportHttp": "HTTP（远程）",
     "serverAdded": "MCP 服务器已添加",
-    "environment": "环境变量",
-    "headers": "请求头",
-    "transport": "传输方式"
+    "searxngUrlOptional": "SearXNG URL（可选）",
+    "searxngUrlPlaceholder": "http://localhost:8888",
+    "namePlaceholder": "my-mcp-server",
+    "commandPlaceholder": "npx / uvx / python",
+    "argsLabel": "参数（JSON 数组）",
+    "urlPlaceholder": "https://example.com/mcp"
   },
   "provider": {
     "title": "LLM 提供商",
@@ -238,7 +246,18 @@
     "providerDeleted": "提供商已删除",
     "testConnection": "测试",
     "testSuccess": "连接成功",
-    "testFailed": "连接失败"
+    "testFailed": "连接失败",
+    "defaultUpdated": "默认提供商已更新",
+    "setDefaultFailed": "设置默认失败",
+    "deleteFailed": "删除提供商失败",
+    "defaultLabel": "默认",
+    "namePlaceholder2": "我的提供商",
+    "apiKeyPlaceholder2": "sk-…",
+    "noProviders": "暂无提供商",
+    "addProviderDesc": "添加 LLM 提供商以开始使用 CrabAgent。",
+    "manageDesc": "管理你的 LLM 提供商凭据",
+    "configureDesc": "配置新的提供商连接",
+    "deleteProviderDesc": "这将永久删除该提供商及其加密的 API Key。"
   },
   "session": {
     "newChat": "新对话",
@@ -250,7 +269,9 @@
     "today": "今天",
     "yesterday": "昨天",
     "thisWeek": "本周",
-    "older": "更早"
+    "older": "更早",
+    "collapseSidebar": "收起侧边栏",
+    "expandSidebar": "展开侧边栏"
   },
   "molt": {
     "title": "快照",
@@ -327,12 +348,15 @@
     "read": "已读",
     "noUnread": "暂无未读通知",
     "noRead": "暂无已读通知",
-    "markAll": "全部已读"
+    "markAll": "全部已读",
+    "emailAction": "请帮我处理这封邮件："
   },
   "chatPanel": {
     "toolRequiresPermission": "{{tool}} 需要授权",
     "typeAnswer": "输入你的回答…",
-    "branchFromHere": "从此处分支"
+    "branchFromHere": "从此处分支",
+    "reconnecting": "重新连接中…",
+    "thinking": "思考中…"
   },
   "delegate": {
     "title": "委派给团队",
@@ -410,7 +434,8 @@
   "fileBrowser": {
     "refresh": "刷新",
     "close": "关闭",
-    "readFailed": "读取文件失败"
+    "readFailed": "读取文件失败",
+    "files": "文件"
   },
   "modelSelector": {
     "searchPlaceholder": "搜索模型…"
@@ -421,7 +446,16 @@
     "backstory": "背景",
     "backstoryPlaceholder": "可选的个性化和专业背景描述",
     "modelOverride": "模型覆盖",
-    "modelPlaceholder": "留空则使用默认模型"
+    "modelPlaceholder": "留空则使用默认模型",
+    "agentId": "Agent ID",
+    "agentIdPlaceholder": "例如：designer、translator",
+    "displayName": "显示名称",
+    "icon": "图标",
+    "toolPermissions": "工具权限",
+    "defaultOverride": "默认值（点击可覆盖）",
+    "cancel": "取消",
+    "save": "保存",
+    "create": "创建"
   },
   "chatPage": {
     "model": "模型",
@@ -441,23 +475,6 @@
     "stored": "会话语言：{{locale}}",
     "rebuild": "切换语言并发送",
     "keep": "保持原样发送"
-  },
-  "agentForm": {
-    "role": "角色",
-    "goal": "目标",
-    "backstory": "背景",
-    "backstoryPlaceholder": "可选的个性化和专业背景描述",
-    "modelOverride": "模型覆盖",
-    "modelPlaceholder": "留空则使用默认模型",
-    "agentId": "Agent ID",
-    "agentIdPlaceholder": "例如：designer、translator",
-    "displayName": "显示名称",
-    "icon": "图标",
-    "toolPermissions": "工具权限",
-    "defaultOverride": "默认值（点击可覆盖）",
-    "cancel": "取消",
-    "save": "保存",
-    "create": "创建"
   },
   "agentsPage": {
     "title": "Agent 团队",
@@ -493,5 +510,88 @@
     "defaultPermissionsDesc": "当 Agent 没有自己的覆盖设置时，将应用这些权限。",
     "deleteConfirm": "删除 Agent「{{name}}」？",
     "deleteDesc": "这将永久删除该 Agent 配置及其学习数据。"
+  },
+  "quickAction": {
+    "digest": "摘要",
+    "remind": "提醒",
+    "inbox": "收件箱",
+    "digestPrompt": "生成并发送我的每日摘要",
+    "remindPrompt": "检查我的任务，对即将到期的任务发送提醒",
+    "inboxPrompt": "检查我的新邮件",
+    "title": "快捷操作"
+  },
+  "codeBlock": {
+    "copy": "复制代码",
+    "copied": "已复制"
+  },
+  "modal": {
+    "close": "关闭"
+  },
+  "email": {
+    "title": "邮箱配置",
+    "incoming": "收信 (IMAP)",
+    "outgoing": "发信 (SMTP)",
+    "options": "选项",
+    "enableIntegration": "启用邮件集成",
+    "checkInterval": "检查间隔（秒）",
+    "testConnection": "测试连接",
+    "testing": "测试中…",
+    "saving": "保存中…",
+    "phImapHost": "imap.example.com",
+    "phEmail": "邮箱地址",
+    "phPassword": "密码/应用专用密码",
+    "phSmtpHost": "smtp.example.com",
+    "saved": "邮箱配置已保存",
+    "failedToSave": "保存失败",
+    "connectionFailed": "连接测试失败"
+  },
+  "task": {
+    "title": "任务",
+    "newTask": "新建任务",
+    "active": "进行中",
+    "done": "已完成",
+    "all": "全部",
+    "noTasks": "暂无任务",
+    "assignee": "负责人",
+    "deadline": "截止日期",
+    "project": "项目",
+    "priority": "优先级",
+    "low": "低",
+    "medium": "中",
+    "high": "高",
+    "description": "描述",
+    "titlePlaceholder": "任务标题",
+    "descriptionPlaceholder": "任务描述",
+    "assigneePlaceholder": "负责人",
+    "deadlinePlaceholder": "截止日期",
+    "projectPlaceholder": "项目",
+    "markDone": "标记完成",
+    "editTask": "编辑",
+    "deleteTask": "删除",
+    "overdue": "已逾期",
+    "dueSoon": "即将到期",
+    "created": "任务已创建",
+    "updated": "任务已更新",
+    "deleted": "任务已删除",
+    "operationFailed": "操作失败",
+    "deleteConfirm": "删除此任务？"
+  },
+  "settingsPage": {
+    "title": "设置",
+    "defaultModel": "默认 LLM 模型",
+    "defaultModelDesc": "邮件处理、定时任务等自动化流程未指定模型时使用的默认模型。",
+    "defaultModelPlaceholder": "gpt-4o",
+    "searxngUrl": "SearXNG 搜索地址",
+    "searxngUrlDesc": "自托管搜索引擎。留空则使用备选搜索方案。",
+    "searxngUrlPlaceholder": "http://localhost:8888",
+    "testSearxng": "测试连接",
+    "testSuccess": "连接成功（{{count}} 条结果）",
+    "testFailed": "连接失败：{{error}}",
+    "saving": "保存中…",
+    "testing": "测试中…",
+    "saved": "设置已保存",
+    "save": "保存设置",
+    "sectionGeneral": "通用",
+    "sectionSearch": "搜索引擎"
   }
 }

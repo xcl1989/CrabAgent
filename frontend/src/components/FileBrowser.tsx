@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { PanelRightClose, X, RefreshCw, ChevronDown, ChevronRight } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import i18n from "../i18n";
 import { FileEntry, FileContent } from "../api/files";
 import { getTree, readFile, isImageFile, getImageUrl } from "../api/files";
@@ -107,6 +108,7 @@ function FilePreview({
   fileError: string | null;
   absolute: boolean;
 }) {
+  const { t } = useTranslation();
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   if (!selectedPath) return null;
 
@@ -131,7 +133,7 @@ function FilePreview({
               {fileContent}
             </pre>
           ) : (
-            <div className="text-xs text-[var(--text-secondary)]">Loading...</div>
+            <div className="text-xs text-[var(--text-secondary)]">{t("common.loading")}</div>
           )}
         </div>
       </div>
@@ -162,6 +164,7 @@ export default function FileBrowser({
   sessionId,
   workspace,
 }: Props) {
+  const { t } = useTranslation();
   const tree = useFileTree(workspace);
 
   if (collapsed) return null;
@@ -172,7 +175,7 @@ export default function FileBrowser({
       <div className="hidden md:flex flex-col border-l border-[var(--border)] bg-[var(--bg-secondary)] w-80 shrink-0 overflow-y-auto">
         {/* Header */}
         <div className="p-2 flex items-center justify-between border-b border-[var(--border)]">
-          <span className="text-xs font-semibold text-[var(--text-primary)]">Files</span>
+          <span className="text-xs font-semibold text-[var(--text-primary)]">{t("fileBrowser.files")}</span>
           <div className="flex items-center gap-0.5">
             <button
               onClick={tree.refresh}
@@ -194,7 +197,7 @@ export default function FileBrowser({
         {/* Files */}
         <div className="overflow-y-auto" style={{ flex: "1 1 auto" }}>
           {tree.loading ? (
-            <div className="text-xs p-3 text-[var(--text-secondary)]">Loading...</div>
+            <div className="text-xs p-3 text-[var(--text-secondary)]">{t("common.loading")}</div>
           ) : (
             <FileTree
               entries={tree.entries}
@@ -232,7 +235,7 @@ export default function FileBrowser({
         />
         <div className="fixed bottom-0 left-0 right-0 z-50 bg-[var(--bg-secondary)] border-t border-[var(--border)] rounded-t-2xl shadow-[var(--shadow-lg)] animate-slide-up max-h-[75vh] flex flex-col">
           <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border-subtle)]">
-            <span className="text-sm font-semibold text-[var(--text-primary)]">Files</span>
+            <span className="text-sm font-semibold text-[var(--text-primary)]">{t("fileBrowser.files")}</span>
             <div className="flex items-center gap-1">
               <button
                 onClick={tree.refresh}
@@ -252,7 +255,7 @@ export default function FileBrowser({
           <div className="flex-1 overflow-y-auto">
             {/* Mobile: simple layout without collapsible */}
             {tree.loading ? (
-              <div className="text-xs p-3 text-[var(--text-secondary)]">Loading...</div>
+              <div className="text-xs p-3 text-[var(--text-secondary)]">{t("common.loading")}</div>
             ) : (
               <FileTree
                 entries={tree.entries}

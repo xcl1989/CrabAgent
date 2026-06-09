@@ -4,10 +4,11 @@ import LoginPage from "./pages/LoginPage";
 import ChatPage from "./pages/ChatPage";
 import AgentsPage from "./pages/AgentsPage";
 import MemoryPage from "./pages/MemoryPage";
+import SettingsPage from "./pages/SettingsPage";
 import { NavBar } from "./components/NavBar";
 import { cn } from "./lib/cn";
 
-export type PageId = "chat" | "agents" | "memory";
+export type PageId = "chat" | "agents" | "memory" | "settings";
 
 function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
   const [page, setPage] = useState<PageId>("chat");
@@ -25,6 +26,9 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
         </div>
         <div className={cn("absolute inset-0", page !== "memory" && "hidden")}>
           <MemoryPage />
+        </div>
+        <div className={cn("absolute inset-0", page !== "settings" && "hidden")}>
+          <SettingsPage />
         </div>
       </div>
     </div>

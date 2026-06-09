@@ -34,6 +34,8 @@ import FileBrowser from "../components/FileBrowser";
 import TodoWidget from "../components/TodoWidget";
 import NotificationBell from "../components/NotificationBell";
 import { ScheduledTaskPanel } from "../components/ScheduledTaskPanel";
+import TaskPanel from "../components/TaskPanel";
+import EmailPanel from "../components/EmailPanel";
 import { TaskBoard } from "../components/TaskBoard";
 import { AgentBar } from "../components/AgentBar";
 import { DelegateModal } from "../components/DelegateModal";
@@ -117,6 +119,8 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
   const [showProviders, setShowProviders] = useState(false);
   const [selectedProvider, setSelectedProvider] = useState<string | null>(null);
   const [showMcpServers, setShowMcpServers] = useState(false);
+  const [showTasks, setShowTasks] = useState(false);
+  const [showEmail, setShowEmail] = useState(false);
 
   useEffect(() => {
     if (!selectedProvider && selectedModel && providerModels.length > 0) {
@@ -428,7 +432,24 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
   };
 
   const handleAgentBarClick = (agent: AgentProfileType) => {
-    document.querySelector<HTMLTextAreaElement>('[placeholder="Type a message…"]')?.focus();
+    const textarea = document.querySelector<HTMLTextAreaElement>("textarea");
+    if (!textarea) return;
+    const mention = `@${agent.name} `;
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const value = textarea.value;
+    // Insert @agent at cursor position (or prepend if cursor is at start)
+    const newValue = value.substring(0, start) + mention + value.substring(end);
+    // Use React's internal setter to update state
+    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+      window.HTMLTextAreaElement.prototype, "value"
+    )?.set;
+    nativeInputValueSetter?.call(textarea, newValue);
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    // Move cursor after the inserted mention
+    const newPos = start + mention.length;
+    textarea.setSelectionRange(newPos, newPos);
+    textarea.focus();
   };
 
   const handleExportReport = async () => {
@@ -447,6 +468,56 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
     URL.revokeObjectURL(url);
   };
 
+  const quickActionPrompts: Record<string, string> = {
+    digest: t("quickAction.digestPrompt"),
+    remind: t("quickAction.remindPrompt"),
+    inbox: t("quickAction.inboxPrompt"),
+  };
+
+  const handleQuickAction = useCallback(
+    async (action: "digest" | "remind" | "inbox") => {
+      const promptText = quickActionPrompts[action];
+      if (!promptText) return;
+      // Ensure we have an active session
+      let sid = activeSession?.session_id;
+      if (!sid) {
+        const model = await newSession(selectedModel, models);
+        setSelectedModel(model);
+        sid = ""; // newSession sets activeSession via state; next render will have it
+      }
+      if (!activeSession && !sid) return;
+      const targetSid = activeSession?.session_id || sid;
+      if (!targetSid) return;
+      setMessages((prev) => [
+        ...prev,
+        { id: `u-${Date.now()}`, role: "user", content: promptText },
+      ]);
+      setSending(true);
+      try {
+        await sessionsApi.sendPrompt(targetSid, promptText, selectedModel, undefined, undefined, undefined, selectedProvider ?? undefined);
+      } catch {
+        setSending(false);
+      }
+    },
+    [activeSession, selectedModel, models, selectedProvider, newSession, setMessages, setSending, setSelectedModel, quickActionPrompts],
+  );
+
+  const handleNotificationAction = useCallback(
+    (n: { title: string; body: string }) => {
+      const textarea = document.querySelector<HTMLTextAreaElement>("textarea");
+      if (textarea) {
+        const text = `${t("notification.emailAction")}\n\n${n.body}`;
+        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+          window.HTMLTextAreaElement.prototype, "value"
+        )?.set;
+        nativeInputValueSetter?.call(textarea, text);
+        textarea.dispatchEvent(new Event("input", { bubbles: true }));
+        textarea.focus();
+      }
+    },
+    [],
+  );
+
   const completedTasks = taskBoardTasks.filter((t) => t.status === "done");
 
   return (
@@ -459,7 +530,10 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
         onDelete={handleDeleteSession}
         onOpenProviders={() => setShowProviders(true)}
         onOpenMcpServers={() => setShowMcpServers(true)}
+        onOpenTasks={() => setShowTasks(true)}
+        onOpenEmail={() => setShowEmail(true)}
         onOpenScheduledTasks={() => setShowScheduledTasks(true)}
+        onQuickAction={handleQuickAction}
         mobileOpen={mobileSidebarOpen}
         onMobileClose={() => setMobileSidebarOpen(false)}
       />
@@ -489,7 +563,7 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
               />
             )}
           </div>
-          <NotificationBell onSwitchSession={onSelectSessionById} />
+          <NotificationBell onSwitchSession={onSelectSessionById} onNotificationAction={handleNotificationAction} />
           {completedTasks.length > 0 && (
             <Button
               size="icon"
@@ -519,7 +593,7 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-xs text-[var(--success)] flex items-center gap-1.5">
                     <Sparkles size={11} className="animate-pulse" />
-                    Replaying branch
+                    {t("chat.replayingBranch")}
                   </span>
                   <span className="text-xs text-[var(--text-tertiary)] font-mono">
                     {replayProgress.current} / {replayProgress.total}
@@ -751,7 +825,7 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
                 {t("chatPage.welcome")}
               </h2>
               <p className="text-sm text-[var(--text-tertiary)] mb-6">
-                Start a conversation or pick a quick template below
+                {t("chat.welcomeSubtitle")}
               </p>
               <div className="grid grid-cols-2 gap-2 mb-6">
                 {STARTER_PROMPTS.map((p, i) => (
@@ -777,7 +851,7 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
                 ))}
               </div>
               <Button variant="brand" onClick={onNewSession}>
-                <Sparkles size={14} /> Start New Conversation
+                <Sparkles size={14} /> {t("chat.startNewConversation")}
               </Button>
             </div>
           </div>
@@ -854,6 +928,19 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
         <ScheduledTaskPanel
           onClose={() => setShowScheduledTasks(false)}
           onSwitchSession={onSelectSessionById}
+        />
+      )}
+
+      {showTasks && (
+        <TaskPanel
+          onClose={() => setShowTasks(false)}
+          onSwitchSession={onSelectSessionById}
+        />
+      )}
+
+      {showEmail && (
+        <EmailPanel
+          onClose={() => setShowEmail(false)}
         />
       )}
 

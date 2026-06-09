@@ -44,7 +44,7 @@ export default function AgentGrowthChart({
   if (loading) {
     return (
       <div className="flex items-center justify-center h-48">
-        <span className="text-sm text-[var(--text-tertiary)]">Loading...</span>
+        <span className="text-sm text-[var(--text-tertiary)]">{t("agents.loading")}</span>
       </div>
     );
   }

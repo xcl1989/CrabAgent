@@ -378,6 +378,18 @@ async def prompt_async(
 
     register_todo_tools(context.tool_registry)
 
+    from crabagent.core.task.tools import register_task_tools
+
+    register_task_tools(context.tool_registry)
+
+    from crabagent.core.meeting.tools import register_meeting_tools
+
+    register_meeting_tools(context.tool_registry)
+
+    from crabagent.core.mail.tools import register_mail_tools
+
+    register_mail_tools(context.tool_registry)
+
     from crabagent.core.tool_loader import discover_and_register_tools
 
     discover_and_register_tools(context.tool_registry, workspace)
@@ -417,7 +429,19 @@ async def prompt_async(
             if agent_def.get("model"):
                 context.model = agent_def["model"]
 
-    # Add agent_switch message to context (persisted to DB above if agent changed)
+    # Add history messages first (any persisted agent_switch messages are included
+    # in their correct positions via message_to_dict which converts them to user role)
+    for msg_record in history_msgs:
+        if msg_record.role == "stats":
+            continue
+        context.messages.append(message_to_dict(msg_record))
+
+    # Restore accumulated token count for compression threshold check
+    if conv.tokens:
+        context.total_tokens = conv.tokens
+
+    # Add agent_switch message AFTER history, RIGHT BEFORE the user message
+    # so the LLM sees the role switch as the most recent context before responding
     if agent_changed:
         if effective_agent == "default":
             default_profile = await get_agent("__default__")
@@ -440,11 +464,6 @@ async def prompt_async(
                 context.messages.append({"role": "user", "content": lessons_block.strip(), "agent": effective_agent})
         except Exception:
             pass
-
-    for msg_record in history_msgs:
-        if msg_record.role == "stats":
-            continue
-        context.messages.append(message_to_dict(msg_record))
 
     persistence = PersistenceListener(conversation_id=conv.id, branch_id=active_branch)
     persistence.sequence = user_msg_seq
@@ -750,6 +769,7 @@ async def prompt_async(
                     await conv_svc.update_conversation(
                         update_db, session_id,
                         model=resolved_model, provider=resolved_provider,
+                        tokens=context.total_tokens,
                     )
             except Exception:
                 logger.exception("Failed to update conversation")

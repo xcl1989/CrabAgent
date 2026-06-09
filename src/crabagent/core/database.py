@@ -125,6 +125,44 @@ class McpServer(Base):
     updated_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
 
+class Task(Base):
+    __tablename__ = "tasks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False, default=1, index=True)
+    title: Mapped[str] = mapped_column(String(500), nullable=False)
+    description: Mapped[str] = mapped_column(Text, default="")
+    assignee: Mapped[str] = mapped_column(String(100), default="")
+    deadline: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
+    source: Mapped[str] = mapped_column(String(50), default="manual")
+    source_ref: Mapped[str] = mapped_column(String(200), default="")
+    source_session: Mapped[str] = mapped_column(String(32), default="")
+    project: Mapped[str] = mapped_column(String(200), default="")
+    status: Mapped[str] = mapped_column(String(20), default="pending")
+    priority: Mapped[str] = mapped_column(String(10), default="medium")
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class EmailConfig(Base):
+    __tablename__ = "email_configs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False, unique=True, default=1)
+    imap_host: Mapped[str] = mapped_column(String(200), default="")
+    imap_port: Mapped[int] = mapped_column(Integer, default=993)
+    imap_user: Mapped[str] = mapped_column(String(200), default="")
+    imap_pass: Mapped[str] = mapped_column(Text, default="")
+    smtp_host: Mapped[str] = mapped_column(String(200), default="")
+    smtp_port: Mapped[int] = mapped_column(Integer, default=587)
+    smtp_user: Mapped[str] = mapped_column(String(200), default="")
+    smtp_pass: Mapped[str] = mapped_column(Text, default="")
+    check_interval: Mapped[int] = mapped_column(Integer, default=300)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
 class AppSetting(Base):
     __tablename__ = "app_settings"
 
@@ -360,6 +398,12 @@ async def init_db() -> None:
         if "prompt_locale" not in columns:
             await conn.execute(text("ALTER TABLE conversations ADD COLUMN prompt_locale VARCHAR(10) DEFAULT ''"))
 
+        result = await conn.execute(text("PRAGMA table_info(email_configs)"))
+        columns = [row[1] for row in result.fetchall()]
+        if "imap_host" not in columns:
+            # email_configs table created by create_all
+            pass
+
         result = await conn.execute(text("PRAGMA table_info(messages)"))
         columns = [row[1] for row in result.fetchall()]
         if "parent_id" not in columns:
@@ -389,6 +433,14 @@ async def init_db() -> None:
             await conn.execute(text("ALTER TABLE agent_profiles ADD COLUMN tools TEXT DEFAULT ''"))
         if "tool_permissions" not in columns:
             await conn.execute(text("ALTER TABLE agent_profiles ADD COLUMN tool_permissions TEXT DEFAULT '{}'"))
+
+        result = await conn.execute(text("PRAGMA table_info(tasks)"))
+        columns = [row[1] for row in result.fetchall()]
+        if "title" not in columns:
+            # tasks 表由 create_all 自动创建，无需 ALTER TABLE
+            pass
+        if "source_session" not in columns:
+            await conn.execute(text("ALTER TABLE tasks ADD COLUMN source_session VARCHAR(32) DEFAULT ''"))
 
         result = await conn.execute(text("PRAGMA table_info(agent_memory)"))
         columns = [row[1] for row in result.fetchall()]

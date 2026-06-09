@@ -87,8 +87,12 @@ pytest tests/test_sandbox.py  # 单个文件
 | `src/crabagent/core/molt/` | 快照/回滚系统（差异存储在 `.crabagent/molts/`） |
 | `src/crabagent/core/tool_loader.py` | 从 `.crabagent/tools/*.py` 发现用户工具 |
 | `src/crabagent/serve/api/` | FastAPI 路由——prompt、session、message、agent、provider、MCP 等 |
+| `src/crabagent/serve/api/settings.py` | 设置 API——通用键值对存储（`AppSetting` 模型），支持 GET/PUT |
 | `src/crabagent/serve/services/` | 业务逻辑——认证、会话、消息、持久化 |
+| `src/crabagent/serve/scheduler.py` | 调度器——定时任务执行 + 邮件轮询，统一使用 `settings.default_model` |
 | `src/crabagent/skills/` | 内置技能（如 `python-debugger/`） |
+| `frontend/src/pages/SettingsPage.tsx` | 前端设置页面——配置默认模型、SearXNG等 |
+| `frontend/src/components/NavBar.tsx` | 导航栏——包含"设置"标签页 |
 
 ### 工具注册流程
 1. 内置工具通过 `tools/registry.py` 中的装饰器在 `import` 时自注册
@@ -126,6 +130,8 @@ pytest tests/test_sandbox.py  # 单个文件
 - `.env` 文件由 pydantic-settings 自动加载
 - API 密钥使用 Fernet 静态加密（密钥自动生成在 `~/.crabagent/encryption_key`）
 - 加密密钥迁移在 `init_db()` 中通过 `migrate_plaintext_keys()` 执行
+- **`CRAB_DEFAULT_MODEL`**（默认 `gpt-4o`）：控制邮件处理（邮件轮询、回复草稿生成）和定时任务执行的默认 LLM 模型
+- 运行时设置（`default_model`、`searxng_url` 等）可通过前端设置页面或 `/api/settings` API 修改，存储在数据库 `app_settings` 表中
 
 ## 通用规则
 - Provider 配置是存储在 `crabagent.db` 中的用户数据——未经用户明确批准不得删除数据库
@@ -133,3 +139,7 @@ pytest tests/test_sandbox.py  # 单个文件
 - 预设 4 个默认 Agent 配置：researcher、analyst、coder、writer
 - 要求 Python >=3.12
 - 有疑问时，先询问用户再执行任何破坏性操作
+
+## 语言要求
+请使用简体中文回复。所有对用户的回复、总结、说明都应使用简体中文。
+代码注释和文件内容保持原文，文件路径、命令等技术术语保持原文。

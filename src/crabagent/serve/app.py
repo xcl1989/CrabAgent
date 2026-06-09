@@ -60,8 +60,8 @@ async def lifespan(app: FastAPI):
     try:
         await get_scheduler().start()
         logger.info("Scheduler started")
-    except Exception:
-        logger.warning("Failed to start scheduler")
+    except Exception as e:
+        logger.exception("Failed to start scheduler: %s", e)
 
     yield
 
@@ -78,7 +78,7 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     app = FastAPI(
         title="CrabAgent",
-        version="0.9.7",
+        version="0.9.9",
         lifespan=lifespan,
     )
     app.state.event_queues = {}
@@ -116,7 +116,9 @@ def create_app() -> FastAPI:
     from crabagent.serve.api.scheduled_task import router as scheduled_task_router
     from crabagent.serve.api.session import router as session_router
     from crabagent.serve.api.settings import router as settings_router
+    from crabagent.serve.api.task import router as task_router
     from crabagent.serve.api.todo import router as todo_router
+    from crabagent.serve.api.email import router as email_router
 
     app.include_router(agent_router, prefix="/api")
     app.include_router(auth_router, prefix="/api")
@@ -137,10 +139,12 @@ def create_app() -> FastAPI:
     app.include_router(todo_router, prefix="/api")
     app.include_router(notification_router, prefix="/api")
     app.include_router(scheduled_task_router, prefix="/api")
+    app.include_router(task_router, prefix="/api")
+    app.include_router(email_router, prefix="/api")
 
     @app.get("/health")
     async def health():
-        return {"status": "ok", "version": "0.9.7"}
+        return {"status": "ok", "version": "0.9.9"}
 
     _mount_spa(app)
 

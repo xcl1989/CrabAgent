@@ -11,6 +11,7 @@ interface Props {
   onChange: (modelId: string, providerName: string) => void;
   disabled?: boolean;
   className?: string;
+  dropdownUpward?: boolean;
 }
 
 export default function ModelSelector({
@@ -20,6 +21,7 @@ export default function ModelSelector({
   onChange,
   disabled,
   className,
+  dropdownUpward = true,
 }: Props) {
   const { t } = useTranslation();
   const selectedProviderRef = useRef<string | null>(null);
@@ -225,10 +227,11 @@ export default function ModelSelector({
       {open && (
         <div
           className={cn(
-            "absolute bottom-full mb-1.5 right-0 z-50",
+            "absolute z-50",
             "min-w-[260px] max-w-[340px]",
             "rounded-lg border border-[var(--border)] bg-[var(--bg-secondary)]",
-            "shadow-[var(--shadow-lg)] flex flex-col"
+            "shadow-[var(--shadow-lg)] flex flex-col",
+            dropdownUpward ? "bottom-full mb-1.5 right-0" : "top-full mt-1.5 left-0"
           )}
         >
           <div className="p-1.5 border-b border-[var(--border)]">

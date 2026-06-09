@@ -345,7 +345,7 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(
         {!connected && messages.length > 0 && (
           <div className="flex items-center justify-center gap-2 mb-3 text-xs text-[var(--warning)] bg-[var(--warning-bg)] border border-[var(--warning-border)] rounded-lg px-3 py-1.5">
             <Loader2 size={12} className="animate-spin" />
-            <span>Reconnecting…</span>
+            <span>{t("chatPanel.reconnecting")}</span>
           </div>
         )}
 
@@ -418,7 +418,7 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(
               >
                 <summary className="cursor-pointer py-1.5 px-3 text-xs rounded-lg select-none list-none bg-[var(--bg-secondary)] border border-[var(--border)] hover:border-[var(--border-strong)] transition-colors text-[var(--text-secondary)] flex items-center gap-2">
                   <span className="text-[var(--accent-2)]">💭</span>
-                  <span>Thinking…</span>
+                  <span>{t("chatPanel.thinking")}</span>
                 </summary>
                 <div className="mt-1.5 p-3 rounded-lg text-xs leading-relaxed bg-[var(--bg-secondary)] border border-[var(--border)] border-l-[3px] border-l-[var(--accent-2)]">
                   <pre className="whitespace-pre-wrap font-mono text-[12px] text-[var(--text-secondary)] m-0 bg-transparent! p-0! border-0!">

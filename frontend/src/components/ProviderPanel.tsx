@@ -60,10 +60,10 @@ export default function ProviderPanel({
   const handleSetDefault = async (name: string) => {
     try {
       await providersApi.updateProvider(name, { is_default: true });
-      toast.success("Default provider updated");
+      toast.success(t("provider.defaultUpdated"));
       onRefresh();
     } catch {
-      toast.error("Failed to set default");
+      toast.error(t("provider.setDefaultFailed"));
     }
   };
 
@@ -73,7 +73,7 @@ export default function ProviderPanel({
       toast.success(t("provider.providerDeleted"));
       onRefresh();
     } catch {
-      toast.error("Failed to delete provider");
+      toast.error(t("provider.deleteFailed"));
     } finally {
       setDeleteTarget(null);
     }
@@ -88,26 +88,26 @@ export default function ProviderPanel({
       <Modal
         open={true}
         onOpenChange={(o) => !o && onClose()}
-        title={mode === "list" ? "Providers" : "Add Provider"}
+        title={mode === "list" ? t("provider.title") : t("provider.addProvider")}
         description={
           mode === "list"
-            ? "Manage your LLM provider credentials"
-            : "Configure a new provider connection"
+            ? t("provider.manageDesc")
+            : t("provider.configureDesc")
         }
         size="md"
         footer={
           mode === "add" ? (
             <>
               <Button variant="ghost" onClick={() => setMode("list")}>
-                Cancel
+                {t("common.cancel")}
               </Button>
               <Button variant="brand" loading={busy} onClick={handleAdd}>
-                Add Provider
+                {t("provider.addProvider")}
               </Button>
             </>
           ) : (
             <Button variant="brand" onClick={() => setMode("add")}>
-              <Plus size={14} /> Add Provider
+              <Plus size={14} /> {t("provider.addProvider")}
             </Button>
           )
         }
@@ -117,10 +117,10 @@ export default function ProviderPanel({
             {providers.length === 0 ? (
               <EmptyState
                 title={t("provider.noProviders")}
-                description="Add an LLM provider to start using CrabAgent."
+                description={t("provider.addProviderDesc")}
                 action={
                   <Button variant="brand" size="sm" onClick={() => setMode("add")}>
-                    <Plus size={14} /> Add Provider
+                    <Plus size={14} /> {t("provider.addProvider")}
                   </Button>
                 }
               />
@@ -212,7 +212,7 @@ export default function ProviderPanel({
                   onChange={(e) => setFormVariantId(e.target.value)}
                   className="w-full h-9 px-3 text-sm rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border)] text-[var(--text-primary)] focus:outline-none focus:border-[var(--brand)] focus:ring-2 focus:ring-[var(--brand)]/30"
                 >
-                  <option value="">Default</option>
+                  <option value="">{t("provider.defaultLabel")}</option>
                   {selectedCatalog.variants.map((v) => (
                     <option key={v.id} value={v.id}>
                       {v.display_name}
@@ -225,13 +225,13 @@ export default function ProviderPanel({
               label={t("provider.name")}
               value={formName}
               onChange={(e) => setFormName(e.target.value)}
-              placeholder="my-provider"
+              placeholder={t("provider.namePlaceholder2")}
             />
             <PasswordInput
               label={t("provider.apiKey")}
               value={formKey}
               onChange={(e) => setFormKey(e.target.value)}
-              placeholder="sk-…"
+              placeholder={t("provider.apiKeyPlaceholder2")}
             />
           </div>
         )}
@@ -241,8 +241,8 @@ export default function ProviderPanel({
         open={!!deleteTarget}
         onOpenChange={(o) => !o && setDeleteTarget(null)}
         title={`Delete provider "${deleteTarget}"?`}
-        description="This will permanently remove the provider and its encrypted API key."
-        confirmText="Delete"
+        description={t("provider.deleteProviderDesc")}
+        confirmText={t("common.delete")}
         tone="danger"
         onConfirm={() => { if (deleteTarget) handleDelete(deleteTarget); }}
       />

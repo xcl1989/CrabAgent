@@ -464,7 +464,7 @@ class TuiSession:
 
     def _print_banner(self):
         self.console.print(
-            f"[bold]CrabAgent v0.9.7[/bold]\n"
+            f"[bold]CrabAgent v0.9.9[/bold]\n"
             f"  provider: {self._provider_display}  "
             f"model: {self.agent_ctx.model or 'default'}\n"
             f"  workspace: {self.agent_ctx.workspace}\n"
@@ -1359,6 +1359,9 @@ class TuiSession:
         from crabagent.core.agent.tools import registry
         from crabagent.core.molt.tools import register_molt_tools
         from crabagent.core.todo.tools import register_todo_tools
+        from crabagent.core.task.tools import register_task_tools
+        from crabagent.core.mail.tools import register_mail_tools
+        from crabagent.core.meeting.tools import register_meeting_tools
         from crabagent.core.tool_loader import discover_and_register_tools
 
         ws = (self.args.workspace or settings.workspace).resolve()
@@ -1368,6 +1371,9 @@ class TuiSession:
             register_skill_tool(registry, sk)
         register_molt_tools(registry)
         register_todo_tools(registry)
+        register_task_tools(registry)
+        register_meeting_tools(registry)
+        register_mail_tools(registry)
         discover_and_register_tools(registry, ws)
         base_prompt = (
             f"You are CrabAgent. Today is "

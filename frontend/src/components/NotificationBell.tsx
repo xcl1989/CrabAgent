@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from "react";
-import { Bell } from "lucide-react";
+import { Bell, ChevronDown, ChevronUp, ExternalLink } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
   listNotifications,
@@ -12,9 +12,12 @@ import { cn } from "../lib/cn";
 
 interface Props {
   onSwitchSession: (sessionId: string) => void;
+  onNotificationAction?: (notification: Notification) => void;
 }
 
 type Tab = "unread" | "read";
+
+const MAX_PREVIEW_LEN = 200;
 
 function relativeTime(d: string | null | undefined): string {
   if (!d) return "";
@@ -30,7 +33,120 @@ function relativeTime(d: string | null | undefined): string {
   return date.toLocaleDateString();
 }
 
-export default function NotificationBell({ onSwitchSession }: Props) {
+function NotificationCard({
+  n,
+  onSwitchSession,
+  onNotificationAction,
+  onMarkRead,
+}: {
+  n: Notification;
+  onSwitchSession: (sid: string) => void;
+  onNotificationAction?: (n: Notification) => void;
+  onMarkRead: (id: number) => void;
+}) {
+  const { t } = useTranslation();
+  const [expanded, setExpanded] = useState(false);
+
+  const isLong = n.body.length > MAX_PREVIEW_LEN;
+  const hasConversation = !!n.conversation_id;
+
+  const handleCardClick = () => {
+    if (!n.read) onMarkRead(n.id);
+    // If it has a conversation, navigate to it; otherwise expand or action
+    if (hasConversation) {
+      onSwitchSession(n.conversation_id);
+    } else if (onNotificationAction) {
+      onNotificationAction(n);
+    }
+  };
+
+  const handleDetailClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!n.read) onMarkRead(n.id);
+    if (hasConversation) {
+      onSwitchSession(n.conversation_id);
+    }
+  };
+
+  const handleExpand = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setExpanded((v) => !v);
+  };
+
+  return (
+    <div
+      onClick={handleCardClick}
+      className={cn(
+        "px-3 py-2.5 cursor-pointer transition-colors border-l-2",
+        "hover:bg-[var(--bg-tertiary)]",
+        !n.read
+          ? "border-l-[var(--brand)] bg-[var(--brand-bg)]/30"
+          : "border-l-transparent",
+      )}
+    >
+      {/* Title row */}
+      <div className="flex items-center gap-2">
+        {!n.read && (
+          <span className="w-1.5 h-1.5 rounded-full bg-[var(--brand)] shrink-0" />
+        )}
+        <span
+          className={cn(
+            "text-xs flex-1 truncate",
+            n.read
+              ? "text-[var(--text-tertiary)] font-normal"
+              : "text-[var(--text-primary)] font-semibold",
+          )}
+        >
+          {n.title}
+        </span>
+      </div>
+
+      {/* Body preview (full content - panel is scrollable) */}
+      {n.body && (
+        <div className="mt-1 ml-3.5">
+          <div
+            className={cn(
+              "text-[11px] whitespace-pre-wrap break-words leading-relaxed",
+              isLong && !expanded && "line-clamp-4",
+            )}
+          >
+            {n.body}
+          </div>
+          {isLong && (
+            <button
+              onClick={handleExpand}
+              className="mt-1 text-[10px] flex items-center gap-0.5 text-[var(--brand)] hover:underline"
+            >
+              {expanded ? (
+                <><ChevronUp size={11} /> 收起</>
+              ) : (
+                <><ChevronDown size={11} /> 展开全文</>
+              )}
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Footer: time + actions */}
+      <div className="flex items-center justify-between mt-1 ml-3.5">
+        <span className="text-[10px] text-[var(--text-tertiary)] font-mono">
+          {relativeTime(n.created_at)}
+        </span>
+        {hasConversation && (
+          <button
+            onClick={handleDetailClick}
+            className="text-[10px] flex items-center gap-0.5 text-[var(--brand)] hover:underline"
+          >
+            <ExternalLink size={10} />
+            查看详情
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default function NotificationBell({ onSwitchSession, onNotificationAction }: Props) {
   const { t } = useTranslation();
   const [count, setCount] = useState(0);
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -50,6 +166,15 @@ export default function NotificationBell({ onSwitchSession }: Props) {
   const fetchList = async () => {
     try {
       setNotifications(await listNotifications());
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const handleMarkRead = async (id: number) => {
+    try {
+      await markRead(id);
+      setCount((c) => Math.max(0, c - 1));
     } catch {
       /* ignore */
     }
@@ -78,15 +203,6 @@ export default function NotificationBell({ onSwitchSession }: Props) {
       document.removeEventListener("keydown", onKey);
     };
   }, [open]);
-
-  const handleClick = async (n: Notification) => {
-    if (!n.read) {
-      await markRead(n.id);
-      setCount((c) => Math.max(0, c - 1));
-    }
-    setOpen(false);
-    if (n.conversation_id) onSwitchSession(n.conversation_id);
-  };
 
   const handleMarkAll = async () => {
     await markAllRead();
@@ -125,7 +241,7 @@ export default function NotificationBell({ onSwitchSession }: Props) {
             "bg-[var(--bg-elevated)] border border-[var(--border)]",
             "shadow-[var(--shadow-lg)] animate-scale-in origin-top-right",
           )}
-          style={{ maxHeight: "440px" }}
+          style={{ maxHeight: "520px" }}
         >
           <div className="flex items-center shrink-0 border-b border-[var(--border-subtle)]">
             {(["unread", "read"] as Tab[]).map((tabKey) => {
@@ -169,44 +285,13 @@ export default function NotificationBell({ onSwitchSession }: Props) {
               </div>
             ) : (
               displayItems.slice(0, 20).map((n) => (
-                <div
+                <NotificationCard
                   key={n.id}
-                  onClick={() => handleClick(n)}
-                  className={cn(
-                    "px-3 py-2.5 cursor-pointer transition-colors border-l-2",
-                    "hover:bg-[var(--bg-tertiary)]",
-                    !n.read
-                      ? "border-l-[var(--brand)] bg-[var(--brand-bg)]/30"
-                      : "border-l-transparent",
-                  )}
-                >
-                  <div className="flex items-center gap-2">
-                    {!n.read && (
-                      <span className="w-1.5 h-1.5 rounded-full bg-[var(--brand)] shrink-0" />
-                    )}
-                    <span
-                      className={cn(
-                        "text-xs flex-1 truncate",
-                        n.read
-                          ? "text-[var(--text-tertiary)] font-normal"
-                          : "text-[var(--text-primary)] font-semibold",
-                      )}
-                    >
-                      {n.title}
-                    </span>
-                  </div>
-                  <div
-                    className={cn(
-                      "text-[11px] mt-0.5 truncate ml-3.5",
-                      n.read ? "text-[var(--text-tertiary)]" : "text-[var(--text-secondary)]",
-                    )}
-                  >
-                    {n.body}
-                  </div>
-                  <div className="text-[10px] mt-1 ml-3.5 text-[var(--text-tertiary)] font-mono">
-                    {relativeTime(n.created_at)}
-                  </div>
-                </div>
+                  n={n}
+                  onSwitchSession={onSwitchSession}
+                  onNotificationAction={onNotificationAction}
+                  onMarkRead={handleMarkRead}
+                />
               ))
             )}
           </div>

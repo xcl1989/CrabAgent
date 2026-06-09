@@ -3,6 +3,7 @@
     "chat": "Chat",
     "agents": "Agents",
     "memory": "Memory",
+    "settings": "Settings",
     "signOut": "Sign out?",
     "signOutDesc": "You'll need to log in again to continue.",
     "signOutBtn": "Sign Out",
@@ -41,7 +42,7 @@
     "passwordPlaceholder": "At least 6 characters",
     "createAccount": "Create Account",
     "defaultHint": "Default: admin / xcl1989",
-    "version": "v0.9.7 · Local-first AI agent platform"
+    "version": "v0.9.8 · Local-first AI agent platform"
   },
   "chat": {
     "placeholder": "Type a message…",
@@ -78,7 +79,10 @@
     "brainstormLabel": "Brainstorm ideas",
     "brainstormPrompt": "Brainstorm some ideas for ",
     "writeDocLabel": "Write a doc",
-    "writeDocPrompt": "Write documentation for "
+    "writeDocPrompt": "Write documentation for ",
+    "replayingBranch": "Replaying branch",
+    "welcomeSubtitle": "Start a conversation or pick a quick template below",
+    "startNewConversation": "Start New Conversation"
   },
   "agents": {
     "title": "Agent Team",
@@ -100,7 +104,8 @@
     "allFieldsRequired": "Name, display name, role and goal are required",
     "permissionAuto": "Auto",
     "permissionConfirm": "Confirm",
-    "permissionDeny": "Deny"
+    "permissionDeny": "Deny",
+    "loading": "Loading…"
   },
   "memory": {
     "title": "Memory",
@@ -132,9 +137,6 @@
     "keyLabel": "Key:",
     "addMemory": "Add Memory",
     "create": "Create",
-    "category": "Category",
-    "key": "Key",
-    "content": "Content",
     "contentPlaceholder": "Enter memory content...",
     "keyPlaceholder": "e.g. lesson:my_tip",
     "categoryPlaceholder": "e.g. tech_stack, architecture",
@@ -173,7 +175,10 @@
     "taskUpdated": "Task updated successfully",
     "taskDeleted": "Task deleted",
     "namePlaceholder": "Daily project check",
-    "questionPlaceholder": "Query project status and summarize"
+    "questionPlaceholder": "Query project status and summarize",
+    "namePlaceholder2": "e.g. Morning news summary",
+    "cronPlaceholder2": "0 9 * * *",
+    "newTask": "New Task"
   },
   "mcp": {
     "title": "MCP Servers",
@@ -211,7 +216,13 @@
     "noServers": "No MCP servers configured",
     "transportStdio": "Stdio (local)",
     "transportHttp": "HTTP (remote)",
-    "serverAdded": "MCP server added"
+    "serverAdded": "MCP server added",
+    "searxngUrlOptional": "SearXNG URL (optional)",
+    "searxngUrlPlaceholder": "http://localhost:8888",
+    "namePlaceholder": "my-mcp-server",
+    "commandPlaceholder": "npx / uvx / python",
+    "argsLabel": "Args (JSON array)",
+    "urlPlaceholder": "https://example.com/mcp"
   },
   "provider": {
     "title": "LLM Providers",
@@ -235,7 +246,18 @@
     "providerDeleted": "Provider deleted",
     "testConnection": "Test",
     "testSuccess": "Connection successful",
-    "testFailed": "Connection failed"
+    "testFailed": "Connection failed",
+    "defaultUpdated": "Default provider updated",
+    "setDefaultFailed": "Failed to set default",
+    "deleteFailed": "Failed to delete provider",
+    "defaultLabel": "Default",
+    "namePlaceholder2": "my-provider",
+    "apiKeyPlaceholder2": "sk-…",
+    "noProviders": "No providers configured",
+    "addProviderDesc": "Add an LLM provider to start using CrabAgent.",
+    "manageDesc": "Manage your LLM provider credentials",
+    "configureDesc": "Configure a new provider connection",
+    "deleteProviderDesc": "This will permanently remove the provider and its encrypted API key."
   },
   "session": {
     "newChat": "New Chat",
@@ -266,7 +288,7 @@
   },
   "todo": {
     "title": "Todo",
-    "addPlaceholder": "Add a task…",
+    "addPlaceholder": "Add task…",
     "empty": "No tasks",
     "pending": "pending",
     "done": "done"
@@ -326,12 +348,15 @@
     "read": "Read",
     "noUnread": "No unread notifications",
     "noRead": "No read notifications",
-    "markAll": "Mark all"
+    "markAll": "Mark all",
+    "emailAction": "Please help me handle this email:"
   },
   "chatPanel": {
     "toolRequiresPermission": "{{tool}} requires permission",
     "typeAnswer": "Type your answer…",
-    "branchFromHere": "Branch from here"
+    "branchFromHere": "Branch from here",
+    "reconnecting": "Reconnecting…",
+    "thinking": "Thinking…"
   },
   "delegate": {
     "title": "Delegate to Team",
@@ -409,29 +434,11 @@
   "fileBrowser": {
     "refresh": "Refresh",
     "close": "Close",
-    "readFailed": "Failed to read file"
+    "readFailed": "Failed to read file",
+    "files": "Files"
   },
   "modelSelector": {
     "searchPlaceholder": "Search models…"
-  },
-  "agentForm": {
-    "role": "Role",
-    "goal": "Goal",
-    "backstory": "Backstory",
-    "backstoryPlaceholder": "Optional personality and expertise context",
-    "modelOverride": "Model Override",
-    "modelPlaceholder": "Leave empty to use default"
-  },
-  "chatPage": {
-    "model": "Model",
-    "effort": "Effort",
-    "modelPlaceholder": "type model id…",
-    "reasoningLow": "low",
-    "reasoningMedium": "medium",
-    "reasoningHigh": "high",
-    "retry": "Retry",
-    "removeImage": "Remove image",
-    "welcome": "Welcome to CrabAgent"
   },
   "agentForm": {
     "role": "Role",
@@ -449,6 +456,17 @@
     "cancel": "Cancel",
     "save": "Save",
     "create": "Create"
+  },
+  "chatPage": {
+    "model": "Model",
+    "effort": "Effort",
+    "modelPlaceholder": "type model id…",
+    "reasoningLow": "low",
+    "reasoningMedium": "medium",
+    "reasoningHigh": "high",
+    "retry": "Retry",
+    "removeImage": "Remove image",
+    "welcome": "Welcome to CrabAgent"
   },
   "agentsPage": {
     "title": "Agent Team",
@@ -486,7 +504,8 @@
     "deleteDesc": "This permanently removes the agent profile and its learning data."
   },
   "codeBlock": {
-    "copy": "Copy code"
+    "copy": "Copy code",
+    "copied": "Copied"
   },
   "modal": {
     "close": "Close"
@@ -498,5 +517,81 @@
     "stored": "Session: {{locale}}",
     "rebuild": "Switch & Send",
     "keep": "Send as-is"
+  },
+  "quickAction": {
+    "digest": "Digest",
+    "remind": "Remind",
+    "inbox": "Inbox",
+    "digestPrompt": "Generate and send my daily digest",
+    "remindPrompt": "Check my tasks and send reminders for anything due soon",
+    "inboxPrompt": "Check my email for new messages",
+    "title": "Quick actions"
+  },
+  "email": {
+    "title": "Email Configuration",
+    "incoming": "INCOMING (IMAP)",
+    "outgoing": "OUTGOING (SMTP)",
+    "options": "OPTIONS",
+    "enableIntegration": "Enable email integration",
+    "checkInterval": "Check interval (s)",
+    "testConnection": "Test Connection",
+    "testing": "Testing…",
+    "saving": "Saving…",
+    "phImapHost": "imap.example.com",
+    "phEmail": "Email address",
+    "phPassword": "Password / App Password",
+    "phSmtpHost": "smtp.example.com",
+    "saved": "Email configuration saved",
+    "failedToSave": "Failed to save",
+    "connectionFailed": "Connection test failed"
+  },
+  "task": {
+    "title": "Tasks",
+    "newTask": "New Task",
+    "active": "Active",
+    "done": "Done",
+    "all": "All",
+    "noTasks": "No tasks yet",
+    "assignee": "Assignee",
+    "deadline": "Deadline",
+    "project": "Project",
+    "priority": "Priority",
+    "low": "Low",
+    "medium": "Medium",
+    "high": "High",
+    "description": "Description",
+    "titlePlaceholder": "Task title",
+    "descriptionPlaceholder": "Task description",
+    "assigneePlaceholder": "Assignee",
+    "deadlinePlaceholder": "Deadline",
+    "projectPlaceholder": "Project",
+    "markDone": "Mark done",
+    "editTask": "Edit",
+    "deleteTask": "Delete",
+    "overdue": "Overdue",
+    "dueSoon": "Due soon",
+    "created": "Task created",
+    "updated": "Task updated",
+    "deleted": "Task deleted",
+    "operationFailed": "Operation failed",
+    "deleteConfirm": "Delete task?"
+  },
+  "settingsPage": {
+    "title": "Settings",
+    "defaultModel": "Default LLM Model",
+    "defaultModelDesc": "Used by email processing, scheduled tasks, and other automated workflows when no model is specified.",
+    "defaultModelPlaceholder": "gpt-4o",
+    "searxngUrl": "SearXNG URL",
+    "searxngUrlDesc": "Self-hosted search engine. Leave empty to use fallback web search.",
+    "searxngUrlPlaceholder": "http://localhost:8888",
+    "testSearxng": "Test Connection",
+    "testSuccess": "Connection successful ({{count}} results)",
+    "testFailed": "Connection failed: {{error}}",
+    "saving": "Saving…",
+    "testing": "Testing…",
+    "saved": "Settings saved",
+    "save": "Save Settings",
+    "sectionGeneral": "General",
+    "sectionSearch": "Search Engine"
   }
 }

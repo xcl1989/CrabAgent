@@ -9,14 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [0.9.7]
+## [0.9.9]
 
 ### Added
-- **Multi-language support** — full i18n across UI, CLI, and agent system prompts
-- README optimized with dedicated multi-language section
+- **Email Smart Task Extraction** — LLM analyzes incoming emails and auto-creates tasks from meetings, deadlines, and action items
+- **Task-Conversation Linking** — tasks created from emails link back to the original email conversation; click "查看详情" from the task panel
+- **Rich Email Notifications** — notification panel now shows email content preview, reply draft, and auto-created tasks with expand/collapse for long content
+
+### Fixed
+- **Task API routing** — `task_router` was imported but never mounted; tasks were invisible in the frontend panel
+- **Task extraction `datetime` import** — missing import caused silent failure in email task extraction
+- **Notification display** — replaced single-line truncation with line-clamp + expand/collapse for long email content
 
 ### Changed
-- Version bumped to 0.9.7 across all 11 locations
+- Version bumped to 0.9.9
 
 ---
 

@@ -115,6 +115,20 @@ async def scheduled_task_create(
         resolved_model = model or ""
         if not resolved_model and context:
             resolved_model = context.model or context.metadata.get("resolved_model", "") or ""
+        if not resolved_model:
+            from crabagent.core.config import settings
+            resolved_model = settings.default_model
+            # Check database settings override
+            try:
+                from crabagent.core.database import AppSetting, async_session_factory
+                from sqlalchemy import select
+                async with async_session_factory() as _sdb:
+                    _r = await _sdb.execute(select(AppSetting).where(AppSetting.key == "default_model"))
+                    _row = _r.scalar_one_or_none()
+                    if _row and _row.value:
+                        resolved_model = _row.value
+            except Exception:
+                pass
 
         parts = cron_expression.strip().split()
         if len(parts) != 5:

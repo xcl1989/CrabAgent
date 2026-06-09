@@ -32,6 +32,23 @@ Month 1: "My entire workflow runs through it. Can't go back."
 
 ---
 
+## 📬 Email Intelligence — Tasks from Inbox
+
+CrabAgent watches your inbox and turns emails into action items — automatically.
+
+```
+Incoming email: "明天下午3点开会讨论新功能"
+      │
+      ├─ 🧠 LLM analyzes: meeting + deadline detected
+      ├─ 📝 Drafts a reply for your review
+      ├─ ✅ Creates task: "参加关于crabagent的会议" (due tomorrow 3PM)
+      └─ 🔗 Links task to email conversation — click to view full context
+```
+
+No rules, no regex. Just LLM-powered understanding that knows the difference between a newsletter and a real to-do.
+
+---
+
 ## Project Memory — The Foundation
 
 Every time you work in a project, CrabAgent automatically extracts lessons and preferences. Next time you open it, it already knows:

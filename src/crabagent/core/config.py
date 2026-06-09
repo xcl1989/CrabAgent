@@ -39,6 +39,8 @@ class Settings(BaseSettings):
 
     language: str = "en"
 
+    default_model: str = "gpt-4o"
+
     encryption_key: str = ""
 
     auto_approve_tools: bool = False

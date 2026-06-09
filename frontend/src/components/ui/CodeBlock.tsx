@@ -69,12 +69,12 @@ export function CodeBlock({
               {copied ? (
                 <>
                   <Check size={11} className="text-[var(--success)]" />
-                  <span className="text-[var(--success)]">Copied</span>
+                  <span className="text-[var(--success)]">{t("codeBlock.copied")}</span>
                 </>
               ) : (
                 <>
                   <Copy size={11} />
-                  <span>Copy</span>
+                  <span>{t("codeBlock.copy")}</span>
                 </>
               )}
             </button>

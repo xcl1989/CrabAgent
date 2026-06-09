@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Plus,
   Trash2,
@@ -10,6 +10,12 @@ import {
   GitBranch,
   MessageSquare,
   X as XIcon,
+  ListTodo,
+  Mail,
+  Zap,
+  BarChart3,
+  Bell,
+  Inbox,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Session } from "../api/sessions";
@@ -26,6 +32,9 @@ interface Props {
   onOpenProviders: () => void;
   onOpenMcpServers: () => void;
   onOpenScheduledTasks: () => void;
+  onOpenTasks: () => void;
+  onOpenEmail: () => void;
+  onQuickAction?: (action: "digest" | "remind" | "inbox") => void;
   mobileOpen?: boolean;
   onMobileClose?: () => void;
 }
@@ -39,6 +48,9 @@ export default function SessionList({
   onOpenProviders,
   onOpenMcpServers,
   onOpenScheduledTasks,
+  onOpenTasks,
+  onOpenEmail,
+  onQuickAction,
   mobileOpen = false,
   onMobileClose,
 }: Props) {
@@ -46,6 +58,8 @@ export default function SessionList({
   const [collapsed, setCollapsed] = useState(false);
   const [query, setQuery] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<Session | null>(null);
+  const [quickMenuOpen, setQuickMenuOpen] = useState(false);
+  const quickMenuRef = useRef<HTMLDivElement>(null);
 
   // Auto-close mobile drawer when a session is selected
   useEffect(() => {
@@ -57,6 +71,25 @@ export default function SessionList({
       return () => window.removeEventListener("keydown", handler);
     }
   }, [mobileOpen, onMobileClose]);
+
+  // Close quick menu on outside click
+  useEffect(() => {
+    if (!quickMenuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (quickMenuRef.current && !quickMenuRef.current.contains(e.target as Node)) {
+        setQuickMenuOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setQuickMenuOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", handler);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [quickMenuOpen]);
 
   const filtered = query.trim()
     ? sessions.filter((s) =>
@@ -280,47 +313,92 @@ export default function SessionList({
         )}
       </div>
 
-      {/* Footer tools */}
-      <div className="p-2 border-t border-[var(--border-subtle)] flex gap-1">
-        <button
-          onClick={onOpenMcpServers}
-          className={cn(
-            "flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-md text-[11px] font-medium",
-            "bg-[var(--bg-tertiary)] border border-[var(--border)]",
-            "hover:border-[var(--border-strong)] hover:text-[var(--text-primary)] transition-colors",
-            "text-[var(--text-secondary)]",
-          )}
-          title={t("mcp.title")}
-        >
-          <Plug size={12} className="text-[var(--accent-2)]" />
-          <span>MCP</span>
-        </button>
-        <button
-          onClick={onOpenScheduledTasks}
-          className={cn(
-            "flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-md text-[11px] font-medium",
-            "bg-[var(--bg-tertiary)] border border-[var(--border)]",
-            "hover:border-[var(--border-strong)] hover:text-[var(--text-primary)] transition-colors",
-            "text-[var(--text-secondary)]",
-          )}
-          title={t("scheduledTask.title")}
-        >
-          <Clock size={12} className="text-[var(--warning)]" />
-          <span>Tasks</span>
-        </button>
-        <button
-          onClick={onOpenProviders}
-          className={cn(
-            "flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-md text-[11px] font-medium",
-            "bg-[var(--bg-tertiary)] border border-[var(--border)]",
-            "hover:border-[var(--border-strong)] hover:text-[var(--text-primary)] transition-colors",
-            "text-[var(--text-secondary)]",
-          )}
-          title={t("provider.title")}
-        >
-          <SettingsIcon size={12} className="text-[var(--text-tertiary)]" />
-          <span>API</span>
-        </button>
+      {/* Footer toolbar */}
+      <div className="px-3 py-2 border-t border-[var(--border-subtle)] flex items-center relative">
+        {/* Quick action trigger */}
+        {onQuickAction && (
+          <div ref={quickMenuRef} className="relative">
+            <button
+              onClick={() => setQuickMenuOpen((v) => !v)}
+              className={cn(
+                "p-1.5 rounded-lg transition-colors",
+                quickMenuOpen
+                  ? "text-[var(--brand)] bg-[var(--brand-bg)]"
+                  : "text-[var(--text-tertiary)] hover:text-[var(--brand)] hover:bg-[var(--brand-bg)]",
+              )}
+              title={t("quickAction.title", "Quick actions")}
+            >
+              <Zap size={15} />
+            </button>
+            {quickMenuOpen && (
+              <div className="absolute bottom-full left-0 mb-1 w-40 rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] shadow-[var(--shadow-lg)] py-1 animate-scale-in origin-bottom-left z-50">
+                <button
+                  onClick={() => { onQuickAction("digest"); setQuickMenuOpen(false); }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] transition-colors"
+                >
+                  <BarChart3 size={13} className="text-[var(--brand)]" />
+                  {t("quickAction.digest")}
+                </button>
+                <button
+                  onClick={() => { onQuickAction("remind"); setQuickMenuOpen(false); }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] transition-colors"
+                >
+                  <Bell size={13} className="text-[var(--warning)]" />
+                  {t("quickAction.remind")}
+                </button>
+                <button
+                  onClick={() => { onQuickAction("inbox"); setQuickMenuOpen(false); }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] transition-colors"
+                >
+                  <Inbox size={13} className="text-[var(--accent)]" />
+                  {t("quickAction.inbox")}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Spacer */}
+        <div className="flex-1" />
+
+        {/* Tool icons */}
+        <div className="flex items-center gap-0.5">
+          <button
+            onClick={onOpenTasks}
+            title={t("task.title")}
+            className="p-1.5 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--accent)] hover:bg-[var(--accent-bg)] transition-colors"
+          >
+            <ListTodo size={15} />
+          </button>
+          <button
+            onClick={onOpenEmail}
+            title={t("email.title")}
+            className="p-1.5 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--accent)] hover:bg-[var(--accent-bg)] transition-colors"
+          >
+            <Mail size={15} />
+          </button>
+          <button
+            onClick={onOpenMcpServers}
+            title={t("mcp.title")}
+            className="p-1.5 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--accent-2)] hover:bg-[var(--accent-2-bg)] transition-colors"
+          >
+            <Plug size={15} />
+          </button>
+          <button
+            onClick={onOpenScheduledTasks}
+            title={t("scheduledTask.title")}
+            className="p-1.5 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--warning)] hover:bg-[var(--warning-bg)] transition-colors"
+          >
+            <Clock size={15} />
+          </button>
+          <button
+            onClick={onOpenProviders}
+            title={t("provider.title")}
+            className="p-1.5 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
+          >
+            <SettingsIcon size={15} />
+          </button>
+        </div>
       </div>
 
       <ConfirmDialog
