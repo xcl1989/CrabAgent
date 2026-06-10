@@ -1,4 +1,4 @@
-import { MessageSquare, Users, Brain, Settings, Sun, Moon, LogOut, Globe } from "lucide-react";
+import { MessageSquare, Users, Brain, Settings, Sun, Moon, LogOut, Globe, Coins } from "lucide-react";
 import { useTheme } from "../lib/theme";
 import { cn } from "../lib/cn";
 import { useState } from "react";
@@ -17,6 +17,7 @@ const items: NavItem[] = [
   { id: "chat", labelKey: "nav.chat", icon: <MessageSquare size={15} /> },
   { id: "agents", labelKey: "nav.agents", icon: <Users size={15} /> },
   { id: "memory", labelKey: "nav.memory", icon: <Brain size={15} /> },
+  { id: "usage", labelKey: "nav.usage", icon: <Coins size={15} /> },
   { id: "settings", labelKey: "nav.settings", icon: <Settings size={15} /> },
 ];
 

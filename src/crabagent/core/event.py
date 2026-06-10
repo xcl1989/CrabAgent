@@ -25,6 +25,8 @@ class EventType(StrEnum):
     TOOL_CONFIRM_REQUEST = "tool_confirm_request"
     USER_INPUT_REQUEST = "user_input_request"
     CONTEXT_COMPRESSED = "context_compressed"
+    COMPRESS_START = "compress_start"
+    COMPRESS_DELTA = "compress_delta"
     SCREENSHOT = "screenshot"
     SUB_AGENT_START = "sub_agent_start"
     SUB_AGENT_END = "sub_agent_end"
@@ -76,9 +78,20 @@ class EventBus:
 
         t0 = _t.monotonic()
         for callback in self._listeners:
-            result = callback(event)
-            if hasattr(result, "__await__"):
-                await result
+            try:
+                result = callback(event)
+                if hasattr(result, "__await__"):
+                    await result
+            except Exception:
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    "[%s] emit listener %s raised on %s",
+                    self._name,
+                    getattr(callback, "__name__", callback),
+                    event.type,
+                    exc_info=True,
+                )
         elapsed = _t.monotonic() - t0
         if elapsed > 0.2:
             import logging

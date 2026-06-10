@@ -83,3 +83,51 @@ class PersistenceListener:
             await self._flush_task
         if self._buffer:
             await self._flush()
+
+    async def persist_compression(self, summary: str) -> None:
+        """Mark all existing messages as compressed and insert the summary.
+
+        Called inline when context compression occurs (from compress.py).
+        After this, new messages saved by PersistenceListener (the current
+        iteration's assistant/tool responses) will have higher ids,
+        naturally appearing after the summary in the database.
+
+        Flow:
+          1. Flush pending buffered saves (previous iterations' messages)
+          2. Mark ALL existing non-compressed messages as compressed=True
+          3. Insert the summary as the sole non-compressed message
+        """
+        # 1. Flush pending buffered saves first
+        await self.finalize()
+
+        from sqlalchemy import update as sa_update
+
+        from crabagent.core.database import Message
+
+        # 2. Mark ALL existing messages as compressed
+        async with async_session_factory() as db:
+            await db.execute(
+                sa_update(Message)
+                .where(
+                    Message.conversation_id == self.conversation_id,
+                    Message.branch_id == self.branch_id,
+                    Message.compressed == False,  # noqa: E712
+                )
+                .values(compressed=True)
+            )
+            # 3. Insert summary as the only non-compressed message
+            db.add(
+                Message(
+                    conversation_id=self.conversation_id,
+                    sequence=0,
+                    role="compress",
+                    content=summary,
+                    branch_id=self.branch_id,
+                    compressed=False,
+                )
+            )
+            await db.commit()
+        logger.info(
+            "Persisted compression summary (%d chars) for conv=%s",
+            len(summary), self.conversation_id,
+        )

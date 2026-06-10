@@ -47,10 +47,13 @@ async def get_messages(
     limit: int | None = None,
     offset: int = 0,
     branch_id: str | None = None,
+    include_compressed: bool = False,
 ) -> list[Message]:
     stmt = select(Message).where(Message.conversation_id == conversation_id)
     if branch_id is not None:
         stmt = stmt.where(Message.branch_id == branch_id)
+    if not include_compressed:
+        stmt = stmt.where(Message.compressed == False)  # noqa: E712
     stmt = stmt.order_by(Message.id.desc())
     if offset:
         stmt = stmt.offset(offset)
@@ -72,8 +75,8 @@ async def delete_messages(db: AsyncSession, conversation_id: int) -> int:
 
 def message_to_dict(msg: Message) -> dict:
     d: dict = {"role": msg.role}
-    # agent_switch messages are user messages for the LLM
-    if d["role"] == "agent_switch":
+    # agent_switch / compress / experience → user for the LLM
+    if d["role"] in ("agent_switch", "compress", "experience"):
         d["role"] = "user"
 
     if msg.content:
@@ -126,4 +129,5 @@ def message_to_response(msg: Message) -> dict:
         d["reasoning_content"] = msg.reasoning_content
     d["branch_id"] = msg.branch_id or "main"
     d["parent_id"] = msg.parent_id
+    d["compressed"] = bool(msg.compressed)
     return d

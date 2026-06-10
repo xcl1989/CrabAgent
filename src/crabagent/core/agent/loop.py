@@ -127,17 +127,6 @@ async def run_agent(
         locale = context.metadata.get("locale", context.locale)
         tools = context.tool_registry.tool_defs(locale=locale) or None
 
-        # Context compression: prefer middleware if attached, fall back to direct call
-        max_context = get_model_token_limit(model)
-        if context.total_tokens > max_context * settings.context_compression_threshold:
-            if context.middlewares:
-                try:
-                    await context.middlewares.run_before_llm(context, context.messages)
-                except Exception:
-                    logger.debug("middleware before_llm failed", exc_info=True)
-            else:
-                await compress_context(context, llm, model)
-
         try:
             full_text = ""
             reasoning_text = ""
@@ -161,25 +150,48 @@ async def run_agent(
             async for chunk in response:
                 if hasattr(chunk, "usage") and chunk.usage is not None:
                     usage = chunk.usage
-                    context.total_tokens = (usage.prompt_tokens or 0) + (usage.completion_tokens or 0)
+                    prompt_tokens = usage.prompt_tokens or 0
+                    completion_tokens = usage.completion_tokens or 0
+
+                    # ── Extract cached tokens from prompt_tokens_details ──
+                    cached_tokens = 0
+                    if hasattr(usage, "prompt_tokens_details") and usage.prompt_tokens_details:
+                        cached_tokens = getattr(usage.prompt_tokens_details, "cached_tokens", 0) or 0
+                    non_cached_tokens = prompt_tokens - cached_tokens
+
+                    # ── Extract reasoning tokens (existing logic) ──
                     reasoning_tokens = 0
                     if hasattr(usage, "completion_tokens_details") and usage.completion_tokens_details:
                         reasoning_tokens = usage.completion_tokens_details.reasoning_tokens or 0
-                    context.visible_tokens = context.total_tokens - reasoning_tokens
-                    import json as _json
 
-                    try:
-                        _raw = _json.dumps(usage.model_dump() if hasattr(usage, "model_dump") else dict(usage))
-                    except Exception:
-                        _raw = str(usage)
+                    context.total_tokens = prompt_tokens + completion_tokens
+                    context.visible_tokens = context.total_tokens - reasoning_tokens
+
+                    # ── Accumulate across all iterations in this run ──
+                    context.accumulated_prompt += prompt_tokens
+                    context.accumulated_completion += completion_tokens
+                    context.accumulated_cached += cached_tokens
+                    context.accumulated_reasoning += reasoning_tokens
+
+                    # ── Per-iteration record for DB persistence ──
+                    context.usage_records.append({
+                        "iteration": context.iteration,
+                        "prompt_tokens": prompt_tokens,
+                        "cached_tokens": cached_tokens,
+                        "non_cached_tokens": non_cached_tokens,
+                        "completion_tokens": completion_tokens,
+                        "reasoning_tokens": reasoning_tokens,
+                    })
+
                     logger.info(
-                        "LLM usage: prompt=%s completion=%s total=%s visible=%s iter=%d raw=%s",
-                        usage.prompt_tokens,
-                        usage.completion_tokens,
-                        context.total_tokens,
-                        context.visible_tokens,
+                        "LLM usage: prompt=%d (cached=%d, fresh=%d) completion=%d (reasoning=%d) iter=%d model=%s",
+                        prompt_tokens,
+                        cached_tokens,
+                        non_cached_tokens,
+                        completion_tokens,
+                        reasoning_tokens,
                         context.iteration,
-                        _raw,
+                        model,
                     )
 
                 if not chunk.choices:
@@ -241,6 +253,20 @@ async def run_agent(
 
             if reasoning_text:
                 await context.event_bus.emit(AgentEvent(type=EventType.THINKING_DONE, data={"text": reasoning_text}))
+
+            # Context compression: check AFTER LLM returns (we now have the
+            # real token count) but BEFORE appending the current response,
+            # so compression doesn't need to deal with messages from the
+            # current iteration — simplifying DB persistence.
+            max_context = get_model_token_limit(model)
+            if context.total_tokens > max_context * settings.context_compression_threshold:
+                if context.middlewares:
+                    try:
+                        await context.middlewares.run_before_llm(context, context.messages)
+                    except Exception:
+                        logger.debug("middleware before_llm failed", exc_info=True)
+                else:
+                    await compress_context(context, llm, model)
 
             context.messages.append(assistant_msg)
 
@@ -467,6 +493,7 @@ def _build_messages(context: AgentContext) -> list[dict]:
         elif msg.get("role") == "assistant" and not content and not msg.get("tool_calls"):
             msg = dict(msg, content="")
         if msg.get("role") not in ("system", "user", "assistant", "tool"):
+            # compress / agent_switch etc. → user for LLM
             msg = {**msg, "role": "user"}
         messages.append(msg)
     return _validate_tool_calls(messages)

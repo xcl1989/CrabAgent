@@ -24,6 +24,7 @@ export interface Message {
   branch_id?: string;
   parent_id?: number | null;
   created_at: string | null;
+  compressed?: boolean;
 }
 
 export interface BranchInfo {
@@ -65,7 +66,7 @@ export function deleteSession(sessionId: string): Promise<void> {
 }
 
 export function getMessages(sessionId: string): Promise<Message[]> {
-  return api.get(`/sessions/${sessionId}/messages?limit=1000`);
+  return api.get(`/sessions/${sessionId}/messages?limit=1000&include_compressed=true`);
 }
 
 export function sendPrompt(

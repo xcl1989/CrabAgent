@@ -9,20 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [0.9.9]
+## [0.9.9.post1]
 
 ### Added
-- **Email Smart Task Extraction** — LLM analyzes incoming emails and auto-creates tasks from meetings, deadlines, and action items
-- **Task-Conversation Linking** — tasks created from emails link back to the original email conversation; click "查看详情" from the task panel
-- **Rich Email Notifications** — notification panel now shows email content preview, reply draft, and auto-created tasks with expand/collapse for long content
-
-### Fixed
-- **Task API routing** — `task_router` was imported but never mounted; tasks were invisible in the frontend panel
-- **Task extraction `datetime` import** — missing import caused silent failure in email task extraction
-- **Notification display** — replaced single-line truncation with line-clamp + expand/collapse for long email content
+- **Token Usage Tracking** — new `TokenUsage` DB model, aggregation API (`/api/token-usage/*`), and frontend `UsagePage` with daily/hourly trends, by-agent/by-model distribution, cache hit rate
+- **Context Compression Streaming** — compression summary now streams token-by-token via SSE (`compress_start` / `compress_delta`), frontend renders an inline card with real-time text
+- **MCP Server Edit** — MCP panel now supports editing existing servers (name, transport, command, args, env, headers) with a pencil icon
+- **GLM-5 Model Support** — added token limits for glm-5, glm-5-turbo, glm-5.1
+- **Compress Role in Frontend** — new `compress` message role rendered as a collapsible card with streaming indicator; i18n keys for compress summary prompt
 
 ### Changed
-- Version bumped to 0.9.9
+- **Background MCP Startup** — MCP servers now start via `asyncio.create_task` in `lifespan`, no longer blocking app startup; graceful cancellation on shutdown
+- **Compression Timing Moved** — context compression check moved from before-LLM to after-LLM response, simplifying DB persistence and agent_switch message handling
+- **Token Accumulation** — `AgentContext` now tracks accumulated prompt/completion/cached/reasoning tokens across all iterations; token usage persisted per-iteration
+- **Agent Switch Messages Filtered** — `[Agent Switch]` / `[Agent 切换]` messages are filtered out from frontend display when loaded from DB
+- **MCP Settings Removed** — SearXNG settings/test tab removed from MCP panel (moved to Settings page)
+- **Compress Prompt i18n** — compression system/user prompts moved to i18n en/zh-CN locale files
+- Version bumped to 0.9.9.post1
+
+---
 
 ---
 

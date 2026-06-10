@@ -461,13 +461,15 @@ async def prompt_async(
                 task_hint=(req.message or "")[:120],
             )
             if lessons_block.strip():
-                context.messages.append({"role": "user", "content": lessons_block.strip(), "agent": effective_agent})
+                context.messages.append({"role": "experience", "content": lessons_block.strip(), "agent": effective_agent})
         except Exception:
             pass
 
     persistence = PersistenceListener(conversation_id=conv.id, branch_id=active_branch)
     persistence.sequence = user_msg_seq
     context.event_bus.subscribe(persistence.on_event)
+    # Expose to compress.py for inline persistence during compression
+    context.metadata["_persistence"] = persistence
 
     from crabagent.core.agent.run_recorder import RunRecorder
 
@@ -647,10 +649,11 @@ async def prompt_async(
     # v0.9 — attach middleware chain (compress + reflect + title)
     try:
         from crabagent.core.agent.middlewares import MiddlewareChain
+        from crabagent.core.agent.middlewares.compress_middleware import CompressMiddleware
         from crabagent.core.agent.middlewares.reflect_middleware import ReflectMiddleware
         from crabagent.core.agent.middlewares.title_middleware import TitleMiddleware
 
-        context.middlewares = MiddlewareChain([ReflectMiddleware(), TitleMiddleware()])
+        context.middlewares = MiddlewareChain([CompressMiddleware(), ReflectMiddleware(), TitleMiddleware()])
     except Exception:
         logger.debug("Failed to attach middleware chain", exc_info=True)
 
@@ -734,31 +737,68 @@ async def prompt_async(
                 "elapsed_seconds": elapsed,
                 "model": resolved_model,
                 "tokens": context.visible_tokens,
+                # ── Cumulative token consumption (this run) ──
+                "total_prompt": context.accumulated_prompt,
+                "total_cached": context.accumulated_cached,
+                "total_non_cached": context.accumulated_non_cached,
+                "total_completion": context.accumulated_completion,
+                "total_reasoning": context.accumulated_reasoning,
+                "total_consumed": context.accumulated_total_consumed,
                 "iterations": context.iteration,
             }
 
             import json
 
-            await context.event_bus.emit(
-                AgentEvent(
-                    type=EventType.MESSAGE_CREATED,
-                    data={
-                        "message": {
-                            "role": "stats",
-                            "content": json.dumps(stats_data, ensure_ascii=False),
-                        }
-                    },
+            try:
+                await context.event_bus.emit(
+                    AgentEvent(
+                        type=EventType.MESSAGE_CREATED,
+                        data={
+                            "message": {
+                                "role": "stats",
+                                "content": json.dumps(stats_data, ensure_ascii=False),
+                            }
+                        },
+                    )
                 )
-            )
+            except Exception:
+                logger.warning("Failed to emit stats event", exc_info=True)
 
-            await context.event_bus.emit(
-                AgentEvent(
-                    type=EventType.AGENT_END,
-                    data=stats_data,
+            try:
+                await context.event_bus.emit(
+                    AgentEvent(
+                        type=EventType.AGENT_END,
+                        data=stats_data,
+                    )
                 )
-            )
+            except Exception:
+                logger.warning("Failed to emit AGENT_END event", exc_info=True)
 
             await persistence.finalize()
+
+            # Compression persistence is now handled inline by compress.py
+            # (persist_compression), so no post-run batch persist is needed.
+
+            # ── Persist per-iteration token usage to DB ──
+            if context.usage_records:
+                try:
+                    from crabagent.core.database import token_usage_batch_create
+
+                    records = [
+                        {
+                            "user_id": user.id,
+                            "session_id": session_id,
+                            "agent_name": context.current_agent,
+                            "model": resolved_model,
+                            "provider": resolved_provider,
+                            "branch_id": active_branch,
+                            **r,
+                        }
+                        for r in context.usage_records
+                    ]
+                    await token_usage_batch_create(records)
+                except Exception:
+                    logger.debug("Failed to write token_usage", exc_info=True)
 
             _tasks.pop(session_id, None)
             _session_locks.pop(session_id, None)

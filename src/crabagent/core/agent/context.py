@@ -34,6 +34,22 @@ class AgentContext:
     ask_callback: Callable[[str, list[str] | None], Awaitable[str]] | None = None
     middlewares: MiddlewareChain | None = None
 
+    # Token accumulators (cumulative across all iterations in this run)
+    accumulated_prompt: int = 0
+    accumulated_completion: int = 0
+    accumulated_cached: int = 0
+    accumulated_reasoning: int = 0
+    usage_records: list[dict[str, Any]] = field(default_factory=list)
+
+    @property
+    def accumulated_non_cached(self) -> int:
+        return self.accumulated_prompt - self.accumulated_cached
+
+    @property
+    def accumulated_total_consumed(self) -> int:
+        """Actual tokens consumed (non-cached input + all output)."""
+        return self.accumulated_non_cached + self.accumulated_completion
+
     @property
     def budget_remaining(self) -> int:
         return max(0, self.max_iterations - self.iteration)

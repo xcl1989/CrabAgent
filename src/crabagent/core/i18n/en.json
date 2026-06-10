@@ -407,6 +407,10 @@
   "shared_context": {
     "title": "## Shared Team Knowledge"
   },
+  "compress": {
+    "system_prompt": "You are a conversation summarizer.",
+    "user_prompt": "Summarize the following conversation history concisely. Preserve key facts, decisions, file paths, and any important context that would be needed to continue the conversation. Write in English. Be thorough but concise (aim for 200-500 words).\n\nConversation to summarize:\n{history}"
+  },
   "agents_md": {
     "section_title": "## Project Rules (AGENTS.md)"
   },

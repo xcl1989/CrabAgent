@@ -91,13 +91,50 @@ export function sseEventToMessages(event: SSEEvent, messages: ChatMessage[]): Ch
     return updated;
   }
 
+  if (event.type === "compress_start") {
+    updated.push({
+      id: `compress-${Date.now()}`,
+      role: "compress",
+      content: "",
+      isStreaming: true,
+    });
+    return updated;
+  }
+
+  if (event.type === "compress_delta") {
+    const last = updated[updated.length - 1];
+    if (last?.role === "compress" && last.isStreaming) {
+      last.content += (event.data.text as string) || "";
+      return updated;
+    }
+    return updated;
+  }
+
   if (event.type === "context_compressed") {
     const orig = event.data.original_count as number;
     const comp = event.data.compressed_count as number;
+    const failed = event.data.failed as boolean | undefined;
+    // Find the streaming compress message and finalize it
+    const idx = updated.findIndex((m) => m.role === "compress" && m.isStreaming);
+    if (idx >= 0) {
+      updated[idx] = {
+        ...updated[idx],
+        isStreaming: false,
+        stats: {
+          elapsed: 0,
+          model: "",
+          tokens: 0,
+          iterations: 0,
+        },
+      };
+    }
+    // Replace the old "notice" with a compact summary line
     updated.push({
       id: `cc-${Date.now()}`,
       role: "notice",
-      content: `Context compressed: ${orig} → ${comp} messages`,
+      content: failed
+        ? `Context compression failed (${orig} messages kept)`
+        : `Context compressed: ${orig} → ${comp} messages`,
     });
     return updated;
   }
@@ -201,6 +238,23 @@ export function dbMessagesToChat(msgs: Message[]): ChatMessage[] {
   const pendingToolCalls: { id: string; name: string; args: unknown }[] = [];
 
   for (const m of msgs) {
+    // Compress summary — render as compress card
+    if (m.role === "compress") {
+      result.push({
+        id: `db-${m.id}`,
+        role: "compress",
+        content: m.content || "",
+      });
+      continue;
+    }
+
+    // Skip agent_switch messages that were re-persisted as user role
+    // after context compression. Match both EN "[Agent Switch]" and
+    // ZH "[Agent 切换]" prefixes for multi-locale safety.
+    if (m.content && (m.content.startsWith("[Agent Switch]") || m.content.startsWith("[Agent 切换]"))) {
+      continue;
+    }
+
     if (m.role === "stats" && m.content) {
       try {
         const raw = JSON.parse(m.content);

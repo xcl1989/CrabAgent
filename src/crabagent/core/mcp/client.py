@@ -13,6 +13,27 @@ from mcp.client.stdio import stdio_client
 logger = logging.getLogger(__name__)
 
 
+def _ensure_node_path(config_env: dict[str, str] | None = None) -> dict[str, str]:
+    """Build an environment dict with a PATH that includes common node/npm locations.
+
+    When CrabAgent runs as a background service, the inherited PATH may not
+    include /usr/local/bin or /opt/homebrew/bin where node/npx/npm live.
+    """
+    import os
+
+    env = dict(config_env or {})
+    if not env:
+        env = dict(os.environ)
+    current_path = env.get("PATH", os.environ.get("PATH", ""))
+    extra_dirs = ["/usr/local/bin", "/opt/homebrew/bin", os.path.expanduser("~/.nvm/versions/node/current/bin")]
+    parts = current_path.split(":") if current_path else []
+    for d in extra_dirs:
+        if d not in parts:
+            parts.append(d)
+    env["PATH"] = ":".join(parts)
+    return env
+
+
 def _get_schema(tool) -> dict[str, Any]:
     if hasattr(tool, "inputSchema"):
         return tool.inputSchema
@@ -68,19 +89,28 @@ class McpConnection:
     def is_connected(self) -> bool:
         return self.status == "connected" and self._session is not None
 
-    async def connect(self) -> list[McpToolInfo]:
+    async def connect(self, timeout: float = 30.0) -> list[McpToolInfo]:
+        """Connect with a timeout to avoid blocking indefinitely on
+        unresponsive servers."""
+        import asyncio
+
         self.status = "connecting"
         self.last_error = ""
         self._exit_stack = AsyncExitStack()
         try:
             if self.config.transport == "http":
-                tools = await self._connect_http()
+                tools = await asyncio.wait_for(self._connect_http(), timeout=timeout)
             else:
-                tools = await self._connect_stdio()
+                tools = await asyncio.wait_for(self._connect_stdio(), timeout=timeout)
             self._tools = tools
             self.status = "connected"
             self.connected_at = time.time()
             return tools
+        except asyncio.TimeoutError:
+            self.last_error = f"Connection timed out after {timeout}s"
+            self.status = "error"
+            await self._cleanup()
+            raise
         except Exception as e:
             self.last_error = str(e)
             self.status = "error"
@@ -88,10 +118,12 @@ class McpConnection:
             raise
 
     async def _connect_stdio(self) -> list[McpToolInfo]:
+        # Merge user-provided env with a PATH that includes common node locations
+        full_env = _ensure_node_path(self.config.env)
         params = StdioServerParameters(
             command=self.config.command,
             args=self.config.args,
-            env=self.config.env if self.config.env else None,
+            env=full_env,
         )
         read_stream, write_stream = await self._exit_stack.enter_async_context(stdio_client(params))
         self._session = await self._exit_stack.enter_async_context(ClientSession(read_stream, write_stream))
@@ -203,6 +235,7 @@ class MCPClientManager:
         if conn:
             await conn.disconnect()
             logger.info("MCP server '%s' disconnected", name)
+            del self._connections[name]
 
     async def stop_all(self):
         names = list(self._connections.keys())
@@ -210,12 +243,24 @@ class MCPClientManager:
             await self.stop_server(name)
 
     async def start_all(self):
+        """Connect to all enabled MCP servers in parallel.
+
+        Each server's failure is logged but never propagates — one bad
+        server must not block the rest.
+        """
+        import asyncio
+
         configs = await load_enabled_servers()
-        for config in configs:
+        if not configs:
+            return
+
+        async def _safe_start(config: McpServerConfig):
             try:
                 await self.start_server(config)
             except Exception:
-                pass
+                pass  # already logged in start_server
+
+        await asyncio.gather(*[_safe_start(c) for c in configs], return_exceptions=True)
 
     def get_connection(self, server_name: str) -> McpConnection | None:
         return self._connections.get(server_name)

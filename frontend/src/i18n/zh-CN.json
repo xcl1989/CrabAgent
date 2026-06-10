@@ -3,6 +3,7 @@
     "chat": "对话",
     "agents": "Agent 团队",
     "memory": "记忆",
+    "usage": "用量",
     "settings": "设置",
     "signOut": "确定退出登录？",
     "signOutDesc": "退出后需要重新登录才能继续使用。",
@@ -82,7 +83,8 @@
     "writeDocPrompt": "为以下内容编写文档：",
     "replayingBranch": "回放分支",
     "welcomeSubtitle": "开始对话或选择一个快速模板",
-    "startNewConversation": "开始新对话"
+    "startNewConversation": "开始新对话",
+    "contextCompression": "上下文压缩"
   },
   "agents": {
     "title": "Agent 团队",
@@ -217,6 +219,7 @@
     "transportStdio": "Stdio（本地）",
     "transportHttp": "HTTP（远程）",
     "serverAdded": "MCP 服务器已添加",
+    "saved": "已保存",
     "searxngUrlOptional": "SearXNG URL（可选）",
     "searxngUrlPlaceholder": "http://localhost:8888",
     "namePlaceholder": "my-mcp-server",
@@ -593,5 +596,34 @@
     "save": "保存设置",
     "sectionGeneral": "通用",
     "sectionSearch": "搜索引擎"
+  },
+  "usage": {
+    "title": "Token 用量",
+    "totalTokens": "总消耗",
+    "todayTokens": "今日",
+    "cacheHitRate": "缓存命中率",
+    "sessions": "会话数",
+    "calls": "次调用",
+    "noData": "暂无用量数据",
+    "dailyTrend": "每日趋势",
+    "byAgent": "按 Agent 分布",
+    "byModel": "按模型分布",
+    "sessionDetail": "会话明细",
+    "sessionTitle": "会话",
+    "prompt": "输入",
+    "cached": "缓存",
+    "nonCached": "非缓存",
+    "completion": "输出",
+    "cacheRate": "缓存率",
+    "total": "合计",
+    "rangeToday": "当天",
+    "range7d": "7 天",
+    "range30d": "30 天",
+    "rangeAll": "全部",
+    "allProjects": "全部项目",
+    "hourlyTrend": "小时趋势",
+    "refresh": "刷新",
+    "totalInput": "总输入",
+    "totalOutput": "总输出"
   }
 }

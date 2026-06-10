@@ -4,7 +4,7 @@
 > Keep it concise — max ~8000 chars. Use `update_agents_md` tool to update it.
 
 ## Version
-- Current: **0.9.9**（邮件智能任务提取 + 通知优化 + 任务↔对话关联）
+- Current: **0.9.9-1**（Token 用量分析 — 缓存区分 + 多维度统计）
 - Version in 7 places: `pyproject.toml`, `src/crabagent/serve/app.py` (`create_app` + `/health`), CLI banner in `src/crabagent/cli/__main__.py` (`_print_banner`), TUI banner in `src/crabagent/cli/tui.py`, `AGENTS.md`, `electron/package.json`, `src/crabagent/electron/package.json`
 - Bump all seven when changing version
 

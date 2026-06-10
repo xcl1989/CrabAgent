@@ -82,6 +82,7 @@ class Message(Base):
     parent_id: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
     branch_id: Mapped[str] = mapped_column(String(32), default="main")
     agent: Mapped[str] = mapped_column(String(100), default="default")
+    compressed: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
 
 
@@ -293,6 +294,36 @@ class AgentRun(Base):
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
 
 
+class TokenUsage(Base):
+    """Per-LLM-call token usage record (one row = one iteration)."""
+
+    __tablename__ = "token_usage"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    session_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    run_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    agent_name: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    model: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
+    provider: Mapped[str] = mapped_column(String(100), default="")
+
+    # Input tokens (cached + non-cached = prompt_tokens)
+    prompt_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    cached_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    non_cached_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    # Output tokens
+    completion_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    reasoning_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    # Totals
+    total_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    iteration: Mapped[int] = mapped_column(Integer, default=0)
+    branch_id: Mapped[str] = mapped_column(String(32), default="main")
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
+
+
 engine = create_async_engine(settings.db_url, echo=False, connect_args={"check_same_thread": False})
 async_session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
@@ -412,6 +443,8 @@ async def init_db() -> None:
             await conn.execute(text("ALTER TABLE messages ADD COLUMN branch_id VARCHAR(32) DEFAULT 'main'"))
         if "agent" not in columns:
             await conn.execute(text("ALTER TABLE messages ADD COLUMN agent VARCHAR(100) DEFAULT 'default'"))
+        if "compressed" not in columns:
+            await conn.execute(text("ALTER TABLE messages ADD COLUMN compressed BOOLEAN DEFAULT 0"))
 
         result = await conn.execute(text("PRAGMA table_info(molts)"))
         columns = [row[1] for row in result.fetchall()]
@@ -1298,3 +1331,452 @@ def _run_to_dict(run) -> dict:
         "metadata": run.metadata_,
         "created_at": run.created_at.isoformat() if run.created_at else "",
     }
+
+
+# ---------------------------------------------------------------------------
+# Token usage CRUD + aggregation queries
+# ---------------------------------------------------------------------------
+
+
+async def token_usage_batch_create(records: list[dict]) -> None:
+    """Batch insert token usage records."""
+    if not records:
+        return
+    async with async_session_factory() as db:
+        for r in records:
+            prompt = r.get("prompt_tokens", 0)
+            cached = r.get("cached_tokens", 0)
+            completion = r.get("completion_tokens", 0)
+            db.add(
+                TokenUsage(
+                    user_id=r["user_id"],
+                    session_id=r.get("session_id", ""),
+                    run_id=r.get("run_id"),
+                    agent_name=r.get("agent_name", "main"),
+                    model=r.get("model", ""),
+                    provider=r.get("provider", ""),
+                    prompt_tokens=prompt,
+                    cached_tokens=cached,
+                    non_cached_tokens=prompt - cached,
+                    completion_tokens=completion,
+                    reasoning_tokens=r.get("reasoning_tokens", 0),
+                    total_tokens=prompt + completion,
+                    iteration=r.get("iteration", 0),
+                    branch_id=r.get("branch_id", "main"),
+                )
+            )
+        await db.commit()
+
+
+def _usage_to_dict(u: TokenUsage) -> dict:
+    return {
+        "id": u.id,
+        "session_id": u.session_id,
+        "run_id": u.run_id,
+        "agent_name": u.agent_name,
+        "model": u.model,
+        "provider": u.provider,
+        "prompt_tokens": u.prompt_tokens,
+        "cached_tokens": u.cached_tokens,
+        "non_cached_tokens": u.non_cached_tokens,
+        "completion_tokens": u.completion_tokens,
+        "reasoning_tokens": u.reasoning_tokens,
+        "total_tokens": u.total_tokens,
+        "iteration": u.iteration,
+        "branch_id": u.branch_id,
+        "created_at": u.created_at.isoformat() if u.created_at else "",
+    }
+
+
+async def _resolve_session_ids_by_workspace(user_id: int, workspace: str) -> set[str] | None:
+    """Return session_ids for a workspace, or None if no filter needed."""
+    if not workspace:
+        return None
+    from sqlalchemy import select
+
+    async with async_session_factory() as db:
+        result = await db.execute(
+            select(Conversation.session_id).where(
+                Conversation.user_id == user_id, Conversation.workspace == workspace
+            )
+        )
+        return {r[0] for r in result.fetchall()}
+
+
+async def token_usage_overview(
+    user_id: int, days: int = 30, workspace: str = ""
+) -> dict:
+    """Aggregate overview: totals, by_agent, by_model, trend (daily or hourly)."""
+    from sqlalchemy import func, select
+
+    cutoff_ts = _time.time() - days * 86400 if days < 365 else 0
+    cutoff_dt = datetime.datetime.fromtimestamp(cutoff_ts) if cutoff_ts > 0 else datetime.datetime.min
+    hourly = days <= 1  # hourly buckets for "today"
+
+    # Resolve workspace → session_ids filter
+    ws_session_ids = await _resolve_session_ids_by_workspace(user_id, workspace)
+
+    async with async_session_factory() as db:
+        # Build base conditions
+        conds = [TokenUsage.user_id == user_id, *_cutoff_filter(cutoff_dt)]
+        if ws_session_ids is not None:
+            if not ws_session_ids:
+                # No sessions match this workspace → empty result
+                return _empty_overview()
+            conds.append(TokenUsage.session_id.in_(ws_session_ids))
+
+        # Totals
+        totals_result = await db.execute(
+            select(
+                func.sum(TokenUsage.prompt_tokens).label("prompt"),
+                func.sum(TokenUsage.cached_tokens).label("cached"),
+                func.sum(TokenUsage.non_cached_tokens).label("non_cached"),
+                func.sum(TokenUsage.completion_tokens).label("completion"),
+                func.sum(TokenUsage.reasoning_tokens).label("reasoning"),
+                func.sum(TokenUsage.total_tokens).label("total"),
+                func.count(TokenUsage.id).label("calls"),
+            ).where(*conds)
+        )
+        row = totals_result.one()
+        total_prompt = row.prompt or 0
+        total_cached = row.cached or 0
+        total_completion = row.completion or 0
+        total_total = row.total or 0
+
+        # Today's tokens (independent of range filter)
+        today_start = datetime.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        today_conds = [TokenUsage.user_id == user_id, TokenUsage.created_at >= today_start]
+        if ws_session_ids is not None:
+            today_conds.append(TokenUsage.session_id.in_(ws_session_ids))
+        today_result = await db.execute(
+            select(func.sum(TokenUsage.total_tokens).label("total")).where(*today_conds)
+        )
+        today_total = today_result.scalar() or 0
+
+        # Sessions count
+        sessions_result = await db.execute(
+            select(func.count(func.distinct(TokenUsage.session_id))).where(*conds)
+        )
+        sessions_count = sessions_result.scalar() or 0
+
+        # By agent
+        agent_result = await db.execute(
+            select(
+                TokenUsage.agent_name,
+                func.sum(TokenUsage.total_tokens).label("total"),
+                func.sum(TokenUsage.prompt_tokens).label("prompt"),
+                func.sum(TokenUsage.cached_tokens).label("cached"),
+                func.sum(TokenUsage.completion_tokens).label("completion"),
+                func.count(TokenUsage.id).label("calls"),
+            )
+            .where(*conds)
+            .group_by(TokenUsage.agent_name)
+            .order_by(func.sum(TokenUsage.total_tokens).desc())
+        )
+        by_agent = [
+            {
+                "agent_name": r[0],
+                "total_tokens": r[1] or 0,
+                "prompt_tokens": r[2] or 0,
+                "cached_tokens": r[3] or 0,
+                "completion_tokens": r[4] or 0,
+                "calls": r[5] or 0,
+            }
+            for r in agent_result.fetchall()
+        ]
+
+        # By model
+        model_result = await db.execute(
+            select(
+                TokenUsage.model,
+                func.sum(TokenUsage.total_tokens).label("total"),
+                func.sum(TokenUsage.prompt_tokens).label("prompt"),
+                func.sum(TokenUsage.cached_tokens).label("cached"),
+                func.sum(TokenUsage.completion_tokens).label("completion"),
+                func.count(TokenUsage.id).label("calls"),
+            )
+            .where(*conds)
+            .group_by(TokenUsage.model)
+            .order_by(func.sum(TokenUsage.total_tokens).desc())
+        )
+        by_model = [
+            {
+                "model": r[0],
+                "total_tokens": r[1] or 0,
+                "prompt_tokens": r[2] or 0,
+                "cached_tokens": r[3] or 0,
+                "completion_tokens": r[4] or 0,
+                "calls": r[5] or 0,
+            }
+            for r in model_result.fetchall()
+        ]
+
+        # Trend (daily or hourly)
+        trend_result = await db.execute(
+            select(TokenUsage).where(*conds).order_by(TokenUsage.created_at.asc())
+        )
+        rows = trend_result.scalars().all()
+        trend: dict[str, dict] = {}
+        for r in rows:
+            if not r.created_at:
+                continue
+            if hourly:
+                bucket = r.created_at.strftime("%H:00")
+            else:
+                bucket = r.created_at.strftime("%Y-%m-%d")
+            if bucket not in trend:
+                trend[bucket] = {
+                    "date" if not hourly else "hour": bucket,
+                    "prompt_tokens": 0,
+                    "cached_tokens": 0,
+                    "non_cached_tokens": 0,
+                    "completion_tokens": 0,
+                    "reasoning_tokens": 0,
+                    "total_tokens": 0,
+                }
+            e = trend[bucket]
+            e["prompt_tokens"] += r.prompt_tokens
+            e["cached_tokens"] += r.cached_tokens
+            e["non_cached_tokens"] += r.non_cached_tokens
+            e["completion_tokens"] += r.completion_tokens
+            e["reasoning_tokens"] += r.reasoning_tokens
+            e["total_tokens"] += r.total_tokens
+
+        # Fill missing hours for hourly view (0-23)
+        if hourly:
+            now_hour = datetime.datetime.now().hour
+            for h in range(0, now_hour + 1):
+                key = f"{h:02d}:00"
+                if key not in trend:
+                    trend[key] = {
+                        "hour": key,
+                        "prompt_tokens": 0,
+                        "cached_tokens": 0,
+                        "non_cached_tokens": 0,
+                        "completion_tokens": 0,
+                        "reasoning_tokens": 0,
+                        "total_tokens": 0,
+                    }
+
+        trend_list = sorted(trend.values(), key=lambda x: list(x.values())[0])
+
+        return {
+            "total_tokens": total_total,
+            "prompt_tokens": total_prompt,
+            "cached_tokens": total_cached,
+            "non_cached_tokens": (row.non_cached or 0),
+            "completion_tokens": total_completion,
+            "reasoning_tokens": (row.reasoning or 0),
+            "cache_hit_rate": round(total_cached / total_prompt, 4) if total_prompt > 0 else 0,
+            "total_calls": row.calls or 0,
+            "today_tokens": today_total,
+            "sessions_count": sessions_count,
+            "by_agent": by_agent,
+            "by_model": by_model,
+            "hourly": hourly,
+            "trend": trend_list,
+            "daily": trend_list,  # backward compat
+        }
+
+
+def _empty_overview() -> dict:
+    return {
+        "total_tokens": 0,
+        "prompt_tokens": 0,
+        "cached_tokens": 0,
+        "non_cached_tokens": 0,
+        "completion_tokens": 0,
+        "reasoning_tokens": 0,
+        "cache_hit_rate": 0,
+        "total_calls": 0,
+        "today_tokens": 0,
+        "sessions_count": 0,
+        "by_agent": [],
+        "by_model": [],
+        "hourly": False,
+        "trend": [],
+        "daily": [],
+    }
+
+
+def _cutoff_filter(cutoff_dt):
+    """Return filter conditions for created_at >= cutoff."""
+    if cutoff_dt == datetime.datetime.min:
+        return []
+    return [TokenUsage.created_at >= cutoff_dt]
+
+
+async def token_usage_sessions(
+    user_id: int, limit: int = 20, offset: int = 0, workspace: str = ""
+) -> tuple[list[dict], int]:
+    """Per-session aggregated token usage."""
+    from sqlalchemy import func, select
+
+    ws_session_ids = await _resolve_session_ids_by_workspace(user_id, workspace)
+
+    async with async_session_factory() as db:
+        conds = [TokenUsage.user_id == user_id]
+        if ws_session_ids is not None:
+            if not ws_session_ids:
+                return [], 0
+            conds.append(TokenUsage.session_id.in_(ws_session_ids))
+
+        # Get aggregated stats per session
+        result = await db.execute(
+            select(
+                TokenUsage.session_id,
+                func.sum(TokenUsage.total_tokens).label("total"),
+                func.sum(TokenUsage.prompt_tokens).label("prompt"),
+                func.sum(TokenUsage.cached_tokens).label("cached"),
+                func.sum(TokenUsage.non_cached_tokens).label("non_cached"),
+                func.sum(TokenUsage.completion_tokens).label("completion"),
+                func.sum(TokenUsage.reasoning_tokens).label("reasoning"),
+                func.count(TokenUsage.id).label("calls"),
+                func.max(TokenUsage.created_at).label("last_active"),
+                func.min(TokenUsage.created_at).label("created"),
+            )
+            .where(*conds)
+            .group_by(TokenUsage.session_id)
+            .order_by(func.sum(TokenUsage.total_tokens).desc())
+            .offset(offset)
+            .limit(limit)
+        )
+        rows = result.fetchall()
+
+        # Get session titles
+        session_ids = [r[0] for r in rows]
+        titles: dict[str, str] = {}
+        if session_ids:
+            conv_result = await db.execute(
+                select(Conversation.session_id, Conversation.title).where(
+                    Conversation.session_id.in_(session_ids)
+                )
+            )
+            for cid, title in conv_result.fetchall():
+                titles[cid] = title or ""
+
+        sessions = [
+            {
+                "session_id": r[0],
+                "title": titles.get(r[0], ""),
+                "total_tokens": r[1] or 0,
+                "prompt_tokens": r[2] or 0,
+                "cached_tokens": r[3] or 0,
+                "non_cached_tokens": r[4] or 0,
+                "completion_tokens": r[5] or 0,
+                "reasoning_tokens": r[6] or 0,
+                "cache_hit_rate": round((r[3] or 0) / (r[2] or 1), 4),
+                "calls": r[7] or 0,
+                "last_active": r[8].isoformat() if r[8] else "",
+                "created_at": r[9].isoformat() if r[9] else "",
+            }
+            for r in rows
+        ]
+
+        # Total count
+        count_result = await db.execute(
+            select(func.count(func.distinct(TokenUsage.session_id))).where(*conds)
+        )
+        total = count_result.scalar() or 0
+
+        return sessions, total
+
+
+async def token_usage_workspaces(user_id: int) -> list[dict]:
+    """List workspaces that have token usage data, with aggregated stats."""
+    from sqlalchemy import func, select
+
+    async with async_session_factory() as db:
+        result = await db.execute(
+            select(
+                Conversation.workspace,
+                func.sum(TokenUsage.total_tokens).label("total"),
+                func.count(TokenUsage.id).label("calls"),
+            )
+            .join(TokenUsage, TokenUsage.session_id == Conversation.session_id)
+            .where(TokenUsage.user_id == user_id, Conversation.workspace != "")
+            .group_by(Conversation.workspace)
+            .order_by(func.sum(TokenUsage.total_tokens).desc())
+        )
+        return [
+            {"workspace": r[0], "total_tokens": r[1] or 0, "calls": r[2] or 0}
+            for r in result.fetchall()
+        ]
+
+
+async def token_usage_session_detail(user_id: int, session_id: str) -> dict | None:
+    """Detailed token usage for a single session."""
+    from sqlalchemy import select
+
+    async with async_session_factory() as db:
+        result = await db.execute(
+            select(TokenUsage)
+            .where(TokenUsage.user_id == user_id, TokenUsage.session_id == session_id)
+            .order_by(TokenUsage.id.asc())
+        )
+        rows = result.scalars().all()
+        if not rows:
+            return None
+
+        # Totals
+        total_prompt = sum(r.prompt_tokens for r in rows)
+        total_cached = sum(r.cached_tokens for r in rows)
+        total_non_cached = sum(r.non_cached_tokens for r in rows)
+        total_completion = sum(r.completion_tokens for r in rows)
+        total_reasoning = sum(r.reasoning_tokens for r in rows)
+        total_tokens = sum(r.total_tokens for r in rows)
+
+        # By agent
+        agent_map: dict[str, dict] = {}
+        for r in rows:
+            if r.agent_name not in agent_map:
+                agent_map[r.agent_name] = {
+                    "agent_name": r.agent_name,
+                    "prompt_tokens": 0,
+                    "cached_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": 0,
+                    "calls": 0,
+                }
+            e = agent_map[r.agent_name]
+            e["prompt_tokens"] += r.prompt_tokens
+            e["cached_tokens"] += r.cached_tokens
+            e["completion_tokens"] += r.completion_tokens
+            e["total_tokens"] += r.total_tokens
+            e["calls"] += 1
+
+        # By model
+        model_map: dict[str, dict] = {}
+        for r in rows:
+            if r.model not in model_map:
+                model_map[r.model] = {
+                    "model": r.model,
+                    "prompt_tokens": 0,
+                    "cached_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": 0,
+                    "calls": 0,
+                }
+            e = model_map[r.model]
+            e["prompt_tokens"] += r.prompt_tokens
+            e["cached_tokens"] += r.cached_tokens
+            e["completion_tokens"] += r.completion_tokens
+            e["total_tokens"] += r.total_tokens
+            e["calls"] += 1
+
+        return {
+            "session_id": session_id,
+            "total": {
+                "prompt_tokens": total_prompt,
+                "cached_tokens": total_cached,
+                "non_cached_tokens": total_non_cached,
+                "completion_tokens": total_completion,
+                "reasoning_tokens": total_reasoning,
+                "total_tokens": total_tokens,
+                "cache_hit_rate": round(total_cached / total_prompt, 4) if total_prompt > 0 else 0,
+                "calls": len(rows),
+            },
+            "by_agent": list(agent_map.values()),
+            "by_model": list(model_map.values()),
+            "records": [_usage_to_dict(r) for r in rows],
+        }

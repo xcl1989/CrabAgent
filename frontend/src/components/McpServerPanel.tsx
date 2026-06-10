@@ -1,9 +1,8 @@
-import { useEffect, useState } from "react";
-import { Plug, Plus, Trash2 } from "lucide-react";
+import { useState } from "react";
+import { Plug, Plus, Trash2, Pencil } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import * as mcpApi from "../api/mcpServers";
 import { McpServer, McpServerStatus } from "../api/mcpServers";
-import * as settingsApi from "../api/settings";
 import {
   Modal,
   Button,
@@ -22,7 +21,7 @@ interface Props {
   onRefresh: () => void;
 }
 
-type Tab = "servers" | "settings";
+type Mode = "list" | "add" | "edit";
 
 export default function McpServerPanel({
   servers,
@@ -31,8 +30,8 @@ export default function McpServerPanel({
   onRefresh,
 }: Props) {
   const { t } = useTranslation();
-  const [tab, setTab] = useState<Tab>("servers");
-  const [mode, setMode] = useState<"list" | "add">("list");
+  const [mode, setMode] = useState<Mode>("list");
+  const [editingName, setEditingName] = useState("");
   const [formName, setFormName] = useState("");
   const [formDisplayName, setFormDisplayName] = useState("");
   const [formTransport, setFormTransport] = useState<"stdio" | "http">("stdio");
@@ -43,28 +42,8 @@ export default function McpServerPanel({
   const [formHeaders, setFormHeaders] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [acting, setActing] = useState<string | null>(null);
-  const [adding, setAdding] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
-
-  const [searxngUrl, setSearxngUrl] = useState("");
-  const [settingsLoaded, setSettingsLoaded] = useState(false);
-  const [testResult, setTestResult] = useState<{
-    success: boolean;
-    result_count?: number;
-    error?: string;
-  } | null>(null);
-  const [testing, setTesting] = useState(false);
   const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    settingsApi
-      .getSettings()
-      .then((s) => {
-        setSearxngUrl(s.searxng_url || "");
-        setSettingsLoaded(true);
-      })
-      .catch(() => setSettingsLoaded(true));
-  }, []);
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
 
   const resetForm = () => {
     setFormName("");
@@ -78,29 +57,59 @@ export default function McpServerPanel({
     setError(null);
   };
 
+  const startEdit = (s: McpServer) => {
+    setEditingName(s.name);
+    setFormName(s.name);
+    setFormDisplayName(s.display_name || "");
+    setFormTransport(s.transport as "stdio" | "http");
+    setFormCommand(s.command || "");
+    setFormArgs(JSON.stringify(s.args || []));
+    setFormUrl(s.url || "");
+    setFormEnv(JSON.stringify(s.env || {}));
+    setFormHeaders(JSON.stringify(s.headers || {}));
+    setError(null);
+    setMode("edit");
+  };
+
   const getStatus = (name: string) => status.find((s) => s.name === name);
 
-  const handleAdd = async () => {
+  // ---------------------------------------------------------------------------
+  // Validation helpers (shared by add & edit)
+  // ---------------------------------------------------------------------------
+  const validateForm = (): {
+    parsedArgs: string[];
+    parsedEnv: Record<string, string>;
+    parsedHeaders: Record<string, string>;
+  } | null => {
     setError(null);
-    if (!formName) return setError(t("mcp.nameRequired"));
-    if (formTransport === "stdio" && !formCommand)
-      return setError(t("mcp.commandRequired"));
-    if (formTransport === "http" && !formUrl)
-      return setError(t("mcp.urlRequired"));
+    if (mode === "add" && !formName) {
+      setError(t("mcp.nameRequired"));
+      return null;
+    }
+    if (formTransport === "stdio" && !formCommand) {
+      setError(t("mcp.commandRequired"));
+      return null;
+    }
+    if (formTransport === "http" && !formUrl) {
+      setError(t("mcp.urlRequired"));
+      return null;
+    }
 
     let parsedArgs: string[] = [];
     try {
       parsedArgs = formArgs.trim() ? JSON.parse(formArgs.trim()) : [];
       if (!Array.isArray(parsedArgs)) throw new Error();
     } catch {
-      return setError(t("mcp.argsFormat"));
+      setError(t("mcp.argsFormat"));
+      return null;
     }
     let parsedEnv: Record<string, string> = {};
     if (formEnv.trim()) {
       try {
         parsedEnv = JSON.parse(formEnv.trim());
       } catch {
-        return setError(t("mcp.envFormat"));
+        setError(t("mcp.envFormat"));
+        return null;
       }
     }
     let parsedHeaders: Record<string, string> = {};
@@ -108,11 +117,19 @@ export default function McpServerPanel({
       try {
         parsedHeaders = JSON.parse(formHeaders.trim());
       } catch {
-        return setError(t("mcp.headersFormat"));
+        setError(t("mcp.headersFormat"));
+        return null;
       }
     }
+    return { parsedArgs, parsedEnv, parsedHeaders };
+  };
 
-    setAdding(true);
+  const handleAdd = async () => {
+    const validated = validateForm();
+    if (!validated) return;
+    const { parsedArgs, parsedEnv, parsedHeaders } = validated;
+
+    setSaving(true);
     try {
       await mcpApi.createMcpServer({
         name: formName,
@@ -131,7 +148,34 @@ export default function McpServerPanel({
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : t("mcp.addFailed"));
     } finally {
-      setAdding(false);
+      setSaving(false);
+    }
+  };
+
+  const handleEdit = async () => {
+    const validated = validateForm();
+    if (!validated) return;
+    const { parsedArgs, parsedEnv, parsedHeaders } = validated;
+
+    setSaving(true);
+    try {
+      await mcpApi.updateMcpServer(editingName, {
+        display_name: formDisplayName || formName,
+        transport: formTransport,
+        command: formCommand,
+        args: parsedArgs,
+        url: formUrl,
+        env: parsedEnv,
+        headers: parsedHeaders,
+      });
+      toast.success(t("mcp.saved") || "Saved");
+      onRefresh();
+      setMode("list");
+      resetForm();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : t("mcp.addFailed"));
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -179,36 +223,6 @@ export default function McpServerPanel({
     }
   };
 
-  const handleSaveSettings = async () => {
-    setSaving(true);
-    setTestResult(null);
-    try {
-      await settingsApi.updateSettings({ searxng_url: searxngUrl });
-      toast.success(t("mcp.settingsSaved"));
-    } catch (e: unknown) {
-      toast.error(t("mcp.testFailed"));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleTestSearxng = async () => {
-    if (!searxngUrl) return;
-    setTesting(true);
-    setTestResult(null);
-    try {
-      const result = await settingsApi.testSearxng(searxngUrl);
-      setTestResult(result);
-    } catch (e: unknown) {
-      setTestResult({
-        success: false,
-        error: e instanceof Error ? e.message : t("mcp.testFailed"),
-      });
-    } finally {
-      setTesting(false);
-    }
-  };
-
   const statusColor = (s: string) =>
     s === "connected"
       ? "var(--success)"
@@ -227,76 +241,13 @@ export default function McpServerPanel({
         description={t("mcp.addServerDesc")}
         size="lg"
       >
-        <div className="flex gap-1 p-1 bg-[var(--bg-tertiary)] rounded-lg mb-4">
-          {(["servers", "settings"] as Tab[]).map((t) => (
-            <button
-              key={t}
-              onClick={() => {
-                setTab(t);
-                setError(null);
-                setTestResult(null);
-              }}
-              className={cn(
-                "flex-1 py-1.5 rounded-md text-sm font-medium transition-all capitalize",
-                tab === t
-                  ? "bg-[var(--bg-secondary)] text-[var(--text-primary)] shadow-[var(--shadow-sm)]"
-                  : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]",
-              )}
-            >
-              {t}
-            </button>
-          ))}
-        </div>
-
         {error && (
           <div className="mb-3 px-3 py-2 rounded-lg bg-[var(--danger-bg)] border border-[var(--danger-border)] text-xs text-[var(--danger)]">
             {error}
           </div>
         )}
 
-        {tab === "settings" ? (
-          <div className="space-y-3">
-            <Input
-              label={t("mcp.searxngUrlOptional")}
-              value={searxngUrl}
-              onChange={(e) => setSearxngUrl(e.target.value)}
-              placeholder={t("mcp.searxngUrlPlaceholder")}
-              disabled={!settingsLoaded}
-              hint="If set, web_search uses SearXNG first. Otherwise DuckDuckGo is used (no API key needed)."
-            />
-            <div className="flex gap-2">
-              <Button
-                variant="secondary"
-                onClick={handleSaveSettings}
-                loading={saving}
-              >
-                Save
-              </Button>
-              <Button
-                variant="outline"
-                onClick={handleTestSearxng}
-                loading={testing}
-                disabled={!searxngUrl}
-              >
-                Test Connection
-              </Button>
-            </div>
-            {testResult && (
-              <div
-                className={cn(
-                  "px-3 py-2 rounded-lg text-xs",
-                  testResult.success
-                    ? "bg-[var(--success-bg)] border border-[var(--success-border)] text-[var(--success)]"
-                    : "bg-[var(--danger-bg)] border border-[var(--danger-border)] text-[var(--danger)]",
-                )}
-              >
-                {testResult.success
-                  ? `Connected successfully! (${testResult.result_count} results returned)`
-                  : `Connection failed: ${testResult.error}`}
-              </div>
-            )}
-          </div>
-        ) : mode === "list" ? (
+        {mode === "list" ? (
           <div className="space-y-2">
             {servers.length === 0 ? (
               <EmptyState
@@ -389,6 +340,14 @@ export default function McpServerPanel({
                         <Button
                           size="xs"
                           variant="ghost"
+                          onClick={() => startEdit(s)}
+                          title={t("common.edit")}
+                        >
+                          <Pencil size={12} />
+                        </Button>
+                        <Button
+                          size="xs"
+                          variant="ghost"
                           onClick={() => setDeleteTarget(s.name)}
                           className="text-[var(--danger)] hover:text-[var(--danger)] hover:bg-[var(--danger-bg)]"
                           title={t("common.delete")}
@@ -419,6 +378,7 @@ export default function McpServerPanel({
               value={formName}
               onChange={(e) => setFormName(e.target.value)}
               placeholder={t("mcp.namePlaceholder")}
+              disabled={mode === "edit"}
             />
             <Input
               label={t("mcp.displayName")}
@@ -498,15 +458,15 @@ export default function McpServerPanel({
                   resetForm();
                 }}
               >
-                Cancel
+                {t("common.cancel")}
               </Button>
               <Button
-                variant="primary"
-                onClick={handleAdd}
-                loading={adding}
+                variant="brand"
+                onClick={mode === "edit" ? handleEdit : handleAdd}
+                loading={saving}
                 fullWidth
               >
-                Add Server
+                {mode === "edit" ? t("common.save") : t("common.create")}
               </Button>
             </div>
           </div>

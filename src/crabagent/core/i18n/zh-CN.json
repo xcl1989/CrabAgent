@@ -407,6 +407,10 @@
   "shared_context": {
     "title": "## 共享团队知识"
   },
+  "compress": {
+    "system_prompt": "你是一个对话摘要生成器。",
+    "user_prompt": "请简洁地总结以下对话历史。保留关键事实、决策、文件路径以及继续对话所需的任何重要上下文。用中文撰写。要全面但简洁（目标 200-500 字）。\n\n需要总结的对话：\n{history}"
+  },
   "agents_md": {
     "section_title": "## 项目规则 (AGENTS.md)"
   },

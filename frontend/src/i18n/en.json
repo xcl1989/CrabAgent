@@ -3,6 +3,7 @@
     "chat": "Chat",
     "agents": "Agents",
     "memory": "Memory",
+    "usage": "Usage",
     "settings": "Settings",
     "signOut": "Sign out?",
     "signOutDesc": "You'll need to log in again to continue.",
@@ -82,7 +83,8 @@
     "writeDocPrompt": "Write documentation for ",
     "replayingBranch": "Replaying branch",
     "welcomeSubtitle": "Start a conversation or pick a quick template below",
-    "startNewConversation": "Start New Conversation"
+    "startNewConversation": "Start New Conversation",
+    "contextCompression": "Context Compression"
   },
   "agents": {
     "title": "Agent Team",
@@ -217,6 +219,7 @@
     "transportStdio": "Stdio (local)",
     "transportHttp": "HTTP (remote)",
     "serverAdded": "MCP server added",
+    "saved": "Saved",
     "searxngUrlOptional": "SearXNG URL (optional)",
     "searxngUrlPlaceholder": "http://localhost:8888",
     "namePlaceholder": "my-mcp-server",
@@ -593,5 +596,34 @@
     "save": "Save Settings",
     "sectionGeneral": "General",
     "sectionSearch": "Search Engine"
+  },
+  "usage": {
+    "title": "Token Usage",
+    "totalTokens": "Total Tokens",
+    "todayTokens": "Today",
+    "cacheHitRate": "Cache Hit Rate",
+    "sessions": "Sessions",
+    "calls": "calls",
+    "noData": "No usage data yet",
+    "dailyTrend": "Daily Trend",
+    "byAgent": "By Agent",
+    "byModel": "By Model",
+    "sessionDetail": "Session Details",
+    "sessionTitle": "Session",
+    "prompt": "Input",
+    "cached": "Cached",
+    "nonCached": "Fresh",
+    "completion": "Output",
+    "cacheRate": "Cache",
+    "total": "Total",
+    "rangeToday": "Today",
+    "range7d": "7 Days",
+    "range30d": "30 Days",
+    "rangeAll": "All",
+    "allProjects": "All Projects",
+    "hourlyTrend": "Hourly Trend",
+    "refresh": "Refresh",
+    "totalInput": "Total Input",
+    "totalOutput": "Total Output"
   }
 }

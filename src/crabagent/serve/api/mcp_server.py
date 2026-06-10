@@ -336,8 +336,8 @@ async def disconnect_mcp_server(
     if not conn:
         raise HTTPException(status_code=404, detail="MCP server not found in connection pool")
 
+    status = conn.get_status_dict()  # capture before stop removes it from pool
     await manager.stop_server(name)
-    status = conn.get_status_dict()
     return McpServerStatusResponse(
         name=status["name"],
         display_name=status["display_name"],

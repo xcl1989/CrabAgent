@@ -27,6 +27,9 @@ DEFAULT_MODEL_TOKEN_LIMITS: dict[str, int] = {
     "glm-4": 128_000,
     "glm-4-flash": 128_000,
     "glm-4-plus": 128_000,
+    "glm-5": 200_000,
+    "glm-5-turbo": 200_000,
+    "glm-5.1": 200_000,
     "qwen-turbo": 1_000_000,
     "qwen-plus": 128_000,
     "qwen-max": 32_000,
@@ -44,6 +47,7 @@ _PREFIX_MATCH_ORDER = [
     "gpt-4o",
     "gpt-4-turbo",
     "glm-4",
+    "glm-5",
     "qwen-",
 ]
 

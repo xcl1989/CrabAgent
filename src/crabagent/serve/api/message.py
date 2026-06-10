@@ -16,12 +16,16 @@ async def list_messages(
     limit: int | None = Query(None, ge=1, le=1000),
     offset: int = Query(0, ge=0),
     branch: str | None = Query(None),
+    include_compressed: bool = Query(False),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     conv = await get_owned_conversation(db, session_id, user)
     branch_id = branch or conv.active_branch or "main"
-    msgs = await get_messages(db, conv.id, limit=limit, offset=offset, branch_id=branch_id)
-    # Filter out internal agent_switch messages from frontend display
-    msgs = [m for m in msgs if m.role != "agent_switch"]
+    msgs = await get_messages(
+        db, conv.id, limit=limit, offset=offset, branch_id=branch_id,
+        include_compressed=include_compressed,
+    )
+    # Filter out internal messages from frontend display
+    msgs = [m for m in msgs if m.role not in ("agent_switch", "experience")]
     return [message_to_response(m) for m in msgs]

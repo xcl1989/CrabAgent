@@ -492,6 +492,28 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(
             );
           }
 
+          if (msg.role === "compress") {
+            return (
+              <div key={msg.id} className="mb-3 flex justify-center">
+                <div className="w-full max-w-2xl rounded-lg border border-[var(--border)] bg-[var(--bg-tertiary)] overflow-hidden text-xs">
+                  <div className="flex items-center gap-1.5 px-3 py-1.5 text-[var(--text-tertiary)]">
+                    {msg.isStreaming ? (
+                      <Loader2 size={11} className="animate-spin" />
+                    ) : (
+                      <CheckCircle2 size={11} />
+                    )}
+                    <span>{t("chat.contextCompression", "上下文压缩")}</span>
+                  </div>
+                  {msg.content && (
+                    <div className="px-3 pb-2 pt-1 text-[var(--text-secondary)] whitespace-pre-wrap leading-relaxed opacity-80">
+                      {msg.content}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          }
+
           if (msg.role === "notice") {
             return (
               <div key={msg.id} className="mb-3 ml-3">

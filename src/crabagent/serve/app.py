@@ -49,11 +49,12 @@ async def lifespan(app: FastAPI):
 
     manager = MCPClientManager()
     app.state.mcp_manager = manager
-    try:
-        await manager.start_all()
-        logger.info("MCP servers initialized")
-    except Exception:
-        logger.warning("Failed to initialize some MCP servers")
+
+    # Start MCP servers in the background — don't block app startup.
+    # Individual server failures are logged but never fatal.
+    mcp_task = asyncio.create_task(manager.start_all())
+    app.state._mcp_task = mcp_task
+    logger.info("MCP servers initializing in background")
 
     from crabagent.serve.scheduler import get_scheduler
 
@@ -66,6 +67,16 @@ async def lifespan(app: FastAPI):
     yield
 
     monitor_task.cancel()
+
+    # Wait for background MCP init to finish (if still running) before cleanup
+    mcp_task = getattr(app.state, "_mcp_task", None)
+    if mcp_task and not mcp_task.done():
+        mcp_task.cancel()
+        try:
+            await mcp_task
+        except (asyncio.CancelledError, Exception):
+            pass
+
     await manager.stop_all()
     logger.info("MCP servers stopped")
 
@@ -78,7 +89,7 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     app = FastAPI(
         title="CrabAgent",
-        version="0.9.9",
+        version="0.9.9-1",
         lifespan=lifespan,
     )
     app.state.event_queues = {}
@@ -102,6 +113,7 @@ def create_app() -> FastAPI:
     from crabagent.serve.api.auth import router as auth_router
     from crabagent.serve.api.branch import router as branch_router
     from crabagent.serve.api.confirm import router as confirm_router
+    from crabagent.serve.api.email import router as email_router
     from crabagent.serve.api.event import router as event_router
     from crabagent.serve.api.files import router as files_router
     from crabagent.serve.api.input import router as input_router
@@ -118,7 +130,7 @@ def create_app() -> FastAPI:
     from crabagent.serve.api.settings import router as settings_router
     from crabagent.serve.api.task import router as task_router
     from crabagent.serve.api.todo import router as todo_router
-    from crabagent.serve.api.email import router as email_router
+    from crabagent.serve.api.token_usage import router as token_usage_router
 
     app.include_router(agent_router, prefix="/api")
     app.include_router(auth_router, prefix="/api")
@@ -141,10 +153,11 @@ def create_app() -> FastAPI:
     app.include_router(scheduled_task_router, prefix="/api")
     app.include_router(task_router, prefix="/api")
     app.include_router(email_router, prefix="/api")
+    app.include_router(token_usage_router, prefix="/api")
 
     @app.get("/health")
     async def health():
-        return {"status": "ok", "version": "0.9.9"}
+        return {"status": "ok", "version": "0.9.9-1"}
 
     _mount_spa(app)
 
