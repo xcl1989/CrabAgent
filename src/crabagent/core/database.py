@@ -257,6 +257,22 @@ class AgentMemory(Base):
     updated_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
 
+class MemoryEmbedding(Base):
+    """Vector embedding cache for AgentMemory entries.
+
+    Embeddings are stored as base64-encoded text for maximum SQLite compat.
+    Each row is a 384-dim float32 vector (~6144 bytes base64).
+    """
+
+    __tablename__ = "memory_embedding"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    memory_id: Mapped[int] = mapped_column(Integer, nullable=False, unique=True, index=True)
+    embedding: Mapped[str] = mapped_column(Text, nullable=False)  # base64-encoded float32 vector
+    model_name: Mapped[str] = mapped_column(String(100), nullable=False, default="")
+    updated_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
+
+
 class TaskRecord(Base):
     __tablename__ = "task_records"
 
@@ -481,6 +497,20 @@ async def init_db() -> None:
             await conn.execute(text("ALTER TABLE agent_memory ADD COLUMN source VARCHAR(10) DEFAULT ''"))
         if "task_category" not in columns:
             await conn.execute(text("ALTER TABLE agent_memory ADD COLUMN task_category VARCHAR(50) DEFAULT ''"))
+
+        # --- MemoryEmbedding table (vector search) ---
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS memory_embedding (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                memory_id INTEGER NOT NULL UNIQUE,
+                embedding TEXT NOT NULL,
+                model_name VARCHAR(100) NOT NULL DEFAULT '',
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_memory_embedding_memory_id ON memory_embedding(memory_id)"
+        ))
 
     from crabagent.core.provider_store import migrate_plaintext_keys
 
@@ -775,6 +805,7 @@ async def agent_memory_upsert(
             )
         )
         existing = result.scalar_one_or_none()
+        mem_id: int | None = None
         if existing:
             existing.memory_type = memory_type
             existing.agent_name = agent_name
@@ -789,23 +820,41 @@ async def agent_memory_upsert(
             if task_category:
                 existing.task_category = task_category
             existing.updated_at = utcnow()
+            mem_id = existing.id
         else:
-            db.add(
-                AgentMemory(
-                    user_id=user_id,
-                    memory_type=memory_type,
-                    agent_name=agent_name,
-                    category=category,
-                    key=key,
-                    content=content,
-                    importance=importance,
-                    confidence=confidence,
-                    source_session=source_session,
-                    source=source,
-                    task_category=task_category,
+            new_mem = AgentMemory(
+                user_id=user_id,
+                memory_type=memory_type,
+                agent_name=agent_name,
+                category=category,
+                key=key,
+                content=content,
+                importance=importance,
+                confidence=confidence,
+                source_session=source_session,
+                source=source,
+                task_category=task_category,
+            )
+            db.add(new_mem)
+        await db.commit()
+        # For new records, get the id after commit
+        if mem_id is None:
+            result2 = await db.execute(
+                select(AgentMemory).where(
+                    AgentMemory.user_id == user_id,
+                    AgentMemory.key == key,
                 )
             )
-        await db.commit()
+            fresh = result2.scalar_one_or_none()
+            if fresh:
+                mem_id = fresh.id
+
+    # Best-effort embedding generation (non-blocking)
+    if mem_id is not None:
+        try:
+            await agent_memory_ensure_embedding(mem_id, key, content)
+        except Exception:
+            pass  # embedding failure must not block upsert
 
 
 async def agent_memory_get_by_type(
@@ -959,6 +1008,143 @@ async def agent_memory_search(
             }
             for r in rows
         ]
+
+
+# ---------------------------------------------------------------------------
+# Semantic (vector) search
+# ---------------------------------------------------------------------------
+
+
+async def agent_memory_search_vector(
+    user_id: int,
+    query: str,
+    memory_type: str = "",
+    limit: int = 5,
+    fallback: bool = True,
+) -> list[dict]:
+    """Semantic vector search over AgentMemory.
+
+    Encodes *query* with sentence-transformers, loads all embeddings for
+    the user, and returns the top-K by cosine similarity combined with
+    importance weight.
+
+    Falls back to :func:`agent_memory_search` (LIKE) when:
+    - sentence-transformers is not installed
+    - no embeddings exist yet
+    - encoding fails for any reason
+    """
+    from crabagent.core.memory_embed import cosine_similarity, decode_embedding, encode_query
+
+    query_vec = encode_query(query)
+    if query_vec is None:
+        if fallback:
+            return await agent_memory_search(user_id, query, memory_type=memory_type, limit=limit)
+        return []
+
+    import base64
+
+    from sqlalchemy import select
+
+    async with async_session_factory() as db:
+        stmt = (
+            select(MemoryEmbedding, AgentMemory)
+            .join(AgentMemory, MemoryEmbedding.memory_id == AgentMemory.id)
+            .where(AgentMemory.user_id == user_id)
+        )
+        if memory_type:
+            stmt = stmt.where(AgentMemory.memory_type == memory_type)
+
+        result = await db.execute(stmt)
+        rows = result.all()
+
+    if not rows:
+        if fallback:
+            return await agent_memory_search(user_id, query, memory_type=memory_type, limit=limit)
+        return []
+
+    # Score each memory: similarity * 0.7 + importance * 0.3
+    scored: list[tuple[float, float, AgentMemory]] = []
+    for emb_row, mem_row in rows:
+        try:
+            vec_bytes = base64.b64decode(emb_row.embedding)
+            vec = decode_embedding(vec_bytes)
+            sim = cosine_similarity(query_vec, vec)
+        except Exception:
+            sim = 0.0
+        score = sim * 0.7 + mem_row.importance * 0.3
+        scored.append((score, sim, mem_row))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+
+    # Increment access_count for top results and build output
+    output: list[dict] = []
+    async with async_session_factory() as db:
+        for _score, sim, mem in scored[:limit]:
+            # Access-count increment (best-effort)
+            try:
+                result = await db.execute(select(AgentMemory).where(AgentMemory.id == mem.id))
+                fresh = result.scalar_one_or_none()
+                if fresh:
+                    fresh.access_count += 1
+            except Exception:
+                pass
+            output.append(
+                {
+                    "id": mem.id,
+                    "memory_type": mem.memory_type,
+                    "agent_name": mem.agent_name,
+                    "category": mem.category,
+                    "key": mem.key,
+                    "content": mem.content,
+                    "importance": mem.importance,
+                    "confidence": mem.confidence,
+                    "access_count": mem.access_count,
+                    "_similarity": round(sim, 4),
+                }
+            )
+        try:
+            await db.commit()
+        except Exception:
+            pass
+
+    return output
+
+
+async def agent_memory_ensure_embedding(memory_id: int, key: str, content: str) -> None:
+    """Generate and persist an embedding for a memory entry (best-effort).
+
+    Called after ``agent_memory_upsert`` to keep the embedding table in sync.
+    """
+    from crabagent.core.memory_embed import encode
+
+    text = f"{key}: {content}"
+    blob = encode(text)
+    if blob is None:
+        return
+
+    import base64
+
+    from sqlalchemy import select
+
+    b64_str = base64.b64encode(blob).decode("ascii")
+
+    async with async_session_factory() as db:
+        result = await db.execute(
+            select(MemoryEmbedding).where(MemoryEmbedding.memory_id == memory_id)
+        )
+        existing = result.scalar_one_or_none()
+        if existing:
+            existing.embedding = b64_str
+            existing.updated_at = utcnow()
+        else:
+            db.add(
+                MemoryEmbedding(
+                    memory_id=memory_id,
+                    embedding=b64_str,
+                    model_name="paraphrase-multilingual-MiniLM-L12-v2",
+                )
+            )
+        await db.commit()
 
 
 async def agent_memory_list_all(

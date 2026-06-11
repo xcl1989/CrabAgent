@@ -258,13 +258,13 @@ async def build_memory_prompt(user_id: int, query: str = "", locale: str = "en")
     from crabagent.core.config import settings
     from crabagent.core.database import (
         agent_memory_get_by_type,
-        agent_memory_search,
+        agent_memory_search_vector,
     )
     from crabagent.core.i18n import t
 
     parts: list[str] = []
 
-    team_memories = await agent_memory_get_by_type(user_id, "team_knowledge", limit=10)
+    team_memories = await agent_memory_get_by_type(user_id, "team", limit=10)
     if team_memories:
         total_chars = sum(len(m["content"]) for m in team_memories)
         if total_chars > 3000:
@@ -283,11 +283,13 @@ async def build_memory_prompt(user_id: int, query: str = "", locale: str = "en")
     max_inject = int(getattr(settings, "memory_max_inject", 5))
     if query and getattr(settings, "memory_auto_recall", True) and max_inject > 0:
         try:
-            related = await agent_memory_search(
+            # Prefer vector search; falls back to LIKE automatically
+            related = await agent_memory_search_vector(
                 user_id,
                 query[:200],
                 memory_type="",
                 limit=max_inject,
+                fallback=True,
             )
         except Exception:
             related = []
@@ -301,8 +303,12 @@ async def build_memory_prompt(user_id: int, query: str = "", locale: str = "en")
                 for m in ordered:
                     mtype = m.get("memory_type", "lesson")
                     agent_tag = f" [{m.get('agent_name')}]" if m.get("agent_name") else ""
+                    sim_tag = ""
+                    if "_similarity" in m:
+                        sim_tag = f", sim={m['_similarity']:.2f}"
                     lines.append(
-                        f"- **{m['key']}** ({mtype}{agent_tag}, imp={m.get('importance', 0.5):.1f}): {m['content']}"
+                        f"- **{m['key']}** ({mtype}{agent_tag}, "
+                        f"imp={m.get('importance', 0.5):.1f}{sim_tag}): {m['content']}"
                     )
                 lines.append("")
                 parts.append("\n".join(lines))
@@ -321,12 +327,18 @@ async def inject_agent_lessons(
 
     Used by both sub-agent delegation (agents.py) and the main agent
     (prompt.py). When ``task_hint`` is given, we additionally query for
-    lessons whose content/key matches the hint (cheap LIKE-based search).
+    lessons whose content/key matches the hint.
+
+    P3: Supports cross-agent lesson sharing — if own lessons < limit,
+    supplements with high-quality lessons from other agents.
     """
 
     if not user_id or not agent_name:
         return system_prompt
-    from crabagent.core.database import agent_memory_get_by_agent, agent_memory_search
+    from crabagent.core.database import (
+        agent_memory_get_by_agent,
+        agent_memory_search_vector,
+    )
 
     lessons: list[dict] = []
     try:
@@ -336,16 +348,42 @@ async def inject_agent_lessons(
 
     if task_hint and len(lessons) < 7:
         try:
-            similar = await agent_memory_search(
+            similar = await agent_memory_search_vector(
                 user_id,
                 task_hint[:120],
                 memory_type="agent_lesson",
                 limit=3,
+                fallback=True,
             )
             existing_keys = {item["key"] for item in lessons}
             for s in similar:
                 if s["key"] not in existing_keys and s.get("agent_name") == agent_name:
                     lessons.append(s)
+                    existing_keys.add(s["key"])
+        except Exception:
+            pass
+
+    # P3: Cross-agent sharing — supplement with high-quality general lessons
+    if len(lessons) < 5:
+        try:
+            existing_keys = {item["key"] for item in lessons}
+            general = await agent_memory_search_vector(
+                user_id,
+                task_hint or "general best practices",
+                memory_type="agent_lesson",
+                limit=8,
+                fallback=True,
+            )
+            for g in general:
+                if g["key"] in existing_keys:
+                    continue
+                if g.get("agent_name") in (agent_name, "", None):
+                    continue  # skip own or already-loaded
+                if g.get("importance", 0) >= 0.7 and g.get("_similarity", 0) >= 0.4:
+                    lessons.append(g)
+                    existing_keys.add(g["key"])
+                    if len(lessons) >= 7:
+                        break
         except Exception:
             pass
 

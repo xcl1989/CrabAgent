@@ -42,6 +42,9 @@ class SchedulerService:
         # Start email polling for all enabled configs
         await self.start_email_polling_all()
 
+        # Start weekly memory quality decay job (Monday 03:00)
+        self._start_memory_decay_job()
+
     async def shutdown(self):
         self._scheduler.shutdown(wait=False)
         logger.info("Scheduler stopped")
@@ -357,6 +360,28 @@ class SchedulerService:
         if self._scheduler.get_job(job_id):
             self._scheduler.remove_job(job_id)
         self._email_polling_users.pop(user_id, None)
+
+    # ---- Memory quality decay ----
+
+    _MEMORY_DECAY_JOB_ID = "memory_quality_decay"
+
+    def _start_memory_decay_job(self):
+        """Register the weekly memory quality decay cron job (Mon 03:00)."""
+        if not self._scheduler.running:
+            return
+        try:
+            from apscheduler.triggers.cron import CronTrigger
+
+            trigger = CronTrigger(day_of_week="mon", hour=3, minute=0, timezone=_get_local_tz())
+            self._scheduler.add_job(
+                _memory_quality_decay,
+                trigger=trigger,
+                id=self._MEMORY_DECAY_JOB_ID,
+                replace_existing=True,
+            )
+            logger.info("Memory quality decay job scheduled (Mon 03:00)")
+        except Exception as e:
+            logger.warning("Failed to schedule memory decay job: %s", e)
 
     async def _poll_emails(self, user_id: int):
         """Called periodically: check new emails → match project → generate reply draft → notify."""
@@ -905,3 +930,50 @@ async def _create_conversation(user_id: int, title: str, workspace: str, model: 
         await db.commit()
         await db.refresh(conv)
         return conv.id
+
+
+async def _memory_quality_decay():
+    """Weekly job: decay importance of unused memories, delete garbage.
+
+    Rules:
+    1. access_count=0 AND age > 30 days → importance -= 0.1 (min 0.3)
+    2. importance < 0.2 AND age > 60 days → DELETE
+    """
+    import datetime
+
+    from sqlalchemy import delete as sa_delete
+    from sqlalchemy import select
+
+    from crabagent.core.database import AgentMemory, async_session_factory
+
+    logger.info("[MemoryDecay] Starting weekly quality decay...")
+    now = datetime.datetime.now()
+    cutoff_30 = now - datetime.timedelta(days=30)
+    cutoff_60 = now - datetime.timedelta(days=60)
+
+    async with async_session_factory() as db:
+        # Phase 1: Decay unused memories
+        result = await db.execute(
+            select(AgentMemory).where(
+                AgentMemory.access_count == 0,
+                AgentMemory.created_at < cutoff_30,
+                AgentMemory.importance > 0.3,
+            )
+        )
+        decayed = 0
+        for mem in result.scalars().all():
+            mem.importance = max(0.3, mem.importance - 0.1)
+            decayed += 1
+        await db.commit()
+
+        # Phase 2: Delete garbage
+        delete_result = await db.execute(
+            sa_delete(AgentMemory).where(
+                AgentMemory.importance < 0.2,
+                AgentMemory.created_at < cutoff_60,
+            )
+        )
+        deleted = delete_result.rowcount
+        await db.commit()
+
+    logger.info("[MemoryDecay] Complete: decayed=%d, deleted=%d", decayed, deleted)

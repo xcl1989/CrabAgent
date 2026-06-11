@@ -134,16 +134,24 @@ async def memory_recall(
     user_id = context.metadata.get("user_id", 0)
     if not user_id:
         return "Error: no user_id in context"
-    from crabagent.core.database import agent_memory_search
+    from crabagent.core.database import agent_memory_search_vector
 
-    results = await agent_memory_search(user_id, query, memory_type=memory_type, limit=limit)
+    results = await agent_memory_search_vector(
+        user_id, query, memory_type=memory_type, limit=limit, fallback=True
+    )
     if not results:
         return f"No memories found for '{query}'."
     lines = [f"# Memory Search: '{query}' ({len(results)} found)\n"]
     for r in results:
         type_tag = r["memory_type"]
         agent_tag = f" [{r['agent_name']}]" if r["agent_name"] else ""
-        lines.append(f"- **{r['key']}** ({type_tag}{agent_tag}, importance={r['importance']:.1f}): {r['content']}")
+        sim_tag = (
+            f", similarity={r['_similarity']:.2f}" if "_similarity" in r else ""
+        )
+        lines.append(
+            f"- **{r['key']}** ({type_tag}{agent_tag}, "
+            f"importance={r['importance']:.1f}{sim_tag}): {r['content']}"
+        )
     return "\n".join(lines)
 
 

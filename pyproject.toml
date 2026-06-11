@@ -47,6 +47,9 @@ dependencies = [
 browser = [
     "playwright>=1.40",
 ]
+memory = [
+    "sentence-transformers>=3.0",
+]
 dev = [
     "ruff>=0.4",
     "pytest>=8.0",
