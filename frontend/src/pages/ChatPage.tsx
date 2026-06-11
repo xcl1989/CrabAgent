@@ -47,6 +47,10 @@ import { useChatState } from "../hooks/useChatState";
 import { useTaskBoard } from "../hooks/useTaskBoard";
 import { useModelSelector } from "../hooks/useModelSelector";
 import { cn } from "../lib/cn";
+import { DocumentPanel, DocState } from "../components/DocumentPanel";
+import { DocOpEvent } from "../components/DocumentTimeline";
+import { SSEEvent } from "../api/events";
+import * as documentsApi from "../api/documents";
 
 interface Props {
 }
@@ -82,7 +86,124 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
     if (session.model) setSelectedModel(session.model);
     if (session.provider) setSelectedProvider(session.provider);
     if (session.workspace) setWorkspace(session.workspace);
+    if (session.agent) setSelectedAgent(session.agent);
   }, [setSelectedModel]);
+
+  // ── Document panel state (must be before useChatState) ─────────
+  const [docState, setDocState] = useState<DocState | null>(null);
+  const [currentDocPath, setCurrentDocPath] = useState<string | null>(null);
+
+  // ── Document panel width (resizable + persistent) ──────────────
+  // Layout: [SessionList 256px] [Chat flex-1] [DocPanel]
+  // We must keep chat area >= 380px so the drag handle is always reachable.
+  const DOC_PANEL_MIN = 360;
+  const DOC_PANEL_DEFAULT = 520;
+  const DOC_PANEL_STORAGE_KEY = "crabagent_doc_panel_width";
+  const SESSION_LIST_W = 256; // w-64 = 16rem = 256px
+  const CHAT_MIN_W = 380;
+
+  /** Dynamic max: viewport minus sidebar minus minimum chat width */
+  const docPanelMax = () => window.innerWidth - SESSION_LIST_W - CHAT_MIN_W;
+
+  const [docPanelWidth, setDocPanelWidth] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem(DOC_PANEL_STORAGE_KEY);
+      if (saved) {
+        const w = parseInt(saved, 10);
+        if (w >= DOC_PANEL_MIN && w <= docPanelMax()) return w;
+      }
+    } catch {}
+    return Math.min(DOC_PANEL_DEFAULT, docPanelMax());
+  });
+
+  const [docPanelMaximized, setDocPanelMaximized] = useState(false);
+
+  const docPanelWidthRef = useRef(docPanelWidth);
+  docPanelWidthRef.current = docPanelWidth;
+
+  const handleDocPanelResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = docPanelWidthRef.current;
+
+    // Full-screen overlay to capture all mouse events (prevents iframe from stealing them)
+    const overlay = document.createElement("div");
+    overlay.style.cssText =
+      "position:fixed;inset:0;z-index:9999;cursor:col-resize;";
+    document.body.appendChild(overlay);
+
+    const handleMouseMove = (ev: MouseEvent) => {
+      const delta = startX - ev.clientX; // drag left → wider panel
+      const maxW = docPanelMax();
+      const newWidth = Math.min(maxW, Math.max(DOC_PANEL_MIN, startWidth + delta));
+      setDocPanelWidth(newWidth);
+    };
+
+    const handleMouseUp = () => {
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+      overlay.remove();
+      setDocPanelWidth((w) => {
+        localStorage.setItem(DOC_PANEL_STORAGE_KEY, String(w));
+        return w;
+      });
+    };
+
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mouseup", handleMouseUp);
+  }, []);
+
+  const handleDocEvent = useCallback((event: SSEEvent) => {
+    const { type, data } = event;
+    if (type === "doc_op_start") {
+      const file = (data.file as string) || "unknown";
+      setDocState({
+        fileName: file.split("/").pop() || file,
+        filePath: file,
+        busy: true,
+        previewHtml: null,
+        previewLoading: false,
+        previewError: null,
+        events: [{ message: `📄 ${data.operation as string} ${file}`, timestamp: Date.now(), status: "running" }],
+      });
+    } else if (type === "doc_op_delta") {
+      setDocState((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          busy: true,
+          events: [...prev.events, { message: data.message as string, timestamp: Date.now(), status: "running" }],
+        };
+      });
+    } else if (type === "doc_op_preview") {
+      setDocState((prev) => {
+        if (!prev) return prev;
+        return { ...prev, previewHtml: (data.html as string) || prev.previewHtml, previewLoading: false };
+      });
+    } else if (type === "doc_op_done") {
+      setDocState((prev) => {
+        if (!prev) return prev;
+        const ok = data.status === "ok";
+        return {
+          ...prev,
+          busy: false,
+          previewLoading: false,
+          events: [
+            ...prev.events,
+            { message: (data.message as string) || (ok ? "✅ Complete" : "❌ Failed"), timestamp: Date.now(), status: ok ? "done" : "error" },
+          ],
+        };
+      });
+    }
+  }, []);
+
+  const wrappedOnEvent = useCallback((event: SSEEvent) => {
+    if (event.type.startsWith("doc_op_")) {
+      handleDocEvent(event);
+    } else {
+      handleTaskBoardEvent(event);
+    }
+  }, [handleTaskBoardEvent, handleDocEvent]);
 
   const {
     sessions,
@@ -109,7 +230,41 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
     handleAbort,
     handleDeleteSession,
     getSubAgentContent,
-  } = useChatState(handleTaskBoardEvent, workspace, onAutoLoadSession);
+  } = useChatState(wrappedOnEvent, workspace, onAutoLoadSession);
+
+  // ── Open Office document from file tree ───────────────────────
+  const handleOpenDoc = useCallback(async (path: string, name: string) => {
+    const ws = activeSession?.workspace || workspace || "";
+    setDocState({
+      fileName: name,
+      filePath: path,
+      busy: true,
+      previewHtml: null,
+      previewLoading: true,
+      previewError: null,
+      events: [{ message: `📄 Opening ${name}…`, timestamp: Date.now(), status: "running" }],
+      workspace: ws || undefined,
+    });
+    try {
+      const preview = await documentsApi.getPreview(path, ws);
+      setCurrentDocPath(path);
+      setDocState((prev) => prev ? {
+        ...prev,
+        busy: false,
+        previewLoading: false,
+        previewHtml: preview.html,
+        events: [...prev.events, { message: `✅ Opened ${name}`, timestamp: Date.now(), status: "done" }],
+      } : prev);
+    } catch (e: any) {
+      setDocState((prev) => prev ? {
+        ...prev,
+        busy: false,
+        previewLoading: false,
+        previewError: e?.message || "Failed to open document",
+        events: [...prev.events, { message: `❌ Failed: ${e?.message || "Unknown error"}`, timestamp: Date.now(), status: "error" }],
+      } : prev);
+    }
+  }, [activeSession?.workspace, workspace]);
 
   // Sync active session ID to parent (for NavBar language switcher reset)
   useEffect(() => {
@@ -214,6 +369,9 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
     async (session: Session) => {
       const model = await selectSession(session, selectedModel, models);
       setSelectedModel(model);
+      if (session.agent) {
+        setSelectedAgent(session.agent);
+      }
       if (session.provider) {
         setSelectedProvider(session.provider);
       } else if (model && providerModels.length > 0) {
@@ -232,6 +390,7 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
   const onNewSession = useCallback(async () => {
     const model = await newSession(selectedModel, models);
     setSelectedModel(model);
+    setSelectedAgent("default");
     clearTaskBoard();
   }, [newSession, selectedModel, models, setSelectedModel, clearTaskBoard]);
 
@@ -335,6 +494,7 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
         selectedAgent,
         reasoningEffort,
         selectedProvider ?? undefined,
+        currentDocPath || undefined,
       );
     } catch {
       setSending(false);
@@ -521,7 +681,7 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
   const completedTasks = taskBoardTasks.filter((t) => t.status === "done");
 
   return (
-    <div className="flex h-full overflow-hidden bg-[var(--bg-primary)]">
+    <div className="relative flex h-full overflow-hidden bg-[var(--bg-primary)]">
       <SessionList
         sessions={sessions}
         activeId={activeSession?.session_id || null}
@@ -863,7 +1023,83 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
         onToggle={() => setShowFiles((v) => !v)}
         sessionId={activeSession?.session_id || null}
         workspace={activeSession?.workspace || workspace || undefined}
+        onOpenDoc={handleOpenDoc}
       />
+
+      {/* Document Panel — right sidebar when AI is working on a doc */}
+      {docState && (
+        <div
+          className={cn(
+            "flex flex-col bg-[var(--bg-primary)] shrink-0 transition-[width] duration-150",
+            docPanelMaximized
+              ? "absolute inset-y-0 right-0 z-30 border-l-0 shadow-[-8px_0_24px_rgba(0,0,0,0.35)]"
+              : "relative border-l border-[var(--border)]",
+          )}
+          style={
+            docPanelMaximized
+              ? { width: `calc(100% - ${SESSION_LIST_W}px)` }
+              : { width: docPanelWidth, maxWidth: `calc(100% - ${SESSION_LIST_W}px - ${CHAT_MIN_W}px)` }
+          }
+        >
+          {/* Drag handle for resizing — only in sidebar mode */}
+          {!docPanelMaximized && (
+            <div
+              className="absolute left-0 inset-y-0 w-3 z-10 cursor-col-resize select-none
+                         hover:w-4 transition-all group"
+              onMouseDown={handleDocPanelResizeStart}
+            >
+              {/* Visible drag rail */}
+              <div className="absolute inset-y-0 left-0 w-[3px]
+                              bg-[var(--border-strong)] group-hover:bg-[var(--accent)]
+                              group-active:bg-[var(--accent)] transition-colors" />
+              {/* Grip dots — appear on hover */}
+              <div className="flex flex-col items-center justify-center h-full gap-[3px] pl-[2px]
+                              opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className="w-[4px] h-[4px] rounded-full bg-[var(--accent)]" />
+                <div className="w-[4px] h-[4px] rounded-full bg-[var(--accent)]" />
+                <div className="w-[4px] h-[4px] rounded-full bg-[var(--accent)]" />
+              </div>
+            </div>
+          )}
+          <DocumentPanel
+            doc={docState}
+            onClose={() => { setDocState(null); setCurrentDocPath(null); }}
+            maximized={docPanelMaximized}
+            onToggleMaximize={() => setDocPanelMaximized((v) => !v)}
+            onDownload={() => {
+              // Trigger download via backend
+              if (docState?.filePath) {
+                const link = document.createElement("a");
+                link.href = `/api/documents/download?path=${encodeURIComponent(docState.filePath)}`;
+                link.download = docState.fileName;
+                link.click();
+              }
+            }}
+            onRefreshPreview={async () => {
+              if (!docState?.filePath) return;
+              setDocState((prev) => prev ? { ...prev, previewLoading: true } : prev);
+              try {
+                const preview = await documentsApi.getPreview(
+                  docState.filePath,
+                  docState.workspace || activeSession?.workspace || "",
+                );
+                setDocState((prev) => prev ? {
+                  ...prev,
+                  previewLoading: false,
+                  previewHtml: preview.html,
+                  previewError: null,
+                } : prev);
+              } catch (e: any) {
+                setDocState((prev) => prev ? {
+                  ...prev,
+                  previewLoading: false,
+                  previewError: e?.message || "刷新预览失败",
+                } : prev);
+              }
+            }}
+          />
+        </div>
+      )}
 
       <TaskBoard
         tasks={taskBoardTasks}

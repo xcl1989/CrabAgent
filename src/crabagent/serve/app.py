@@ -64,7 +64,20 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.exception("Failed to start scheduler: %s", e)
 
+    # Detect OfficeCLI binary for office document tools
+    from crabagent.core.office.manager import get_office_manager
+
+    office_mgr = get_office_manager()
+    if await office_mgr.detect():
+        app.state.office_available = True
+        logger.info("OfficeCLI available — office tools enabled")
+    else:
+        app.state.office_available = False
+        logger.info("OfficeCLI not found — office tools will report helpful install message")
+
     yield
+
+    # No explicit cleanup needed for OfficeManager
 
     monitor_task.cancel()
 
@@ -89,7 +102,7 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     app = FastAPI(
         title="CrabAgent",
-        version="0.9.9-1",
+        version="0.10.0",
         lifespan=lifespan,
     )
     app.state.event_queues = {}
@@ -113,6 +126,7 @@ def create_app() -> FastAPI:
     from crabagent.serve.api.auth import router as auth_router
     from crabagent.serve.api.branch import router as branch_router
     from crabagent.serve.api.confirm import router as confirm_router
+    from crabagent.serve.api.documents import router as documents_router
     from crabagent.serve.api.email import router as email_router
     from crabagent.serve.api.event import router as event_router
     from crabagent.serve.api.files import router as files_router
@@ -142,6 +156,7 @@ def create_app() -> FastAPI:
     app.include_router(provider_router, prefix="/api")
     app.include_router(mcp_server_router, prefix="/api")
     app.include_router(confirm_router, prefix="/api")
+    app.include_router(documents_router, prefix="/api")
     app.include_router(branch_router, prefix="/api")
     app.include_router(files_router, prefix="/api")
     app.include_router(input_router, prefix="/api")
@@ -157,7 +172,7 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     async def health():
-        return {"status": "ok", "version": "0.9.9-1"}
+        return {"status": "ok", "version": "0.10.0"}
 
     _mount_spa(app)
 

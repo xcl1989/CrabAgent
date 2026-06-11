@@ -1,7 +1,14 @@
 import { useState } from "react";
-import { Folder, FolderOpen, FileText, ChevronRight, ChevronDown, Loader2, ImageIcon } from "lucide-react";
+import { Folder, FolderOpen, FileText, ChevronRight, ChevronDown, Loader2, ImageIcon, ExternalLink } from "lucide-react";
 import { FileEntry, isImageFile } from "../api/files";
 import { cn } from "../lib/cn";
+
+const OFFICE_EXTS = [".xlsx", ".docx", ".pptx"];
+
+function isOfficeFile(name: string): boolean {
+  const ext = name.split(".").pop()?.toLowerCase();
+  return ext ? OFFICE_EXTS.includes("." + ext) : false;
+}
 
 interface Props {
   entries: FileEntry[];
@@ -9,6 +16,7 @@ interface Props {
   selectedPath: string | null;
   depth?: number;
   absolute?: boolean;
+  onOpenDoc?: (path: string, name: string) => void;
 }
 
 function sortEntries(entries: FileEntry[]): FileEntry[] {
@@ -26,6 +34,7 @@ export default function FileTree({
   selectedPath,
   depth = 0,
   absolute = false,
+  onOpenDoc,
 }: Props) {
   if (entries.length === 0) {
     return depth === 0 ? (
@@ -45,6 +54,7 @@ export default function FileTree({
           selectedPath={selectedPath}
           depth={depth}
           absolute={absolute}
+          onOpenDoc={onOpenDoc}
         />
       ))}
     </div>
@@ -57,12 +67,14 @@ function FileTreeNode({
   selectedPath,
   depth,
   absolute,
+  onOpenDoc,
 }: {
   entry: FileEntry;
   onSelect: (path: string) => void;
   selectedPath: string | null;
   depth: number;
   absolute: boolean;
+  onOpenDoc?: (path: string, name: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [children, setChildren] = useState<FileEntry[] | undefined>(
@@ -100,7 +112,7 @@ function FileTreeNode({
         onClick={handleToggle}
         title={entry.path}
         className={cn(
-          "flex items-center gap-1.5 pr-2 py-1 cursor-pointer text-xs rounded-md transition-colors",
+          "group flex items-center gap-1.5 pr-2 py-1 cursor-pointer text-xs rounded-md transition-colors",
           isSelected
             ? "bg-[var(--brand-bg)] text-[var(--brand)]"
             : "text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]",
@@ -131,7 +143,19 @@ function FileTreeNode({
             <FileText size={13} className="text-[var(--text-tertiary)]" />
           )}
         </span>
-        <span className="truncate">{entry.name}</span>
+        <span className="flex-1 truncate">{entry.name}</span>
+        {!isDir && onOpenDoc && isOfficeFile(entry.name) && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenDoc(entry.path, entry.name);
+            }}
+            className="opacity-0 group-hover:opacity-100 shrink-0 p-0.5 rounded text-[var(--accent)] hover:bg-[var(--accent-bg)] transition-all"
+            title="Open in editor"
+          >
+            <ExternalLink size={12} />
+          </button>
+        )}
       </div>
       {isDir && expanded && (
         <div>
@@ -150,6 +174,7 @@ function FileTreeNode({
               selectedPath={selectedPath}
               depth={depth + 1}
               absolute={absolute}
+              onOpenDoc={onOpenDoc}
             />
           )}
         </div>

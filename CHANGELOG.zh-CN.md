@@ -8,6 +8,40 @@ English version: [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
+## [0.10.0]
+
+### 新增
+- **智能文档处理** — AI Agent 现在可以通过五个内置工具读取、创建、编辑、查询和渲染 Office 文档（`.docx`、`.xlsx`、`.pptx`）：`office_read`、`office_create`、`office_edit`、`office_query`、`office_render`
+  - 后端：`OfficeManager` 封装 OfficeCLI 二进制文件执行文档操作
+  - 前端：`DocumentPanel` 带拖拽调整手柄、最大化/还原按钮、拖拽遮罩层（防止 iframe 劫持鼠标事件）
+  - 前端：`DocumentPreview` 支持文件类型图标、加载/错误状态、HTML 预览
+  - SSE 事件实现文档操作实时可视化：`doc_op_start`、`doc_op_delta`、`doc_op_preview`、`doc_op_done`
+- **Scrapling 集成增强网页抓取** — `web_scrape` 现在使用 [Scrapling](https://github.com/D4Vinci/Scrapling) 解析器实现高质量结构化 HTML 提取
+  - 标题 → Markdown 标题，`<p>` → 段落（含内联链接），`<li>` → 列表，`<tr>` → 表格，`<a>` → `[文本](url)`
+  - 新增 `selector` 参数，支持 CSS 选择器精确提取页面元素
+  - 自动过滤噪音标签（script、style、nav、footer、侧边栏等）
+  - Scrapling 不可用时自动降级到 lxml
+- **会话 Agent 持久化** — 加载历史会话时自动恢复上次使用的 Agent 配置
+  - 后端：`SessionResponse` 新增 `agent` 字段
+  - 前端：自动加载、会话选择、新建会话时均恢复 Agent
+- **上下文压缩质量修复** — 压缩摘要不再被截断
+  - 提示词从"200-500 字"改为"全面详细，无长度限制，使用 Markdown 格式"
+  - `max_tokens` 提高：1024 → 4096
+  - 输入截断放宽：工具结果 500→2000 字符，消息 1000→3000 字符
+
+### 变更
+- **文档面板布局** — 默认宽度 480→520px，动态最大宽度计算，文档面板打开时聊天内容不再被挤压
+- **Univer 死代码清理** — 移除 `UniverEditor.tsx`、`@univerjs/*` 依赖、孤立 i18n 键和"在线编辑"按钮（开源版 Univer 无法导入/编辑已有 Office 文件）
+- **文件浏览器** — Git 和 Molts 区块默认折叠
+- **DocumentPreview** — 优化加载/错误状态，按文件类型显示图标
+
+### 修复
+- 文档面板拖拽：iframe 劫持鼠标事件导致拖拽粘死 — 使用透明遮罩层修复
+- 最大化按钮：最大化后无法还原 — 修复父容器定位
+- 文档面板最大化时聊天内容被挤压 — 动态 maxWidth 计算
+
+---
+
 ## [0.9.9.post1]
 
 ### 新增

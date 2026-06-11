@@ -69,7 +69,7 @@ def validate_command(command: str) -> str | None:
     lower_cmd = command.lower().strip()
     for crit_dir in _CRITICAL_DIRS:
         if crit_dir in lower_cmd and (">" in command or ">>" in command or "tee" in command):
-            return f"Command blocked: writing to critical system path '{crit_dir}'"
+            return f"NEED_CONFIRM:writing to critical system path '{crit_dir}'"
 
     if "> /dev/sd" in command or "> /dev/hd" in command:
         return "Command blocked: direct write to block device"

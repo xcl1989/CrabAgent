@@ -9,6 +9,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.10.0]
+
+### Added
+- **Intelligent Document Processing** — AI agents can now read, create, edit, query, and render Office documents (`.docx`, `.xlsx`, `.pptx`) through five built-in tools: `office_read`, `office_create`, `office_edit`, `office_query`, `office_render`
+  - Backend: `OfficeManager` wraps the OfficeCLI binary for document operations
+  - Frontend: `DocumentPanel` with resize handle, maximize/restore button, and drag overlay (prevents iframe mouse-event hijacking)
+  - Frontend: `DocumentPreview` with file-type icons, loading/error states, and HTML preview
+  - SSE events for real-time document operation visualization: `doc_op_start`, `doc_op_delta`, `doc_op_preview`, `doc_op_done`
+- **Scrapling integration for web scraping** — `web_scrape` now uses [Scrapling](https://github.com/D4Vinci/Scrapling) parser for high-quality structured HTML extraction
+  - Headings → Markdown headers, `<p>` → paragraphs (with inline links), `<li>` → lists, `<tr>` → tables, `<a>` → `[text](url)`
+  - New `selector` parameter for CSS-selector-based element extraction
+  - Automatic noise filtering (script, style, nav, footer, sidebar, etc.)
+  - Graceful fallback to lxml when Scrapling is unavailable
+- **Session agent persistence** — loading a historical session now restores the last-used agent profile
+  - Backend: `agent` field added to `SessionResponse`
+  - Frontend: agent restored on auto-load, session select, and new session
+- **Context compression quality fix** — compression summaries no longer truncated mid-sentence
+  - Prompt changed from "200-500 words" to "comprehensive, no length limit, use Markdown"
+  - `max_tokens` increased: 1024 → 4096
+  - Input truncation relaxed: tool results 500→2000 chars, messages 1000→3000 chars
+
+### Changed
+- **Document panel layout** — default width 480→520px, dynamic max-width calculation, chat content no longer squeezed when document panel is open
+- **Univer dead code cleanup** — removed `UniverEditor.tsx`, `@univerjs/*` dependencies, orphaned i18n keys, and "在线编辑" button (open-source Univer cannot import/edit existing Office files)
+- **FileBrowser** — Git and Molts sections default to collapsed
+- **DocumentPreview** — optimized loading/error states, type-specific file icons
+
+### Fixed
+- Document panel drag handle: iframe stealing mouse events during drag — fixed with transparent overlay
+- Maximize button: couldn't restore after maximizing — fixed parent container positioning
+- Chat content squeezed when document panel maximized — dynamic maxWidth calculation
+
+---
+
 ## [0.9.9.post1]
 
 ### Added

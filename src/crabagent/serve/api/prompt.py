@@ -121,6 +121,7 @@ class PromptRequest(BaseModel):
     images: list[str] | None = None
     agent: str | None = None
     reasoning_effort: str | None = None
+    file_context: str = ""
 
 
 @router.post("/sessions/{session_id}/prompt", status_code=status.HTTP_202_ACCEPTED)
@@ -351,6 +352,8 @@ async def prompt_async(
         locale=locale,
     )
     context.metadata["locale"] = locale
+    if req.file_context:
+        context.metadata["current_doc"] = req.file_context
 
     if req.images or local_images:
         from crabagent.core.agent.token_limits import is_vision_model

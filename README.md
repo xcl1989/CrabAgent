@@ -179,6 +179,15 @@ crabagent --serve          # → http://localhost:5210
 ### 🧠 Project Memory
 Remembers your project context across sessions. Zero extra cost.
 
+### 📄 Intelligent Document Processing
+AI agents can read, create, edit, and preview Office documents (`.docx`, `.xlsx`, `.pptx`) directly in conversations.
+```
+> Read sales.xlsx and summarize the Q1 data
+> Create a project proposal document
+> Update slide 3 title to "Q2 Roadmap"
+```
+Document panel opens alongside chat — drag to resize, maximize for full view.
+
 ### 🖼️ Multi-modal
 Paste/drop images into conversations. Auto-detects vision model support.
 

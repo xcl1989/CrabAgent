@@ -625,5 +625,21 @@
     "refresh": "Refresh",
     "totalInput": "Total Input",
     "totalOutput": "Total Output"
+  },
+  "document": {
+    "title": "Document",
+    "tabPreview": "Preview",
+    "tabTimeline": "Timeline",
+    "download": "Download",
+    "refresh": "Refresh Preview",
+    "noDocument": "No document open",
+    "operationStart": "Starting...",
+    "operationDone": "Complete",
+    "operationError": "Failed",
+    "unknownFile": "Unknown file",
+    "loadingPreview": "Loading preview...",
+    "previewFailed": "Preview unavailable",
+    "maximize": "Maximize",
+    "restore": "Restore"
   }
 }

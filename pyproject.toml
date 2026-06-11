@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "crabagent"
-version = "0.9.9.post1"
+version = "0.10.0"
 description = "CrabAgent - AI Agent Platform with dual-mode (CLI + Serve)"
 readme = "README.md"
 license = {text = "Commercial"}
@@ -26,7 +26,8 @@ dependencies = [
     "pydantic-settings>=2.0",
     "litellm>=1.40",
     "httpx>=0.27",
-    "lxml>=5.0",
+    "lxml>=6.1.1",
+    "scrapling>=0.4.9",
     "ddgs>=7.0",
     "rich>=13.0",
     "prompt_toolkit>=3.0",

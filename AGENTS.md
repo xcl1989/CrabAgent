@@ -1,27 +1,51 @@
-# Project Rules
+# 项目规则
 
-> This file is automatically loaded into every session's system prompt.
-> Keep it concise — max ~8000 chars. Use `update_agents_md` tool to update it.
+> 此文件会自动加载到每个会话的系统提示词中。
+> 保持简洁——最多约 8000 字符。使用 `update_agents_md` 工具来更新。
 
-## Version
-- Current: **0.9.9-1**（Token 用量分析 — 缓存区分 + 多维度统计）
-- Version in 7 places: `pyproject.toml`, `src/crabagent/serve/app.py` (`create_app` + `/health`), CLI banner in `src/crabagent/cli/__main__.py` (`_print_banner`), TUI banner in `src/crabagent/cli/tui.py`, `AGENTS.md`, `electron/package.json`, `src/crabagent/electron/package.json`
-- Bump all seven when changing version
+## 版本
+- 当前：**0.10.0**（智能文档处理 + Scrapling + 压缩修复）
+- 版本号出现在 7 处：`pyproject.toml`、`src/crabagent/serve/app.py`（`create_app` + `/health`）、CLI 横幅 `src/crabagent/cli/__main__.py`（`_print_banner`）、TUI 横幅 `src/crabagent/cli/tui.py`、`AGENTS.md`、`electron/package.json`、`src/crabagent/electron/package.json`
+- 修改版本时需同步更新全部七处
 
-## Commands
+## Office 文档能力
 
-### Install (full, with frontend)
+CrabAgent 通过以下组件处理 Office 文档：
+
+| 组件 | 用途 | 位置 |
+|------|------|------|
+| **OfficeManager** | OfficeCLI binary 封装（检测/执行/解析） | `src/crabagent/core/office/manager.py` |
+| **5 个 Agent 工具** | office_read / create / edit / query / render | `src/crabagent/core/agent/tools/office.py` |
+| **文档管理 API** | 上传/下载/预览/保存/删除 | `src/crabagent/serve/api/documents.py` |
+| **DocumentPanel** | 前端文档面板（预览/时间线） | `frontend/src/components/DocumentPanel.tsx` |
+
+### SSE 事件（文档操作可视化）
+- `doc_op_start` — AI 开始操作文档
+- `doc_op_delta` — 操作进度更新
+- `doc_op_preview` — 文档 HTML 预览更新
+- `doc_op_done` — 操作完成
+
+### 工具签名速查
+- `office_read(file_path, mode="text", sheet="", max_lines=200)` — 读取文档内容
+- `office_create(file_path)` — 创建空白文档
+- `office_edit(file_path, command, element_path="", props={}, element_type="")` — 编辑元素
+- `office_query(file_path, path_or_selector, mode="path", depth=1)` — 查询元素
+- `office_render(file_path)` — 渲染 HTML 预览
+
+## 命令
+
+### 安装（完整版，含前端）
 ```
-make install          # builds frontend -> copies to static -> pip install -e '.[dev]'
+make install          # 构建前端 -> 复制到 static -> pip install -e '.[dev]'
 ```
 
-### Install (backend only, no frontend)
+### 安装（仅后端，无前端）
 ```
 pip install -e '.[dev]'
 ```
 
-### Frontend build only (sandbox / no-shell-access)
-When `npm` is not in PATH, use the python3 workaround:
+### 仅构建前端（沙箱 / 无 shell 访问）
+当 `npm` 不在 PATH 中时，使用 python3 方案：
 ```
 cd frontend && python3 << 'PYEOF'
 import os, subprocess
@@ -35,7 +59,6 @@ env['SHELL'] = bp + '/sh'
 proc = subprocess.run([node, npm, 'run', 'build'], cwd='.', env=env, timeout=180, capture_output=True, text=True)
 if proc.returncode == 0:
     top = '/Users/xiecongling/Documents/Coding/CrabAgent'
-    # Clean old assets before copying new ones
     import glob
     for old in glob.glob(top + '/src/crabagent/static/assets/*'):
         os.remove(old)
@@ -45,69 +68,76 @@ else:
     print((proc.stdout or '')[-500:])
 PYEOF
 ```
-Built assets go to `frontend/dist/` and are copied to `src/crabagent/static/`. Always clean old assets before copy to avoid stale hashed files.
+构建产物在 `frontend/dist/`，复制到 `src/crabagent/static/`。复制前务必清理旧资源文件。
 
-### Run
+### 运行
 ```
-crabagent                     # interactive CLI
-crabagent "query"             # single-shot
-crabagent --serve             # web UI on :5210
+crabagent                     # 交互式 CLI
+crabagent "query"             # 单次执行
+crabagent --serve             # Web UI，端口 :5210
 crabagent --serve --port 8080
-crabagent --build-desktop     # build .dmg from pip install
+crabagent --build-desktop     # 从 pip 安装构建 .dmg
 ```
 
-### Lint / Format
+### 代码检查 / 格式化
 ```
 ruff check src/ tests/
 ruff format src/ tests/
 ```
 
-### Test
+### 测试
 ```
-pytest                        # all tests (asyncio_mode=auto in pyproject.toml)
-pytest tests/test_sandbox.py  # single file
+pytest                        # 全部测试（pyproject.toml 中 asyncio_mode=auto）
+pytest tests/test_sandbox.py  # 单个文件
 ```
 
-## Architecture
+## 架构
 
-Dual-mode Python agent platform: **CLI** (`src/crabagent/cli/`) and **Serve** (`src/crabagent/serve/`), sharing core logic in `src/crabagent/core/`.
+双模式 Python Agent 平台：**CLI**（`src/crabagent/cli/`）和 **Serve**（`src/crabagent/serve/`），共享核心逻辑 `src/crabagent/core/`。
 
-### Key directories
-| Path | Purpose |
-|------|---------|
-| `src/crabagent/core/agent/loop.py` | Agent loop — litellm calls, tool execution, context compression |
-| `src/crabagent/core/agent/context.py` | `AgentContext` dataclass (workspace, messages, event_bus, tool_registry) |
-| `src/crabagent/core/agent/tools/` | Built-in tools: bash, read, write, edit, glob, grep, web, browser, agent, sandbox, scheduled_task |
-| `src/crabagent/core/agent/agents.py` | Multi-agent delegation — loads `AgentProfile` from DB |
-| `src/crabagent/core/agent/compress.py` | Context window compression (threshold 0.8) |
-| `src/crabagent/core/agent/token_limits.py` | Model token limit registry |
-| `src/crabagent/core/config.py` | `Settings` (pydantic-settings, env prefix `CRAB_`, reads `.env`) |
-| `src/crabagent/core/database.py` | SQLAlchemy async models + `init_db()` with ALTER TABLE migrations |
-| `src/crabagent/core/provider_store.py` | LLM provider CRUD (API keys encrypted with Fernet) |
-| `src/crabagent/core/mcp/` | MCP (Model Context Protocol) client + tool registration |
-| `src/crabagent/core/molt/` | Snapshot/rollback system (stores diffs in `.crabagent/molts/`) |
-| `src/crabagent/core/tool_loader.py` | Discovers user tools from `.crabagent/tools/*.py` |
-| `src/crabagent/serve/api/` | FastAPI routers — prompt, session, message, agent, provider, MCP, etc. |
-| `src/crabagent/serve/services/` | Business logic — auth, conversation, message, persistence |
-| `src/crabagent/skills/` | Bundled skills (e.g. `python-debugger/`) |
+### 关键目录
+| 路径 | 用途 |
+|------|------|
+| `src/crabagent/core/agent/loop.py` | Agent 循环——litellm 调用、工具执行、上下文压缩 |
+| `src/crabagent/core/agent/context.py` | `AgentContext` 数据类（workspace、messages、event_bus、tool_registry） |
+| `src/crabagent/core/agent/tools/` | 内置工具：bash、read、write、edit、glob、grep、web、browser、agent、sandbox、scheduled_task、**office** |
+| `src/crabagent/core/agent/agents.py` | 多 Agent 委派——从数据库加载 `AgentProfile` |
+| `src/crabagent/core/agent/compress.py` | 上下文窗口压缩（阈值 0.8） |
+| `src/crabagent/core/agent/token_limits.py` | 模型 Token 限制注册表 |
+| `src/crabagent/core/config.py` | `Settings`（pydantic-settings，环境变量前缀 `CRAB_`，读取 `.env`） |
+| `src/crabagent/core/database.py` | SQLAlchemy 异步模型 + `init_db()` 含 ALTER TABLE 迁移 |
+| `src/crabagent/core/provider_store.py` | LLM 供应商 CRUD（API 密钥用 Fernet 加密） |
+| `src/crabagent/core/mcp/` | MCP（模型上下文协议）客户端 + 工具注册 |
+| `src/crabagent/core/office/` | Office 文档处理（OfficeCLI 管理器 + Agent 工具） |
+| `src/crabagent/core/molt/` | 快照/回滚系统（差异存储在 `.crabagent/molts/`） |
+| `src/crabagent/core/tool_loader.py` | 从 `.crabagent/tools/*.py` 发现用户工具 |
+| `src/crabagent/serve/api/` | FastAPI 路由——prompt、session、message、agent、provider、MCP、**documents** 等 |
+| `src/crabagent/serve/api/settings.py` | 设置 API——通用键值对存储（`AppSetting` 模型），支持 GET/PUT |
+| `src/crabagent/serve/services/` | 业务逻辑——认证、会话、消息、持久化 |
+| `src/crabagent/serve/scheduler.py` | 调度器——定时任务执行 + 邮件轮询，统一使用 `settings.default_model` |
+| `src/crabagent/skills/` | 内置技能（如 `python-debugger/`） |
+| `frontend/src/components/` | React 组件，含 DocumentPanel / DocumentTimeline / DocumentPreview |
+| `frontend/src/pages/SettingsPage.tsx` | 前端设置页面——配置默认模型、SearXNG等 |
+| `frontend/src/components/NavBar.tsx` | 导航栏——包含"设置"标签页 |
 
-### Tool registration flow
-1. Built-in tools self-register on `import` via decorators in `tools/registry.py`
-2. Browser/agent/scheduled_task tools are optionally imported (wrapped in `try/except`)
-3. `discover_skills()` + `register_skill_tool()` load from `.crabagent/skills/` and `.opencode/skills/`
-4. `discover_and_register_tools()` loads user `.py` files from `.crabagent/tools/`
-5. `register_mcp_tools()` registers tools from MCP servers
+### 工具注册流程
+1. 内置工具通过 `tools/registry.py` 中的装饰器在 `import` 时自注册
+2. Browser/agent/scheduled_task 工具可选导入（包裹在 `try/except` 中）
+3. `discover_skills()` + `register_skill_tool()` 从 `.crabagent/skills/` 和 `.opencode/skills/` 加载
+4. `discover_and_register_tools()` 从 `.crabagent/tools/` 加载用户 `.py` 文件
+5. `register_mcp_tools()` 注册来自 MCP 服务器的工具
+6. Office 工具（office_read/create/edit/query/render）在 `core/__init__.py` 中导入时自注册
 
-### Serve mode flow
-- Entry: `create_app()` in `serve/app.py` — mounts all `/api` routers + SPA fallback
-- Lifespan: `init_db()` -> start MCP clients -> start scheduler
-- Prompt handling: `serve/api/prompt.py` creates `AgentContext` per request, runs agent in `asyncio.Task`
+### Serve 模式流程
+- 入口：`serve/app.py` 中的 `create_app()`——挂载所有 `/api` 路由 + SPA 回退
+- 生命周期：`init_db()` -> 检测 OfficeCLI -> 启动 MCP 客户端 -> 启动调度器
+- Prompt 处理：`serve/api/prompt.py` 为每个请求创建 `AgentContext`，在 `asyncio.Task` 中运行 agent
 
-## Database Schema Changes
-- NEVER delete `crabagent.db` when adding new columns/tables
-- SQLAlchemy `create_all()` only creates new tables, it does NOT alter existing ones
-- When adding a column to an existing table, add ALTER TABLE logic in `init_db()` in `src/crabagent/core/database.py`
-- Example pattern:
+## 数据库结构变更
+- 添加新列/表时**绝不要**删除 `crabagent.db`
+- SQLAlchemy 的 `create_all()` 只创建新表，不会修改已有表
+- 给已有表添加列时，在 `src/crabagent/core/database.py` 的 `init_db()` 中添加 ALTER TABLE 逻辑
+- 示例模式：
   ```python
   result = await conn.execute(text("PRAGMA table_info(conversations)"))
   columns = [row[1] for row in result.fetchall()]
@@ -115,22 +145,32 @@ Dual-mode Python agent platform: **CLI** (`src/crabagent/cli/`) and **Serve** (`
       await conn.execute(text("ALTER TABLE conversations ADD COLUMN tokens INTEGER DEFAULT 0"))
   ```
 
-## Browser Automation (v0.3.0)
-- Playwright is an **optional dependency**: `pip install 'crabagent[browser]'`
-- Tools only register if playwright is importable — `PLAYWRIGHT_AVAILABLE` flag in `browser.py`
-- `BrowserManager` stored in `context.metadata["_browser_manager"]`, lazily initialized on first call
-- Headless by default; set `CRAB_BROWSER_HEADLESS=false` for headed mode
-- Cleanup: `browser_mgr.close()` called in `finally` blocks of both CLI and serve prompt handlers
+## 浏览器自动化 (v0.3.0)
+- Playwright 是**可选依赖**：`pip install 'crabagent[browser]'`
+- 工具仅在 playwright 可导入时注册——`browser.py` 中的 `PLAYWRIGHT_AVAILABLE` 标志
+- `BrowserManager` 存储在 `context.metadata["_browser_manager"]`，首次调用时懒初始化
+- 默认无头模式；设置 `CRAB_BROWSER_HEADLESS=false` 启用有头模式
+- 清理：CLI 和 serve 的 prompt 处理器中 `finally` 块都会调用 `browser_mgr.close()`
 
-## Config
-- All settings use env prefix `CRAB_` (e.g. `CRAB_DB_URL`, `CRAB_SERVE_PORT`, `CRAB_JWT_SECRET`)
-- `.env` file is auto-loaded by pydantic-settings
-- API keys are encrypted at rest with Fernet (key auto-generated in `~/.crabagent/encryption_key`)
-- Encryption key migration runs in `init_db()` via `migrate_plaintext_keys()`
+## 配置
+- 所有设置使用环境变量前缀 `CRAB_`（如 `CRAB_DB_URL`、`CRAB_SERVE_PORT`、`CRAB_JWT_SECRET`）
+- `.env` 文件由 pydantic-settings 自动加载
+- API 密钥使用 Fernet 静态加密（密钥自动生成在 `~/.crabagent/encryption_key`）
+- 加密密钥迁移在 `init_db()` 中通过 `migrate_plaintext_keys()` 执行
+- **`CRAB_DEFAULT_MODEL`**（默认 `gpt-4o`）：控制邮件处理（邮件轮询、回复草稿生成）和定时任务执行的默认 LLM 模型
+- 运行时设置（`default_model`、`searxng_url` 等）可通过前端设置页面或 `/api/settings` API 修改，存储在数据库 `app_settings` 表中
 
-## General
-- Provider configs are user data stored in `crabagent.db` — never delete the DB without explicit user approval
-- Default admin user created on first `init_db()` (username: `admin`, password: `xcl1989`)
-- 4 default agent profiles seeded: researcher, analyst, coder, writer
-- Requires Python >=3.12
-- When in doubt, ask the user before any destructive operation
+## 通用规则
+- Provider 配置是存储在 `crabagent.db` 中的用户数据——未经用户明确批准不得删除数据库
+- 首次 `init_db()` 时创建默认管理员用户（用户名：`admin`，密码：`xcl1989`）
+- 预设 4 个默认 Agent 配置：researcher、analyst、coder、writer
+- 要求 Python >=3.12
+- 有疑问时，先询问用户再执行任何破坏性操作
+
+## 语言要求
+请使用简体中文回复。所有对用户的回复、总结、说明都应使用简体中文。
+代码注释和文件内容保持原文，文件路径、命令等技术术语保持原文。
+
+## 语言要求
+请使用简体中文回复。所有对用户的回复、总结、说明都应使用简体中文。
+代码注释和文件内容保持原文，文件路径、命令等技术术语保持原文。

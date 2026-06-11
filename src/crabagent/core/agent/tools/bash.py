@@ -1,5 +1,6 @@
 import asyncio
 import subprocess
+from typing import Any
 
 from crabagent.core.agent.tools.registry import registry
 from crabagent.core.agent.tools.sandbox import truncate_output, validate_command
@@ -48,10 +49,24 @@ async def bash_command(
     workdir: str | None = None,
     timeout: int = 120000,
     background: bool = False,
+    context: Any = None,
 ) -> str:
     block_reason = validate_command(command)
     if block_reason:
-        return block_reason
+        if block_reason.startswith("NEED_CONFIRM:"):
+            detail = block_reason[len("NEED_CONFIRM:"):]
+            if context and context.confirm_callback:
+                approved = await context.confirm_callback("bash", {
+                    "command": command,
+                    "warning": detail,
+                })
+                if not approved:
+                    return f"Command denied by user: {detail}"
+            # fallback: if no confirm_callback, ask via message to LLM
+            else:
+                return f"⚠️ 安全提醒：该命令需要您确认 — {detail}\n\n是否允许执行？请回复 yes/no。"
+        else:
+            return block_reason
 
     if background:
         return await _run_background(command, workdir)

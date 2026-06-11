@@ -17,7 +17,7 @@ export default function GitChanges({ workspace, collapsible }: Props) {
   const [expandedFile, setExpandedFile] = useState<string | null>(null);
   const [diffData, setDiffData] = useState<string>("");
   const [diffLoading, setDiffLoading] = useState(false);
-  const [sectionOpen, setSectionOpen] = useState(true);
+  const [sectionOpen, setSectionOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);

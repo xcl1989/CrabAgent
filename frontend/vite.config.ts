@@ -12,21 +12,14 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
-        manualChunks: {
-          "vendor-react": ["react", "react-dom", "react-router-dom"],
-          "vendor-charts": ["recharts"],
-          "vendor-markdown": [
-            "react-markdown",
-            "remark-gfm",
-            "rehype-highlight",
-            "highlight.js",
-          ],
-          "vendor-ui": [
-            "@radix-ui/react-dialog",
-            "@radix-ui/react-tooltip",
-            "lucide-react",
-            "sonner",
-          ],
+        manualChunks(id: string) {
+          // Keep vendor chunks
+          if (id.includes("node_modules/react")) return "vendor-react";
+          if (id.includes("node_modules/recharts")) return "vendor-charts";
+          if (id.includes("node_modules/react-markdown") || id.includes("node_modules/remark-gfm") || id.includes("node_modules/rehype-highlight") || id.includes("node_modules/highlight")) return "vendor-markdown";
+          if (id.includes("node_modules/@radix-ui") || id.includes("node_modules/lucide") || id.includes("node_modules/sonner")) return "vendor-ui";
+          // Merge all Univer sub-chunks (locales, dictionaries, etc.) except main entry points
+          if (id.includes("@univerjs") && !id.endsWith("/index.js") && !id.endsWith("/facade.js")) return "univer-data";
         },
       },
     },

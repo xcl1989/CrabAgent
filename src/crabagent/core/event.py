@@ -39,6 +39,12 @@ class EventType(StrEnum):
     PIPELINE_STEP_END = "pipeline_step_end"
     PIPELINE_END = "pipeline_end"
 
+    # Office document operations
+    DOC_OP_START = "doc_op_start"
+    DOC_OP_DELTA = "doc_op_delta"
+    DOC_OP_PREVIEW = "doc_op_preview"
+    DOC_OP_DONE = "doc_op_done"
+
 
 @dataclass
 class AgentEvent:

@@ -14,6 +14,7 @@ interface Props {
   onToggle: () => void;
   sessionId: string | null;
   workspace?: string;
+  onOpenDoc?: (path: string, name: string) => void;
 }
 
 function useFileTree(workspace?: string) {
@@ -163,6 +164,7 @@ export default function FileBrowser({
   onToggle,
   sessionId,
   workspace,
+  onOpenDoc,
 }: Props) {
   const { t } = useTranslation();
   const tree = useFileTree(workspace);
@@ -204,6 +206,7 @@ export default function FileBrowser({
               onSelect={tree.handleSelect}
               selectedPath={tree.selectedPath}
               absolute={tree.absolute}
+              onOpenDoc={onOpenDoc}
             />
           )}
         </div>
@@ -262,6 +265,7 @@ export default function FileBrowser({
                 onSelect={tree.handleSelect}
                 selectedPath={tree.selectedPath}
                 absolute={tree.absolute}
+                onOpenDoc={onOpenDoc}
               />
             )}
             <ErrorBoundary>

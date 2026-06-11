@@ -625,5 +625,21 @@
     "refresh": "刷新",
     "totalInput": "总输入",
     "totalOutput": "总输出"
+  },
+  "document": {
+    "title": "文档",
+    "tabPreview": "预览",
+    "tabTimeline": "时间线",
+    "download": "下载",
+    "refresh": "刷新预览",
+    "noDocument": "暂无打开的文档",
+    "operationStart": "开始操作",
+    "operationDone": "完成",
+    "operationError": "失败",
+    "unknownFile": "未知文件",
+    "loadingPreview": "加载预览中...",
+    "previewFailed": "预览不可用",
+    "maximize": "最大化",
+    "restore": "还原"
   }
 }

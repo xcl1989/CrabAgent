@@ -4,9 +4,34 @@
 > 保持简洁——最多约 8000 字符。使用 `update_agents_md` 工具来更新。
 
 ## 版本
-- 当前：**0.9.7**（多语言支持、README 优化、版本升级）
+- 当前：**0.9.9.post1**（Office 文档能力 — 后端工具 + 前端预览）
 - 版本号出现在 7 处：`pyproject.toml`、`src/crabagent/serve/app.py`（`create_app` + `/health`）、CLI 横幅 `src/crabagent/cli/__main__.py`（`_print_banner`）、TUI 横幅 `src/crabagent/cli/tui.py`、`AGENTS.md`、`electron/package.json`、`src/crabagent/electron/package.json`
 - 修改版本时需同步更新全部七处
+
+## Office 文档能力
+
+CrabAgent 通过以下组件处理 Office 文档：
+
+| 组件 | 用途 | 位置 |
+|------|------|------|
+| **OfficeManager** | OfficeCLI binary 封装（检测/执行/解析） | `src/crabagent/core/office/manager.py` |
+| **5 个 Agent 工具** | office_read / create / edit / query / render | `src/crabagent/core/agent/tools/office.py` |
+| **文档管理 API** | 上传/下载/预览/保存/删除 | `src/crabagent/serve/api/documents.py` |
+| **DocumentPanel** | 前端文档面板（预览/编辑/时间线） | `frontend/src/components/DocumentPanel.tsx` |
+| **UniverEditor** | 前端 Univer SDK 编辑器封装 | `frontend/src/components/UniverEditor.tsx` |
+
+### SSE 事件（文档操作可视化）
+- `doc_op_start` — AI 开始操作文档
+- `doc_op_delta` — 操作进度更新
+- `doc_op_preview` — 文档 HTML 预览更新
+- `doc_op_done` — 操作完成
+
+### 工具签名速查
+- `office_read(file_path, mode="text", sheet="", max_lines=200)` — 读取文档内容
+- `office_create(file_path)` — 创建空白文档
+- `office_edit(file_path, command, element_path="", props={}, element_type="")` — 编辑元素
+- `office_query(file_path, path_or_selector, mode="path", depth=1)` — 查询元素
+- `office_render(file_path)` — 渲染 HTML 预览
 
 ## 命令
 
@@ -76,7 +101,7 @@ pytest tests/test_sandbox.py  # 单个文件
 |------|------|
 | `src/crabagent/core/agent/loop.py` | Agent 循环——litellm 调用、工具执行、上下文压缩 |
 | `src/crabagent/core/agent/context.py` | `AgentContext` 数据类（workspace、messages、event_bus、tool_registry） |
-| `src/crabagent/core/agent/tools/` | 内置工具：bash、read、write、edit、glob、grep、web、browser、agent、sandbox、scheduled_task |
+| `src/crabagent/core/agent/tools/` | 内置工具：bash、read、write、edit、glob、grep、web、browser、agent、sandbox、scheduled_task、**office** |
 | `src/crabagent/core/agent/agents.py` | 多 Agent 委派——从数据库加载 `AgentProfile` |
 | `src/crabagent/core/agent/compress.py` | 上下文窗口压缩（阈值 0.8） |
 | `src/crabagent/core/agent/token_limits.py` | 模型 Token 限制注册表 |
@@ -84,13 +109,15 @@ pytest tests/test_sandbox.py  # 单个文件
 | `src/crabagent/core/database.py` | SQLAlchemy 异步模型 + `init_db()` 含 ALTER TABLE 迁移 |
 | `src/crabagent/core/provider_store.py` | LLM 供应商 CRUD（API 密钥用 Fernet 加密） |
 | `src/crabagent/core/mcp/` | MCP（模型上下文协议）客户端 + 工具注册 |
+| `src/crabagent/core/office/` | Office 文档处理（OfficeCLI 管理器 + Agent 工具） |
 | `src/crabagent/core/molt/` | 快照/回滚系统（差异存储在 `.crabagent/molts/`） |
 | `src/crabagent/core/tool_loader.py` | 从 `.crabagent/tools/*.py` 发现用户工具 |
-| `src/crabagent/serve/api/` | FastAPI 路由——prompt、session、message、agent、provider、MCP 等 |
+| `src/crabagent/serve/api/` | FastAPI 路由——prompt、session、message、agent、provider、MCP、**documents** 等 |
 | `src/crabagent/serve/api/settings.py` | 设置 API——通用键值对存储（`AppSetting` 模型），支持 GET/PUT |
 | `src/crabagent/serve/services/` | 业务逻辑——认证、会话、消息、持久化 |
 | `src/crabagent/serve/scheduler.py` | 调度器——定时任务执行 + 邮件轮询，统一使用 `settings.default_model` |
 | `src/crabagent/skills/` | 内置技能（如 `python-debugger/`） |
+| `frontend/src/components/` | React 组件，含 DocumentPanel / DocumentTimeline / DocumentPreview / **UniverEditor** |
 | `frontend/src/pages/SettingsPage.tsx` | 前端设置页面——配置默认模型、SearXNG等 |
 | `frontend/src/components/NavBar.tsx` | 导航栏——包含"设置"标签页 |
 
@@ -100,10 +127,11 @@ pytest tests/test_sandbox.py  # 单个文件
 3. `discover_skills()` + `register_skill_tool()` 从 `.crabagent/skills/` 和 `.opencode/skills/` 加载
 4. `discover_and_register_tools()` 从 `.crabagent/tools/` 加载用户 `.py` 文件
 5. `register_mcp_tools()` 注册来自 MCP 服务器的工具
+6. Office 工具（office_read/create/edit/query/render）在 `core/__init__.py` 中导入时自注册
 
 ### Serve 模式流程
 - 入口：`serve/app.py` 中的 `create_app()`——挂载所有 `/api` 路由 + SPA 回退
-- 生命周期：`init_db()` -> 启动 MCP 客户端 -> 启动调度器
+- 生命周期：`init_db()` -> 检测 OfficeCLI -> 启动 MCP 客户端 -> 启动调度器
 - Prompt 处理：`serve/api/prompt.py` 为每个请求创建 `AgentContext`，在 `asyncio.Task` 中运行 agent
 
 ## 数据库结构变更
@@ -139,6 +167,10 @@ pytest tests/test_sandbox.py  # 单个文件
 - 预设 4 个默认 Agent 配置：researcher、analyst、coder、writer
 - 要求 Python >=3.12
 - 有疑问时，先询问用户再执行任何破坏性操作
+
+## 语言要求
+请使用简体中文回复。所有对用户的回复、总结、说明都应使用简体中文。
+代码注释和文件内容保持原文，文件路径、命令等技术术语保持原文。
 
 ## 语言要求
 请使用简体中文回复。所有对用户的回复、总结、说明都应使用简体中文。

@@ -32,6 +32,7 @@ class SessionResponse(BaseModel):
     workspace: str
     model: str
     provider: str = ""
+    agent: str = "default"
     active_branch: str = "main"
     prompt_locale: str = ""
     created_at: str | None = None
@@ -45,6 +46,7 @@ def _conv_to_response(conv) -> SessionResponse:
         workspace=conv.workspace,
         model=conv.model,
         provider=getattr(conv, "provider", "") or "",
+        agent=getattr(conv, "agent", None) or "default",
         active_branch=conv.active_branch or "main",
         prompt_locale=getattr(conv, "prompt_locale", "") or "",
         created_at=conv.created_at.isoformat() if conv.created_at else None,

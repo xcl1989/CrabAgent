@@ -70,7 +70,7 @@ export default function MoltTimeline({ sessionId, collapsible }: Props) {
     }
   };
 
-  const [sectionOpen, setSectionOpen] = useState(true);
+  const [sectionOpen, setSectionOpen] = useState(false);
 
   if (refreshing && molts.length === 0) {
     return (

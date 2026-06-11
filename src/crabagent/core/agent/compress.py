@@ -44,7 +44,7 @@ async def compress_context(context: AgentContext, llm_params: dict, model: str) 
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            max_tokens=1024,
+            max_tokens=4096,
             stream=True,
             stream_options={"include_usage": True},
         )
@@ -143,11 +143,11 @@ def _format_messages(messages: list[dict]) -> str:
 
         if role == "tool":
             tool_name = msg.get("name", "tool")
-            parts.append(f"[{tool_name} result]: {content[:500]}")
+            parts.append(f"[{tool_name} result]: {content[:2000]}")
         else:
             # Normalise internal roles for display
             display_role = "user" if role in ("agent_switch", "experience", "compress") else role
-            display = content[:1000] if len(content) > 1000 else content
+            display = content[:3000] if len(content) > 3000 else content
             parts.append(f"[{display_role}]: {display}")
 
     return "\n\n".join(parts)
