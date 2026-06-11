@@ -226,6 +226,7 @@ Drop a `.py` file in `.crabagent/tools/` — or let the AI create one for you in
 ```bash
 pip install crabagent                    # CLI + Web UI + API (all-in-one)
 pip install 'crabagent[browser]'        # Browser automation
+pip install 'crabagent[memory]'         # Semantic memory search (recommended)
 pip install 'crabagent[dev]'            # Testing + linting
 ```
 
@@ -279,6 +280,7 @@ pytest                   # Run tests
 | `CRAB_MAX_TOKENS` | `4096` | Max response tokens |
 | `CRAB_BROWSER_HEADLESS` | `true` | Browser headless mode |
 | `CRAB_WEB_PROXY` | (empty) | HTTP proxy for web tools |
+| `CRAB_MEMORY_EMBEDDING` | `auto` | Memory vector search: `auto` / `on` / `off` |
 
 ---
 
@@ -290,7 +292,7 @@ CrabAgent/
 │   ├── cli/           # CLI + TUI
 │   ├── core/agent/    # Agent loop, tools, compression, agents
 │   ├── core/mcp/      # MCP client manager
-│   ├── core/          # Database, config, project memory
+│   ├── core/          # Database, config, project memory, embedding
 │   └── serve/         # FastAPI + API + scheduler
 ├── frontend/          # React SPA
 ├── electron/          # Electron desktop app

@@ -12,6 +12,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.10.0]
 
 ### Added
+- **Semantic Memory Search** — memory recall upgraded from SQL `LIKE` keyword matching to vector similarity search using `sentence-transformers`
+  - New `MemoryEmbedding` table stores 384-dim float32 vectors (base64-encoded) for each memory entry
+  - `agent_memory_search_vector()` computes cosine similarity × 0.7 + importance × 0.3 for ranking
+  - Automatic fallback to LIKE search when `sentence-transformers` is not installed
+  - `CRAB_MEMORY_EMBEDDING` env var controls behavior: `auto` (default) / `on` / `off`
+  - New optional dependency: `pip install 'crabagent[memory]'`
+- **Cross-Agent Lesson Sharing** — agents can now reuse high-quality lessons from other agents
+  - When an agent's own lessons < 5, supplements with lessons from other agents where importance ≥ 0.7 and similarity ≥ 0.4
+  - Enables knowledge transfer across the team (e.g., coder benefits from researcher's search strategies)
+- **Memory Quality Decay** — weekly cron job automatically prunes stale memories
+  - Every Monday 03:00: memories with `access_count=0` and age > 30 days get importance reduced by 0.1
+  - Memories with importance < 0.2 and age > 60 days are deleted
+- **Data Cleanup** — reduced memory entries from 645 → 530 (removed duplicates, low-quality entries, stale project docs)
+- **Bash Streaming Output** — bash tool now streams output in real-time via SSE instead of blocking until completion
+  - New `BASH_OUTPUT` / `BASH_EXIT` event types for live terminal-style display
+  - Auto-background on timeout with log file path for follow-up
+  - Frontend: terminal-style panel with green monospace text and pulsing indicator
+- **Office Tool Fixes** — `office_read` now supports `offset` parameter; `add_element` supports `index`/`after`/`before` positioning; `office_query` auto-truncates output over 50K chars
 - **Intelligent Document Processing** — AI agents can now read, create, edit, query, and render Office documents (`.docx`, `.xlsx`, `.pptx`) through five built-in tools: `office_read`, `office_create`, `office_edit`, `office_query`, `office_render`
   - Backend: `OfficeManager` wraps the OfficeCLI binary for document operations
   - Frontend: `DocumentPanel` with resize handle, maximize/restore button, and drag overlay (prevents iframe mouse-event hijacking)
@@ -35,11 +53,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Univer dead code cleanup** — removed `UniverEditor.tsx`, `@univerjs/*` dependencies, orphaned i18n keys, and "在线编辑" button (open-source Univer cannot import/edit existing Office files)
 - **FileBrowser** — Git and Molts sections default to collapsed
 - **DocumentPreview** — optimized loading/error states, type-specific file icons
+- **Memory search** — `build_memory_prompt()`, `inject_agent_lessons()`, and `memory_recall` tool now use vector search with LIKE fallback
+- **Team memory type fix** — fixed `team` memories never being injected (was querying `team_knowledge` instead of `team`)
 
 ### Fixed
 - Document panel drag handle: iframe stealing mouse events during drag — fixed with transparent overlay
 - Maximize button: couldn't restore after maximizing — fixed parent container positioning
 - Chat content squeezed when document panel maximized — dynamic maxWidth calculation
+- `office_read` always returning from paragraph 1 — added `offset` parameter
+- Bash tool hard-coded 8s timeout cutting off normal commands — replaced with streaming + auto-background
 
 ---
 

@@ -11,6 +11,23 @@ English version: [CHANGELOG.md](CHANGELOG.md)
 ## [0.10.0]
 
 ### 新增
+- **语义记忆搜索** — 记忆召回从 SQL `LIKE` 关键词匹配升级为基于 `sentence-transformers` 的向量相似度搜索
+  - 新增 `MemoryEmbedding` 表，为每条记忆存储 384 维 float32 向量（base64 编码）
+  - `agent_memory_search_vector()` 使用 余弦相似度 × 0.7 + importance × 0.3 综合排序
+  - 未安装 `sentence-transformers` 时自动降级到 LIKE 搜索
+  - 新增环境变量 `CRAB_MEMORY_EMBEDDING`：`auto`（默认）/ `on` / `off`
+  - 新增可选依赖：`pip install 'crabagent[memory]'`
+- **跨 Agent 经验共享** — Agent 现在可以复用其他 Agent 的高质量经验
+  - 当自身经验 < 5 条时，自动补充其他 Agent 的经验（importance ≥ 0.7 且相似度 ≥ 0.4）
+  - 实现团队间的知识传递（如 coder 可以借鉴 researcher 的搜索策略）
+- **记忆质量衰减** — 每周定时任务自动清理过时记忆
+  - 每周一 03:00：`access_count=0` 且超过 30 天的记忆 importance 降低 0.1
+  - importance < 0.2 且超过 60 天的记忆自动删除
+- **数据清理** — 记忆条目从 645 条精简至 530 条（删除重复、低质量、过时项目文档）
+- **Bash 流式输出** — bash 工具现在通过 SSE 实时流式输出，不再阻塞等待完成
+  - 新增 `BASH_OUTPUT` / `BASH_EXIT` 事件类型，前端终端风格实时显示
+  - 超时后自动转后台，返回日志文件路径供后续查看
+- **Office 工具修复** — `office_read` 新增 `offset` 参数；`add_element` 支持 `index`/`after`/`before` 定位；`office_query` 输出超 5 万字符时自动截断
 - **智能文档处理** — AI Agent 现在可以通过五个内置工具读取、创建、编辑、查询和渲染 Office 文档（`.docx`、`.xlsx`、`.pptx`）：`office_read`、`office_create`、`office_edit`、`office_query`、`office_render`
   - 后端：`OfficeManager` 封装 OfficeCLI 二进制文件执行文档操作
   - 前端：`DocumentPanel` 带拖拽调整手柄、最大化/还原按钮、拖拽遮罩层（防止 iframe 劫持鼠标事件）
@@ -34,11 +51,15 @@ English version: [CHANGELOG.md](CHANGELOG.md)
 - **Univer 死代码清理** — 移除 `UniverEditor.tsx`、`@univerjs/*` 依赖、孤立 i18n 键和"在线编辑"按钮（开源版 Univer 无法导入/编辑已有 Office 文件）
 - **文件浏览器** — Git 和 Molts 区块默认折叠
 - **DocumentPreview** — 优化加载/错误状态，按文件类型显示图标
+- **记忆搜索** — `build_memory_prompt()`、`inject_agent_lessons()` 和 `memory_recall` 工具改用向量搜索，自动降级到 LIKE
+- **Team 记忆类型修复** — 修复 `team` 类型记忆从未被注入的问题（原来错误查询 `team_knowledge`）
 
 ### 修复
 - 文档面板拖拽：iframe 劫持鼠标事件导致拖拽粘死 — 使用透明遮罩层修复
 - 最大化按钮：最大化后无法还原 — 修复父容器定位
 - 文档面板最大化时聊天内容被挤压 — 动态 maxWidth 计算
+- `office_read` 始终从第 1 段返回 — 新增 `offset` 参数
+- Bash 工具硬编码 8 秒超时截断正常命令 — 改为流式输出 + 自动转后台
 
 ---
 
