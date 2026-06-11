@@ -134,7 +134,7 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
         }, 500);
         return;
       }
-      if (event.type === "text_delta" || event.type === "tool_call" || event.type === "thinking_delta" || event.type === "iteration_start") {
+      if (event.type === "text_delta" || event.type === "tool_call" || event.type === "thinking_delta" || event.type === "iteration_start" || event.type === "bash_output") {
         setSending(true);
       }
       if (event.type === "agent_end") {

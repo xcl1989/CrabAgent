@@ -114,7 +114,8 @@ class OfficeManager:
         OfficeResult
             如果 binary 输出 JSON 格式（以 ``{`` 开头），自动解析。
         """
-        if not self._available:
+        cmd = [self._binary_path, *args] if self._available else []
+        if not cmd:
             return OfficeResult(
                 success=False,
                 error=(
@@ -123,53 +124,7 @@ class OfficeManager:
                     "iOfficeAI/OfficeCLI/main/install.sh | bash"
                 ),
             )
-
-        cmd = [self._binary_path, *args]
-        logger.debug("officecli: %s", " ".join(cmd))
-
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(), timeout=timeout
-            )
-            stdout_decoded = stdout.decode("utf-8", errors="replace")
-            stderr_decoded = stderr.decode("utf-8", errors="replace")
-
-            if proc.returncode != 0:
-                return OfficeResult(
-                    success=False,
-                    error=stderr_decoded or f"Exit code {proc.returncode}",
-                    raw_output=stdout_decoded,
-                )
-
-            # 尝试 JSON 解析
-            trimmed = stdout_decoded.strip()
-            if trimmed.startswith("{"):
-                try:
-                    payload = json.loads(trimmed)
-                    return OfficeResult(
-                        success=payload.get("success", True),
-                        data=payload.get("data", payload),
-                        error=payload.get("error", ""),
-                        raw_output=stdout_decoded,
-                    )
-                except json.JSONDecodeError:
-                    pass
-
-            return OfficeResult(success=True, data=stdout_decoded, raw_output=stdout_decoded)
-
-        except TimeoutError:
-            return OfficeResult(success=False, error=f"Command timed out ({timeout}s)")
-        except FileNotFoundError:
-            self._available = False
-            return OfficeResult(success=False, error="OfficeCLI binary not found")
-        except Exception as e:
-            logger.exception("OfficeCLI exec failed")
-            return OfficeResult(success=False, error=str(e))
+        return await self._exec_with_stdin(cmd, timeout=timeout)
 
     # ── high-level helpers ──────────────────────────────────────────────
 
@@ -183,9 +138,12 @@ class OfficeManager:
         max_lines: int = 200,
         sheet: str = "",
         cols: str = "",
+        start: int = 0,
     ) -> OfficeResult:
         """读取文档的纯文本内容。"""
         args = ["view", file_path, "text", "--max-lines", str(max_lines)]
+        if start > 0:
+            args.extend(["--start", str(start)])
         if sheet:
             args.extend(["--sheet", sheet])
         if cols:
@@ -234,16 +192,41 @@ class OfficeManager:
         Parameters
         ----------
         parent_path : str
-            父元素路径，如 ``/``（根）, ``/slide[1]``
+            父元素路径，如 ``/``（根）, ``/slide[1]``, ``/body``
         element_type : str
-            元素类型，如 ``slide``, ``shape``, ``table``, ``chart``, ``image``
+            元素类型，如 ``slide``, ``shape``, ``table``, ``paragraph``,
+            ``chart``, ``image``, ``sheet``, ``row``, ``cell``
         props : dict | None
-            元素的属性
+            元素的属性。支持的定位键（不会传给 CLI --prop）：
+            - ``index``: 插入位置（0-based）
+            - ``after``: 在此路径的元素之后插入
+            - ``before``: 在此路径的元素之前插入
+            - ``data``: table 专用，二维数组 JSON（通过 stdin 传递）
         """
         cmd = ["add", file_path, parent_path, "--type", element_type]
+
+        # 分离定位参数和普通属性
+        pass_props: dict[str, Any] = {}
+        table_data: Any = None
         for k, v in (props or {}).items():
+            if k == "index":
+                cmd.extend(["--index", str(int(v))])
+            elif k in ("after", "before"):
+                cmd.extend([f"--{k}", str(v)])
+            elif k == "data":
+                table_data = v
+            else:
+                pass_props[k] = v
+
+        for k, v in pass_props.items():
             cmd.extend(["--prop", f"{k}={v}"])
-        return await self.exec(*cmd)
+
+        # table 的 data 用 stdin 传递，避免命令行参数长度限制
+        stdin_data: bytes | None = None
+        if table_data is not None:
+            stdin_data = json.dumps(table_data).encode("utf-8")
+
+        return await self._exec_with_stdin(cmd, stdin_data)
 
     async def remove_element(self, file_path: str, element_path: str) -> OfficeResult:
         """删除文档中的元素。"""
@@ -292,6 +275,63 @@ class OfficeManager:
         return await self.exec("help", "--format", fmt)
 
     # ── internal ────────────────────────────────────────────────────────
+
+    async def _exec_with_stdin(
+        self, cmd: list[str], stdin_data: bytes | None = None, timeout: int = 60
+    ) -> OfficeResult:
+        """执行命令，可选通过 stdin 传递数据。"""
+        if not self._available:
+            return OfficeResult(
+                success=False,
+                error="OfficeCLI is not installed.",
+            )
+
+        logger.debug("officecli: %s", " ".join(cmd))
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdin=asyncio.subprocess.PIPE if stdin_data else asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(input=stdin_data), timeout=timeout
+            )
+            stdout_decoded = stdout.decode("utf-8", errors="replace")
+            stderr_decoded = stderr.decode("utf-8", errors="replace")
+
+            if proc.returncode != 0:
+                return OfficeResult(
+                    success=False,
+                    error=stderr_decoded or f"Exit code {proc.returncode}",
+                    raw_output=stdout_decoded,
+                )
+
+            # 尝试 JSON 解析
+            trimmed = stdout_decoded.strip()
+            if trimmed.startswith("{"):
+                try:
+                    payload = json.loads(trimmed)
+                    return OfficeResult(
+                        success=payload.get("success", True),
+                        data=payload.get("data", payload),
+                        error=payload.get("error", ""),
+                        raw_output=stdout_decoded,
+                    )
+                except json.JSONDecodeError:
+                    pass
+
+            return OfficeResult(success=True, data=stdout_decoded, raw_output=stdout_decoded)
+
+        except TimeoutError:
+            return OfficeResult(success=False, error=f"Command timed out ({timeout}s)")
+        except FileNotFoundError:
+            self._available = False
+            return OfficeResult(success=False, error="OfficeCLI binary not found")
+        except Exception as e:
+            logger.exception("OfficeCLI exec failed")
+            return OfficeResult(success=False, error=str(e))
 
     async def _run_cmd(self, cmd: list[str]) -> str:
         proc = await asyncio.create_subprocess_exec(

@@ -1,11 +1,36 @@
 import asyncio
+import logging
+import os
 import subprocess
+import tempfile
+import time
 from typing import Any
 
 from crabagent.core.agent.tools.registry import registry
 from crabagent.core.agent.tools.sandbox import truncate_output, validate_command
 
-_DETACH_TIMEOUT = 8
+logger = logging.getLogger(__name__)
+
+# Emit BASH_OUTPUT events at most every N seconds
+_EMIT_INTERVAL = 0.15
+
+# When reading stream chunks, timeout per individual read() call.
+# Prevents hanging if the process stalls without producing output.
+_CHUNK_READ_TIMEOUT = 60
+
+
+async def _emit_bash_output(context: Any, text: str, tool_call_id: str = "") -> None:
+    """Emit a BASH_OUTPUT SSE event for real-time frontend display."""
+    if not context or not hasattr(context, "event_bus") or not context.event_bus:
+        return
+    from crabagent.core.event import AgentEvent, EventType
+
+    await context.event_bus.emit(
+        AgentEvent(
+            type=EventType.BASH_OUTPUT,
+            data={"text": text, "tool_call_id": tool_call_id},
+        )
+    )
 
 
 @registry.register(
@@ -62,14 +87,13 @@ async def bash_command(
                 })
                 if not approved:
                     return f"Command denied by user: {detail}"
-            # fallback: if no confirm_callback, ask via message to LLM
             else:
                 return f"⚠️ 安全提醒：该命令需要您确认 — {detail}\n\n是否允许执行？请回复 yes/no。"
         else:
             return block_reason
 
     if background:
-        return await _run_background(command, workdir)
+        return await _run_background(command, workdir, context)
 
     # Source user profile to get correct PATH (macOS Python, homebrew, etc.)
     _profile_cmd = (
@@ -90,41 +114,173 @@ async def bash_command(
             start_new_session=True,
         )
 
-        try:
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=_DETACH_TIMEOUT)
-        except TimeoutError:
-            return await _detach_process(proc, command)
+        timeout_sec = timeout / 1000.0
+        collected_stdout: list[str] = []
+        collected_stderr: list[str] = []
 
-        parts = []
-        if stdout:
-            parts.append(stdout.decode("utf-8", errors="replace"))
-        if stderr:
-            parts.append(f"[stderr]\n{stderr.decode('utf-8', errors='replace')}")
-        if proc.returncode != 0:
-            parts.append(f"[exit code: {proc.returncode}]")
-        output = "\n".join(parts) if parts else "[no output]"
-        return truncate_output(output)
+        # Try to extract tool_call_id from context for SSE event correlation
+        tool_call_id = ""
+        if context and hasattr(context, "metadata"):
+            tool_call_id = context.metadata.get("current_tool_call_id", "")
+
+        try:
+            await asyncio.wait_for(
+                _stream_output(
+                    proc,
+                    collected_stdout,
+                    collected_stderr,
+                    context,
+                    tool_call_id,
+                ),
+                timeout=timeout_sec,
+            )
+            # Process completed within timeout
+            await proc.wait()
+            full_out = "".join(collected_stdout)
+            full_err = "".join(collected_stderr)
+            return _format_result(full_out, full_err, proc.returncode)
+
+        except TimeoutError:
+            # Process still running after timeout → auto-background
+            return await _auto_background(
+                proc, collected_stdout, collected_stderr, command, timeout_sec, context
+            )
+
     except Exception as e:
         return f"Error executing command: {e}"
 
 
-async def _detach_process(proc: asyncio.subprocess.Process, command: str) -> str:
-    import os
-    import tempfile
+async def _stream_output(
+    proc: asyncio.subprocess.Process,
+    stdout_sink: list[str],
+    stderr_sink: list[str],
+    context: Any,
+    tool_call_id: str = "",
+) -> None:
+    """Read stdout/stderr in chunks, emit BASH_OUTPUT events in real-time."""
+
+    async def _read_stream(
+        stream: asyncio.StreamReader,
+        sink: list[str],
+        label: str,
+    ) -> None:
+        buf = ""
+        last_emit = 0.0
+        while True:
+            try:
+                chunk = await asyncio.wait_for(
+                    stream.read(4096), timeout=_CHUNK_READ_TIMEOUT
+                )
+            except TimeoutError:
+                # No data for a while, but process may still be running
+                # Emit whatever we have buffered
+                if buf:
+                    await _emit_bash_output(context, buf, tool_call_id)
+                    buf = ""
+                    last_emit = time.monotonic()
+                continue
+            except Exception:
+                break
+
+            if not chunk:
+                break
+
+            text = chunk.decode("utf-8", errors="replace")
+            sink.append(text)
+            buf += text
+
+            now = time.monotonic()
+            # Emit when buffer accumulates enough or enough time has passed
+            if len(buf) >= 4096 or (now - last_emit) >= _EMIT_INTERVAL:
+                await _emit_bash_output(context, buf, tool_call_id)
+                buf = ""
+                last_emit = now
+
+        # Flush remaining buffer
+        if buf:
+            await _emit_bash_output(context, buf, tool_call_id)
+
+    await asyncio.gather(
+        _read_stream(proc.stdout, stdout_sink, "stdout"),
+        _read_stream(proc.stderr, stderr_sink, "stderr"),
+    )
+
+
+def _format_result(
+    stdout: str,
+    stderr: str,
+    returncode: int,
+    timed_out: bool = False,
+    timeout_sec: float = 0,
+) -> str:
+    """Format command output into a string result."""
+    parts: list[str] = []
+    if stdout:
+        parts.append(stdout)
+    if stderr:
+        parts.append(f"[stderr]\n{stderr}")
+    if returncode != 0:
+        parts.append(f"[exit code: {returncode}]")
+    if timed_out:
+        parts.append(f"[timed out after {timeout_sec:.0f}s]")
+    output = "\n".join(parts) if parts else "[no output]"
+    return truncate_output(output)
+
+
+async def _auto_background(
+    proc: asyncio.subprocess.Process,
+    collected_stdout: list[str],
+    collected_stderr: list[str],
+    command: str,
+    timeout_sec: float,
+    context: Any,
+) -> str:
+    """Process exceeded timeout — redirect remaining output to a log file and return."""
 
     pid = proc.pid
     log_dir = tempfile.gettempdir()
     log_file = os.path.join(log_dir, f"crabagent-bg-{pid}.log")
 
+    # Write already-collected output to log file
     try:
-        log_fd = os.open(log_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
-        if proc.stdout:
-            await _drain_to_file(proc.stdout, log_fd)
-        os.close(log_fd)
+        with open(log_file, "w") as f:
+            f.write("".join(collected_stdout))
+            if collected_stderr:
+                f.write("\n[stderr]\n")
+                f.write("".join(collected_stderr))
     except Exception:
         pass
 
-    await asyncio.sleep(2)
+    # Redirect process remaining output to log file (append mode)
+    try:
+        log_fd = os.open(log_file, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+        if proc.stdout:
+            asyncio.ensure_future(_drain_to_fd(proc.stdout, log_fd))
+        if proc.stderr:
+            asyncio.ensure_future(_drain_to_fd(proc.stderr, log_fd, prefix=b"[stderr] "))
+    except Exception:
+        pass
+
+    # Emit final event to inform frontend
+    try:
+        tool_call_id = ""
+        if context and hasattr(context, "metadata"):
+            tool_call_id = context.metadata.get("current_tool_call_id", "")
+        await _emit_bash_output(
+            context,
+            (
+                f"\n⏳ 命令执行超过 {timeout_sec:.0f}s，已自动转入后台\n"
+                f"   PID: {pid}\n"
+                f"   日志: {log_file}\n"
+            ),
+            tool_call_id,
+        )
+    except Exception:
+        pass
+
+    # Check if process is still alive
+    await asyncio.sleep(1)
+    status_line = ""
     try:
         check = await asyncio.create_subprocess_shell(
             f"ps -p {pid} -o pid=,command=",
@@ -134,40 +290,64 @@ async def _detach_process(proc: asyncio.subprocess.Process, command: str) -> str
         )
         out, _ = await asyncio.wait_for(check.communicate(), timeout=5)
         if out.strip():
-            return (
-                f"[auto-background] PID={pid} — process is still running\n"
-                f"  command: {out.decode().strip()}\n"
-                f"  log: {log_file}\n"
-                f"  tail: tail -f {log_file}\n"
-                f"  stop: kill {pid}"
-            )
+            status_line = f"  command: {out.decode().strip()}\n"
     except Exception:
         pass
 
-    return f"[auto-background] PID={pid} — process may still be running\n  log: {log_file}\n  check: ps -p {pid}"
+    partial_out = "".join(collected_stdout)
+    partial_err = "".join(collected_stderr)
+    result = _format_result(partial_out, partial_err, -1)
+
+    return (
+        f"{result}\n"
+        f"[auto-background] 命令超过 {timeout_sec:.0f}s 仍在运行，已转入后台\n"
+        f"  PID: {pid}\n"
+        f"{status_line}"
+        f"  日志: {log_file}\n"
+        f"  查看最新输出: tail -50 {log_file}\n"
+        f"  终止: kill {pid}\n"
+    )
 
 
-async def _drain_to_file(stream: asyncio.StreamReader, fd: int, max_bytes: int = 50000):
-    import os as _os
-
+async def _drain_to_fd(
+    stream: asyncio.StreamReader,
+    fd: int,
+    max_bytes: int = 500_000,
+    prefix: bytes = b"",
+) -> None:
+    """Drain remaining stream output to a file descriptor."""
     collected = 0
+    wrote_prefix = not prefix  # Skip prefix on first write if empty
     try:
         while collected < max_bytes:
-            chunk = await asyncio.wait_for(stream.read(4096), timeout=1)
+            try:
+                chunk = await asyncio.wait_for(stream.read(4096), timeout=5)
+            except Exception:
+                break
             if not chunk:
                 break
-            _os.write(fd, chunk)
+            if not wrote_prefix:
+                os.write(fd, prefix)
+                wrote_prefix = True
+            os.write(fd, chunk)
             collected += len(chunk)
     except Exception:
         pass
+    finally:
+        try:
+            os.close(fd)
+        except Exception:
+            pass
 
 
-async def _run_background(command: str, workdir: str | None = None) -> str:
-    import os
-    import tempfile
+async def _run_background(
+    command: str, workdir: str | None = None, context: Any = None
+) -> str:
+    """Start command in background via nohup and return immediately."""
 
     log_dir = tempfile.gettempdir()
-    log_file = os.path.join(log_dir, f"crabagent-bg-{os.getpid()}.log")
+    pid = os.getpid()
+    log_file = os.path.join(log_dir, f"crabagent-bg-{pid}.log")
 
     _profile_cmd = (
         "export SHELL=$(echo $SHELL 2>/dev/null || echo /bin/sh); "
@@ -193,6 +373,12 @@ async def _run_background(command: str, workdir: str | None = None) -> str:
 
         if proc.returncode != 0 or not pid_str:
             return f"[background] failed to start\n{err_str}"
+
+        # Emit event for frontend
+        await _emit_bash_output(
+            context,
+            f"[background] PID={pid_str} — process started\n  log: {log_file}\n",
+        )
 
         await asyncio.sleep(1)
         try:

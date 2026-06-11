@@ -496,7 +496,22 @@ def _build_messages(context: AgentContext) -> list[dict]:
             # compress / agent_switch etc. → user for LLM
             msg = {**msg, "role": "user"}
         messages.append(msg)
-    return _validate_tool_calls(messages)
+
+    # Strip internal-only fields (e.g. "agent") before sending to LLM API.
+    # Some providers (e.g. Kimi) reject extra fields with strict validation.
+    _VALID_KEYS: dict[str, set[str]] = {
+        "system": {"role", "content"},
+        "user": {"role", "content"},
+        "assistant": {"role", "content", "tool_calls", "reasoning_content"},
+        "tool": {"role", "content", "tool_call_id"},
+    }
+    cleaned = []
+    for msg in messages:
+        role = msg.get("role", "")
+        valid = _VALID_KEYS.get(role, {"role", "content"})
+        cleaned.append({k: v for k, v in msg.items() if k in valid})
+
+    return _validate_tool_calls(cleaned)
 
 
 def _validate_tool_calls(messages: list[dict]) -> list[dict]:

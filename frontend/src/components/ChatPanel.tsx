@@ -436,10 +436,13 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(
               ? name.replace(/^mcp__/, "").replace(/__/g, ": ")
               : name;
             const accentVar = isMcp ? "var(--accent-2)" : "var(--accent)";
+            const bashStream = (msg as any).bashStream as string | undefined;
+            const isBashStreaming = name === "bash" && bashStream;
             return (
               <details
                 key={msg.id}
                 className="mb-3 ml-3 rounded-lg overflow-hidden"
+                open={isBashStreaming ? true : undefined}
               >
                 <summary className="flex items-center gap-2 cursor-pointer py-1.5 px-3 text-xs select-none list-none bg-[var(--bg-secondary)] border border-[var(--border)] rounded-lg hover:border-[var(--border-strong)] transition-colors">
                   <span
@@ -461,7 +464,17 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(
                       {summary}
                     </span>
                   )}
+                  {isBashStreaming && (
+                    <span className="inline-block w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse shrink-0" />
+                  )}
                 </summary>
+                {isBashStreaming && (
+                  <div className="mt-1 p-2 rounded-b-lg bg-[#1e1e1e] border border-t-0 border-[var(--border)]">
+                    <pre className="whitespace-pre-wrap font-mono text-[11px] text-green-300 leading-relaxed m-0 max-h-64 overflow-y-auto">
+                      {bashStream}
+                    </pre>
+                  </div>
+                )}
               </details>
             );
           }

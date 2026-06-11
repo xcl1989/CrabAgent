@@ -121,6 +121,11 @@ async def _render_and_emit_preview(
                 "description": "最大返回行数",
                 "default": 200,
             },
+            "offset": {
+                "type": "integer",
+                "description": "起始行/段落编号（从1开始）。用于跳过文档前段内容，直接读取中后部分。",
+                "default": 0,
+            },
         },
         "required": [],
     },
@@ -130,6 +135,7 @@ async def office_read(
     mode: str = "text",
     sheet: str = "",
     max_lines: int = 200,
+    offset: int = 0,
     context: Any = None,
 ) -> str:
     """读取 Office 文档内容。"""
@@ -155,7 +161,9 @@ async def office_read(
     elif mode == "stats":
         result = await mgr.view_stats(resolved)
     else:
-        result = await mgr.view_text(resolved, max_lines=max_lines, sheet=sheet)
+        result = await mgr.view_text(
+            resolved, max_lines=max_lines, sheet=sheet, start=offset
+        )
 
     if not result.success:
         return f"读取失败: {result.error}"
@@ -313,7 +321,10 @@ def _describe_op(
                 "- table: 表格\n"
                 "- chart: 图表\n"
                 "- image: 图片\n"
-                "- sheet: 工作表（Excel）",
+                "- sheet: 工作表（Excel）\n"
+                "- paragraph: 段落（Word）\n"
+                "- row: 行（表格）\n"
+                "- cell: 单元格（表格）",
             },
         },
         "required": ["command"],
@@ -455,7 +466,17 @@ async def office_query(
     if isinstance(data, (dict, list)):
         import json as _json
 
-        return _json.dumps(data, ensure_ascii=False, indent=2)
+        output = _json.dumps(data, ensure_ascii=False, indent=2)
+        # 截断过长的输出，避免返回几十万字符
+        max_chars = 50_000
+        if len(output) > max_chars:
+            output = (
+                output[:max_chars]
+                + "\n\n... (输出已截断，共 "
+                + str(len(output))
+                + " 字符。请使用更精确的路径或增加 depth 来缩小范围)"
+            )
+        return output
     return str(data)
 
 

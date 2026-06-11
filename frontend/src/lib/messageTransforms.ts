@@ -52,6 +52,8 @@ export function sseEventToMessages(event: SSEEvent, messages: ChatMessage[]): Ch
     if (callId && messages.some((m) => m.id === `tr-${callId}`)) {
       return messages;
     }
+    // Finalize any streaming bash output for this tool_call
+    const bashKey = event.data.name === "bash" ? `bash-stream` : "";
     updated.push({
       id: callId ? `tr-${callId}` : `tr-${Date.now()}`,
       role: "tool_result",
@@ -59,6 +61,25 @@ export function sseEventToMessages(event: SSEEvent, messages: ChatMessage[]): Ch
       source: (event.data.source as "builtin" | "mcp") || "builtin",
       server_name: (event.data.server_name as string) || undefined,
     });
+    return updated;
+  }
+
+  if (event.type === "bash_output") {
+    const text = (event.data.text as string) || "";
+    // Find the last tool_call for "bash" and append streaming output
+    let bashCallIdx = -1;
+    for (let i = updated.length - 1; i >= 0; i--) {
+      const m = updated[i];
+      if (m.role === "tool_call" && m.content?.includes('"bash"')) {
+        bashCallIdx = i;
+        break;
+      }
+    }
+    if (bashCallIdx < 0) return updated;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const bashCall: any = updated[bashCallIdx];
+    const prevStream = bashCall.bashStream || "";
+    bashCall.bashStream = prevStream + text;
     return updated;
   }
 
