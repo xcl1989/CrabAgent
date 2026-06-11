@@ -1409,9 +1409,15 @@ async def token_usage_overview(
     """Aggregate overview: totals, by_agent, by_model, trend (daily or hourly)."""
     from sqlalchemy import func, select
 
-    cutoff_ts = _time.time() - days * 86400 if days < 365 else 0
-    cutoff_dt = datetime.datetime.fromtimestamp(cutoff_ts) if cutoff_ts > 0 else datetime.datetime.min
     hourly = days <= 1  # hourly buckets for "today"
+    if days <= 1:
+        # "Today" means from midnight, not 24h ago
+        cutoff_dt = datetime.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    elif days < 365:
+        cutoff_ts = _time.time() - days * 86400
+        cutoff_dt = datetime.datetime.fromtimestamp(cutoff_ts)
+    else:
+        cutoff_dt = datetime.datetime.min
 
     # Resolve workspace → session_ids filter
     ws_session_ids = await _resolve_session_ids_by_workspace(user_id, workspace)
