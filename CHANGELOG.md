@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.10.1]
+
+### Added
+- **Document Quick Edit** — double-click text in document preview to edit inline, with paragraph splitting on Enter
+  - Backend `POST /api/documents/quick-edit/text` endpoint: plain text replacement (no newlines) or split paragraph into multiple paragraphs (with newlines)
+  - Frontend injects editing script into preview iframe: double-click → contenteditable → click outside to save / Escape to cancel
+  - Preview HTML gets `white-space: pre-wrap` CSS injected to render `\n` as visible line breaks
+  - Automatic backup to `~/.crabagent/docs-backup/` before each edit
+
+### Fixed
+- `NameError: name 'json' is not defined` — added missing import
+
 ## [0.10.0]
 
 ### Added

@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import base64
+import datetime
+import json
 import logging
 import mimetypes
+import shutil
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 
 from crabagent.core.config import settings
 from crabagent.core.database import User
@@ -148,7 +152,7 @@ async def preview_document(
     if not result.success:
         raise HTTPException(status_code=500, detail=result.error)
 
-    return {"html": result.data, "file": path, "name": file_path.name}
+    return {"html": _fix_html_newlines(result.data), "file": path, "name": file_path.name}
 
 
 @router.post("/save")
@@ -195,3 +199,176 @@ async def delete_document(
     file_path.unlink()
     logger.info("Document deleted: %s", file_path)
     return {"status": "ok", "file": path}
+
+
+# ── Quick Edit ──────────────────────────────────────────────────────
+
+
+class QuickEditTextRequest(BaseModel):
+    """请求：通过文本匹配来修改文档中的文字内容。"""
+
+    path: str
+    old_text: str
+    new_text: str
+    workspace: str = ""
+
+
+class QuickEditTextResponse(BaseModel):
+    status: str
+    preview_html: str | None = None
+    message: str = ""
+
+
+def _backup_doc(file_path: Path) -> str | None:
+    """创建文档的备份副本，返回备份路径；若失败返回 None。"""
+    try:
+        backup_dir = Path.home() / ".crabagent" / "docs-backup"
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_path = backup_dir / f"{file_path.stem}_{ts}{file_path.suffix}"
+        shutil.copy2(str(file_path), str(backup_path))
+        return str(backup_path)
+    except Exception as e:
+        logger.warning("Backup failed for %s: %s", file_path, e)
+        return None
+
+
+def _fix_html_newlines(html: str | None) -> str | None:
+    """OfficeCLI 的 HTML 渲染不把 \\n 转为 <br>，通过在 head 注入 CSS white-space: pre-wrap 让换行可见。"""
+    if html:
+        # 只在 <head> 或 <html> 开头注入一行 CSS，让所有文本保留换行
+        css = "<style>.page, .page-body, .page * { white-space: pre-wrap !important; }</style>\n"
+        if "<head>" in html:
+            html = html.replace("<head>", "<head>" + css)
+        elif "<html" in html:
+            html = html.replace("<html", css + "<html")
+        else:
+            html = css + html
+    return html
+
+
+@router.post("/quick-edit/text", response_model=QuickEditTextResponse)
+async def quick_edit_text(
+    req: QuickEditTextRequest,
+    user: User = Depends(get_current_user),
+):
+    """通过文本匹配快速修改文档中的文字内容。
+
+    前端用户双击预览中的文字并编辑后，调用此接口。
+    后端直接用 OfficeCLI 的 set --find / --replace 全局查找替换，
+    无需预先定位元素路径。
+    """
+    mgr = get_office_manager()
+    if not mgr.available:
+        raise HTTPException(status_code=503, detail="OfficeCLI is not installed")
+
+    # 解析文件路径
+    docs_dir = _get_docs_dir(user.id, req.workspace)
+    file_path = _safe_path(docs_dir, req.path)
+
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    ext = file_path.suffix.lower()
+    if ext not in _PREVIEWABLE_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"Unsupported file type '{ext}'")
+
+    try:
+        old = req.old_text.strip()
+        new = req.new_text.strip()
+        if not old:
+            raise HTTPException(status_code=400, detail="old_text is required")
+
+        logger.info("[QE] old=%s new=%s split=%s", old[:50], new[:50], "\n" in new)
+
+        # 修改前备份
+        backup_path = _backup_doc(file_path)
+        if backup_path:
+            logger.info("[QE] Backed up %s", file_path.name)
+
+        # 判断是否需要分段（新文本含 \n）
+        need_split = "\n" in new
+
+        if not need_split:
+            logger.info("[QE] Simple text replace")
+            # 简单情况：纯文字修改，用 batch set --find/--replace
+            batch_cmds = json.dumps([{
+                "command": "set",
+                "path": "/",
+                "props": {"find": old, "replace": new},
+            }]).encode("utf-8")
+            binary = mgr.binary_path or "/usr/local/bin/officecli"
+            result = await mgr._exec_with_stdin(
+                [binary, "batch", str(file_path), "--json"],
+                stdin_data=batch_cmds,
+            )
+            if not result.success:
+                raise HTTPException(status_code=500, detail=f"Text replace failed: {result.error}")
+
+        else:
+            logger.info("[QE] Paragraph split mode: %d segments", len([s for s in new.split("\n") if s.strip()]))
+            # 复杂情况：用户按了 Enter，需要把原段落拆成多个段落
+            # 1) 用 officecli query "paragraph" --find <old_text> 查找原段落路径
+            binary = mgr.binary_path or "/usr/local/bin/officecli"
+            query_result = await mgr._exec_with_stdin(
+                [binary, "query", str(file_path), "paragraph", "--find", old, "--json"],
+            )
+            para_path = None
+            if query_result.success and isinstance(query_result.data, dict):
+                results = query_result.data.get("results", [])
+                if results:
+                    para_path = results[0].get("path", "")
+            if not para_path:
+                raise HTTPException(status_code=404, detail=f"Paragraph with text '{old}' not found")
+
+            parent_path = "/body"
+            parent_info = await mgr.get_element(str(file_path), parent_path, depth=1)
+            para_index = None
+            if parent_info.success and isinstance(parent_info.data, dict):
+                children = parent_info.data.get("results", [{}])[0].get("children", [])
+                for i, child in enumerate(children):
+                    if child.get("path") == para_path:
+                        para_index = i
+                        break
+
+            if para_index is None:
+                raise HTTPException(status_code=500, detail="Could not determine paragraph position")
+
+            segments = [s for s in new.split("\n") if s.strip()]
+            if not segments:
+                raise HTTPException(status_code=400, detail="No content after splitting")
+
+            # batch 删除原段落
+            remove_result = await mgr._exec_with_stdin(
+                [binary, "batch", str(file_path), "--json"],
+                stdin_data=json.dumps([{"command": "remove", "path": para_path}]).encode("utf-8"),
+            )
+            if not remove_result.success:
+                raise HTTPException(status_code=500, detail=f"Remove failed: {remove_result.error}")
+
+            # 逐个插入新段落
+            for idx, seg in enumerate(segments):
+                add_result = await mgr.exec(
+                    "add", str(file_path), parent_path,
+                    "--type", "paragraph",
+                    "--prop", f"text={seg.strip()}",
+                    "--index", str(para_index + idx),
+                    "--json",
+                )
+                if not add_result.success:
+                    logger.error("[QE] Add paragraph failed at index %d: %s", para_index + idx, add_result.error)
+
+        # 渲染新预览
+        preview_result = await mgr.view_html(str(file_path))
+        preview_html = _fix_html_newlines(preview_result.data) if preview_result.success else None
+
+        return QuickEditTextResponse(
+            status="ok",
+            preview_html=preview_html,
+            message="done",
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("[QE] Unexpected error")
+        raise HTTPException(status_code=500, detail=str(e))

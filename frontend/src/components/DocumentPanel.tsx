@@ -1,9 +1,10 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { X, Download, RefreshCw, Eye, Clock, FileText, Maximize2, Minimize2, FileSpreadsheet, Presentation } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "../lib/cn";
 import { DocumentTimeline, DocOpEvent } from "./DocumentTimeline";
 import { DocumentPreview } from "./DocumentPreview";
+import * as documentsApi from "../api/documents";
 
 type Tab = "preview" | "timeline";
 
@@ -49,6 +50,40 @@ export function DocumentPanel({
 }: Props) {
   const { t } = useTranslation();
   const [tab, setTab] = useState<Tab>("preview");
+  const [editing, setEditing] = useState(false);
+  // Local preview override from quick-edit, cleared on next refresh
+  const [localPreviewHtml, setLocalPreviewHtml] = useState<string | null>(null);
+
+  const handleQuickEdit = useCallback(async (oldText: string, newText: string) => {
+    if (!doc?.filePath) return;
+    setEditing(true);
+    try {
+      const result = await documentsApi.quickEditText({
+        path: doc.filePath,
+        old_text: oldText,
+        new_text: newText,
+        workspace: doc.workspace || "",
+      });
+      if (result.preview_html) {
+        setLocalPreviewHtml(result.preview_html);
+      }
+      if (result.status === "no_match") {
+        console.warn("Quick edit: text not found:", oldText);
+      }
+      // Also trigger server refresh so next page load has latest
+      onRefreshPreview?.();
+    } catch (e: any) {
+      console.error("Quick edit failed:", e);
+      onRefreshPreview?.();
+    } finally {
+      setEditing(false);
+    }
+  }, [doc?.filePath, doc?.workspace, onRefreshPreview]);
+
+  // Clear local preview when doc changes
+  useEffect(() => {
+    setLocalPreviewHtml(null);
+  }, [doc?.previewHtml]);
 
   const handleDownload = useCallback(() => {
     onDownload?.();
@@ -103,14 +138,23 @@ export function DocumentPanel({
         ))}
       </div>
 
+      {/* Status bar during edit */}
+      {editing && (
+        <div className="px-3 py-1 text-xs text-[var(--success)] bg-[var(--success-bg)] flex items-center gap-1.5 border-b border-[var(--border)]">
+          <span className="w-1.5 h-1.5 rounded-full bg-[var(--success)] animate-pulse" />
+          Applying edit...
+        </div>
+      )}
+
       {/* Content */}
       <div className="flex-1 overflow-hidden">
         {tab === "preview" ? (
           <DocumentPreview
-            html={doc.previewHtml}
+            html={localPreviewHtml ?? doc.previewHtml}
             loading={doc.previewLoading}
             error={doc.previewError || undefined}
             className="h-full"
+            onQuickEdit={handleQuickEdit}
           />
         ) : (
           <DocumentTimeline events={doc.events} className="h-full overflow-y-auto" />
@@ -128,7 +172,10 @@ export function DocumentPanel({
           {t("document.download")}
         </button>
         <button
-          onClick={onRefreshPreview}
+          onClick={() => {
+            setLocalPreviewHtml(null);
+            onRefreshPreview?.();
+          }}
           className="flex items-center gap-1 px-2 py-1 rounded text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] transition-colors"
           title={t("document.refresh")}
         >

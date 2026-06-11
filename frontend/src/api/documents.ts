@@ -71,6 +71,25 @@ export function saveDocument(
   return api.post("/documents/save", { path, content: contentBase64, workspace });
 }
 
+export interface QuickEditTextRequest {
+  path: string;
+  old_text: string;
+  new_text: string;
+  workspace?: string;
+}
+
+export interface QuickEditTextResponse {
+  status: string;
+  preview_html: string | null;
+  message: string;
+}
+
+export function quickEditText(
+  req: QuickEditTextRequest,
+): Promise<QuickEditTextResponse> {
+  return api.post("/documents/quick-edit/text", req);
+}
+
 export async function deleteDocument(
   path: string,
   workspace = "",

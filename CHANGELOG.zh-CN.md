@@ -8,6 +8,18 @@ English version: [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
+## [0.10.1]
+
+### 新增
+- **文档 Quick Edit** — 在文档预览上双击文字直接编辑，支持换行分段
+  - 后端 `POST /api/documents/quick-edit/text` 端点：纯文本替换（无换行）或按 `\n` 拆分为多个段落（有换行）
+  - 前端 iframe 注入编辑脚本：双击→contenteditable→点外部保存/Escape取消
+  - 预览 HTML 注入 `white-space: pre-wrap` CSS，让文档内的换行可见
+  - 编辑前自动备份到 `~/.crabagent/docs-backup/`
+
+### 修复
+- `NameError: name 'json' is not defined` — 补全缺失的 import
+
 ## [0.10.0]
 
 ### 新增
