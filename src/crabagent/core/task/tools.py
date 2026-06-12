@@ -135,7 +135,7 @@ def register_task_tools(registry):
 
         header = "📋 Tasks:\n"
         lines = []
-        for i, t in enumerate(items, 1):
+        for t in items:
             mark = "✅" if t["status"] == "done" else "⬜"
             pri = {"high": "🔴", "medium": "🟡", "low": "🟢"}.get(t["priority"], "")
             deadline = ""
@@ -143,7 +143,7 @@ def register_task_tools(registry):
                 deadline = f" 📅{t['deadline'][:10]}"
             project_tag = f" [{t['project']}]" if t["project"] else ""
             lines.append(
-                f"  {i}. {mark} {pri} **{t['title']}**{project_tag}{deadline}"
+                f"  {t['id']}. {mark} {pri} **{t['title']}**{project_tag}{deadline}"
             )
             if t["assignee"]:
                 lines.append(f"     👤 {t['assignee']}")
