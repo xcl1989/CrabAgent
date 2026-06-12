@@ -244,10 +244,12 @@ def register_task_tools(registry):
         if assignee:
             kwargs["assignee"] = assignee
         if deadline:
-            try:
-                kwargs["deadline"] = datetime.datetime.strptime(deadline, "%Y-%m-%d")
-            except ValueError:
-                pass
+            for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M", "%Y-%m-%d"):
+                try:
+                    kwargs["deadline"] = datetime.datetime.strptime(deadline[:16], fmt)
+                    break
+                except ValueError:
+                    continue
         if status:
             kwargs["status"] = status
         if priority:

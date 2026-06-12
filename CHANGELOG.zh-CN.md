@@ -8,6 +8,33 @@ English version: [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
+## [0.10.2]
+
+### 新增
+- **微信渠道（iLink Bot）** — 基于腾讯 iLink Bot API 的完整微信双向通信集成
+  - 扫码登录、异步长轮询消息循环（35秒）、AES-128-ECB 媒体加密
+  - 收到微信消息自动通过 Agent 处理并回复（支持多轮对话记忆）
+  - 可配置微信渠道工作空间；会话标记 `source='wechat'` 实现隔离
+  - REST API：`GET /api/wechat/status`、`POST /api/wechat/qrcode`、`PUT /api/wechat/config`、`POST /api/wechat/test`、`GET /api/wechat/conversations`
+  - 前端 `WeChatPanel`：绑定状态、工作空间选择、通知开关、会话记录
+- **微信通知联动** — 系统通知（定时任务结果、邮件摘要、邮件轮询告警）自动推送微信
+  - 按类别开关：任务逾期、定时任务完成、邮件摘要
+  - `context_token` 持久化：首次收到消息时自动保存推送目标和 token，服务重启后自动恢复
+  - 邮件上下文注入：邮件通知推送到微信时，自动将邮件详情（发件人、主题、正文、草稿）注入微信会话上下文，用户在微信中说"回邮件"时 Agent 有完整上下文
+- **设置页 Tab 布局** — 从单页竖滚改为三个 Tab：通用 / 搜索 / 微信渠道
+  - 微信面板从 5 个卡片精简为 3 个：账号（绑定+工作空间+自动回复）、通知（开关+推送目标）、会话记录（可折叠）
+  - 保存按钮仅在通用/搜索 Tab 显示（微信设置为即时保存）
+
+### 变更
+- `_create_notification()` 新增 `category` 参数，用于微信推送路由
+- `WeChatNotification.send()` 内存 `_context_store` 为空时回退到持久化的 `notify_target_user` + `cached_context_token`
+- `WeChatMessageLoop.start()` 启动时恢复持久化的 context_token 到内存缓存
+
+### 修复
+- 微信通知静默失败 "No target user_id and no cached users" — 推送目标现从首次消息自动持久化
+- 邮件到微信的上下文断裂：用户在微信说"回邮件"但 Agent 无邮件上下文 — 现自动注入邮件详情到微信会话
+- 通用和搜索 Section 重复使用 `Globe` 图标 — 替换为 `SlidersHorizontal` 和 `Search` 图标
+
 ## [0.10.1]
 
 ### 新增

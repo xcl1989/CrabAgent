@@ -47,6 +47,19 @@ function isOverdue(task: Task): boolean {
   return new Date(task.deadline) < new Date();
 }
 
+function formatDeadline(deadline: string): string {
+  // deadline comes as ISO string like "2026-06-12T09:45:00" or "2026-06-12"
+  const d = new Date(deadline);
+  if (isNaN(d.getTime())) return deadline.slice(0, 10);
+  const datePart = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  // Check if time is non-midnight
+  if (d.getHours() !== 0 || d.getMinutes() !== 0) {
+    const timePart = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+    return `${datePart} ${timePart}`;
+  }
+  return datePart;
+}
+
 export default function TaskPanel({ onClose, onSwitchSession }: Props) {
   const { t } = useTranslation();
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -283,7 +296,7 @@ export default function TaskPanel({ onClose, onSwitchSession }: Props) {
                           )}
                         >
                           <Clock size={10} />
-                          {task.deadline.slice(0, 10)}
+                          {formatDeadline(task.deadline)}
                         </span>
                       )}
                       <span className="text-[10px] text-[var(--text-tertiary)] capitalize">
@@ -347,7 +360,7 @@ export default function TaskPanel({ onClose, onSwitchSession }: Props) {
               onChange={(e) => setNewAssignee(e.target.value)}
             />
             <Input
-              type="date"
+              type="datetime-local"
               placeholder={t("task.deadlinePlaceholder")}
               value={newDeadline}
               onChange={(e) => setNewDeadline(e.target.value)}

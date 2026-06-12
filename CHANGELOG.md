@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.10.2]
+
+### Added
+- **WeChat Channel (iLink Bot)** — full two-way WeChat integration via Tencent's iLink Bot API
+  - QR code login, async long-poll message loop (35s), AES-128-ECB media encryption
+  - Auto-reply to incoming WeChat messages through the Agent (with multi-turn conversation memory)
+  - Configurable workspace per WeChat channel; conversations tagged with `source='wechat'` for isolation
+  - REST API: `GET /api/wechat/status`, `POST /api/wechat/qrcode`, `PUT /api/wechat/config`, `POST /api/wechat/test`, `GET /api/wechat/conversations`
+  - Frontend `WeChatPanel` with binding status, workspace selector, notification toggles, and conversation history
+- **WeChat Notification Sync** — system notifications (scheduled task results, email summaries, email polling alerts) now auto-push to WeChat
+  - Per-category toggles: task overdue, scheduled task result, email summary
+  - `context_token` persistence: push target and token auto-saved on first incoming message, restored on service restart
+  - Email context injection: when an email notification pushes to WeChat, the email details (sender, subject, body, draft) are injected into the WeChat conversation as context, so the user can say "reply to the email" and the Agent has full context
+- **Settings Page Tab Layout** — reorganized from single-page scroll into three tabs: General / Search / WeChat
+  - WeChat panel consolidated from 5 cards to 3: Account (binding + workspace + auto-reply), Notifications (toggles + push target), Conversation History (collapsible)
+  - Save button only shown on General/Search tabs (WeChat settings are instant-save)
+
+### Changed
+- `_create_notification()` now accepts `category` parameter for WeChat push routing
+- `WeChatNotification.send()` falls back to persisted `notify_target_user` + `cached_context_token` when memory `_context_store` is empty
+- `WeChatMessageLoop.start()` restores persisted context tokens into memory cache on startup
+
+### Fixed
+- WeChat notifications silently failing with "No target user_id and no cached users" — push target now auto-persisted from first incoming message
+- Email-to-WeChat context gap: user says "reply to email" in WeChat but Agent has no email context — context now injected into WeChat conversation
+- Duplicate `Globe` icon for General and Search sections — replaced with `SlidersHorizontal` and `Search` icons
+
 ## [0.10.1]
 
 ### Added

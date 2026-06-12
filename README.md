@@ -49,6 +49,27 @@ No rules, no regex. Just LLM-powered understanding that knows the difference bet
 
 ---
 
+## 💬 WeChat Channel — AI in Your Pocket
+
+Bind your WeChat account via QR code, and CrabAgent becomes reachable from your phone.
+
+```
+You (WeChat): "看一下26年1月有啥工作"
+       │
+       ├─ 🤖 Agent processes with full project context
+       ├─ 💬 Replies directly in WeChat chat
+       └─ 🔔 Pushes notifications: task overdue, scheduled task done, email summary
+```
+
+**Three modes:**
+- **Command execution** — send instructions from WeChat, Agent executes and replies
+- **Proactive notifications** — task deadlines, scheduled task results, email summaries auto-pushed
+- **Conversational** — multi-turn chat with full project memory
+
+**Notification sync:** When an email arrives, the summary pushes to WeChat *with full context injected* — so you can say "reply to that email" and the Agent knows exactly who and what.
+
+---
+
 ## Project Memory — The Foundation
 
 Every time you work in a project, CrabAgent automatically extracts lessons and preferences. Next time you open it, it already knows:

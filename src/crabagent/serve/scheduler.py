@@ -31,6 +31,7 @@ class SchedulerService:
         self._email_polling_users: dict[int, int] = {}  # user_id -> interval_seconds
         self._processed_message_ids: set[str] = set()  # dedup across poll cycles
         self._poll_failures: dict[int, int] = {}  # user_id -> consecutive failure count
+        self._wechat_loop = None  # WeChatMessageLoop instance (if running)
 
     async def start(self):
         self._scheduler.start()
@@ -45,7 +46,12 @@ class SchedulerService:
         # Start weekly memory quality decay job (Monday 03:00)
         self._start_memory_decay_job()
 
+        # Start WeChat message loop if enabled and logged in
+        await self.start_wechat_loop()
+
     async def shutdown(self):
+        # Stop WeChat loop
+        await self.stop_wechat_loop()
         self._scheduler.shutdown(wait=False)
         logger.info("Scheduler stopped")
 
@@ -233,12 +239,20 @@ class SchedulerService:
 
         if agent_error:
             try:
-                await self._create_notification(task.user_id, task.name, f"执行失败: {str(agent_error)[:200]}", "")
+                await self._create_notification(
+                    task.user_id, task.name,
+                    f"执行失败: {str(agent_error)[:200]}", "",
+                    category="scheduled_task",
+                )
             except Exception:
                 pass
         else:
             try:
-                await self._create_notification(task.user_id, task.name, "任务执行完成", ctx_conv_id)
+                await self._create_notification(
+                    task.user_id, task.name,
+                    "任务执行完成", ctx_conv_id,
+                    category="scheduled_task",
+                )
             except Exception:
                 pass
 
@@ -294,10 +308,25 @@ class SchedulerService:
                 await db.commit()
         logger.info("[ST] Task #%d next_run_at refreshed to %s", task_id, next_run_naive)
 
-    async def _create_notification(self, user_id: int, title: str, body: str, conversation_id: str):
+    async def _create_notification(
+        self,
+        user_id: int,
+        title: str,
+        body: str,
+        conversation_id: str,
+        category: str = "",
+    ):
+        """Write a notification to DB and optionally push to WeChat.
+
+        Args:
+            category: "" (no WeChat push) | "scheduled_task" | "email" | "email_alert"
+        """
         from crabagent.core.database import Notification
 
-        logger.info("[ST] _create_notification: user_id=%d, title=%s, conv=%s", user_id, title, conversation_id)
+        logger.info(
+            "[ST] _create_notification: user_id=%d, title=%s, conv=%s, cat=%s",
+            user_id, title, conversation_id, category,
+        )
         try:
             async with async_session_factory() as db:
                 notif = Notification(
@@ -311,6 +340,119 @@ class SchedulerService:
             logger.info("[ST] notification created successfully, id=%d", notif.id)
         except Exception as e:
             logger.error("[ST] _create_notification FAILED: %s", e, exc_info=True)
+
+        # Push to WeChat if category is set
+        if category:
+            try:
+                await self._push_to_wechat(category, title, body, conversation_id)
+            except Exception as e:
+                logger.warning("[Notify] WeChat push failed: category=%s, error=%s", category, e)
+
+    async def _push_to_wechat(
+        self,
+        category: str,
+        title: str,
+        body: str,
+        conversation_id: str = "",
+    ):
+        """Check user config toggle, then push notification to WeChat.
+
+        Also injects a context message into the WeChat conversation so
+        the Agent can act on the notification (e.g. reply to an email).
+        """
+        from crabagent.core.wechat import WeChatNotification
+        from crabagent.core.wechat.config import load_config
+
+        cfg = await load_config()
+        if not cfg.enabled or not cfg.bot_token:
+            return
+
+        # Check per-category toggle
+        if category == "scheduled_task" and not cfg.notify_schedule_result:
+            return
+        if category == "email" and not cfg.notify_email_summary:
+            return
+        # "email_alert" has no toggle — always push if WeChat is logged in
+
+        text = f"🔔 {title}"
+        if body:
+            text += f"\n\n{body[:800]}"
+
+        success = await WeChatNotification.send(text)
+        if success:
+            logger.info("[Notify] WeChat push sent: category=%s, title=%s", category, title)
+        else:
+            logger.debug("[Notify] WeChat push skipped (not logged in or no target)")
+
+        # Inject context message into WeChat conversation for Agent awareness
+        if category == "email" and conversation_id:
+            await self._inject_wechat_context(category, title, body, conversation_id)
+
+    async def _inject_wechat_context(
+        self,
+        category: str,
+        title: str,
+        body: str,
+        source_conversation_id: str,
+    ):
+        """Write a context message into the WeChat conversation.
+
+        This ensures that when the user replies in WeChat (e.g. "回邮件"),
+        the Agent has the email details in its conversation history.
+        """
+        from crabagent.core.database import Conversation, Message as DBMessage, async_session_factory
+        from sqlalchemy import select
+
+        try:
+            async with async_session_factory() as db:
+                # Find the WeChat conversation
+                stmt = (
+                    select(Conversation)
+                    .where(
+                        Conversation.source == "wechat",
+                        Conversation.user_id == 1,
+                    )
+                    .order_by(Conversation.updated_at.desc())
+                    .limit(1)
+                )
+                result = await db.execute(stmt)
+                conv = result.scalar_one_or_none()
+                if not conv:
+                    logger.debug("[Notify] No WeChat conversation found — skipping context inject")
+                    return
+
+                # Build a concise context message
+                context_text = (
+                    f"[系统通知] {title}\n\n{body[:500]}\n\n"
+                    f"📧 相关会话ID: {source_conversation_id}"
+                )
+
+                # Get next sequence number
+                max_seq = await db.execute(
+                    select(DBMessage.id)
+                    .where(DBMessage.conversation_id == conv.id, DBMessage.branch_id == "main")
+                    .order_by(DBMessage.id.desc())
+                    .limit(1)
+                )
+                last_msg = max_seq.scalar_one_or_none()
+                seq = (last_msg or 0) + 1
+
+                msg = DBMessage(
+                    conversation_id=conv.id,
+                    sequence=seq,
+                    role="assistant",
+                    content=context_text,
+                    branch_id="main",
+                    agent="notification",
+                )
+                db.add(msg)
+                await db.commit()
+                logger.info(
+                    "[Notify] Context injected into WeChat conv %d (seq=%d)",
+                    conv.id, seq,
+                )
+        except Exception as e:
+            logger.warning("[Notify] Failed to inject WeChat context: %s", e)
 
     # ---- Email polling ----
 
@@ -383,6 +525,41 @@ class SchedulerService:
         except Exception as e:
             logger.warning("Failed to schedule memory decay job: %s", e)
 
+    # ---- WeChat (iLink Bot) ----
+
+    async def start_wechat_loop(self):
+        """Start the WeChat message long-poll loop if enabled and logged in."""
+        try:
+            from crabagent.core.wechat import WeChatMessageLoop, get_authenticated_client
+            from crabagent.core.wechat.config import load_config
+
+            cfg = await load_config()
+            if not cfg.enabled or not cfg.bot_token:
+                logger.info("[WeChat] Not enabled or not logged in — skipping loop")
+                return
+
+            # Stop existing loop
+            await self.stop_wechat_loop()
+
+            client = await get_authenticated_client()
+            if not client:
+                logger.warning("[WeChat] Failed to create authenticated client")
+                return
+
+            loop = WeChatMessageLoop(client)
+            self._wechat_loop = loop
+            await loop.start()
+            logger.info("[WeChat] Message loop started (account=%s)", cfg.account_id)
+        except Exception as e:
+            logger.error("[WeChat] Failed to start loop: %s", e)
+
+    async def stop_wechat_loop(self):
+        """Stop the WeChat message loop if running."""
+        loop = self._wechat_loop
+        if loop and getattr(loop, "_running", False):
+            await loop.stop()
+        self._wechat_loop = None
+
     async def _poll_emails(self, user_id: int):
         """Called periodically: check new emails → match project → generate reply draft → notify."""
         from crabagent.core.mail.handler import check_new_emails
@@ -398,8 +575,12 @@ class SchedulerService:
                 await self._create_notification(
                     user_id,
                     "📬 Email Poll Failed",
-                    f"Email polling has failed {fails} consecutive times. Please check your email configuration.\n\nError: {e}",
+                    (
+                        f"Email polling has failed {fails} consecutive times."
+                        f" Please check your email configuration.\n\nError: {e}"
+                    ),
                     "",
+                    category="email_alert",
                 )
             return
 
@@ -557,7 +738,7 @@ class SchedulerService:
             body_text = "\n".join(notif_lines)
             try:
                 title = _t("emailPoll.newEmail", locale, subject=subject[:80])
-                await self._create_notification(user_id, title, body_text, email_conv_session_id)
+                await self._create_notification(user_id, title, body_text, email_conv_session_id, category="email")
             except Exception as e:
                 logger.error("[EmailPoll] Notification failed for user %d: %s", user_id, e)
 
@@ -565,7 +746,10 @@ class SchedulerService:
         if len(new_emails) > 5:
             extra = _t("emailPoll.moreEmails", locale, count=len(new_emails) - 5)
             try:
-                await self._create_notification(user_id, _t("emailPoll.moreEmailsTitle", locale), extra, "")
+                await self._create_notification(
+                    user_id, _t("emailPoll.moreEmailsTitle", locale),
+                    extra, "", category="email",
+                )
             except Exception:
                 pass
 

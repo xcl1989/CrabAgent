@@ -63,6 +63,7 @@ class Conversation(Base):
     auto_titled: Mapped[bool] = mapped_column(Boolean, default=False)
     system_prompt: Mapped[str] = mapped_column(Text, default="")
     prompt_locale: Mapped[str] = mapped_column(String(10), default="")
+    source: Mapped[str] = mapped_column(String(20), default="chat")  # chat | wechat | email | scheduled
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
@@ -444,6 +445,8 @@ async def init_db() -> None:
             await conn.execute(text("ALTER TABLE conversations ADD COLUMN system_prompt TEXT DEFAULT ''"))
         if "prompt_locale" not in columns:
             await conn.execute(text("ALTER TABLE conversations ADD COLUMN prompt_locale VARCHAR(10) DEFAULT ''"))
+        if "source" not in columns:
+            await conn.execute(text("ALTER TABLE conversations ADD COLUMN source VARCHAR(20) DEFAULT 'chat'"))
 
         result = await conn.execute(text("PRAGMA table_info(email_configs)"))
         columns = [row[1] for row in result.fetchall()]

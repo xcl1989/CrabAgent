@@ -55,10 +55,12 @@ async def create_task(
 
     deadline_dt = None
     if req.deadline:
-        try:
-            deadline_dt = datetime.datetime.strptime(req.deadline[:10], "%Y-%m-%d")
-        except ValueError:
-            pass
+        for fmt in ("%Y-%m-%dT%H:%M", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+            try:
+                deadline_dt = datetime.datetime.strptime(req.deadline[:16], fmt)
+                break
+            except ValueError:
+                continue
 
     return await _add(
         db,
@@ -103,12 +105,12 @@ async def update_task(
         if val is not None:
             kwargs[field] = val
     if req.deadline is not None:
-        try:
-            kwargs["deadline"] = datetime.datetime.strptime(
-                req.deadline[:10], "%Y-%m-%d"
-            )
-        except ValueError:
-            pass
+        for fmt in ("%Y-%m-%dT%H:%M", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+            try:
+                kwargs["deadline"] = datetime.datetime.strptime(req.deadline[:16], fmt)
+                break
+            except ValueError:
+                continue
 
     t = await _update(db, task_id, user.id, **kwargs)
     if not t:

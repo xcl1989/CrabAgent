@@ -145,6 +145,7 @@ def create_app() -> FastAPI:
     from crabagent.serve.api.task import router as task_router
     from crabagent.serve.api.todo import router as todo_router
     from crabagent.serve.api.token_usage import router as token_usage_router
+    from crabagent.serve.api.wechat import router as wechat_router
 
     app.include_router(agent_router, prefix="/api")
     app.include_router(auth_router, prefix="/api")
@@ -169,10 +170,11 @@ def create_app() -> FastAPI:
     app.include_router(task_router, prefix="/api")
     app.include_router(email_router, prefix="/api")
     app.include_router(token_usage_router, prefix="/api")
+    app.include_router(wechat_router, prefix="/api")
 
     @app.get("/health")
     async def health():
-        return {"status": "ok", "version": "0.10.1"}
+        return {"status": "ok", "version": "0.10.2"}
 
     _mount_spa(app)
 
