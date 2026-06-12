@@ -90,6 +90,32 @@ export function quickEditText(
   return api.post("/documents/quick-edit/text", req);
 }
 
+// ── Quick Edit: Style ─────────────────────────────────────────────
+
+export interface StyleChange {
+  element: string;
+  props: Record<string, string | number | boolean>;
+}
+
+export interface QuickEditStyleRequest {
+  path: string;
+  workspace?: string;
+  changes: StyleChange[];
+}
+
+export interface QuickEditStyleResponse {
+  status: string;
+  preview_html: string | null;
+  results: Array<{ element: string; success: boolean; error?: string }>;
+  message: string;
+}
+
+export function quickEditStyle(
+  req: QuickEditStyleRequest,
+): Promise<QuickEditStyleResponse> {
+  return api.post("/documents/quick-edit/style", req);
+}
+
 export async function deleteDocument(
   path: string,
   workspace = "",

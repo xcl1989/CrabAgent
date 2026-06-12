@@ -41,10 +41,13 @@ def _resolve_path_or_current(file_path: str, context: Any = None) -> tuple[str |
     return None, "⚠️ 请指定文档路径，或先在左侧文件树中打开一个文档"
 
 
-def _check_available() -> str | None:
-    """如果 OfficeCLI 不可用则返回错误提示。"""
+async def _ensure_available() -> str | None:
+    """确保 OfficeCLI 可用，必要时自动检测。返回错误信息或 None。"""
     mgr = get_office_manager()
     if not mgr.available:
+        # 自动触发检测（兼容 detect 未提前调用的场景）
+        if await mgr.detect():
+            return None
         return (
             "❌ OfficeCLI is not installed.\n\n"
             "Install with one command:\n"
@@ -139,7 +142,7 @@ async def office_read(
     context: Any = None,
 ) -> str:
     """读取 Office 文档内容。"""
-    err = _check_available()
+    err = await _ensure_available()
     if err:
         return err
 
@@ -193,7 +196,7 @@ async def office_read(
 )
 async def office_create(file_path: str = "", context: Any = None) -> str:
     """创建新的 Office 文档。"""
-    err = _check_available()
+    err = await _ensure_available()
     if err:
         return err
 
@@ -298,8 +301,12 @@ def _describe_op(
                 "- / → 文档根\n"
                 "- /slide[1] → 第1张幻灯片\n"
                 "- /slide[1]/shape[1] → 第1张幻灯片的第1个形状\n"
-                "- /sheet[1]/cell[A1] → Excel 第1个工作表的 A1 单元格\n"
-                "- /body/p[1] → Word 第1段落",
+                "- /Sheet1/A1 → Excel 的 A1 单元格（注意：Sheet名区分大小写，用字母列号）\n"
+                "- /body/p[1] → Word 第1段落\n\n"
+                "⚠️ Excel 注意：新建的空白工作表中没有预置的单元格。\n"
+                "   先使用 add 命令添加单元格（如 add → parent=/Sheet1, type=cell），\n"
+                "   然后再用 set 修改其内容。\n"
+                "   add 会自动创建行和单元格，路径形如 /Sheet1/A1、/Sheet1/B2 等。",
             },
             "props": {
                 "type": "object",
@@ -339,7 +346,7 @@ async def office_edit(
     context: Any = None,
 ) -> str:
     """编辑 Office 文档中的元素。"""
-    err = _check_available()
+    err = await _ensure_available()
     if err:
         return err
 
@@ -437,7 +444,7 @@ async def office_query(
     context: Any = None,
 ) -> str:
     """查询文档元素。"""
-    err = _check_available()
+    err = await _ensure_available()
     if err:
         return err
 
@@ -500,7 +507,7 @@ async def office_query(
 )
 async def office_render(file_path: str = "", context: Any = None) -> str:
     """渲染文档为 HTML 预览。"""
-    err = _check_available()
+    err = await _ensure_available()
     if err:
         return err
 

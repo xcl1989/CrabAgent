@@ -9,9 +9,160 @@ interface Props {
   error?: string;
   className?: string;
   onQuickEdit?: (oldText: string, newText: string) => void;
+  /** 用户拖拽列边框调整宽度后触发 */
+  onStyleEdit?: (element: string, props: Record<string, string | number | boolean>) => void;
 }
 
-// Injected script for inline editing.
+// Injected script for column-resize and row-resize.
+// Handles visual drag in-iframe; coordinates with parent for mouseup-outside-iframe.
+const RESIZE_SCRIPT = `
+<script>
+(function() {
+  // Column resize state
+  var dragCol = null, dragStartX = 0, dragStartPt = 0, dragTh = null;
+  // Row resize state
+  var dragRow = null, dragStartY = 0, dragStartH = 0, dragRowTh = null;
+
+  function getTable() { return document.querySelector('table'); }
+
+  // ---- Column helpers ----
+  function findBorderCol(cx) {
+    var hd = document.querySelectorAll('th.col-header');
+    for (var i = 0; i < hd.length; i++) {
+      var r = hd[i].getBoundingClientRect();
+      if (Math.abs(cx - r.right) <= 6) return { th: hd[i], idx: i };
+    }
+    return null;
+  }
+  function getColEl(idx) {
+    var t = getTable(); if (!t) return null;
+    var cols = t.querySelectorAll('colgroup col');
+    return cols[idx + 1] || null;
+  }
+  function parseW(el) {
+    if (!el) return 80;
+    var m = el.getAttribute('style') && el.getAttribute('style').match(/width:\s*([\d.]+)\s*pt/i);
+    return m ? parseFloat(m[1]) : 80;
+  }
+
+  // ---- Row helpers ----
+  function findBorderRow(cy) {
+    var hd = document.querySelectorAll('th.row-header');
+    for (var i = 0; i < hd.length; i++) {
+      var r = hd[i].getBoundingClientRect();
+      if (Math.abs(cy - r.bottom) <= 6) return { th: hd[i], idx: i };
+    }
+    return null;
+  }
+  function getRowTr(th) { return th ? th.closest('tr') : null; }
+  function parseH(el) {
+    if (!el) return 20;
+    var m = el.getAttribute('style') && el.getAttribute('style').match(/height:\s*([\d.]+)\s*pt/i);
+    if (m) return parseFloat(m[1]);
+    var r = el.getBoundingClientRect();
+    return Math.round((r.height * 0.75) * 100) / 100;
+  }
+
+  // ---- Finish column resize ----
+  function finishCol() {
+    if (!dragCol || !dragTh) return;
+    var p = parseW(dragCol);
+    var w = Math.max(1, Math.round((p / 5.251) * 100) / 100);
+    var path = dragTh.getAttribute('data-path');
+    dragCol = null; dragTh = null;
+    document.body.style.cursor = ''; document.body.style.userSelect = '';
+    window.parent.postMessage({ type: 'col-resize-active', active: false }, '*');
+    if (path && w > 0) window.parent.postMessage({ type: 'col-resize', element: path, props: { width: w } }, '*');
+  }
+
+  // ---- Finish row resize ----
+  function finishRow() {
+    if (!dragRow || !dragRowTh) return;
+    var tr = getRowTr(dragRowTh);
+    var p = tr ? parseH(tr) : dragStartH;
+    var h = Math.max(5, Math.round(p * 100) / 100);
+    var path = dragRowTh.getAttribute('data-path');
+    dragRow = null; dragRowTh = null;
+    document.body.style.cursor = ''; document.body.style.userSelect = '';
+    window.parent.postMessage({ type: 'row-resize-active', active: false }, '*');
+    if (path && h > 0) window.parent.postMessage({ type: 'row-resize', element: path, props: { height: h } }, '*');
+  }
+
+  // ---- Hover cursors ----
+  document.addEventListener('mousemove', function(e) {
+    if (dragCol || dragRow) return;
+    var t = e.target;
+    if (t && t.closest('thead')) {
+      var bc = findBorderCol(e.clientX);
+      document.body.style.cursor = bc ? 'col-resize' : '';
+    } else if (t && t.closest('tbody')) {
+      var br = findBorderRow(e.clientY);
+      document.body.style.cursor = br ? 'row-resize' : '';
+    } else {
+      document.body.style.cursor = '';
+    }
+  });
+
+  // ---- Start drag ----
+  document.addEventListener('mousedown', function(e) {
+    if (e.button !== 0) return;
+    var t = e.target;
+    if (t && t.closest('thead')) {
+      var bc = findBorderCol(e.clientX);
+      if (!bc) return;
+      e.preventDefault();
+      var el = getColEl(bc.idx); if (!el) return;
+      dragTh = bc.th; dragCol = el;
+      dragStartX = e.clientX; dragStartPt = parseW(el);
+      document.body.style.cursor = 'col-resize'; document.body.style.userSelect = 'none';
+      window.parent.postMessage({ type: 'col-resize-active', active: true }, '*');
+    } else if (t && t.closest('tbody')) {
+      var br = findBorderRow(e.clientY);
+      if (!br) return;
+      e.preventDefault();
+      var tr = getRowTr(br.th); if (!tr) return;
+      dragRowTh = br.th; dragRow = tr;
+      dragStartY = e.clientY; dragStartH = parseH(tr);
+      document.body.style.cursor = 'row-resize'; document.body.style.userSelect = 'none';
+      window.parent.postMessage({ type: 'row-resize-active', active: true }, '*');
+    }
+  });
+
+  // ---- Drag update ----
+  document.addEventListener('mousemove', function(e) {
+    if (dragCol) {
+      var newColPt = Math.max(10, dragStartPt + (e.clientX - dragStartX) * 0.75);
+      dragCol.style.width = newColPt + 'pt';
+      var tbl = getTable();
+      if (tbl) {
+        var total = 0;
+        var cs = tbl.querySelectorAll('colgroup col');
+        for (var ci = 0; ci < cs.length; ci++) {
+          var sw = cs[ci].getAttribute('style') && cs[ci].getAttribute('style').match(/width:\s*([\d.]+)\s*pt/i);
+          total += sw ? parseFloat(sw[1]) : 0;
+        }
+        tbl.style.width = Math.max(total, 50) + 'pt';
+      }
+    } else if (dragRow) {
+      dragRow.style.height = Math.max(5, dragStartH + (e.clientY - dragStartY) * 0.75) + 'pt';
+    }
+  });
+
+  // ---- Mouseup inside iframe ----
+  document.addEventListener('mouseup', function(e) {
+    if (dragCol) finishCol(); else if (dragRow) finishRow();
+  });
+
+  // ---- Mouseup outside iframe ----
+  window.addEventListener('message', function(e) {
+    if (e.data && e.data.type === 'col-resize-finish' && dragCol) finishCol();
+    if (e.data && e.data.type === 'row-resize-finish' && dragRow) finishRow();
+  });
+})();
+</script>
+`;
+
+// Injected script for inline editing.// Injected script for inline editing.
 // Double-click to edit. Escape to cancel. Save triggers:
 //   - Click outside element (inside iframe) → mousedown handler
 //   - Click outside iframe → parent sends "quick-edit-finish" message
@@ -101,13 +252,18 @@ const EDIT_SCRIPT = `
 </script>
 `;
 
-export function DocumentPreview({ html, loading, error, className, onQuickEdit }: Props) {
+export function DocumentPreview({ html, loading, error, className, onQuickEdit, onStyleEdit }: Props) {
   const { t } = useTranslation();
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const editHandlerRef = useRef(onQuickEdit);
+  const styleHandlerRef = useRef(onStyleEdit);
   const [editing, setEditing] = useState(false);
+  const [resizing, setResizing] = useState(false);
+  const resizeActive = useRef(false);
   editHandlerRef.current = onQuickEdit;
+  styleHandlerRef.current = onStyleEdit;
 
+  // Listen for messages from iframe
   useEffect(() => {
     const handler = (e: MessageEvent) => {
       const data = e.data;
@@ -116,10 +272,43 @@ export function DocumentPreview({ html, loading, error, className, onQuickEdit }
         editHandlerRef.current?.(data.old_text, data.new_text);
       } else if (data.type === "quick-edit-active") {
         setEditing(!!data.active);
+      } else if (data.type === "col-resize" && data.element && data.props) {
+        setResizing(true);
+        styleHandlerRef.current?.(data.element, data.props);
+        setTimeout(() => setResizing(false), 800);
+      } else if (data.type === "row-resize" && data.element && data.props) {
+        setResizing(true);
+        styleHandlerRef.current?.(data.element, data.props);
+        setTimeout(() => setResizing(false), 800);
+      } else if (data.type === "col-resize-active" || data.type === "row-resize-active") {
+        resizeActive.current = !!data.active;
+        if (data.active) {
+          document.body.style.cursor = data.type === "row-resize-active" ? 'row-resize' : 'col-resize';
+          document.body.style.userSelect = 'none';
+        } else {
+          document.body.style.cursor = '';
+          document.body.style.userSelect = '';
+        }
       }
     };
     window.addEventListener("message", handler);
     return () => window.removeEventListener("message", handler);
+  }, []);
+
+  // Forward mouseup outside iframe → col/row-resize-finish to iframe
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (!resizeActive.current) return;
+      const iframe = iframeRef.current;
+      if (!iframe) return;
+      const rect = iframe.getBoundingClientRect();
+      if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) {
+        iframe.contentWindow?.postMessage({ type: 'col-resize-finish' }, '*');
+        iframe.contentWindow?.postMessage({ type: 'row-resize-finish' }, '*');
+      }
+    };
+    window.addEventListener("mouseup", handler);
+    return () => window.removeEventListener("mouseup", handler);
   }, []);
 
   // When editing is active, listen for clicks on the parent page
@@ -168,15 +357,21 @@ export function DocumentPreview({ html, loading, error, className, onQuickEdit }
     );
   }
 
+  const allScripts = `${RESIZE_SCRIPT}\n${EDIT_SCRIPT}`;
   const injectedHtml = html.includes("</body>")
-    ? html.replace("</body>", `${EDIT_SCRIPT}\n</body>`)
-    : html + EDIT_SCRIPT;
+    ? html.replace("</body>", `${allScripts}\n</body>`)
+    : html + allScripts;
 
   return (
     <div className={cn("relative h-full", className)}>
       {editing && (
         <div className="absolute top-2 right-2 z-40 px-2 py-1 rounded-lg text-[10px] bg-blue-500 text-white shadow-md">
           Editing... (click outside to save)
+        </div>
+      )}
+      {resizing && (
+        <div className="absolute top-2 left-2 z-40 px-2 py-1 rounded-lg text-[10px] bg-green-600 text-white shadow-md">
+          Resizing...
         </div>
       )}
       <iframe

@@ -203,7 +203,7 @@ class OfficeManager:
             - ``before``: 在此路径的元素之前插入
             - ``data``: table 专用，二维数组 JSON（通过 stdin 传递）
         """
-        cmd = ["add", file_path, parent_path, "--type", element_type]
+        cmd = [self._binary_path, "add", file_path, parent_path, "--type", element_type]
 
         # 分离定位参数和普通属性
         pass_props: dict[str, Any] = {}

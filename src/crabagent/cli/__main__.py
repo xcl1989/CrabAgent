@@ -501,6 +501,7 @@ async def _setup_agent_context(
     import crabagent.core.agent.tools.read  # noqa: F401
     import crabagent.core.agent.tools.web  # noqa: F401
     import crabagent.core.agent.tools.write  # noqa: F401
+    import crabagent.core.agent.tools.office  # noqa: F401
 
     try:
         import crabagent.core.agent.tools.browser  # noqa: F401
@@ -515,6 +516,12 @@ async def _setup_agent_context(
     except Exception:
         pass
     from crabagent.core.agent.tools import registry as _registry
+
+    # Detect OfficeCLI for office document tools
+    from crabagent.core.office.manager import get_office_manager
+
+    office_mgr = get_office_manager()
+    await office_mgr.detect()
 
     workspace = args.workspace or settings.workspace
     workspace = workspace.resolve()

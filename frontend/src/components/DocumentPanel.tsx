@@ -80,6 +80,24 @@ export function DocumentPanel({
     }
   }, [doc?.filePath, doc?.workspace, onRefreshPreview]);
 
+  const handleStyleEdit = useCallback(async (element: string, props: Record<string, string | number | boolean>) => {
+    if (!doc?.filePath) return;
+    try {
+      const result = await documentsApi.quickEditStyle({
+        path: doc.filePath,
+        workspace: doc.workspace || "",
+        changes: [{ element, props }],
+      });
+      if (result.preview_html) {
+        setLocalPreviewHtml(result.preview_html);
+      }
+      // 不调 onRefreshPreview——API 已返回最新预览，
+      // 再调服务器刷新会让 useEffect 清掉 localPreviewHtml 导致闪回
+    } catch (e: any) {
+      console.error("Style edit failed:", e);
+    }
+  }, [doc?.filePath, doc?.workspace]);
+
   // Clear local preview when doc changes
   useEffect(() => {
     setLocalPreviewHtml(null);
@@ -155,6 +173,7 @@ export function DocumentPanel({
             error={doc.previewError || undefined}
             className="h-full"
             onQuickEdit={handleQuickEdit}
+            onStyleEdit={handleStyleEdit}
           />
         ) : (
           <DocumentTimeline events={doc.events} className="h-full overflow-y-auto" />

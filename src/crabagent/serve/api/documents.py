@@ -204,6 +204,28 @@ async def delete_document(
 # ── Quick Edit ──────────────────────────────────────────────────────
 
 
+class StyleChange(BaseModel):
+    """一次样式/布局属性的修改。"""
+    element: str
+    """元素路径，如 /Sheet1/col[A]、/Sheet1/row[3]"""
+    props: dict[str, str | int | float | bool]
+    """要设置的属性，如 {"width": 20}、{"height": 30, "hidden": True}"""
+
+
+class QuickEditStyleRequest(BaseModel):
+    """请求：批量修改文档中元素的样式/布局属性（行高、列宽等）。"""
+    path: str
+    workspace: str = ""
+    changes: list[StyleChange]
+
+
+class QuickEditStyleResponse(BaseModel):
+    status: str
+    preview_html: str | None = None
+    results: list[dict] = []
+    message: str = ""
+
+
 class QuickEditTextRequest(BaseModel):
     """请求：通过文本匹配来修改文档中的文字内容。"""
 
@@ -245,6 +267,80 @@ def _fix_html_newlines(html: str | None) -> str | None:
         else:
             html = css + html
     return html
+
+
+@router.post("/quick-edit/style", response_model=QuickEditStyleResponse)
+async def quick_edit_style(
+    req: QuickEditStyleRequest,
+    user: User = Depends(get_current_user),
+):
+    """批量修改文档中元素的样式/布局属性（如行高、列宽、隐藏行/列等）。
+
+    前端拖拽列边框调整宽度后，调用此接口持久化。
+    每个 change 对应一次 officecli set 操作。
+    """
+    mgr = get_office_manager()
+    if not mgr.available:
+        raise HTTPException(status_code=503, detail="OfficeCLI is not installed")
+
+    docs_dir = _get_docs_dir(user.id, req.workspace)
+    file_path = _safe_path(docs_dir, req.path)
+
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    ext = file_path.suffix.lower()
+    if ext not in _PREVIEWABLE_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"Unsupported file type '{ext}'")
+
+    if not req.changes:
+        raise HTTPException(status_code=400, detail="No changes provided")
+
+    logger.info(
+        "[QE-style] %d change(s) on %s",
+        len(req.changes), req.path,
+    )
+
+    # 修改前备份
+    _backup_doc(file_path)
+
+    results: list[dict] = []
+    all_ok = True
+
+    for change in req.changes:
+        try:
+            result = await mgr.set_props(
+                str(file_path), change.element, dict(change.props)
+            )
+            results.append({
+                "element": change.element,
+                "success": result.success,
+                "error": result.error if not result.success else "",
+            })
+            if not result.success:
+                all_ok = False
+                logger.warning("[QE-style] Failed: %s → %s", change.element, result.error)
+            else:
+                logger.info("[QE-style] OK: %s → %s", change.element, change.props)
+        except Exception as e:
+            results.append({
+                "element": change.element,
+                "success": False,
+                "error": str(e),
+            })
+            all_ok = False
+            logger.exception("[QE-style] Error on %s", change.element)
+
+    # 渲染新预览（即使部分失败也返回，让前端看到当前状态）
+    preview_result = await mgr.view_html(str(file_path))
+    preview_html = _fix_html_newlines(preview_result.data) if preview_result.success else None
+
+    return QuickEditStyleResponse(
+        status="ok" if all_ok else "partial",
+        preview_html=preview_html,
+        results=results,
+        message=f"{len(req.changes)} change(s), {sum(1 for r in results if r['success'])} succeeded",
+    )
 
 
 @router.post("/quick-edit/text", response_model=QuickEditTextResponse)
