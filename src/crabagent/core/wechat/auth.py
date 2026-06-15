@@ -11,7 +11,7 @@ import logging
 from typing import Any
 
 from crabagent.core.wechat.client import LoginCredentials, QRCodeResult, WeChatClient
-from crabagent.core.wechat.config import WeChatConfig, load_config, save_config
+from crabagent.core.wechat.config import load_config, save_config
 
 logger = logging.getLogger(__name__)
 

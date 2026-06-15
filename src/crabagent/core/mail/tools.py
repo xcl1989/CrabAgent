@@ -32,7 +32,8 @@ def register_mail_tools(registry):
         description=(
             "Send an email via the configured SMTP server. "
             "Use when the user asks to send an email, reply to someone, "
-            "or send a notification. Requires email configuration to be set up."
+            "or send a notification. Supports file attachments and HTML body. "
+            "Requires email configuration to be set up."
         ),
         parameters={
             "type": "object",
@@ -47,13 +48,29 @@ def register_mail_tools(registry):
                 },
                 "body": {
                     "type": "string",
-                    "description": "Email body text (plain text)",
+                    "description": "Email body text (plain text by default, HTML if html=true)",
+                },
+                "attachments": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "List of file paths to attach (e.g. [\"/path/to/report.pdf\"])",
+                },
+                "html": {
+                    "type": "boolean",
+                    "description": "If true, body is treated as HTML. Default: false.",
                 },
             },
             "required": ["to", "subject", "body"],
         },
     )
-    async def email_send(to: str, subject: str, body: str, context=None) -> str:
+    async def email_send(
+        to: str,
+        subject: str,
+        body: str,
+        attachments: list[str] | None = None,
+        html: bool = False,
+        context=None,
+    ) -> str:
         from crabagent.core.mail.handler import send_email as _send
 
         user_id = 1
@@ -62,9 +79,13 @@ def register_mail_tools(registry):
                 context.metadata.get("user_id", context.metadata.get("uid", 1))
             )
 
-        result = await _send(to=to, subject=subject, body=body, user_id=user_id)
+        result = await _send(
+            to=to, subject=subject, body=body,
+            user_id=user_id, attachments=attachments, html=html,
+        )
         if result.get("status") == "ok":
-            return f"✅ Email sent to **{to}**: {subject}"
+            att_info = f" ({result.get('attachments', 0)} attachments)" if attachments else ""
+            return f"✅ Email sent to **{to}**: {subject}{att_info}"
         else:
             return f"❌ Failed to send email: {result.get('message', 'Unknown error')}"
 
@@ -210,12 +231,19 @@ def register_mail_tools(registry):
                     "type": "string",
                     "description": "Final email body text",
                 },
+                "attachments": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "List of file paths to attach",
+                },
             },
             "required": ["to", "subject", "body"],
         },
     )
     async def email_send_draft(
-        to: str, subject: str, body: str, context=None
+        to: str, subject: str, body: str,
+        attachments: list[str] | None = None,
+        context=None,
     ) -> str:
         from crabagent.core.mail.handler import send_email as _send
 
@@ -226,10 +254,12 @@ def register_mail_tools(registry):
             )
 
         result = await _send(
-            to=to, subject=f"[Draft] {subject}", body=body, user_id=user_id
+            to=to, subject=f"[Draft] {subject}", body=body,
+            user_id=user_id, attachments=attachments,
         )
         if result.get("status") == "ok":
-            return f"✅ Draft sent to **{to}**: {subject}"
+            att_info = f" ({result.get('attachments', 0)} attachments)" if attachments else ""
+            return f"✅ Draft sent to **{to}**: {subject}{att_info}"
         else:
             return f"❌ Failed to send draft: {result.get('message', 'Unknown error')}"
 

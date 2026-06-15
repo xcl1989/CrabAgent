@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useRef, useState, type ReactNode } from "react";
+import { forwardRef, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -21,6 +21,7 @@ import {
   Wrench,
   Zap,
   X,
+  ArrowDown,
 } from "lucide-react";
 import { Modal, CodeBlock } from "./ui";
 import ToolResultRender from "./ToolResultRender";
@@ -279,7 +280,7 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(
       onSubAgentModalClose,
       getSubAgentContent,
     },
-    bottomRef,
+    _ref,
   ) => {
     const { t } = useTranslation();
     const [previewImage, setPreviewImage] = useState<string | null>(null);
@@ -288,6 +289,58 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(
     );
     const [modalContent, setModalContent] = useState("");
     const modalContentRef = useRef("");
+
+    // ── Smart auto-scroll ──────────────────────────────────────
+    const scrollRef = useRef<HTMLDivElement>(null);
+    const isAtBottomRef = useRef(true);
+    const [showJumpBtn, setShowJumpBtn] = useState(false);
+    const [newMsgHint, setNewMsgHint] = useState(0);
+
+    const handleScroll = useCallback(() => {
+      const el = scrollRef.current;
+      if (!el) return;
+      const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+      const atBottom = distFromBottom < 120;
+      isAtBottomRef.current = atBottom;
+      setShowJumpBtn(!atBottom);
+      if (atBottom) setNewMsgHint(0);
+    }, []);
+
+    // Content signature to detect streaming text growth (not just message count)
+    const contentSig = useMemo(() => {
+      const last = messages[messages.length - 1];
+      return `${messages.length}:${last?.content?.length || 0}`;
+    }, [messages]);
+
+    // Auto-scroll on new content if user is at the bottom
+    useEffect(() => {
+      if (isAtBottomRef.current) {
+        const el = scrollRef.current;
+        if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+      } else {
+        setNewMsgHint((n) => n + 1);
+      }
+    }, [contentSig]);
+
+    const jumpToBottom = useCallback(() => {
+      const el = scrollRef.current;
+      if (el) {
+        el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+        isAtBottomRef.current = true;
+        setShowJumpBtn(false);
+        setNewMsgHint(0);
+      }
+    }, []);
+
+    // Helper: scroll to bottom if user is currently at bottom (for details toggle)
+    const maybeScrollOnToggle = useCallback(() => {
+      if (isAtBottomRef.current) {
+        setTimeout(() => {
+          const el = scrollRef.current;
+          if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+        }, 50);
+      }
+    }, []);
     const modalTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const resolvedSubAgentId = externalSubAgentId ?? activeSubAgentId;
@@ -341,7 +394,11 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(
     }
 
     return (
-      <div className="flex-1 overflow-y-auto px-3 sm:px-6 py-3 sm:py-4">
+      <div
+        ref={scrollRef}
+        onScroll={handleScroll}
+        className="flex-1 overflow-y-auto px-3 sm:px-6 py-3 sm:py-4 relative"
+      >
         {!connected && messages.length > 0 && (
           <div className="flex items-center justify-center gap-2 mb-3 text-xs text-[var(--warning)] bg-[var(--warning-bg)] border border-[var(--warning-border)] rounded-lg px-3 py-1.5">
             <Loader2 size={12} className="animate-spin" />
@@ -363,6 +420,7 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(
               <details
                 key={callMsg.id}
                 className="mb-3 group ml-3 rounded-lg overflow-hidden"
+                onToggle={(e) => { if (e.currentTarget.open) maybeScrollOnToggle(); }}
               >
                 <summary
                   className={cn(
@@ -415,6 +473,7 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(
               <details
                 key={msg.id}
                 className="mb-3 ml-3 rounded-lg overflow-hidden"
+                onToggle={(e) => { if (e.currentTarget.open) maybeScrollOnToggle(); }}
               >
                 <summary className="cursor-pointer py-1.5 px-3 text-xs rounded-lg select-none list-none bg-[var(--bg-secondary)] border border-[var(--border)] hover:border-[var(--border-strong)] transition-colors text-[var(--text-secondary)] flex items-center gap-2">
                   <span className="text-[var(--accent-2)]">💭</span>
@@ -794,7 +853,22 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(
           </div>
         )}
 
-        <div ref={bottomRef} />
+        {/* Jump-to-bottom floating button */}
+        {showJumpBtn && (
+          <div className="sticky bottom-4 flex justify-center z-30 pointer-events-none">
+            <button
+              onClick={jumpToBottom}
+              className="pointer-events-auto flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-[var(--brand)] text-white shadow-lg hover:bg-[var(--brand-hover)] transition-all"
+            >
+              <ArrowDown size={13} />
+              {newMsgHint > 0 && (
+                <span className="px-1.5 py-0.5 rounded-full bg-white/20 text-[10px]">
+                  {newMsgHint > 9 ? "9+" : newMsgHint}
+                </span>
+              )}
+            </button>
+          </div>
+        )}
 
         {/* Image lightbox */}
         <Modal

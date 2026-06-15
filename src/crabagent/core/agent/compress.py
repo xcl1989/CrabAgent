@@ -44,12 +44,13 @@ async def compress_context(context: AgentContext, llm_params: dict, model: str) 
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            max_tokens=4096,
+            max_tokens=8192,
             stream=True,
             stream_options={"include_usage": True},
         )
 
-        summary = ""
+        content_buf = ""
+        reasoning_buf = ""
         async for chunk in response:
             if not chunk.choices:
                 continue
@@ -57,10 +58,10 @@ async def compress_context(context: AgentContext, llm_params: dict, model: str) 
             piece = ""
             if delta.content:
                 piece = delta.content
-                summary += piece
+                content_buf += piece
             elif hasattr(delta, "reasoning_content") and delta.reasoning_content:
-                piece = delta.reasoning_content
-                summary += piece
+                # Collect reasoning separately — never mix into the summary
+                reasoning_buf += delta.reasoning_content
 
             if piece:
                 await context.event_bus.emit(
@@ -69,7 +70,9 @@ async def compress_context(context: AgentContext, llm_params: dict, model: str) 
                         data={"text": piece},
                     )
                 )
-        summary = summary.strip()
+
+        # Prefer actual content; fall back to reasoning only if content is empty
+        summary = content_buf.strip() or reasoning_buf.strip()
     except Exception as e:
         logger.warning("Context compression failed, keeping original: %s", e)
         await context.event_bus.emit(
@@ -134,6 +137,11 @@ def _format_messages(messages: list[dict]) -> str:
     for msg in messages:
         role = msg.get("role", "?")
         content = msg.get("content", "")
+
+        # Skip compress ack placeholders — they carry no information
+        if msg.get("_compress_ack"):
+            continue
+
         if not content:
             if msg.get("tool_calls"):
                 tool_names = [tc.get("function", {}).get("name", "?") for tc in msg["tool_calls"]]

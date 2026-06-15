@@ -21,6 +21,7 @@ from crabagent.core.wechat.auth import (
 from crabagent.core.wechat.client import (
     IncomingMessage,
     LoginCredentials,
+    MediaAttachment,
     QRCodeResult,
     SessionExpiredError,
     WeChatClient,
@@ -35,6 +36,7 @@ __all__ = [
     "WeChatMessageLoop",
     "WeChatConfig",
     "IncomingMessage",
+    "MediaAttachment",
     "LoginCredentials",
     "QRCodeResult",
     "SessionExpiredError",
@@ -143,3 +145,86 @@ class WeChatNotification:
         """Send an email digest summary."""
         text = f"📬 邮件摘要\n\n{summary[:800]}"
         return await WeChatNotification.send(text, user_id)
+
+    @staticmethod
+    async def send_image(image_path: str, user_id: str = "") -> bool:
+        """Send an image file to a WeChat user."""
+        from pathlib import Path
+
+        client = None
+        try:
+            from crabagent.serve.scheduler import get_scheduler
+
+            sched = get_scheduler()
+            loop = getattr(sched, "_wechat_loop", None)
+            if loop and loop._running and loop.client._context_store:
+                client = loop.client
+        except Exception:
+            pass
+
+        if not client:
+            client = await get_authenticated_client()
+        if not client:
+            logger.debug("[WeChatNotify] Not logged in — skipping image send")
+            return False
+
+        try:
+            if not user_id:
+                if client._context_store:
+                    user_id = next(iter(client._context_store))
+                else:
+                    cfg = await load_config()
+                    if cfg.notify_target_user and cfg.cached_context_token:
+                        user_id = cfg.notify_target_user
+                        client._context_store[user_id] = cfg.cached_context_token
+                    else:
+                        return False
+
+            return await client.send_image(to_user=user_id, image_path=Path(image_path))
+        except Exception as e:
+            logger.error("[WeChatNotify] send_image failed: %s", e)
+            return False
+        finally:
+            try:
+                if client and (not client._http or not client._http.is_closed):
+                    pass  # keep alive if from loop
+            except Exception:
+                pass
+
+    @staticmethod
+    async def send_file(file_path: str, user_id: str = "") -> bool:
+        """Send a file attachment to a WeChat user."""
+        from pathlib import Path
+
+        client = None
+        try:
+            from crabagent.serve.scheduler import get_scheduler
+
+            sched = get_scheduler()
+            loop = getattr(sched, "_wechat_loop", None)
+            if loop and loop._running and loop.client._context_store:
+                client = loop.client
+        except Exception:
+            pass
+
+        if not client:
+            client = await get_authenticated_client()
+        if not client:
+            return False
+
+        try:
+            if not user_id:
+                if client._context_store:
+                    user_id = next(iter(client._context_store))
+                else:
+                    cfg = await load_config()
+                    if cfg.notify_target_user and cfg.cached_context_token:
+                        user_id = cfg.notify_target_user
+                        client._context_store[user_id] = cfg.cached_context_token
+                    else:
+                        return False
+
+            return await client.send_file(to_user=user_id, file_path=Path(file_path))
+        except Exception as e:
+            logger.error("[WeChatNotify] send_file failed: %s", e)
+            return False

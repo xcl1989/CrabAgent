@@ -219,7 +219,6 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
     replaying,
     replayProgress,
     todoRefreshKey,
-    bottomRef,
     selectSession,
     newSession,
     selectSessionById,
@@ -771,7 +770,6 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
             )}
 
             <ChatPanel
-              ref={bottomRef}
               messages={messages}
               connected={connected}
               sending={sending}

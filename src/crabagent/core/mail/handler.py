@@ -46,13 +46,15 @@ async def send_email(
     body: str,
     reply_to: str | None = None,
     user_id: int = 1,
+    attachments: list[str] | None = None,
+    html: bool = False,
 ) -> dict:
-    """Send an email via configured SMTP."""
+    """Send an email via configured SMTP, optionally with file attachments."""
     client = await get_smtp_client(user_id)
     if not client:
         return {"status": "error", "message": "SMTP not configured"}
     try:
-        result = await client.send(to, subject, body, reply_to)
+        result = await client.send(to, subject, body, reply_to, attachments, html)
         return result
     except Exception as e:
         logger.error(f"Email send failed: {e}")

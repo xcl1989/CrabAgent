@@ -16,8 +16,6 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
   const [replayProgress, setReplayProgress] = useState({ current: 0, total: 0 });
   const [todoRefreshKey, setTodoRefreshKey] = useState(0);
   const activeSessionRef = useRef<Session | null>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
-  const prevMsgCountRef = useRef(0);
   const pendingSubEventsRef = useRef<SSEEvent[]>([]);
   const subFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const subAgentContents = useRef<Map<string, string>>(new Map());
@@ -181,13 +179,6 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
 
   const { connected } = useSSE(activeSession?.session_id || null, handleSSEEvent);
 
-  useEffect(() => {
-    if (messages.length > prevMsgCountRef.current) {
-      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-    }
-    prevMsgCountRef.current = messages.length;
-  }, [messages]);
-
   const selectSession = useCallback(
     async (session: Session, selectedModel: string, models: { id: string }[]) => {
       setSending(false);
@@ -320,7 +311,6 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
     replaying,
     replayProgress,
     todoRefreshKey,
-    bottomRef,
     selectSession,
     newSession,
     selectSessionById,
