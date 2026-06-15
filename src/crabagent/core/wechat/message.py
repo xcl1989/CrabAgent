@@ -145,7 +145,10 @@ class WeChatMessageLoop:
         """
         logger.info(
             "[WeChatLoop] Message from %s (%s): %.80s [attachments: %d]",
-            msg.from_user, msg.chat_type, msg.content, len(msg.attachments),
+            msg.from_user,
+            msg.chat_type,
+            msg.content,
+            len(msg.attachments),
         )
 
         # Send typing indicator
@@ -224,13 +227,13 @@ class WeChatMessageLoop:
         logger.info("[WeChatLoop] Scanning reply for file refs (%d chars)...", len(reply_text))
 
         # 1) Markdown images: ![alt](path)
-        for m in re.finditer(r'!\[.*?\]\(([^)]+)\)', reply_text):
-            img_str = m.group(1).split('?')[0]  # strip query params
+        for m in re.finditer(r"!\[.*?\]\(([^)]+)\)", reply_text):
+            img_str = m.group(1).split("?")[0]  # strip query params
             img_path = Path(img_str)
             if not img_path.is_absolute():
                 img_path = workspace / img_str
             if img_path.exists() and str(img_path) not in sent:
-                if img_path.suffix.lower() in ('.png', '.jpg', '.jpeg', '.gif', '.webp'):
+                if img_path.suffix.lower() in (".png", ".jpg", ".jpeg", ".gif", ".webp"):
                     try:
                         await self.client.send_image(msg.from_user, img_path, token)
                         sent.add(str(img_path))
@@ -239,14 +242,12 @@ class WeChatMessageLoop:
 
         # Common file extensions we can send via WeChat
         _file_exts = (
-            r'pdf|xlsx|xls|docx|doc|pptx|ppt|csv|txt|zip|json|md|'
-            r'py|js|ts|html|css|sql|rar|7z|tar|gz|epub|mp3|mp4'
+            r"pdf|xlsx|xls|docx|doc|pptx|ppt|csv|txt|zip|json|md|"
+            r"py|js|ts|html|css|sql|rar|7z|tar|gz|epub|mp3|mp4"
         )
 
         # 2) File references in backticks: `file.xlsx` or `/abs/path/file.pptx`
-        for m in re.finditer(
-            rf'[`"]([^`"`]+\.(?:{_file_exts}))[`"]', reply_text, re.IGNORECASE
-        ):
+        for m in re.finditer(rf'[`"]([^`"`]+\.(?:{_file_exts}))[`"]', reply_text, re.IGNORECASE):
             fname = m.group(1)
             p = Path(fname)
             if p.is_absolute():
@@ -263,13 +264,11 @@ class WeChatMessageLoop:
                     break
 
         # 3) Absolute paths mentioned in the reply (even without backticks)
-        for m in re.finditer(
-            rf'(/[^\s`"`\'\)]+\.(?:{_file_exts}))', reply_text, re.IGNORECASE
-        ):
+        for m in re.finditer(rf'(/[^\s`"`\'\)]+\.(?:{_file_exts}))', reply_text, re.IGNORECASE):
             p = Path(m.group(1))
             if p.exists() and str(p) not in sent:
                 try:
-                    if p.suffix.lower() in ('.png', '.jpg', '.jpeg', '.gif', '.webp'):
+                    if p.suffix.lower() in (".png", ".jpg", ".jpeg", ".gif", ".webp"):
                         await self.client.send_image(msg.from_user, p, token)
                     else:
                         await self.client.send_file(msg.from_user, p, token)
@@ -312,10 +311,20 @@ class WeChatMessageLoop:
 # ── WeChatProgressListener ──────────────────────────────────────────────────
 
 # Tools that are too lightweight to count toward visible progress
-_QUIET_TOOLS = frozenset({
-    "read", "glob", "grep", "todo_add", "todo_list", "todo_done",
-    "task_list", "task_add", "shared_list", "shared_get",
-})
+_QUIET_TOOLS = frozenset(
+    {
+        "read",
+        "glob",
+        "grep",
+        "todo_add",
+        "todo_list",
+        "todo_done",
+        "task_list",
+        "task_add",
+        "shared_list",
+        "shared_get",
+    }
+)
 
 # Fallback: push a heartbeat if no TEXT_DONE for this many seconds
 _FALLBACK_INTERVAL = 45.0
@@ -330,10 +339,22 @@ class WeChatProgressListener:
         flush ``_pending`` as a WeChat message.
       - The final TEXT_DONE (no subsequent TOOL_CALL) is left buffered —
         ``_default_handler`` sends it as the final reply.
-      - A background heartbeat task runs independently: if no push has
-        happened for ``_FALLBACK_INTERVAL`` seconds (even during a long
-        blocking tool call), it pushes a heartbeat automatically.
+      - A background heartbeat task runs independently with three jobs:
+        1. **Typing keepalive** — sends ``send_typing(status=1)`` every
+           ~15s to keep the context_token alive during long tasks.
+           Without this, iLink expires the token after ~4 minutes and
+           all subsequent sends fail with ``ret=-2``.
+        2. **Heartbeat text** — if no push has happened for
+           ``_FALLBACK_INTERVAL`` seconds, pushes a status message.
+        3. **Buffer flush** — when sends fail, messages are buffered and
+           retried with exponential backoff. Once a send succeeds, all
+           buffered messages are flushed in one batch.
     """
+
+    # Send typing indicator this often (protocol recommends every 5s)
+    _TYPING_INTERVAL = 15.0
+    # Max buffered messages before merging old ones
+    _MAX_BUFFER = 20
 
     def __init__(
         self,
@@ -349,15 +370,24 @@ class WeChatProgressListener:
         self._finished: bool = False  # Set by stop() to terminate heartbeat
         self._heartbeat_task: asyncio.Task | None = None
 
+        # --- Resilient delivery ---
+        self._buffer: list[str] = []  # Messages waiting for retry
+        self._backoff: float = 5.0  # Current retry backoff (seconds)
+        self._max_backoff: float = 120.0
+        self._last_retry: float = 0.0  # Time of last buffer-flush attempt
+        self._last_typing: float = 0.0  # Time of last typing keepalive
+        self._typing_warned: bool = False  # Suppress repeated logging
+
     def start(self) -> None:
         """Start the background heartbeat task."""
         if self._heartbeat_task is None:
-            self._heartbeat_task = asyncio.create_task(
-                self._heartbeat_loop(), name="wechat-progress-heartbeat"
-            )
+            self._heartbeat_task = asyncio.create_task(self._heartbeat_loop(), name="wechat-progress-heartbeat")
 
     async def stop(self) -> None:
-        """Signal the heartbeat loop to stop and wait for cleanup."""
+        """Signal the heartbeat loop to stop and wait for cleanup.
+
+        Makes a final attempt to flush any buffered messages.
+        """
         self._finished = True
         if self._heartbeat_task and not self._heartbeat_task.done():
             self._heartbeat_task.cancel()
@@ -365,25 +395,67 @@ class WeChatProgressListener:
                 await self._heartbeat_task
             except asyncio.CancelledError:
                 pass
+        # Final attempt to flush buffered messages
+        if self._buffer:
+            merged = "\n---\n".join(self._buffer)
+            try:
+                ok = await self._client.send_message(self._to_user, merged)
+                if ok:
+                    logger.info(
+                        "[WeChatProgress] Final flush: sent %d buffered messages",
+                        len(self._buffer),
+                    )
+                    self._buffer.clear()
+            except Exception:
+                logger.warning(
+                    "[WeChatProgress] Final flush failed, %d messages lost",
+                    len(self._buffer),
+                )
 
     async def _heartbeat_loop(self) -> None:
-        """Background loop that pushes heartbeats during long silences.
+        """Background loop: typing keepalive + heartbeat + buffer flush.
 
-        Checks every 10 seconds. If no push has occurred for
-        ``_FALLBACK_INTERVAL`` seconds, sends a heartbeat.
-        This ensures the user still gets feedback even when a single
-        tool call blocks for minutes.
+        Runs every 10 seconds. Each iteration:
+        1. Sends typing indicator to keep context_token alive.
+        2. If there are buffered messages and backoff has elapsed, tries
+           to flush them.
+        3. If no heartbeat text has been pushed for a while (and we're
+           not in degraded mode), pushes a status message.
         """
         while not self._finished:
             await asyncio.sleep(10)
             if self._finished:
                 break
             now = time.monotonic()
-            if now - self._last_push >= _FALLBACK_INTERVAL:
+
+            # 1. Typing keepalive — prevents context_token expiry
+            if now - self._last_typing >= self._TYPING_INTERVAL:
+                self._last_typing = now
+                try:
+                    await self._client.send_typing(self._to_user, status=1)
+                    self._typing_warned = False
+                except Exception:
+                    if not self._typing_warned:
+                        logger.debug("[WeChatProgress] typing keepalive failed (token may be stale)")
+                        self._typing_warned = True
+
+            # 2. Flush buffered messages with exponential backoff
+            if self._buffer and (now - self._last_retry) >= self._backoff:
+                self._last_retry = now
+                merged = "\n---\n".join(self._buffer)
+                ok = await self._send(merged)
+                if ok:
+                    logger.info(
+                        "[WeChatProgress] Recovered! Flushed %d buffered messages",
+                        len(self._buffer),
+                    )
+                    self._buffer.clear()
+                    self._backoff = 5.0  # Reset backoff on recovery
+
+            # 3. Normal heartbeat — skip when degraded to avoid buffer bloat
+            if not self._buffer and now - self._last_push >= _FALLBACK_INTERVAL:
                 elapsed = int(now - self._start)
-                await self._push(
-                    f"⏳ 仍在处理中（已完成 {self._tool_count} 步，{elapsed}s）"
-                )
+                await self._push(f"⏳ 仍在处理中（已完成 {self._tool_count} 步，{elapsed}s）")
 
     async def on_event(self, event: Any) -> None:
         """EventBus callback — inspects event type and pushes when needed."""
@@ -409,17 +481,11 @@ class WeChatProgressListener:
                 self._pending = ""
                 return
 
-    async def _push(self, text: str) -> bool:
-        """Send a progress message via WeChat.
+    async def _send(self, text: str) -> bool:
+        """Low-level send — calls client.send_message, returns success.
 
-        Never gives up — the background heartbeat loop will retry
-        every ``_FALLBACK_INTERVAL`` seconds on failure.
-        Only updates ``_last_push`` on success, so the heartbeat loop
-        naturally takes over when sends start failing.
-
-        Does **not** pass a fixed ``context_token`` — delegates to
-        :meth:`WeChatClient.send_message` which reads the freshest token
-        from ``_context_store``.
+        Does not buffer or retry. Used by both ``_push`` and the
+        heartbeat flush logic.
         """
         try:
             ok = await self._client.send_message(
@@ -428,14 +494,44 @@ class WeChatProgressListener:
             )
             if ok:
                 self._last_push = time.monotonic()
+                self._typing_warned = False
                 return True
-            logger.info("[WeChatProgress] send_message returned False (will retry)")
+            return False
         except Exception:
-            logger.debug("[WeChatProgress] push exception (will retry)", exc_info=True)
+            logger.debug("[WeChatProgress] send exception", exc_info=True)
+            return False
+
+    async def _push(self, text: str) -> bool:
+        """Send a progress message, buffer on failure for later retry.
+
+        On success: updates ``_last_push`` and resets backoff.
+        On failure: stores the message in ``_buffer`` and increases
+        backoff. The heartbeat loop will periodically attempt to flush
+        all buffered messages once sends recover.
+        """
+        ok = await self._send(text)
+        if ok:
+            return True
+
+        # Buffer for retry — keep at most _MAX_BUFFER entries
+        if len(self._buffer) >= self._MAX_BUFFER:
+            # Merge oldest two to make room
+            self._buffer[0] = self._buffer[0] + "\n" + self._buffer[1]
+            del self._buffer[1]
+        self._buffer.append(text)
+
+        # Exponential backoff
+        self._backoff = min(self._backoff * 1.5, self._max_backoff)
+        logger.info(
+            "[WeChatProgress] send failed, buffered message (total=%d, next retry in %.0fs)",
+            len(self._buffer),
+            self._backoff,
+        )
         return False
 
 
 # ── _run_agent_for_wechat ───────────────────────────────────────────────────
+
 
 async def _run_agent_for_wechat(msg: IncomingMessage, client: WeChatClient | None = None) -> str:
     """Run the Agent loop for a WeChat message and return the reply text.
@@ -585,37 +681,49 @@ async def _run_agent_for_wechat(msg: IncomingMessage, client: WeChatClient | Non
                         if raw_bytes and len(raw_bytes) < 5_000_000:  # 5MB limit
                             b64 = _b64.b64encode(raw_bytes).decode("ascii")
                             data_url = f"data:image/jpeg;base64,{b64}"
-                            content_blocks.append({
-                                "type": "image_url",
-                                "image_url": {"url": data_url},
-                            })
-                            content_blocks.append({
-                                "type": "text",
-                                "text": f"[用户发送了一张图片，{att.width}x{att.height}]",
-                            })
+                            content_blocks.append(
+                                {
+                                    "type": "image_url",
+                                    "image_url": {"url": data_url},
+                                }
+                            )
+                            content_blocks.append(
+                                {
+                                    "type": "text",
+                                    "text": f"[用户发送了一张图片，{att.width}x{att.height}]",
+                                }
+                            )
                         else:
-                            content_blocks.append({
-                                "type": "text",
-                                "text": f"[用户发送了一张图片，但下载失败或过大（{len(raw_bytes)} bytes）]",
-                            })
+                            content_blocks.append(
+                                {
+                                    "type": "text",
+                                    "text": f"[用户发送了一张图片，但下载失败或过大（{len(raw_bytes)} bytes）]",
+                                }
+                            )
                     except Exception as e:
                         logger.warning("[WeChatLoop] Image download failed: %s", e)
-                        content_blocks.append({
-                            "type": "text",
-                            "text": f"[用户发送了一张图片，但处理失败：{e}]",
-                        })
+                        content_blocks.append(
+                            {
+                                "type": "text",
+                                "text": f"[用户发送了一张图片，但处理失败：{e}]",
+                            }
+                        )
                 else:
-                    content_blocks.append({
-                        "type": "text",
-                        "text": f"[用户发送了一张图片，{att.width}x{att.height}]",
-                    })
+                    content_blocks.append(
+                        {
+                            "type": "text",
+                            "text": f"[用户发送了一张图片，{att.width}x{att.height}]",
+                        }
+                    )
 
             elif att.media_type == "voice":
                 asr = att.asr_text or "(无法识别的语音消息)"
-                content_blocks.append({
-                    "type": "text",
-                    "text": f"[用户发送了语音消息] {asr}",
-                })
+                content_blocks.append(
+                    {
+                        "type": "text",
+                        "text": f"[用户发送了语音消息] {asr}",
+                    }
+                )
 
             elif att.media_type == "file":
                 if client:
@@ -626,32 +734,42 @@ async def _run_agent_for_wechat(msg: IncomingMessage, client: WeChatClient | Non
                             save_dir.mkdir(parents=True, exist_ok=True)
                             file_path = save_dir / (att.file_name or f"file_{att.file_size}")
                             file_path.write_bytes(raw_bytes)
-                            content_blocks.append({
-                                "type": "text",
-                                "text": f"[用户发送了文件「{att.file_name}」，已保存到 {file_path}]",
-                            })
+                            content_blocks.append(
+                                {
+                                    "type": "text",
+                                    "text": f"[用户发送了文件「{att.file_name}」，已保存到 {file_path}]",
+                                }
+                            )
                         else:
-                            content_blocks.append({
-                                "type": "text",
-                                "text": f"[用户发送了文件「{att.file_name}」，但下载失败]",
-                            })
+                            content_blocks.append(
+                                {
+                                    "type": "text",
+                                    "text": f"[用户发送了文件「{att.file_name}」，但下载失败]",
+                                }
+                            )
                     except Exception as e:
                         logger.warning("[WeChatLoop] File download failed: %s", e)
-                        content_blocks.append({
-                            "type": "text",
-                            "text": f"[用户发送了文件「{att.file_name}」，但处理失败：{e}]",
-                        })
+                        content_blocks.append(
+                            {
+                                "type": "text",
+                                "text": f"[用户发送了文件「{att.file_name}」，但处理失败：{e}]",
+                            }
+                        )
                 else:
-                    content_blocks.append({
-                        "type": "text",
-                        "text": f"[用户发送了文件「{att.file_name}」]",
-                    })
+                    content_blocks.append(
+                        {
+                            "type": "text",
+                            "text": f"[用户发送了文件「{att.file_name}」]",
+                        }
+                    )
 
             elif att.media_type == "video":
-                content_blocks.append({
-                    "type": "text",
-                    "text": f"[用户发送了一段视频，时长 {att.duration}s，暂不支持视频处理]",
-                })
+                content_blocks.append(
+                    {
+                        "type": "text",
+                        "text": f"[用户发送了一段视频，时长 {att.duration}s，暂不支持视频处理]",
+                    }
+                )
 
         # Append original text if present
         if msg.content:
@@ -682,6 +800,7 @@ async def _run_agent_for_wechat(msg: IncomingMessage, client: WeChatClient | Non
         if mcp_mgr:
             try:
                 import asyncio as _a
+
                 await _a.wait_for(mcp_mgr.stop_all(), timeout=10)
             except Exception:
                 pass
@@ -774,16 +893,15 @@ async def _find_or_create_wechat_conversation(
             )
             msgs = list(reversed(msg_result.scalars().all()))
             prior = [
-                {"role": m.role, "content": m.content}
-                for m in msgs
-                if m.content and m.role in ("user", "assistant")
+                {"role": m.role, "content": m.content} for m in msgs if m.content and m.role in ("user", "assistant")
             ]
             # Touch updated_at
             conv.updated_at = conv.updated_at  # trigger onupdate
             await db.commit()
             logger.info(
                 "[WeChatLoop] Reusing conversation: session=%s, %d prior msgs",
-                conv.session_id, len(prior),
+                conv.session_id,
+                len(prior),
             )
             return conv.session_id, conv.id, prior
 
