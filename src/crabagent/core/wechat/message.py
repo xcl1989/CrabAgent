@@ -167,7 +167,6 @@ class WeChatMessageLoop:
                 reply_sent = await self.client.send_message(
                     to_user=msg.from_user,
                     text=reply_text,
-                    context_token=msg.context_token,
                 )
             except SessionExpiredError:
                 logger.warning("[WeChatLoop] Session expired before final reply could be sent")
@@ -222,7 +221,7 @@ class WeChatMessageLoop:
             workspace = Path.cwd().resolve()
 
         sent: set[str] = set()
-        token = msg.context_token
+        token = self.client._context_store.get(msg.from_user, "")
 
         logger.info("[WeChatLoop] Scanning reply for file refs (%d chars)...", len(reply_text))
 
@@ -341,20 +340,24 @@ class WeChatProgressListener:
         ``_default_handler`` sends it as the final reply.
       - A background heartbeat task runs independently with three jobs:
         1. **Typing keepalive** — sends ``send_typing(status=1)`` every
-           ~15s to keep the context_token alive during long tasks.
-           Without this, iLink expires the token after ~4 minutes and
-           all subsequent sends fail with ``ret=-2``.
+           ~5s during long tasks.
         2. **Heartbeat text** — if no push has happened for
            ``_FALLBACK_INTERVAL`` seconds, pushes a status message.
         3. **Buffer flush** — when sends fail, messages are buffered and
-           retried with exponential backoff. Once a send succeeds, all
-           buffered messages are flushed in one batch.
+           retried with exponential backoff.
+
+      - **Consolidation mode**: iLink silently drops sends after roughly
+        10 consecutive pushes. After ``_MAX_INDIVIDUAL_SENDS`` (8)
+        individual pushes, all further progress is accumulated and
+        delivered as a single batch merged with the final reply.
     """
 
     # Send typing indicator this often (protocol recommends every 5s)
-    _TYPING_INTERVAL = 15.0
+    _TYPING_INTERVAL = 5.0
     # Max buffered messages before merging old ones
     _MAX_BUFFER = 20
+    # iLink drops sends after ~10; consolidate after this many
+    _MAX_INDIVIDUAL_SENDS = 7
 
     def __init__(
         self,
@@ -377,6 +380,10 @@ class WeChatProgressListener:
         self._last_retry: float = 0.0  # Time of last buffer-flush attempt
         self._last_typing: float = 0.0  # Time of last typing keepalive
         self._typing_warned: bool = False  # Suppress repeated logging
+
+        # --- Consolidation (iLink ~10-send limit) ---
+        self._send_count: int = 0  # How many individual sends succeeded
+        self._consolidated: list[str] = []  # Messages for final batch delivery
 
     def start(self) -> None:
         """Start the background heartbeat task."""
@@ -452,8 +459,14 @@ class WeChatProgressListener:
                     self._buffer.clear()
                     self._backoff = 5.0  # Reset backoff on recovery
 
-            # 3. Normal heartbeat — skip when degraded to avoid buffer bloat
+            # 3. Normal heartbeat — skip when degraded or in
+            # consolidation mode to avoid filling the batch with noise.
             if not self._buffer and now - self._last_push >= _FALLBACK_INTERVAL:
+                if self._send_count >= self._MAX_INDIVIDUAL_SENDS:
+                    # In consolidation mode: user already received the
+                    # "完成后统一推送" notification; heartbeat would only
+                    # bloat the final merged message.
+                    continue
                 elapsed = int(now - self._start)
                 await self._push(f"⏳ 仍在处理中（已完成 {self._tool_count} 步，{elapsed}s）")
 
@@ -484,8 +497,8 @@ class WeChatProgressListener:
     async def _send(self, text: str) -> bool:
         """Low-level send — calls client.send_message, returns success.
 
-        Does not buffer or retry. Used by both ``_push`` and the
-        heartbeat flush logic.
+        Increments ``_send_count`` on success so the consolidation
+        threshold in ``_push`` stays accurate.
         """
         try:
             ok = await self._client.send_message(
@@ -494,6 +507,7 @@ class WeChatProgressListener:
             )
             if ok:
                 self._last_push = time.monotonic()
+                self._send_count += 1
                 self._typing_warned = False
                 return True
             return False
@@ -502,18 +516,40 @@ class WeChatProgressListener:
             return False
 
     async def _push(self, text: str) -> bool:
-        """Send a progress message, buffer on failure for later retry.
+        """Send a progress message, switch to consolidation on overflow.
 
-        On success: updates ``_last_push`` and resets backoff.
-        On failure: stores the message in ``_buffer`` and increases
-        backoff. The heartbeat loop will periodically attempt to flush
-        all buffered messages once sends recover.
+        After ``_MAX_INDIVIDUAL_SENDS`` (7) individual sends:
+        - The **8th** push sends a one-time notification to the user
+          ("⏳ 任务较长，完成后统一推送") then consolidates.
+        - Subsequent pushes are accumulated in ``_consolidated``
+          and delivered as a single batch merged with the final reply.
         """
+        # ── Consolidation mode ──────────────────────────────────────
+        if self._send_count >= self._MAX_INDIVIDUAL_SENDS:
+            # 8th push: send a one-line notification to set expectations
+            if self._send_count == self._MAX_INDIVIDUAL_SENDS:
+                self._send_count += 1  # Mark notification as "sent"
+                await self._client.send_message(
+                    self._to_user,
+                    "⏳ 任务较长，完成后统一推送后续进度和结果",
+                )
+            # Accumulate real progress for final batch
+            self._consolidated.append(text)
+            logger.info("[WeChatProgress] consolidation mode: queued (%d)", len(self._consolidated))
+            return True
+
         ok = await self._send(text)
         if ok:
             return True
 
-        # Buffer for retry — keep at most _MAX_BUFFER entries
+        # First failure: give the long-poll a moment to pick up any
+        # new message with a fresh context_token, then retry once.
+        await asyncio.sleep(2)
+        ok = await self._send(text)
+        if ok:
+            return True
+
+        # Still failed: buffer for retry — keep at most _MAX_BUFFER entries
         if len(self._buffer) >= self._MAX_BUFFER:
             # Merge oldest two to make room
             self._buffer[0] = self._buffer[0] + "\n" + self._buffer[1]
@@ -571,7 +607,7 @@ async def _run_agent_for_wechat(msg: IncomingMessage, client: WeChatClient | Non
         pass
 
     sender_label = msg.from_nickname or msg.from_user
-    title = f"微信 - {sender_label}"
+    title = f"微信 - {sender_label} v2"
     system_prompt = (
         f"你正在回复微信消息。发送者: {sender_label}。\n"
         f"请简洁回复，适合手机阅读。工作目录: {workspace}\n\n"
@@ -807,6 +843,21 @@ async def _run_agent_for_wechat(msg: IncomingMessage, client: WeChatClient | Non
 
     # Extract last assistant text
     reply = _extract_last_assistant_text(context)
+
+    # If consolidation mode was active, merge buffered progress with
+    # the final reply so everything arrives in one iLink send.
+    if progress and progress._consolidated:
+        parts = list(progress._consolidated)
+        if reply:
+            parts.append(reply)
+        merged = "\n\n".join(parts)
+        logger.info(
+            "[WeChatProgress] Consolidation: %d msgs + reply merged (%d chars)",
+            len(progress._consolidated),
+            len(merged),
+        )
+        return merged
+
     return reply or "（无回复内容）"
 
 
@@ -881,17 +932,19 @@ async def _find_or_create_wechat_conversation(
         conv = result.scalar_one_or_none()
 
         if conv:
-            # Load recent messages for context
+            # Load all messages for context — no limit.
+            # DeepSeek V4 supports 1M tokens, so we can safely include
+            # the full conversation.  An unrestricted read also maximises
+            # prompt caching (the prefix never changes between turns).
             msg_result = await db.execute(
                 select(DBMessage)
                 .where(
                     DBMessage.conversation_id == conv.id,
                     DBMessage.branch_id == "main",
                 )
-                .order_by(DBMessage.id.desc())
-                .limit(20)
+                .order_by(DBMessage.id)
             )
-            msgs = list(reversed(msg_result.scalars().all()))
+            msgs = list(msg_result.scalars().all())
             prior = [
                 {"role": m.role, "content": m.content} for m in msgs if m.content and m.role in ("user", "assistant")
             ]

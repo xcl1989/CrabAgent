@@ -146,6 +146,13 @@ class WeChatClient:
         headers = self._headers(authed=authed)
         try:
             resp = await http.post(url, json=body, headers=headers)
+            # Log response headers to detect any token-refresh headers
+            h = dict(resp.headers)
+            logger.info("[iLink] %s response headers: set-cookie=%s x-context-token=%s x-session=%s",
+                        path,
+                        h.get("set-cookie", "—")[:80],
+                        h.get("x-context-token", h.get("x-session-token", "—"))[:40],
+                        h.get("x-session-id", "—"))
             resp.raise_for_status()
             return resp.json()
         except httpx.HTTPStatusError as e:
@@ -161,6 +168,12 @@ class WeChatClient:
         headers = self._headers(authed=authed)
         try:
             resp = await http.get(url, headers=headers)
+            h = dict(resp.headers)
+            logger.info("[iLink] %s response headers: set-cookie=%s x-context-token=%s x-session=%s",
+                        path,
+                        h.get("set-cookie", "—")[:80],
+                        h.get("x-context-token", h.get("x-session-token", "—"))[:40],
+                        h.get("x-session-id", "—"))
             resp.raise_for_status()
             return resp.json()
         except httpx.HTTPStatusError as e:
@@ -414,11 +427,17 @@ class WeChatClient:
         try:
             data = await self._post("ilink/bot/sendmessage", body)
             ret = data.get("ret", 0)
+            # Server may return a refreshed context_token — use it
+            new_token = data.get("context_token") or data.get("new_context_token", "")
+            if new_token and new_token != context_token:
+                self._context_store[to_user] = new_token
+                logger.info("[iLink] send_message got refreshed context_token: %.20s", new_token)
             if ret == -14:
                 raise SessionExpiredError("iLink session expired")
             if ret != 0:
                 logger.warning("[iLink] send_message ret=%s, data=%s", ret, str(data)[:200])
                 return False
+            logger.info("[iLink] send_message success, response keys: %s", list(data.keys()))
             return True
         except SessionExpiredError:
             raise
@@ -447,9 +466,17 @@ class WeChatClient:
         }
         try:
             data = await self._post("ilink/bot/getconfig", body)
+            # Server may return a refreshed context_token — use it
+            new_token = data.get("context_token") or data.get("new_context_token", "")
+            if new_token and new_token != context_token:
+                self._context_store[to_user] = new_token
+                context_token = new_token
+                logger.info("[iLink] getconfig got refreshed context_token: %.20s", new_token)
             typing_ticket = data.get("typing_ticket", "")
             if not typing_ticket:
+                logger.info("[iLink] getconfig success (no typing_ticket), response keys: %s", list(data.keys()))
                 return
+            logger.info("[iLink] getconfig success, has typing_ticket, response keys: %s", list(data.keys()))
         except Exception as e:
             logger.debug("[iLink] getconfig failed: %s", e)
             return
