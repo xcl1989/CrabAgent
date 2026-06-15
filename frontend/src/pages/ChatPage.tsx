@@ -36,6 +36,7 @@ import NotificationBell from "../components/NotificationBell";
 import { ScheduledTaskPanel } from "../components/ScheduledTaskPanel";
 import TaskPanel from "../components/TaskPanel";
 import EmailPanel from "../components/EmailPanel";
+import SkillsPanel from "../components/SkillsPanel";
 import { TaskBoard } from "../components/TaskBoard";
 import { AgentBar } from "../components/AgentBar";
 import { DelegateModal } from "../components/DelegateModal";
@@ -287,6 +288,7 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
     }
   }, [selectedModel, providerModels, selectedProvider]);
   const [showScheduledTasks, setShowScheduledTasks] = useState(false);
+  const [showSkills, setShowSkills] = useState(false);
   const [viewingSubAgent, setViewingSubAgent] = useState<string | null>(null);
   const [showDelegate, setShowDelegate] = useState(false);
   const [showResultCompare, setShowResultCompare] = useState(false);
@@ -692,6 +694,7 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
         onOpenTasks={() => setShowTasks(true)}
         onOpenEmail={() => setShowEmail(true)}
         onOpenScheduledTasks={() => setShowScheduledTasks(true)}
+        onOpenSkills={() => setShowSkills(true)}
         onQuickAction={handleQuickAction}
         mobileOpen={mobileSidebarOpen}
         onMobileClose={() => setMobileSidebarOpen(false)}
@@ -1177,6 +1180,8 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
           onClose={() => setShowEmail(false)}
         />
       )}
+
+      {showSkills && <SkillsPanel onClose={() => setShowSkills(false)} />}
 
       {showDelegate && activeSession && (
         <DelegateModal

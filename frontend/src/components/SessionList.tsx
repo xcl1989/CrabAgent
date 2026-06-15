@@ -16,6 +16,7 @@ import {
   BarChart3,
   Bell,
   Inbox,
+  Sparkles,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Session } from "../api/sessions";
@@ -34,6 +35,7 @@ interface Props {
   onOpenScheduledTasks: () => void;
   onOpenTasks: () => void;
   onOpenEmail: () => void;
+  onOpenSkills: () => void;
   onQuickAction?: (action: "digest" | "remind" | "inbox") => void;
   mobileOpen?: boolean;
   onMobileClose?: () => void;
@@ -50,6 +52,7 @@ export default function SessionList({
   onOpenScheduledTasks,
   onOpenTasks,
   onOpenEmail,
+  onOpenSkills,
   onQuickAction,
   mobileOpen = false,
   onMobileClose,
@@ -117,12 +120,10 @@ export default function SessionList({
       onClick,
       icon,
       title,
-      color,
     }: {
       onClick: () => void;
       icon: React.ReactNode;
       title: string;
-      color: string;
     }) => (
       <button
         onClick={onClick}
@@ -131,7 +132,6 @@ export default function SessionList({
           "p-2 rounded-lg transition-colors",
           "text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]",
         )}
-        style={{ color }}
       >
         {icon}
       </button>
@@ -158,24 +158,10 @@ export default function SessionList({
           <Plus size={16} />
         </Button>
         <div className="flex-1" />
-        <ToolButton
-          onClick={onOpenMcpServers}
-          icon={<Plug size={15} />}
-          title={t("mcp.title")}
-          color=""
-        />
-        <ToolButton
-          onClick={onOpenScheduledTasks}
-          icon={<Clock size={15} />}
-          title={t("scheduledTask.title")}
-          color=""
-        />
-        <ToolButton
-          onClick={onOpenProviders}
-          icon={<SettingsIcon size={15} />}
-          title={t("provider.title")}
-          color=""
-        />
+        <ToolButton onClick={onOpenSkills} icon={<Sparkles size={15} />} title="Skills" />
+        <ToolButton onClick={onOpenMcpServers} icon={<Plug size={15} />} title={t("mcp.title")} />
+        <ToolButton onClick={onOpenScheduledTasks} icon={<Clock size={15} />} title={t("scheduledTask.title")} />
+        <ToolButton onClick={onOpenProviders} icon={<SettingsIcon size={15} />} title={t("provider.title")} />
       </div>
     );
   }
@@ -324,7 +310,7 @@ export default function SessionList({
                 "p-1.5 rounded-lg transition-colors",
                 quickMenuOpen
                   ? "text-[var(--brand)] bg-[var(--brand-bg)]"
-                  : "text-[var(--text-tertiary)] hover:text-[var(--brand)] hover:bg-[var(--brand-bg)]",
+                  : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]",
               )}
               title={t("quickAction.title", "Quick actions")}
             >
@@ -361,33 +347,40 @@ export default function SessionList({
         {/* Spacer */}
         <div className="flex-1" />
 
-        {/* Tool icons */}
+        {/* Tool icons — unified hover style */}
         <div className="flex items-center gap-0.5">
           <button
             onClick={onOpenTasks}
             title={t("task.title")}
-            className="p-1.5 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--accent)] hover:bg-[var(--accent-bg)] transition-colors"
+            className="p-1.5 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
           >
             <ListTodo size={15} />
           </button>
           <button
             onClick={onOpenEmail}
             title={t("email.title")}
-            className="p-1.5 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--accent)] hover:bg-[var(--accent-bg)] transition-colors"
+            className="p-1.5 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
           >
             <Mail size={15} />
           </button>
           <button
             onClick={onOpenMcpServers}
             title={t("mcp.title")}
-            className="p-1.5 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--accent-2)] hover:bg-[var(--accent-2-bg)] transition-colors"
+            className="p-1.5 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
           >
             <Plug size={15} />
           </button>
           <button
+            onClick={onOpenSkills}
+            title="Skills"
+            className="p-1.5 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
+          >
+            <Sparkles size={15} />
+          </button>
+          <button
             onClick={onOpenScheduledTasks}
             title={t("scheduledTask.title")}
-            className="p-1.5 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--warning)] hover:bg-[var(--warning-bg)] transition-colors"
+            className="p-1.5 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
           >
             <Clock size={15} />
           </button>

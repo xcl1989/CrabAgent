@@ -11,3 +11,22 @@ export function updateSettings(data: Record<string, string>): Promise<Record<str
 export function testSearxng(url: string): Promise<{ success: boolean; result_count?: number; error?: string }> {
   return api.post("/settings/test-searxng", { url });
 }
+
+export interface SkillInfo {
+  name: string;
+  description: string;
+  location: string;
+  auxiliary_files: string[];
+}
+
+export interface SkillDetail extends SkillInfo {
+  content: string;
+}
+
+export function getSkills(): Promise<SkillInfo[]> {
+  return api.get("/settings/skills");
+}
+
+export function getSkillDetail(name: string): Promise<SkillDetail> {
+  return api.get(`/settings/skills/${encodeURIComponent(name)}`);
+}
