@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { useState } from "react";
-import { Plus, Trash2, Star, StarOff } from "lucide-react";
+import { Plus, Trash2, Star, StarOff, ChevronDown, ChevronRight, X } from "lucide-react";
 import { Provider, CatalogEntry } from "../api/providers";
 import * as providersApi from "../api/providers";
 import { Modal, Button, Input, PasswordInput, ConfirmDialog, EmptyState } from "./ui";
@@ -29,6 +29,52 @@ export default function ProviderPanel({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
+  const [newModelInput, setNewModelInput] = useState<Record<string, string>>({});
+  const [modelBusy, setModelBusy] = useState<string | null>(null);
+
+  const handleAddExtraModel = async (providerName: string) => {
+    const modelId = (newModelInput[providerName] || "").trim();
+    if (!modelId) return;
+    const provider = providers.find((p) => p.name === providerName);
+    if (!provider) return;
+    const current = provider.extra_models || [];
+    if (current.includes(modelId)) {
+      toast.error("Model already exists");
+      return;
+    }
+    setModelBusy(providerName);
+    try {
+      await providersApi.updateProvider(providerName, {
+        extra_models: [...current, modelId],
+      });
+      toast.success(`Added model: ${modelId}`);
+      onRefresh();
+      setNewModelInput({ ...newModelInput, [providerName]: "" });
+    } catch {
+      toast.error("Failed to add model");
+    } finally {
+      setModelBusy(null);
+    }
+  };
+
+  const handleRemoveExtraModel = async (providerName: string, modelId: string) => {
+    const provider = providers.find((p) => p.name === providerName);
+    if (!provider) return;
+    const current = provider.extra_models || [];
+    setModelBusy(`${providerName}:${modelId}`);
+    try {
+      await providersApi.updateProvider(providerName, {
+        extra_models: current.filter((m) => m !== modelId),
+      });
+      toast.success(`Removed model: ${modelId}`);
+      onRefresh();
+    } catch {
+      toast.error("Failed to remove model");
+    } finally {
+      setModelBusy(null);
+    }
+  };
 
   const handleAdd = async () => {
     setError(null);
@@ -129,44 +175,104 @@ export default function ProviderPanel({
                 <div
                   key={p.name}
                   className={cn(
-                    "p-3 rounded-xl flex items-center justify-between gap-3",
-                    "bg-[var(--bg-tertiary)] border border-[var(--border)]",
+                    "rounded-xl border border-[var(--border)]",
+                    "bg-[var(--bg-tertiary)] overflow-hidden",
                   )}
                 >
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm font-medium text-[var(--text-primary)] flex items-center gap-1.5">
-                      <span className="truncate">{p.display_name}</span>
-                      {p.is_default && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--brand-bg)] text-[var(--brand)] border border-[var(--brand-border)] flex items-center gap-1 shrink-0">
-                          <Star size={9} /> default
-                        </span>
-                      )}
+                  <div className="p-3 flex items-center justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-medium text-[var(--text-primary)] flex items-center gap-1.5">
+                        <span className="truncate">{p.display_name}</span>
+                        {p.is_default && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--brand-bg)] text-[var(--brand)] border border-[var(--brand-border)] flex items-center gap-1 shrink-0">
+                            <Star size={9} /> default
+                          </span>
+                        )}
+                        {(p.extra_models?.length ?? 0) > 0 && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--bg-secondary)] text-[var(--text-tertiary)] border border-[var(--border)] shrink-0">
+                            +{p.extra_models!.length} 模型
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-xs text-[var(--text-tertiary)] font-mono truncate">
+                        {p.type} · {p.api_key_preview}
+                      </div>
                     </div>
-                    <div className="text-xs text-[var(--text-tertiary)] font-mono truncate">
-                      {p.type} · {p.api_key_preview}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1 shrink-0">
-                    {!p.is_default && (
+                    <div className="flex items-center gap-1 shrink-0">
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => handleSetDefault(p.name)}
-                        title={t("provider.setAsDefault")}
+                        onClick={() => setExpandedProvider(expandedProvider === p.name ? null : p.name)}
+                        title="额外模型"
                       >
-                        <StarOff size={14} />
+                        {expandedProvider === p.name ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                       </Button>
-                    )}
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setDeleteTarget(p.name)}
-                      title={t("common.delete")}
-                      className="text-[var(--danger)] hover:text-[var(--danger)] hover:bg-[var(--danger-bg)]"
-                    >
-                      <Trash2 size={14} />
-                    </Button>
+                      {!p.is_default && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleSetDefault(p.name)}
+                          title={t("provider.setAsDefault")}
+                        >
+                          <StarOff size={14} />
+                        </Button>
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setDeleteTarget(p.name)}
+                        title={t("common.delete")}
+                        className="text-[var(--danger)] hover:text-[var(--danger)] hover:bg-[var(--danger-bg)]"
+                      >
+                        <Trash2 size={14} />
+                      </Button>
+                    </div>
                   </div>
+                  {expandedProvider === p.name && (
+                    <div className="px-3 pb-3 pt-1 border-t border-[var(--border)] space-y-2">
+                      <div className="text-[11px] font-medium text-[var(--text-secondary)] pt-1.5">
+                        额外模型（API 未返回但可调用的模型）
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {(p.extra_models || []).map((m) => (
+                          <span
+                            key={m}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[var(--bg-secondary)] border border-[var(--border)] text-xs text-[var(--text-primary)] font-mono"
+                          >
+                            {m}
+                            <button
+                              onClick={() => handleRemoveExtraModel(p.name, m)}
+                              disabled={modelBusy === `${p.name}:${m}`}
+                              className="text-[var(--text-tertiary)] hover:text-[var(--danger)] transition-colors"
+                            >
+                              <X size={11} />
+                            </button>
+                          </span>
+                        ))}
+                        {(p.extra_models || []).length === 0 && (
+                          <span className="text-[11px] text-[var(--text-tertiary)]">暂无额外模型</span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="text"
+                          value={newModelInput[p.name] || ""}
+                          onChange={(e) => setNewModelInput({ ...newModelInput, [p.name]: e.target.value })}
+                          onKeyDown={(e) => { if (e.key === "Enter") handleAddExtraModel(p.name); }}
+                          placeholder="输入模型 ID，如 glm-5.2"
+                          className="flex-1 h-8 px-2.5 text-xs rounded-lg bg-[var(--bg-secondary)] border border-[var(--border)] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--brand)] focus:ring-1 focus:ring-[var(--brand)]/30"
+                        />
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => handleAddExtraModel(p.name)}
+                          loading={modelBusy === p.name}
+                        >
+                          <Plus size={12} />
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))
             )}

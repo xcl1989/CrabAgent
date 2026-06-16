@@ -4,7 +4,7 @@
 > 保持简洁——最多约 8000 字符。使用 `update_agents_md` 工具来更新。
 
 ## 版本
-- 当前：**0.10.2**（微信渠道集成 + 通知联动 + 设置页 Tab 布局）
+- 当前：**0.10.3**（微信图片接收 + 会话归档 + AES key 修复）
 - 版本号出现在 7 处：`pyproject.toml`、`src/crabagent/serve/app.py`（`create_app` + `/health`）、CLI 横幅 `src/crabagent/cli/__main__.py`（`_print_banner`）、TUI 横幅 `src/crabagent/cli/tui.py`、`AGENTS.md`、`electron/package.json`、`src/crabagent/electron/package.json`
 - 修改版本时需同步更新全部七处
 

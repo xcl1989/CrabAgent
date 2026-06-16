@@ -513,8 +513,14 @@ class WeChatClient:
         elif attachment.cdn_url:
             download_url = attachment.cdn_url
         else:
-            logger.warning("[iLink] download_media: no download URL")
+            logger.warning(
+                "[iLink] download_media: no download URL — raw keys=%s, media=%s",
+                list(raw.keys()) if raw else "None",
+                media,
+            )
             return b""
+
+        logger.info("[iLink] download_media: URL=%s, aes_key=%s", download_url[:120], bool(media.get("aes_key") or attachment.aes_key))
 
         http = await self._get_http()
         try:
@@ -526,16 +532,60 @@ class WeChatClient:
 
         encrypted = resp.content
 
-        # Resolve AES key
-        aes_key = media.get("aes_key", "") or attachment.aes_key
+        # If CDN already returned plaintext image, skip decryption
+        if encrypted[:2] == b'\xff\xd8' or encrypted[:4] == b'\x89PNG':
+            logger.info("[iLink] CDN returned plaintext image, skipping AES decrypt")
+            return encrypted
+
+        # Resolve AES key — prefer the top-level aeskey (hex format) over
+        # media.aes_key (which is base64-of-hex, harder to parse correctly)
+        aes_key = attachment.aes_key or media.get("aes_key", "")
         if aes_key:
             try:
                 from crabagent.core.wechat.crypto import decrypt
-                return decrypt(encrypted, aes_key)
+                decrypted = decrypt(encrypted, aes_key)
+                
+                # Verify decrypted data is a valid image
+                if decrypted[:2] == b'\xff\xd8' or decrypted[:4] == b'\x89PNG':
+                    logger.info("[iLink] AES decrypt OK: %d bytes plaintext", len(decrypted))
+                    return decrypted
+                
+                # Decryption produced invalid image — try alternative key interpretations
+                logger.warning("[iLink] AES decrypt produced invalid image, trying alternative keys...")
+                
+                import hashlib as _hl
+                from cryptography.hazmat.primitives.ciphers import Cipher as _Cipher, algorithms as _alg, modes as _modes
+                
+                raw_key_str = attachment.aes_key or media.get("aes_key", "")
+                alt_keys = [
+                    ("raw_ascii_16", raw_key_str.encode("utf-8")[:16]),
+                    ("md5_of_str", _hl.md5(raw_key_str.encode("utf-8")).digest()),
+                    ("base64_decoded", base64.b64decode(raw_key_str) if len(raw_key_str) >= 20 else b""),
+                ]
+                
+                for label, alt_k in alt_keys:
+                    if len(alt_k) != 16:
+                        continue
+                    try:
+                        c = _Cipher(_alg.AES(alt_k), _modes.ECB())
+                        d = c.decryptor()
+                        result = d.update(encrypted) + d.finalize()
+                        if result[:2] == b'\xff\xd8' or result[:4] == b'\x89PNG':
+                            logger.info("[iLink] Valid image with alt key '%s'", label)
+                            pad = result[-1]
+                            if 1 <= pad <= 16:
+                                result = result[:-pad]
+                            return result
+                    except Exception:
+                        pass
+                
+                logger.error("[iLink] All key interpretations failed, image data is corrupted")
+                return b""
             except Exception as e:
                 logger.error("[iLink] AES decrypt failed: %s", e)
                 return encrypted
 
+        logger.warning("[iLink] download_media: no AES key, returning encrypted data")
         return encrypted
 
     # ---- Media: upload ----

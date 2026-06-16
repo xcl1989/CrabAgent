@@ -30,6 +30,7 @@ DEFAULT_MODEL_TOKEN_LIMITS: dict[str, int] = {
     "glm-5": 200_000,
     "glm-5-turbo": 200_000,
     "glm-5.1": 200_000,
+    "glm-5.2": 1_000_000,
     "qwen-turbo": 1_000_000,
     "qwen-plus": 128_000,
     "qwen-max": 32_000,
@@ -76,6 +77,7 @@ VISION_UNSUPPORTED_EXACT = {
     "glm-4.5",
     "glm-4.6",
     "glm-4.7",
+    "glm-5.2",
     "minimax-01",
 }
 

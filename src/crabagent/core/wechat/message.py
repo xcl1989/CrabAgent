@@ -20,6 +20,8 @@ logger = logging.getLogger(__name__)
 _ERROR_BACKOFF = 5.0
 # Session expired re-login notification cooldown
 _RELOGIN_NOTIFY_COOLDOWN = 300.0  # 5 min
+# Archive a WeChat conversation when prior messages exceed this count
+_WECHAT_ARCHIVE_MSG_THRESHOLD = 150
 
 
 class WeChatMessageLoop:
@@ -155,10 +157,11 @@ class WeChatMessageLoop:
         await self.client.send_typing(msg.from_user, status=1)
 
         try:
-            reply_text = await _run_agent_for_wechat(msg, self.client)
+            reply_text, conv_id = await _run_agent_for_wechat(msg, self.client)
         except Exception as e:
             logger.error("[WeChatLoop] Agent execution failed: %s", e)
             reply_text = f"抱歉，处理消息时出错：{str(e)[:100]}"
+            conv_id = 0
 
         # Send text reply (protected — session may have expired during long tasks)
         reply_sent = False
@@ -203,6 +206,16 @@ class WeChatMessageLoop:
             logger.warning("[WeChatLoop] Session expired before attachments could be sent")
         except Exception as e:
             logger.warning("[WeChatLoop] Send attachments failed: %s", e)
+
+        # Async post-reply archive check — zero user-perceived latency
+        if conv_id:
+            sender_label = msg.from_nickname or msg.from_user
+            asyncio.create_task(
+                _maybe_archive_after_reply(
+                    conv_id=conv_id,
+                    title=f"微信 - {sender_label} v2",
+                )
+            )
 
         # Stop typing
         await self.client.send_typing(msg.from_user, status=2)
@@ -619,7 +632,11 @@ async def _run_agent_for_wechat(msg: IncomingMessage, client: WeChatClient | Non
         f"  - 文件：在回复中提及完整文件路径（如 `/path/to/report.pdf`），或用反引号包裹文件名\n"
         f"- 支持的文件类型：图片(png/jpg/gif/webp)、文档(pdf/xlsx/docx/pptx/csv/txt/zip/json/md等所有常见格式)\n"
         f"- 发送后用户在微信中会收到文件，无需额外操作\n"
-        f"- 如果用户要的内容适合直接发送文件，**优先发文件**而不是把内容贴在聊天里\n"
+        f"- 如果用户要的内容适合直接发送文件，**优先发文件**而不是把内容贴在聊天里\n\n"
+        f"## 图片识别能力\n"
+        f"当用户发送图片时，图片会保存到本地文件并提供给你。如果你自身无法直接查看图片，\n"
+        f"请检查你是否有图片识别/分析相关的工具（如 vision、image analyze 等），有就调用。\n"
+        f"如果确实没有任何图片识别手段，再如实告诉用户。\n"
     )
 
     # ---- Find or create conversation (reuse per user) ----
@@ -677,7 +694,8 @@ async def _run_agent_for_wechat(msg: IncomingMessage, client: WeChatClient | Non
             if a.media_type == "voice" and a.asr_text:
                 att_parts.append(f"[语音] {a.asr_text}")
             elif a.media_type == "image":
-                att_parts.append(f"[图片 {a.width}x{a.height}]")
+                dim = f"{a.width}x{a.height}" if a.width and a.height else ""
+                att_parts.append(f"[图片{f' {dim}' if dim else ''}]")
             elif a.media_type == "file":
                 att_parts.append(f"[文件: {a.file_name}]")
             elif a.media_type == "video":
@@ -715,6 +733,16 @@ async def _run_agent_for_wechat(msg: IncomingMessage, client: WeChatClient | Non
                     try:
                         raw_bytes = await client.download_media(att)
                         if raw_bytes and len(raw_bytes) < 5_000_000:  # 5MB limit
+                            # Save to local file for vision tool access
+                            import time as _time
+                            save_dir = workspace / "wechat_files"
+                            save_dir.mkdir(parents=True, exist_ok=True)
+                            img_filename = f"wechat_img_{int(_time.time())}.jpg"
+                            img_path = save_dir / img_filename
+                            img_path.write_bytes(raw_bytes)
+
+                            # Provide both base64 (for vision-capable models) and
+                            # text instructions (for non-vision models to use vision tools)
                             b64 = _b64.b64encode(raw_bytes).decode("ascii")
                             data_url = f"data:image/jpeg;base64,{b64}"
                             content_blocks.append(
@@ -726,7 +754,10 @@ async def _run_agent_for_wechat(msg: IncomingMessage, client: WeChatClient | Non
                             content_blocks.append(
                                 {
                                     "type": "text",
-                                    "text": f"[用户发送了一张图片，{att.width}x{att.height}]",
+                                    "text": (
+                                        f"[用户发送了一张图片，已保存到 {img_path}]\n"
+                                        f"如果你无法直接看到图片内容，请检查你是否有图片识别相关的工具可以分析这张图片。"
+                                    ),
                                 }
                             )
                         else:
@@ -819,7 +850,7 @@ async def _run_agent_for_wechat(msg: IncomingMessage, client: WeChatClient | Non
         await run_agent(context, query)
     except Exception as e:
         logger.error("[WeChatLoop] run_agent error: %s", e)
-        return f"处理时出错：{str(e)[:100]}"
+        return f"处理时出错：{str(e)[:100]}", conv_id
     finally:
         app_settings.auto_approve_tools = False
         # Stop the heartbeat timer
@@ -856,9 +887,9 @@ async def _run_agent_for_wechat(msg: IncomingMessage, client: WeChatClient | Non
             len(progress._consolidated),
             len(merged),
         )
-        return merged
+        return merged, conv_id
 
-    return reply or "（无回复内容）"
+    return reply or "（无回复内容）", conv_id
 
 
 async def _register_tools(context, workspace) -> None:
@@ -973,6 +1004,201 @@ async def _find_or_create_wechat_conversation(
         await db.refresh(conv)
         logger.info("[WeChatLoop] New conversation created: session=%s", session_id)
         return session_id, conv.id, []
+
+
+# ---------------------------------------------------------------------------
+# Conversation archival: periodically roll over a long WeChat conversation
+# into a fresh one with an LLM-generated summary, to prevent unbounded
+# context growth.  Runs asynchronously after the user has already received
+# their reply — zero perceived latency.
+# ---------------------------------------------------------------------------
+
+
+async def _summarize_conversation(messages: list[dict], model: str) -> str:
+    """One-shot LLM summarization of conversation history.
+
+    Reuses the i18n compress prompt for consistency with the main
+    agent's context compression flow.
+    """
+    import litellm
+
+    from crabagent.core.agent.compress import _format_messages
+    from crabagent.core.provider_store import get_default_provider
+
+    history_text = _format_messages(messages)
+    system_prompt = "你是一个对话摘要生成器。"
+    user_prompt = (
+        "请全面、详细地总结以下对话历史。必须保留所有关键事实、决策、文件路径、"
+        "代码变更细节以及继续对话所需的任何重要上下文。用中文撰写。使用 Markdown "
+        "格式组织内容（标题、列表、代码块等）。不要省略任何重要细节——宁可详细也"
+        "不能遗漏。**输出不超过 5000 字**，在保证完整性的前提下尽量精简。\n\n"
+        f"需要总结的对话：\n{history_text}"
+    )
+
+    # Resolve provider params (api_key, api_base, custom_llm_provider)
+    provider = await get_default_provider()
+    if not provider:
+        raise RuntimeError("No LLM provider configured")
+    llm_params: dict = {"api_key": provider.api_key}
+    if provider.base_url:
+        llm_params["api_base"] = provider.base_url
+        llm_params["custom_llm_provider"] = "openai"
+
+    response = await litellm.acompletion(
+        model=model,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        max_tokens=4096,
+        stream=False,
+        **llm_params,
+    )
+    return response.choices[0].message.content.strip()
+
+
+async def _maybe_archive_after_reply(conv_id: int, title: str) -> None:
+    """Check if a WeChat conversation should be archived and create
+    a fresh one with a summary.
+
+    Runs asynchronously after the user has already received their reply.
+
+    Triggers:
+      1. **Date** — conversation was created on a previous day.
+      2. **Volume** — prior messages exceed *_WECHAT_ARCHIVE_MSG_THRESHOLD*.
+    """
+    import datetime
+    import secrets
+
+    from sqlalchemy import func, select
+
+    from crabagent.core.database import (
+        AppSetting,
+        Conversation,
+        Message as DBMessage,
+        async_session_factory,
+    )
+    from crabagent.serve.services.message import save_message
+
+    try:
+        async with async_session_factory() as db:
+            conv = await db.get(Conversation, conv_id)
+            if not conv:
+                return
+
+            # --- Condition 1: Date trigger ---
+            created_date = conv.created_at.date()
+            today = datetime.date.today()
+            date_trigger = created_date < today
+
+            # --- Condition 2: Volume trigger ---
+            count_result = await db.execute(
+                select(func.count(DBMessage.id)).where(
+                    DBMessage.conversation_id == conv_id,
+                    DBMessage.branch_id == "main",
+                    DBMessage.role.in_(["user", "assistant"]),
+                    DBMessage.content != "",
+                )
+            )
+            prior_count = count_result.scalar() or 0
+            volume_trigger = prior_count > _WECHAT_ARCHIVE_MSG_THRESHOLD
+
+            if not date_trigger and not volume_trigger:
+                return
+
+            reason = "跨天归档" if date_trigger else f"消息超限归档({prior_count})"
+            logger.info(
+                "[WeChatLoop] Archiving conv #%d (%s, %d prior msgs, created %s)",
+                conv_id,
+                reason,
+                prior_count,
+                created_date.isoformat(),
+            )
+
+            # 1. Load prior messages for summarization
+            msg_result = await db.execute(
+                select(DBMessage)
+                .where(
+                    DBMessage.conversation_id == conv_id,
+                    DBMessage.branch_id == "main",
+                    DBMessage.role.in_(["user", "assistant"]),
+                    DBMessage.content != "",
+                )
+                .order_by(DBMessage.id)
+            )
+            msgs = list(msg_result.scalars().all())
+            prior = [{"role": m.role, "content": m.content} for m in msgs]
+
+            # 2. Summarize (skip if too few messages)
+            summary = ""
+            if len(prior) >= 4:
+                # Resolve model
+                model = "deepseek-v4-flash"
+                try:
+                    r = await db.execute(
+                        select(AppSetting).where(AppSetting.key == "default_model")
+                    )
+                    row = r.scalar_one_or_none()
+                    if row and row.value:
+                        model = row.value
+                except Exception:
+                    pass
+
+                try:
+                    summary = await _summarize_conversation(prior, model)
+                except Exception as e:
+                    logger.warning("[WeChatLoop] Summary failed, skipping archive: %s", e)
+                    return
+            else:
+                logger.info("[WeChatLoop] Only %d msgs, skipping summary", len(prior))
+
+            # 3. Archive old conversation — rename title so it won't match lookups
+            archive_tag = datetime.datetime.now().strftime("%m-%d %H:%M")
+            conv.title = f"{title[:400]} (已归档 {archive_tag})"
+
+            # 4. Create new conversation
+            new_session_id = secrets.token_hex(16)
+            new_conv = Conversation(
+                session_id=new_session_id,
+                user_id=conv.user_id,
+                title=title,
+                workspace=conv.workspace or "",
+                model=conv.model or "",
+                source="wechat",
+            )
+            db.add(new_conv)
+            await db.commit()
+            await db.refresh(new_conv)
+
+            # 5. Inject summary as initial context
+            if summary:
+                await save_message(
+                    db,
+                    conversation_id=new_conv.id,
+                    sequence=1,
+                    role="user",
+                    content=f"[以下是之前对话的摘要]\n\n{summary}",
+                    branch_id="main",
+                )
+                await save_message(
+                    db,
+                    conversation_id=new_conv.id,
+                    sequence=2,
+                    role="assistant",
+                    content="好的，我已了解之前的对话背景，请继续。",
+                    branch_id="main",
+                )
+                await db.commit()
+
+            logger.info(
+                "[WeChatLoop] Archive done: conv #%d → #%d, summary=%d chars",
+                conv_id,
+                new_conv.id,
+                len(summary),
+            )
+
+    except Exception as e:
+        logger.error("[WeChatLoop] Archive task failed: %s", e)
 
 
 def _extract_last_assistant_text(context) -> str:

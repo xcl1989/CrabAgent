@@ -8,6 +8,7 @@ export interface Provider {
   enabled: boolean;
   base_url: string;
   api_key_preview: string;
+  extra_models?: string[];
 }
 
 export interface CatalogVariant {
@@ -50,7 +51,7 @@ export function createProvider(data: {
 
 export function updateProvider(
   name: string,
-  data: { display_name?: string; api_key?: string; base_url?: string; enabled?: boolean; is_default?: boolean },
+  data: { display_name?: string; api_key?: string; base_url?: string; enabled?: boolean; is_default?: boolean; extra_models?: string[] },
 ): Promise<Provider> {
   return api.patch(`/providers/${name}`, data);
 }

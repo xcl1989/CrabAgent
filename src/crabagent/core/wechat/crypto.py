@@ -42,6 +42,11 @@ def _normalize_key(key_data: str | bytes) -> bytes:
         decoded = base64.b64decode(raw, validate=True)
         if len(decoded) == 16:
             return decoded
+        # base64-of-hex: decoded is 32-byte ASCII hex string
+        if len(decoded) == 32:
+            decoded_str = decoded.decode("ascii", errors="ignore")
+            if all(c in "0123456789abcdefABCDEF" for c in decoded_str):
+                return bytes.fromhex(decoded_str)
     except Exception:
         pass
 

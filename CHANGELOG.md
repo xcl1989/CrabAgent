@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.10.3]
+
+### Fixed
+- **WeChat Image Reception** — images sent by WeChat users are now correctly received, decrypted, and processed by the Agent
+  - **AES key format bug**: iLink returns the key in `media.aes_key` as base64(hex_string) — a double encoding that `_normalize_key` could not parse, falling back to MD5 and producing garbage decryption. Fixed by adding a base64-of-hex decode path in `crypto.py` and preferring the top-level `aeskey` field (plain hex) in `download_media()`
+  - **Image handling for non-vision models**: when the default model cannot process `image_url` content blocks, images are now saved to a local file with a text hint guiding the Agent to use any available vision tool (e.g. MCP image analysis). System prompt updated to instruct the Agent to self-discover image analysis capabilities
+  - **Image dimension display**: `[图片 0x0]` placeholder replaced with `[图片]` when width/height are unavailable (iLink does not return these fields for images)
+
+### Added
+- **WeChat Conversation Archival** — automatic rollover of long WeChat conversations to prevent unbounded context growth
+  - **Date trigger**: when a conversation's creation date is before today, it is archived after the user's reply is sent
+  - **Volume trigger**: when prior messages exceed 150, archived as a safety net
+  - **Summary injection**: old conversation is LLM-summarized (≤5000 chars), old conversation renamed to `(已归档 MM-DD HH:MM)`, new conversation created with the summary injected as initial context
+  - **Zero perceived latency**: archival runs asynchronously after the reply is delivered; user never waits
+  - **Graceful degradation**: if LLM summarization fails, archival is skipped and retried on the next trigger
+
+---
+
 ## [0.10.2]
 
 ### Added

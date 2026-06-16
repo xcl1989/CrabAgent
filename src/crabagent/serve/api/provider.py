@@ -3,8 +3,9 @@ from __future__ import annotations
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import select
 
-from crabagent.core.database import User
+from crabagent.core.database import User, ProviderConfig, async_session_factory
 from crabagent.core.provider_store import (
     PROVIDER_CATALOG,
     create_provider,
@@ -28,6 +29,7 @@ class ProviderResponse(BaseModel):
     enabled: bool
     base_url: str
     api_key_preview: str
+    extra_models: list[str] = []
 
 
 class CatalogVariant(BaseModel):
@@ -59,6 +61,7 @@ class UpdateProviderRequest(BaseModel):
     base_url: str | None = None
     enabled: bool | None = None
     is_default: bool | None = None
+    extra_models: list[str] | None = None
 
 
 def _mask_key(api_key: str) -> str:
@@ -68,6 +71,14 @@ def _mask_key(api_key: str) -> str:
 
 
 def _to_response(p) -> ProviderResponse:
+    extra_models = []
+    if hasattr(p, "extra") and p.extra:
+        try:
+            import json
+            extra = json.loads(p.extra) if isinstance(p.extra, str) else p.extra
+            extra_models = extra.get("extra_models", [])
+        except Exception:
+            pass
     return ProviderResponse(
         name=p.name,
         display_name=p.display_name,
@@ -76,6 +87,7 @@ def _to_response(p) -> ProviderResponse:
         enabled=p.enabled,
         base_url=p.base_url,
         api_key_preview=_mask_key(p.api_key),
+        extra_models=extra_models,
     )
 
 
@@ -129,15 +141,49 @@ async def update_provider_endpoint(name: str, req: UpdateProviderRequest, user: 
     if not existing:
         raise HTTPException(status_code=404, detail="Provider not found")
 
-    updates = {k: v for k, v in req.model_dump().items() if v is not None}
     if req.is_default:
         await set_default_provider(name)
+
+    # Handle extra_models — store into extra JSON
+    if req.extra_models is not None:
+        import json as _json
+        async with async_session_factory() as session:
+            result = await session.execute(
+                select(ProviderConfig).where(ProviderConfig.name == name)
+            )
+            row = result.scalar_one_or_none()
+            if row:
+                try:
+                    extra = _json.loads(row.extra) if row.extra else {}
+                except Exception:
+                    extra = {}
+                extra["extra_models"] = req.extra_models
+                row.extra = _json.dumps(extra)
+                await session.commit()
+                await session.refresh(row)
+                from crabagent.core.provider_store import _to_info
+                return _to_response(row)
+
+    updates = {k: v for k, v in req.model_dump().items() if v is not None and k != "extra_models"}
+    if req.is_default:
         updates.pop("is_default", None)
 
     p = await update_provider(name, **updates)
     if not p:
         raise HTTPException(status_code=404, detail="Provider not found")
-    return _to_response(p)
+    # _to_response expects a ProviderConfig row, but update_provider returns ProviderInfo
+    # Reconstruct response manually
+    extra_models = existing.extra.get("extra_models", []) if req.extra_models is None else req.extra_models
+    return ProviderResponse(
+        name=p.name,
+        display_name=p.display_name,
+        type=p.provider_type,
+        is_default=p.is_default,
+        enabled=p.enabled,
+        base_url=p.base_url,
+        api_key_preview=_mask_key(p.api_key),
+        extra_models=extra_models,
+    )
 
 
 @router.delete("/{name}", status_code=204)
@@ -153,6 +199,9 @@ async def get_provider_models(name: str, user: User = Depends(get_current_user))
     if not p:
         raise HTTPException(status_code=404, detail="Provider not found")
 
+    models = []
+
+    # Fetch from provider API
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.get(
@@ -161,12 +210,19 @@ async def get_provider_models(name: str, user: User = Depends(get_current_user))
             )
             resp.raise_for_status()
             data = resp.json()
+        for m in data.get("data", []):
+            mid = m.get("id", "")
+            if mid:
+                models.append({"id": mid, "owned_by": m.get("owned_by", "")})
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Failed to fetch models: {e}")
+        # If API fails but we have extra_models, still return those
+        if not p.extra.get("extra_models"):
+            raise HTTPException(status_code=502, detail=f"Failed to fetch models: {e}")
 
-    models = []
-    for m in data.get("data", []):
-        mid = m.get("id", "")
-        if mid:
-            models.append({"id": mid, "owned_by": m.get("owned_by", "")})
+    # Merge extra_models (user-defined, not returned by API)
+    existing_ids = {m["id"] for m in models}
+    for mid in p.extra.get("extra_models", []):
+        if mid and mid not in existing_ids:
+            models.append({"id": mid, "owned_by": "custom"})
+
     return models
