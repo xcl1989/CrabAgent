@@ -46,6 +46,9 @@ class SchedulerService:
         # Start weekly memory quality decay job (Monday 03:00)
         self._start_memory_decay_job()
 
+        # Start calendar jobs (iCal sync, morning brief, event reminders)
+        self._start_calendar_jobs()
+
         # Start WeChat message loop if enabled and logged in
         await self.start_wechat_loop()
 
@@ -189,6 +192,10 @@ class SchedulerService:
         from crabagent.core.mail.tools import register_mail_tools
 
         register_mail_tools(context.tool_registry)
+
+        from crabagent.core.calendar.tools import register_calendar_tools
+
+        register_calendar_tools(context.tool_registry)
 
         from crabagent.core.tool_loader import discover_and_register_tools
 
@@ -524,6 +531,71 @@ class SchedulerService:
             logger.info("Memory quality decay job scheduled (Mon 03:00)")
         except Exception as e:
             logger.warning("Failed to schedule memory decay job: %s", e)
+
+    # ---- Calendar (iCal sync + morning brief + event reminders) ----
+
+    _ICAL_SYNC_JOB_ID = "calendar_ical_sync"
+    _MORNING_BRIEF_JOB_ID = "calendar_morning_brief"
+    _EVENT_REMINDER_JOB_ID = "calendar_event_reminder"
+
+    def _start_calendar_jobs(self):
+        """Register calendar-related cron jobs."""
+        if not self._scheduler.running:
+            return
+        try:
+            from apscheduler.triggers.cron import CronTrigger
+
+            tz = _get_local_tz()
+
+            # 1. iCal sync — every 30 minutes
+            self._scheduler.add_job(
+                _calendar_ical_sync,
+                CronTrigger(minute="*/30", timezone=tz),
+                id=self._ICAL_SYNC_JOB_ID,
+                replace_existing=True,
+            )
+            logger.info("[Calendar] iCal sync job scheduled (every 30 min)")
+
+            # 2. Morning brief — daily at 08:00 (actual time from settings)
+            self._scheduler.add_job(
+                _calendar_morning_brief,
+                CronTrigger(hour=8, minute=0, timezone=tz),
+                id=self._MORNING_BRIEF_JOB_ID,
+                replace_existing=True,
+            )
+            logger.info("[Calendar] Morning brief job scheduled (08:00)")
+
+            # 3. Event reminders — every 5 minutes
+            self._scheduler.add_job(
+                _calendar_event_reminder,
+                CronTrigger(minute="*/5", timezone=tz),
+                id=self._EVENT_REMINDER_JOB_ID,
+                replace_existing=True,
+            )
+            logger.info("[Calendar] Event reminder job scheduled (every 5 min)")
+
+        except Exception as e:
+            logger.warning("[Calendar] Failed to schedule calendar jobs: %s", e)
+
+    def reschedule_morning_brief(self, time_str: str):
+        """Update the morning brief schedule when user changes the time."""
+        if not self._scheduler.running:
+            return
+        try:
+            from apscheduler.triggers.cron import CronTrigger
+
+            parts = time_str.strip().split(":")
+            hour, minute = int(parts[0]), int(parts[1])
+            tz = _get_local_tz()
+            self._scheduler.add_job(
+                _calendar_morning_brief,
+                CronTrigger(hour=hour, minute=minute, timezone=tz),
+                id=self._MORNING_BRIEF_JOB_ID,
+                replace_existing=True,
+            )
+            logger.info("[Calendar] Morning brief rescheduled to %s", time_str)
+        except Exception as e:
+            logger.warning("[Calendar] Failed to reschedule morning brief: %s", e)
 
     # ---- WeChat (iLink Bot) ----
 
@@ -1161,3 +1233,206 @@ async def _memory_quality_decay():
         await db.commit()
 
     logger.info("[MemoryDecay] Complete: decayed=%d, deleted=%d", decayed, deleted)
+
+
+# ---------------------------------------------------------------------------
+# Calendar jobs
+# ---------------------------------------------------------------------------
+
+
+async def _calendar_ical_sync():
+    """Sync all enabled iCal sources every 30 minutes."""
+    import datetime
+
+    from sqlalchemy import select
+
+    from crabagent.core.calendar.ical_sync import sync_all_sources
+    from crabagent.core.database import CalendarIcalSource
+
+    try:
+        async with async_session_factory() as db:
+            result = await db.execute(
+                select(CalendarIcalSource).where(CalendarIcalSource.enabled.is_(True))
+            )
+            sources = list(result.scalars().all())
+            if not sources:
+                return
+
+            stats = await sync_all_sources(db)
+            if stats["synced"] > 0 or stats["errors"]:
+                logger.info(
+                    "[Calendar] iCal sync: %d events, %d errors",
+                    stats["synced"],
+                    len(stats["errors"]),
+                )
+    except Exception as e:
+        logger.error("[Calendar] iCal sync job failed: %s", e)
+
+
+async def _calendar_morning_brief():
+    """Generate and push a daily morning brief (events + tasks + free time)."""
+    import json
+
+    from sqlalchemy import select
+
+    from crabagent.core.calendar.store import get_today_overview, load_calendar_settings
+    from crabagent.core.database import AppSetting
+
+    try:
+        async with async_session_factory() as db:
+            # Check if morning brief is enabled
+            cfg = await load_calendar_settings(db)
+            if not cfg.get("morning_brief_enabled"):
+                return
+
+            channel = cfg.get("morning_brief_channel", "wechat")
+
+            # Get today's overview
+            overview = await get_today_overview(db, user_id=1)
+
+            if overview["timed_events"] == 0 and not overview["due_tasks"]:
+                logger.info("[Calendar] Morning brief: nothing scheduled today, skipping")
+                return
+
+            # Build brief text
+            lines = [f"📅 今日晨报 ({overview['date']})\n"]
+            lines.append(f"📊 {overview['summary']}\n")
+
+            timed = [e for e in overview["events"] if not e.get("all_day")]
+            all_day = [e for e in overview["events"] if e.get("all_day")]
+
+            if timed:
+                lines.append("🕐 日程:")
+                for e in timed:
+                    time_str = ""
+                    if e["start_time"]:
+                        try:
+                            dt = datetime.datetime.fromisoformat(e["start_time"])
+                            time_str = f"{dt.strftime('%H:%M')}"
+                            if e.get("end_time"):
+                                dt2 = datetime.datetime.fromisoformat(e["end_time"])
+                                time_str += f"-{dt2.strftime('%H:%M')}"
+                        except Exception:
+                            pass
+                    loc = f" 📍{e['location']}" if e.get("location") else ""
+                    lines.append(f"  {time_str} {e['title']}{loc}")
+                lines.append("")
+
+            if all_day:
+                lines.append("📌 全天/截止:")
+                for e in all_day:
+                    lines.append(f"  {e['title']}")
+                lines.append("")
+
+            if overview["free_slots"]:
+                lines.append("🟢 空闲时段:")
+                for slot in overview["free_slots"]:
+                    try:
+                        s = datetime.datetime.fromisoformat(slot["start"])
+                        en = datetime.datetime.fromisoformat(slot["end"])
+                        dur = slot.get("duration_min", 0)
+                        hours = dur // 60
+                        mins = dur % 60
+                        dur_str = f"{hours}h{mins}m" if hours else f"{mins}m"
+                        lines.append(f"  {s.strftime('%H:%M')}-{en.strftime('%H:%M')} ({dur_str})")
+                    except Exception:
+                        pass
+
+            brief_text = "\n".join(lines)
+
+            # Push via WeChat
+            if channel in ("wechat", "both"):
+                try:
+                    from crabagent.core.wechat import WeChatNotification
+
+                    notif = WeChatNotification()
+                    await notif.send(brief_text)
+                    logger.info("[Calendar] Morning brief pushed to WeChat (%d chars)", len(brief_text))
+                except Exception as e:
+                    logger.warning("[Calendar] Morning brief WeChat push failed: %s", e)
+
+            # Push via email
+            if channel in ("email", "both"):
+                try:
+                    from crabagent.core.mail.tools import _get_email_config
+                    from crabagent.core.mail.utils import send_email
+
+                    email_cfg = await _get_email_config(db, user_id=1)
+                    if email_cfg and email_cfg.get("smtp_host"):
+                        await send_email(
+                            smtp_host=email_cfg["smtp_host"],
+                            smtp_port=email_cfg.get("smtp_port", 587),
+                            smtp_user=email_cfg["smtp_user"],
+                            smtp_pass=email_cfg["smtp_pass"],
+                            to=email_cfg["smtp_user"],
+                            subject=f"📅 今日晨报 {overview['date']}",
+                            body=brief_text,
+                        )
+                        logger.info("[Calendar] Morning brief sent via email")
+                except Exception as e:
+                    logger.warning("[Calendar] Morning brief email failed: %s", e)
+
+    except Exception as e:
+        logger.error("[Calendar] Morning brief job failed: %s", e)
+
+
+async def _calendar_event_reminder():
+    """Check for events that need reminders (every 5 minutes)."""
+    import datetime
+
+    from sqlalchemy import select
+
+    from crabagent.core.calendar.store import load_calendar_settings
+    from crabagent.core.database import CalendarEvent
+
+    try:
+        async with async_session_factory() as db:
+            cfg = await load_calendar_settings(db)
+            if not cfg.get("event_reminder_enabled", True):
+                return
+
+            now = datetime.datetime.now()
+            check_until = now + datetime.timedelta(minutes=30)
+
+            # Find events that need reminding
+            result = await db.execute(
+                select(CalendarEvent).where(
+                    CalendarEvent.reminder_sent == False,  # noqa: E712
+                    CalendarEvent.reminder_minutes > 0,
+                    CalendarEvent.start_time > now,
+                    CalendarEvent.start_time <= check_until,
+                )
+            )
+            events = list(result.scalars().all())
+
+            if not events:
+                return
+
+            reminded = 0
+            for event in events:
+                should_remind_at = event.start_time - datetime.timedelta(minutes=event.reminder_minutes)
+                if now >= should_remind_at:
+                    # Build reminder text
+                    time_str = event.start_time.strftime("%H:%M")
+                    text = f"⏰ 即将开始：{event.title}\n⏱️ {time_str}"
+                    if event.location:
+                        text += f"\n📍 {event.location}"
+
+                    # Push via WeChat
+                    try:
+                        from crabagent.core.wechat import WeChatNotification
+
+                        notif = WeChatNotification()
+                        await notif.send(text)
+                    except Exception:
+                        pass
+
+                    event.reminder_sent = True
+                    reminded += 1
+
+            if reminded > 0:
+                await db.commit()
+                logger.info("[Calendar] Sent %d event reminders", reminded)
+
+    except Exception as e:
+        logger.error("[Calendar] Event reminder job failed: %s", e)

@@ -2,6 +2,7 @@
   "nav": {
     "chat": "Chat",
     "agents": "Agents",
+    "calendar": "Calendar",
     "memory": "Memory",
     "usage": "Usage",
     "settings": "Settings",

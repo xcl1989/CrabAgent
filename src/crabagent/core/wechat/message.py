@@ -913,6 +913,11 @@ async def _register_tools(context, workspace) -> None:
     register_task_tools(context.tool_registry)
     register_meeting_tools(context.tool_registry)
     register_mail_tools(context.tool_registry)
+
+    from crabagent.core.calendar.tools import register_calendar_tools
+
+    register_calendar_tools(context.tool_registry)
+
     discover_and_register_tools(context.tool_registry, workspace)
 
     # MCP tools

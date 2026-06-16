@@ -398,6 +398,10 @@ async def prompt_async(
 
     register_mail_tools(context.tool_registry)
 
+    from crabagent.core.calendar.tools import register_calendar_tools
+
+    register_calendar_tools(context.tool_registry)
+
     from crabagent.core.tool_loader import discover_and_register_tools
 
     discover_and_register_tools(context.tool_registry, workspace)

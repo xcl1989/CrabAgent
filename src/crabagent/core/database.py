@@ -226,6 +226,64 @@ class AgentProfile(Base):
     updated_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
 
+class CalendarEvent(Base):
+    """An event in the built-in calendar system.
+
+    Events can originate from manual creation, Agent creation, iCal
+    sync, or be dynamically derived from Task deadlines (those have
+    ``type='task'`` and are not persisted — generated on the fly).
+    """
+
+    __tablename__ = "calendar_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False, default=1, index=True)
+    title: Mapped[str] = mapped_column(String(500), nullable=False)
+    description: Mapped[str] = mapped_column(Text, default="")
+    start_time: Mapped[datetime.datetime] = mapped_column(DateTime, nullable=False, index=True)
+    end_time: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
+    all_day: Mapped[bool] = mapped_column(Boolean, default=False)
+    type: Mapped[str] = mapped_column(String(20), default="manual")  # manual | agent | external
+    source: Mapped[str] = mapped_column(String(50), default="manual")  # manual | ical | agent | meeting
+    linked_task_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    project: Mapped[str] = mapped_column(String(200), default="")
+    location: Mapped[str] = mapped_column(String(500), default="")
+    color: Mapped[str] = mapped_column(String(20), default="")
+    reminder_minutes: Mapped[int] = mapped_column(Integer, default=15)
+    reminder_sent: Mapped[bool] = mapped_column(Boolean, default=False)
+    ical_uid: Mapped[str] = mapped_column(String(200), default="", index=True)
+    ical_source_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class CalendarIcalSource(Base):
+    """An external calendar subscription source.
+
+    Supports two protocols:
+    - ``ical``: static ICS URL (DingTalk, Feishu)
+    - ``caldav``: CalDAV protocol (企业微信)
+    """
+
+    __tablename__ = "calendar_ical_sources"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    source_type: Mapped[str] = mapped_column(String(20), default="ical")  # ical | caldav
+    caldav_username: Mapped[str] = mapped_column(Text, default="")
+    caldav_password: Mapped[str] = mapped_column(Text, default="")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_sync_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
+    last_sync_status: Mapped[str] = mapped_column(String(20), default="")
+    last_error: Mapped[str] = mapped_column(Text, default="")
+    sync_event_count: Mapped[int] = mapped_column(Integer, default=0)
+    lookback_days: Mapped[int] = mapped_column(Integer, default=7)
+    lookahead_days: Mapped[int] = mapped_column(Integer, default=30)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
+
+
 class SharedMemory(Base):
     __tablename__ = "shared_memory"
 
@@ -514,6 +572,23 @@ async def init_db() -> None:
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_memory_embedding_memory_id ON memory_embedding(memory_id)"
         ))
+
+        # --- Calendar tables migrations ---
+        # calendar_ical_sources: add CalDAV fields if missing (for upgrades)
+        result = await conn.execute(text("PRAGMA table_info(calendar_ical_sources)"))
+        columns = [row[1] for row in result.fetchall()]
+        if "source_type" not in columns:
+            await conn.execute(text(
+                "ALTER TABLE calendar_ical_sources ADD COLUMN source_type VARCHAR(20) DEFAULT 'ical'"
+            ))
+        if "caldav_username" not in columns:
+            await conn.execute(text(
+                "ALTER TABLE calendar_ical_sources ADD COLUMN caldav_username TEXT DEFAULT ''"
+            ))
+        if "caldav_password" not in columns:
+            await conn.execute(text(
+                "ALTER TABLE calendar_ical_sources ADD COLUMN caldav_password TEXT DEFAULT ''"
+            ))
 
     from crabagent.core.provider_store import migrate_plaintext_keys
 

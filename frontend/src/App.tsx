@@ -6,10 +6,11 @@ import AgentsPage from "./pages/AgentsPage";
 import MemoryPage from "./pages/MemoryPage";
 import SettingsPage from "./pages/SettingsPage";
 import UsagePage from "./pages/UsagePage";
+import CalendarPage from "./pages/CalendarPage";
 import { NavBar } from "./components/NavBar";
 import { cn } from "./lib/cn";
 
-export type PageId = "chat" | "agents" | "memory" | "usage" | "settings";
+export type PageId = "chat" | "agents" | "memory" | "usage" | "calendar" | "settings";
 
 function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
   const [page, setPage] = useState<PageId>("chat");
@@ -30,6 +31,9 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
         </div>
         <div className={cn("absolute inset-0", page !== "usage" && "hidden")}>
           <UsagePage />
+        </div>
+        <div className={cn("absolute inset-0", page !== "calendar" && "hidden")}>
+          <CalendarPage />
         </div>
         <div className={cn("absolute inset-0", page !== "settings" && "hidden")}>
           <SettingsPage />

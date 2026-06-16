@@ -605,6 +605,10 @@ async def _setup_agent_context(
 
     register_mail_tools(context.tool_registry)
 
+    from crabagent.core.calendar.tools import register_calendar_tools
+
+    register_calendar_tools(context.tool_registry)
+
     from crabagent.core.tool_loader import discover_and_register_tools
 
     discover_and_register_tools(context.tool_registry, workspace)
@@ -755,10 +759,10 @@ def _print_banner(context, provider: str, model: str):
         from rich.text import Text
 
         console = Console()
-        t = Text("CrabAgent v0.10.3", style="bold")
+        t = Text("CrabAgent v0.10.4", style="bold")
         console.print(t)
     except ImportError:
-        print("CrabAgent v0.10.3")
+        print("CrabAgent v0.10.4")
 
     print(f"  provider: {provider}  model: {model}")
     print(f"  workspace: {context.workspace}")

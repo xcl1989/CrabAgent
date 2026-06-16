@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.10.4]
+
+### Added
+- **Calendar Day View — Event Layer Separation** — time-spanning events (with end_time) and time-point reminders (task deadlines, events without end_time) are now visually distinct
+  - **Block events** (meetings, timed tasks): rendered as coloured blocks on the timeline, unchanged
+  - **Pin events** (reminders, deadlines): rendered as floating red labels on the right side of the timeline, positioned precisely at the trigger time-point with `translateY(-50%)`
+  - **Automatic layout**: block events shrink their right edge (150px) when pin events exist, preventing overlap
+  - **Minimum block height**: raised from 24px to 36px for better readability of short events
+  - Backend untouched — pure frontend change in `DayView` component
+
+---
+
 ## [0.10.3]
 
 ### Fixed
