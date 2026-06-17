@@ -15,6 +15,7 @@ interface Props {
   sessionId: string | null;
   workspace?: string;
   onOpenDoc?: (path: string, name: string) => void;
+  refreshTrigger?: number;
 }
 
 function useFileTree(workspace?: string) {
@@ -165,9 +166,18 @@ export default function FileBrowser({
   sessionId,
   workspace,
   onOpenDoc,
+  refreshTrigger,
 }: Props) {
   const { t } = useTranslation();
   const tree = useFileTree(workspace);
+
+  // Auto-refresh when parent triggers (e.g. AI created/modified files)
+  useEffect(() => {
+    if (refreshTrigger !== undefined && refreshTrigger > 0) {
+      tree.refresh();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshTrigger]);
 
   if (collapsed) return null;
 

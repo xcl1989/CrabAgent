@@ -138,6 +138,7 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
   type WorkspaceType = "document" | "code" | "prototype" | "meeting" | "markdown";
   const [workspaceType, setWorkspaceType] = useState<WorkspaceType>("document");
   const [meetingActive, setMeetingActive] = useState(false);
+  const [fileTreeRefreshKey, setFileTreeRefreshKey] = useState(0);
 
   const handleStartMeeting = useCallback(() => {
     setMeetingActive(true);
@@ -232,6 +233,8 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
           ],
         };
       });
+      // Refresh file tree to show new/modified files
+      setFileTreeRefreshKey((k) => k + 1);
     }
   }, []);
 
@@ -1194,6 +1197,7 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
                   setShowWorkFiles(false);
                   handleOpenDoc(path, name);
                 }}
+                refreshTrigger={fileTreeRefreshKey}
               />
             </div>
           </div>
@@ -1532,6 +1536,7 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
         sessionId={activeSession?.session_id || null}
         workspace={activeSession?.workspace || workspace || undefined}
         onOpenDoc={handleOpenDoc}
+        refreshTrigger={fileTreeRefreshKey}
       />
 
       {/* Document Panel — right sidebar when AI is working on a doc */}

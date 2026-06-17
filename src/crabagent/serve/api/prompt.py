@@ -227,7 +227,10 @@ async def prompt_async(
         }
         _type_label = _type_labels.get(req.workspace_type, "文件")
         _hints = {
-            "document": "用户正在编辑此 Office 文档。使用 office_edit 工具修改时无需指定文件路径。",
+            "document": (
+                "用户正在编辑此 Office 文档。使用 office_edit 工具修改时无需指定文件路径。\n"
+                "⚠️ 每次修改文档后，请在回复中用「📝 变更摘要：」开头总结你做了哪些更改。"
+            ),
             "code": "用户正在编辑此代码文件。",
             "prototype": "用户正在编辑此 HTML 原型，右侧有实时预览。",
             "markdown": "用户正在编辑此 Markdown 文档。",
