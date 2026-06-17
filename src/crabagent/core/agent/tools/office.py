@@ -59,6 +59,40 @@ async def _ensure_available() -> str | None:
     return None
 
 
+async def _collect_formulas(mgr: Any, file_path: str, sheet: str = "") -> str:
+    """收集 xlsx 中的公式单元格，返回可读的公式摘要。
+
+    使用 query cell 选择器查找含公式的单元格，然后逐个获取详情。
+    """
+    # 用 query 查找所有有 formula 的单元格
+    result = await mgr.query(file_path, "cell[formula]")
+    if not result.success or not result.data:
+        return ""
+
+    cells = result.data if isinstance(result.data, list) else result.data.get("results", [])
+    if not cells:
+        # query 可能返回 dict 格式
+        if isinstance(result.data, dict):
+            cells = result.data.get("results", [])
+
+    if not cells:
+        return ""
+
+    lines: list[str] = []
+    for cell_node in cells[:50]:  # 限制最多 50 个，避免输出过长
+        if isinstance(cell_node, dict):
+            path = cell_node.get("path", "")
+            fmt = cell_node.get("format", {})
+            if isinstance(fmt, dict):
+                formula = fmt.get("formula", "")
+                cached = fmt.get("cachedValue", "")
+                computed = fmt.get("computedValue", "")
+                display = computed or cached or "?"
+                lines.append(f"{path}: ={formula}  →  {display}")
+
+    return "\n".join(lines) if lines else ""
+
+
 def _check_extension(file_path: str) -> str | None:
     """检查文件扩展名是否受支持。"""
     ext = Path(file_path).suffix.lower()
@@ -172,6 +206,16 @@ async def office_read(
         return f"读取失败: {result.error}"
 
     content = result.data or ""
+
+    # 对 xlsx 文件，在 text 模式下追加公式信息
+    if mode == "text" and resolved.endswith(".xlsx"):
+        try:
+            formula_info = await _collect_formulas(mgr, resolved, sheet)
+            if formula_info:
+                content += "\n\n--- 公式单元格 ---\n" + formula_info
+        except Exception:
+            logger.debug("Formula collection failed", exc_info=True)
+
     summary = f"📄 已读取 {Path(file_path).name} ({mode} 模式, {len(str(content))} 字符)\n\n"
     return summary + str(content)
 
@@ -288,12 +332,13 @@ def _describe_op(
             },
             "command": {
                 "type": "string",
-                "enum": ["set", "add", "remove", "move"],
+                "enum": ["set", "add", "remove", "move", "swap"],
                 "description": "操作类型：\n"
-                "- set: 修改已有元素的属性（文本、字体、颜色、大小等）\n"
-                "- add: 添加新元素（幻灯片、形状、表格、图表等）\n"
+                "- set: 修改已有元素的属性（文本、字体、颜色、大小、公式、合并等）\n"
+                "- add: 添加新元素（幻灯片、形状、表格、行、列、单元格等）\n"
                 "- remove: 删除元素\n"
-                "- move: 移动元素到新位置",
+                "- move: 移动元素到新位置\n"
+                "- swap: 交换两个元素的位置",
             },
             "element_path": {
                 "type": "string",
@@ -302,7 +347,14 @@ def _describe_op(
                 "- /slide[1] → 第1张幻灯片\n"
                 "- /slide[1]/shape[1] → 第1张幻灯片的第1个形状\n"
                 "- /Sheet1/A1 → Excel 的 A1 单元格（注意：Sheet名区分大小写，用字母列号）\n"
-                "- /body/p[1] → Word 第1段落\n\n"
+                "- /Sheet1/A1:C3 → Excel 的范围（用于合并/批量格式化）\n"
+                "- /Sheet1/row[3] → Excel 第3行（用于设置行高/删除行）\n"
+                "- /Sheet1/col[A] → Excel A列（用于设置列宽/删除列）\n"
+                "- /theme → PPT 主题（颜色/字体方案）\n"
+                "- /slidemaster[1] → PPT 母版\n"
+                "- /body/p[1] → Word 第1段落\n"
+                "- /body/tbl[1]/tr[2]/tc[1] → Word 表格第2行第1列单元格\n"
+                "- /slide[1]/table[1]/tr[2]/tc[1] → PPT 表格第2行第1列单元格\n\n"
                 "⚠️ Excel 注意：新建的空白工作表中没有预置的单元格。\n"
                 "   先使用 add 命令添加单元格（如 add → parent=/Sheet1, type=cell），\n"
                 "   然后再用 set 修改其内容。\n"
@@ -318,20 +370,47 @@ def _describe_op(
                 "- color: 颜色（十六进制 #FF0000 或命名色）\n"
                 "- background: 背景色\n"
                 "- width, height: 尺寸\n"
-                "- x, y: 位置",
+                "- x, y: 位置\n\n"
+                "Excel 专用属性：\n"
+                "- formula: 单元格公式（不含=前缀），如 SUM(A1:A10)\n"
+                "- merge: 合并单元格，传范围如 A1:C3 或 true/false（用于 range 路径）\n"
+                "- numberformat: 数字格式，如 #,##0.00 或 yyyy-mm-dd\n"
+                "- fill: 单元格背景色\n"
+                "- border.all: 边框样式，如 'single;1pt;FF0000'\n"
+                "- bold/italic/underline/strike: 字体样式\n"
+                "- alignment.horizontal: 对齐（left/center/right）\n"
+                "- shift: 插入时位移（right/down）\n\n"
+                "Word 表格专用属性：\n"
+                "- colspan: 水平合并列数\n"
+                "- vmerge: 垂直合并（restart 标记起始，continue 标记后续）\n"
+                "- valign: 垂直对齐（top/center/bottom）\n\n"
+                "PPT 专用属性：\n"
+                "- layout: 幻灯片布局名（如 'Title Slide'、'Title and Content'、'Blank'）\n"
+                "- merge.right: 表格水平合并列数\n"
+                "- transition: 幻灯片切换效果（fade/push/wipe/morph）\n\n"
+                "PPT 主题属性（路径 /theme）：\n"
+                "- accent1~accent6: 主题配色\n"
+                "- headingFont: 标题字体 / bodyFont: 正文字体\n\n"
+                "表格创建属性（add table）：\n"
+                "- data: 内联数据 'H1,H2;R1C1,R1C2' 或 CSV\n"
+                "- style: 表格样式（medium1~4, light1~3, dark1~2）\n"
+                "- headerFill/bodyFill: 表头/正文背景色\n"
+                "- border.all/border.horizontal/border.vertical: 边框",
             },
             "element_type": {
                 "type": "string",
                 "description": "（add 操作专用）要添加的元素类型：\n"
-                "- slide: 幻灯片（PPT）\n"
+                "- slide: 幻灯片（PPT）— 支持 layout/title/text 属性\n"
                 "- shape: 形状/文本框\n"
-                "- table: 表格\n"
+                "- table: 表格— 支持 data/style/headerFill 属性\n"
                 "- chart: 图表\n"
                 "- image: 图片\n"
                 "- sheet: 工作表（Excel）\n"
+                "- row: 行（Excel: add 到 /SheetName — 支持 --after/--before 插入到指定位置）\n"
+                "- column: 列（Excel: add 到 /SheetName — --prop name=C 指定列字母）\n"
+                "- cell: 单元格（Excel: add 到 /SheetName — --prop ref=B2 指定位置）\n"
                 "- paragraph: 段落（Word）\n"
-                "- row: 行（表格）\n"
-                "- cell: 单元格（表格）",
+                "- placeholder: PPT 占位符（--prop phType=title/body）",
             },
         },
         "required": ["command"],
@@ -389,6 +468,11 @@ async def office_edit(
         result = await mgr.move_element(
             resolved, element_path, to_parent, int(index)
         )
+    elif command == "swap":
+        path2 = props.get("with", "")
+        if not path2:
+            return "swap 操作需要指定 props.with（第二个元素的路径）"
+        result = await mgr.exec("swap", resolved, element_path, path2)
     else:
         return f"不支持的命令: {command}"
 

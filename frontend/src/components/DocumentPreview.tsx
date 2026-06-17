@@ -17,6 +17,10 @@ interface Props {
   onOutlineActive?: (index: number) => void;
   /** 当前选中元素信息（单击选中或双击编辑时） */
   onEditElement?: (info: { tagName: string; path: string; text: string; style: Record<string, string> }) => void;
+  /** Excel 单元格直接编辑 */
+  onCellEdit?: (path: string, newText: string) => void;
+  /** Excel 单元格选择范围 */
+  onCellRangeSelect?: (range: string | null, sheet?: string) => void;
 }
 
 // Injected script for column-resize and row-resize.
@@ -176,7 +180,149 @@ const EDIT_SCRIPT = `
 <script>
 (function() {
   var el = null, oldText = '';
+  var el_isCell = false, el_path = '';
   var selectedEl = null;
+
+  // ── Excel 单元格选择 ──
+  var selStart = null, selEnd = null;
+  var cellMouseDown = false;
+
+  // ★ 覆盖层：保证选区始终显示为完整矩形（挂载到 .table-wrapper 内）
+  var overlay = document.createElement('div');
+  overlay.id = 'excel-selection-overlay';
+  overlay.style.cssText = 'position:absolute;pointer-events:none;z-index:100;border:2px solid #217346;background:rgba(33,115,70,0.08);display:none;';
+
+  // 辅助函数：获取单元格实际占用的行列数
+  function getCellSpan(td) {
+    var cs = td.getAttribute('colspan');
+    var rs = td.getAttribute('rowspan');
+    return {
+      colspan: cs ? parseInt(cs, 10) : 1,
+      rowspan: rs ? parseInt(rs, 10) : 1
+    };
+  }
+
+  function parseCellPath(path) {
+    // path = "/采购计划样表/C6" → split("/") → ["", "采购计划样表", "C6"]
+    var parts = path.split('/');
+    var cellRef = parts[parts.length - 1];  // "C6"
+    if (!cellRef) return null;
+    var colMatch = cellRef.match(/^([A-Z]+)([0-9]+)$/);
+    if (!colMatch) return null;
+    var colLetters = colMatch[1], colIdx = 0;
+    for (var i = 0; i < colLetters.length; i++) colIdx = colIdx * 26 + (colLetters.charCodeAt(i) - 64);
+    return { col: colLetters, colIdx: colIdx - 1, row: parseInt(colMatch[2], 10) - 1 };
+  }
+  function colIdxToLetter(idx) {
+    var s = '', i = idx + 1;
+    while (i > 0) { var r = (i - 1) % 26; s = String.fromCharCode(65 + r) + s; i = Math.floor((i - 1) / 26); }
+    return s;
+  }
+  function formatCellStr(info) { return colIdxToLetter(info.colIdx) + (info.row + 1); }
+  function formatRangeStr(a, b) { var s = formatCellStr(a), e = formatCellStr(b); return s === e ? s : s + ':' + e; }
+  function clearCellSelection() {
+    var cells = document.querySelectorAll('td[data-path]');
+    for (var i = 0; i < cells.length; i++) { cells[i].style.backgroundColor = ''; cells[i].style.outline = ''; cells[i].style.outlineOffset = ''; }
+    // 清除行背景
+    var rows = document.querySelectorAll('tr[data-row]');
+    for (var i = 0; i < rows.length; i++) { rows[i].style.backgroundColor = ''; rows[i].style.outline = ''; }
+    // 隐藏覆盖层
+    var ov = document.getElementById('excel-selection-overlay');
+    if (ov) ov.style.display = 'none';
+  }
+  // ★ 定位覆盖层：计算选区完整矩形的物理位置
+  function positionOverlay(minR, maxR, minC, maxC) {
+    var ov = document.getElementById('excel-selection-overlay');
+    if (!ov) return;
+    // 找到选区左上角和右下角的 td 元素
+    var topLeft = null, bottomRight = null;
+    var all = document.querySelectorAll('td[data-path]');
+    for (var i = 0; i < all.length; i++) {
+      var info = parseCellPath(all[i].getAttribute('data-path') || '');
+      if (!info) continue;
+      if (info.row === minR && info.colIdx === minC) topLeft = all[i];
+      if (info.row === maxR && info.colIdx === maxC) bottomRight = all[i];
+      if (topLeft && bottomRight) break;
+    }
+    // fallback：如果找不到精确匹配，取范围内任意单元格
+    if (!topLeft) {
+      for (var i = 0; i < all.length; i++) {
+        var info = parseCellPath(all[i].getAttribute('data-path') || '');
+        if (info && info.row === minR) { topLeft = all[i]; break; }
+      }
+    }
+    if (!bottomRight) {
+      for (var i = 0; i < all.length; i++) {
+        var info = parseCellPath(all[i].getAttribute('data-path') || '');
+        if (info && info.row === maxR) { bottomRight = all[i]; break; }
+      }
+    }
+    if (!topLeft || !bottomRight) { ov.style.display = 'none'; return; }
+    // 把覆盖层挂在 .table-wrapper 内部，position:absolute 自然相对于 wrapper 定位
+    var wrapper = document.querySelector('.table-wrapper') || document.body;
+    if (ov.parentNode !== wrapper) wrapper.appendChild(ov);
+    var wr = wrapper.getBoundingClientRect();
+    var r1 = topLeft.getBoundingClientRect();
+    var r2 = bottomRight.getBoundingClientRect();
+    ov.style.display = 'block';
+    ov.style.left = (r1.left - wr.left) + 'px';
+    ov.style.top = (r1.top - wr.top) + 'px';
+    ov.style.width = (r2.right - r1.left) + 'px';
+    ov.style.height = (r2.bottom - r1.top) + 'px';
+  }
+
+  function highlightRange(a, b) {
+    clearCellSelection();
+    // ★ 使用物理范围（考虑 colspan/rowspan）计算矩形
+    var minR = Math.min(a.row, b.row);
+    var maxR = Math.max(a.bottomRow !== undefined ? a.bottomRow : a.row, b.bottomRow !== undefined ? b.bottomRow : b.row);
+    var minC = Math.min(a.colIdx, b.colIdx);
+    var maxC = Math.max(a.rightCol !== undefined ? a.rightCol : a.colIdx, b.rightCol !== undefined ? b.rightCol : b.colIdx);
+
+    // ★ 关键修复：扩展范围以覆盖选区内所有合并单元格的完整行列
+    // 例如 A6(rowspan=2) 在选区内时，选区要自动扩展到第7行
+    var changed = true;
+    while (changed) {
+      changed = false;
+      var all = document.querySelectorAll('td[data-path]');
+      for (var i = 0; i < all.length; i++) {
+        var info = parseCellPath(all[i].getAttribute('data-path') || '');
+        if (!info) continue;
+        if (info.row >= minR && info.row <= maxR && info.colIdx >= minC && info.colIdx <= maxC) {
+          var span = getCellSpan(all[i]);
+          var cellBottom = info.row + span.rowspan - 1;
+          var cellRight = info.colIdx + span.colspan - 1;
+          if (cellBottom > maxR) { maxR = cellBottom; changed = true; }
+          if (cellRight > maxC) { maxC = cellRight; changed = true; }
+        }
+      }
+    }
+
+    // 整行高亮：覆盖选中行整个宽度（即使某些列没有 td）
+    var rows = document.querySelectorAll('tr[data-row]');
+    for (var i = 0; i < rows.length; i++) {
+      var rowAttr = rows[i].getAttribute('data-row') || '';
+      var parts = rowAttr.split('-');
+      var dataRow = parseInt(parts[parts.length - 1], 10) - 1;
+      if (!isNaN(dataRow) && dataRow >= minR && dataRow <= maxR) {
+        rows[i].style.backgroundColor = 'rgba(33,115,70,0.06)';
+      }
+    }
+    // 单元格高亮：给选中的具体单元格加边框（使用扩展后的范围）
+    var all = document.querySelectorAll('td[data-path]');
+    for (var i = 0; i < all.length; i++) {
+      var info = parseCellPath(all[i].getAttribute('data-path') || '');
+      if (!info) continue;
+      if (info.row >= minR && info.row <= maxR && info.colIdx >= minC && info.colIdx <= maxC) {
+        all[i].style.backgroundColor = 'rgba(33,115,70,0.12)';
+        all[i].style.outline = '2px solid #217346';
+        all[i].style.outlineOffset = '-1px';
+      }
+    }
+    // ★ 覆盖层：保证选区始终显示为完整矩形
+    positionOverlay(minR, maxR, minC, maxC);
+    return formatRangeStr({ colIdx: minC, row: minR }, { colIdx: maxC, row: maxR });
+  }
 
   // Walk up to a meaningful block-level container
   function findBlock(target) {
@@ -217,27 +363,24 @@ const EDIT_SCRIPT = `
     }, '*');
   }
 
-  // mouseup → check if user selected text (drag-highlight), activate toolbar only when text is selected
+  // mouseup → check if user selected text
   document.addEventListener('mouseup', function(e) {
-    if (el) return; // don't interfere with text editing
+    if (el) return;
+    var wasCellDrag = cellMouseDown;
+    cellMouseDown = false;
     setTimeout(function() {
       var sel = window.getSelection();
       var selText = sel ? sel.toString().trim() : '';
+      if (wasCellDrag) return;
       if (selText && selectedEl && selText !== (selectedEl.innerText || '').trim()) {
-        // Partial text selection within an element — report the selected text
         notifySelectedFromText(selText);
       } else if (selText) {
-        // Selection available — activate toolbar with the selected text
         var t = sel.anchorNode ? (sel.anchorNode.parentElement || sel.anchorNode.parentNode) : null;
         var block = t ? findBlock(t) : null;
-        if (block) {
-          notifySelected(block);
-        } else {
-          notifySelectedFromText(selText);
-        }
+        if (block) notifySelected(block);
+        else notifySelectedFromText(selText);
       } else {
-        // No text selected — deselect
-        if (selectedEl) {
+        if (selectedEl && !selStart) {
           selectedEl = null;
           window.parent.postMessage({ type: 'edit-element-deselected' }, '*');
         }
@@ -245,13 +388,13 @@ const EDIT_SCRIPT = `
     }, 10);
   });
 
-  // Also listen for selectionchange (handles select-all, programmatic selection)
+  // selectionchange
   document.addEventListener('selectionchange', function() {
     if (el) return;
+    if (selStart) return; // 单元格选择模式不反选
     var sel = window.getSelection();
     var selText = sel ? sel.toString().trim() : '';
     if (!selText && selectedEl) {
-      // Selection cleared
       selectedEl = null;
       window.parent.postMessage({ type: 'edit-element-deselected' }, '*');
     }
@@ -261,81 +404,122 @@ const EDIT_SCRIPT = `
     selectedEl = null;
     window.parent.postMessage({
       type: 'edit-element-selected',
-      tagName: 'TEXT',
-      path: '',
+      tagName: 'TEXT', path: '',
       text: text.substring(0, 2000),
-      style: {
-        fontWeight: '400',
-        fontStyle: 'normal',
-        textDecoration: 'none',
-        fontSize: '14px',
-        color: '#000000',
-      }
+      style: { fontWeight: '400', fontStyle: 'normal', textDecoration: 'none', fontSize: '14px', color: '#000000' }
     }, '*');
   }
 
+  // ── 单元格选择（支持合并单元格） ──
+  // 辅助函数：从 td 构建包含物理范围的位置对象
+  function makeCellPos(td) {
+    var info = parseCellPath(td.getAttribute('data-path') || '');
+    if (!info) return null;
+    var span = getCellSpan(td);
+    return {
+      colIdx: info.colIdx,
+      row: info.row,
+      rightCol: info.colIdx + span.colspan - 1,
+      bottomRow: info.row + span.rowspan - 1
+    };
+  }
+
+  document.addEventListener('mousedown', function(e) {
+    if (el) return;
+    var td = e.target.closest ? e.target.closest('td[data-path]') : null;
+    if (!td) return;
+    notifySelected(td);
+    cellMouseDown = true;
+    var pos = makeCellPos(td);
+    if (!pos) return;
+    selStart = pos; selEnd = JSON.parse(JSON.stringify(pos));
+    var range = highlightRange(selStart, selEnd);
+    var sheetName = (td.getAttribute('data-path') || '').split('/')[1] || '';
+    window.parent.postMessage({ type: 'cell-range-select', range: range, sheet: sheetName }, '*');
+  });
+
+  document.addEventListener('mousemove', function(e) {
+    if (!cellMouseDown || !selStart || el) return;
+    var td = e.target.closest ? e.target.closest('td[data-path]') : null;
+    if (!td) return;
+    var pos = makeCellPos(td);
+    if (!pos) return;
+    selEnd = pos;
+    var range = highlightRange(selStart, selEnd);
+    var sheetName = (td.getAttribute('data-path') || '').split('/')[1] || '';
+    window.parent.postMessage({ type: 'cell-range-select', range: range, sheet: sheetName }, '*');
+  });
+
+  document.addEventListener('selectstart', function(e) {
+    if (cellMouseDown) e.preventDefault();
+  });
+
+  // 点击非 td 区域清除选区
+  document.addEventListener('mousedown', function(e) {
+    if (el) return;
+    var td = e.target.closest ? e.target.closest('td[data-path]') : null;
+    if (!td && selStart) {
+      selStart = null; selEnd = null;
+      clearCellSelection();
+      window.parent.postMessage({ type: 'cell-range-select', range: null }, '*');
+    }
+  });
+
+  // ── 双击编辑（支持 Excel 单元格） ──
   document.addEventListener('dblclick', function(e) {
     var t = e.target;
     if (!t || t.tagName === 'BODY' || t.tagName === 'HTML' || t.tagName === 'SCRIPT' || t.tagName === 'STYLE') return;
+
+    // Excel 单元格直接编辑（通过 data-path 精确定位）
+    var td = t.closest ? t.closest('td[data-path]') : null;
+    if (td) {
+      var cellPath = td.getAttribute('data-path') || '';
+      var cellText = (td.innerText || td.textContent || '').trim();
+      td.contentEditable = 'true'; td.focus();
+      try { var r = document.createRange(); r.selectNodeContents(td); var s = window.getSelection(); s.removeAllRanges(); s.addRange(r); } catch(_) {}
+      el = td; el_isCell = true; el_path = cellPath; oldText = cellText;
+      notifySelected(td);
+      window.parent.postMessage({ type: 'quick-edit-active', active: true }, '*');
+      e.preventDefault();
+      return;
+    }
+
+    // 普通元素编辑
     var block = findBlock(t);
     if (!block) return;
     var txt = (block.innerText || block.textContent).trim();
     if (!txt) return;
-    block.contentEditable = 'true';
-    block.focus();
-    try {
-      var r = document.createRange();
-      r.selectNodeContents(block);
-      var s = window.getSelection();
-      s.removeAllRanges();
-      s.addRange(r);
-    } catch(_) {}
-    el = block;
-    oldText = txt;
-    // Also notify parent about the selected element
+    block.contentEditable = 'true'; block.focus();
+    try { var r = document.createRange(); r.selectNodeContents(block); var s = window.getSelection(); s.removeAllRanges(); s.addRange(r); } catch(_) {}
+    el = block; el_isCell = false; el_path = ''; oldText = txt;
     notifySelected(block);
-    // Notify parent that editing started
     window.parent.postMessage({ type: 'quick-edit-active', active: true }, '*');
   });
 
   // Escape to cancel
   document.addEventListener('keydown', function(e) {
-    if (e.key === 'Escape' && el) {
-      e.preventDefault();
-      cancel();
-    }
-    // Enter = newline (default)
+    if (e.key === 'Escape' && el) { e.preventDefault(); cancel(); }
   });
 
   // Click inside iframe but outside editing element → save
   document.addEventListener('mousedown', function(e) {
     if (!el) return;
-    if (el === e.target || el.contains(e.target)) return; // click inside editing area
+    if (el === e.target || el.contains(e.target)) return;
     finish();
   }, true);
 
-  // Listen for parent telling us to finish (user clicked outside iframe)
+  // Listen for parent messages
   window.addEventListener('message', function(e) {
-    if (e.data?.type === 'quick-edit-finish' && el) {
-      finish();
-    }
-    // Parent requests style change on selected element
+    if (e.data?.type === 'quick-edit-finish' && el) finish();
     if (e.data?.type === 'apply-style' && selectedEl) {
       var props = e.data.props;
       for (var k in props) {
-        if (k === 'bold') {
-          selectedEl.style.fontWeight = props[k] ? 'bold' : 'normal';
-        } else if (k === 'italic') {
-          selectedEl.style.fontStyle = props[k] ? 'italic' : 'normal';
-        } else if (k === 'underline') {
-          selectedEl.style.textDecoration = props[k] ? 'underline' : 'none';
-        } else if (k === 'size') {
-          selectedEl.style.fontSize = props[k] + 'pt';
-        } else if (k === 'color') {
-          selectedEl.style.color = props[k];
-        }
+        if (k === 'bold') selectedEl.style.fontWeight = props[k] ? 'bold' : 'normal';
+        else if (k === 'italic') selectedEl.style.fontStyle = props[k] ? 'italic' : 'normal';
+        else if (k === 'underline') selectedEl.style.textDecoration = props[k] ? 'underline' : 'none';
+        else if (k === 'size') selectedEl.style.fontSize = props[k] + 'pt';
+        else if (k === 'color') selectedEl.style.color = props[k];
       }
-      // Re-notify parent with updated style
       notifySelected(selectedEl);
     }
   });
@@ -344,11 +528,13 @@ const EDIT_SCRIPT = `
     if (!el) return;
     var n = (el.innerText || el.textContent).trim();
     el.contentEditable = 'false';
-    if (n && n !== oldText) {
-      window.parent.postMessage({ type: 'quick-edit', old_text: oldText, new_text: n }, '*');
+    if (el_isCell && el_path) {
+      // Excel 单元格：用 data-path 精确定位
+      if (n !== oldText) window.parent.postMessage({ type: 'cell-edit', path: el_path, new_text: n }, '*');
+    } else {
+      if (n && n !== oldText) window.parent.postMessage({ type: 'quick-edit', old_text: oldText, new_text: n }, '*');
     }
-    el = null;
-    oldText = '';
+    el = null; oldText = ''; el_isCell = false; el_path = '';
     window.parent.postMessage({ type: 'quick-edit-active', active: false }, '*');
   }
 
@@ -356,15 +542,14 @@ const EDIT_SCRIPT = `
     if (!el) return;
     el.innerText = oldText;
     el.contentEditable = 'false';
-    el = null;
-    oldText = '';
+    el = null; oldText = ''; el_isCell = false; el_path = '';
     window.parent.postMessage({ type: 'quick-edit-active', active: false }, '*');
   }
 })();
 </script>
 `;
 
-export function DocumentPreview({ html, loading, error, className, onQuickEdit, onStyleEdit, onOutlineChange, onOutlineActive, onEditElement }: Props) {
+export function DocumentPreview({ html, loading, error, className, onQuickEdit, onStyleEdit, onOutlineChange, onOutlineActive, onEditElement, onCellEdit, onCellRangeSelect }: Props) {
   const { t } = useTranslation();
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const editHandlerRef = useRef(onQuickEdit);
@@ -372,6 +557,8 @@ export function DocumentPreview({ html, loading, error, className, onQuickEdit, 
   const outlineHandlerRef = useRef(onOutlineChange);
   const outlineActiveHandlerRef = useRef(onOutlineActive);
   const editElementHandlerRef = useRef(onEditElement);
+  const cellEditHandlerRef = useRef(onCellEdit);
+  const cellRangeSelectHandlerRef = useRef(onCellRangeSelect);
   const [editing, setEditing] = useState(false);
   const [resizing, setResizing] = useState(false);
   const resizeActive = useRef(false);
@@ -385,6 +572,8 @@ export function DocumentPreview({ html, loading, error, className, onQuickEdit, 
   outlineHandlerRef.current = onOutlineChange;
   outlineActiveHandlerRef.current = onOutlineActive;
   editElementHandlerRef.current = onEditElement;
+  cellEditHandlerRef.current = onCellEdit;
+  cellRangeSelectHandlerRef.current = onCellRangeSelect;
 
   // Listen for messages from iframe
   useEffect(() => {
@@ -425,6 +614,10 @@ export function DocumentPreview({ html, loading, error, className, onQuickEdit, 
         });
       } else if (data.type === "edit-element-deselected") {
         editElementHandlerRef.current?.(null as any);
+      } else if (data.type === "cell-edit" && data.path && data.new_text !== undefined) {
+        cellEditHandlerRef.current?.(data.path as string, data.new_text as string);
+      } else if (data.type === "cell-range-select") {
+        cellRangeSelectHandlerRef.current?.(data.range || null, data.sheet as string | undefined);
       } else if (data.type === "doc-scroll-position") {
         savedScroll.current = data.scrollTop as number;
       }

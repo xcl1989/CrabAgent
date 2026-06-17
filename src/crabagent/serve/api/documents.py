@@ -468,3 +468,213 @@ async def quick_edit_text(
     except Exception as e:
         logger.exception("[QE] Unexpected error")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Quick Edit: structured table operations ───────────────────────────
+
+
+class TableOpRequest(BaseModel):
+    """请求：结构化表格操作（插入/删除行列、合并/取消合并、设置公式等）。"""
+
+    path: str
+    workspace: str = ""
+    operation: str
+    """操作类型：insert_row | delete_row | insert_col | delete_col |
+    merge_cells | unmerge_cells | set_formula | set_cell_style"""
+    sheet: str = "Sheet1"
+    """Excel 工作表名"""
+    params: dict = {}
+    """操作参数，具体取决于 operation 类型：
+    - insert_row: {after_row: int} 或 {before_row: int}
+    - delete_row: {row: int}
+    - insert_col: {col_letter: str} 或 {after_col: str}
+    - delete_col: {col_letter: str}
+    - merge_cells: {range: str}  如 "A1:C3"
+    - unmerge_cells: {range: str}
+    - set_formula: {cell: str, formula: str}
+    - set_cell_style: {cell: str, props: dict}
+    """
+
+
+class TableOpResponse(BaseModel):
+    status: str
+    preview_html: str | None = None
+    message: str = ""
+    error: str = ""
+
+
+def _build_batch_cmd(req: TableOpRequest) -> dict | None:
+    """将结构化操作转换为 officecli batch 命令。"""
+    op = req.operation
+    p = req.params
+    sheet = req.sheet
+
+    if op == "insert_row":
+        cmd: dict = {"command": "add", "parent": f"/{sheet}", "type": "row", "props": {"cols": p.get("cols", 1)}}
+        if "after_row" in p:
+            cmd["after"] = f"/{sheet}/row[{p['after_row']}]"
+        elif "before_row" in p:
+            cmd["before"] = f"/{sheet}/row[{p['before_row']}]"
+        return cmd
+
+    if op == "delete_row":
+        return {"command": "remove", "path": f"/{sheet}/row[{p['row']}]"}
+
+    if op == "insert_col":
+        cmd = {"command": "add", "parent": f"/{sheet}", "type": "column", "props": {}}
+        if "col_letter" in p:
+            cmd["props"]["name"] = p["col_letter"]
+        if "after_col" in p:
+            cmd["after"] = f"/{sheet}/col[{p['after_col']}]"
+        return cmd
+
+    if op == "delete_col":
+        return {"command": "remove", "path": f"/{sheet}/col[{p['col_letter']}]"}
+
+    if op == "merge_cells":
+        cell_range = p.get("range", "")
+        if not cell_range:
+            return None
+        return {"command": "set", "path": f"/{sheet}/{cell_range}", "props": {"merge": True}}
+
+    if op == "unmerge_cells":
+        cell_range = p.get("range", "")
+        if not cell_range:
+            return None
+        return {"command": "set", "path": f"/{sheet}/{cell_range}", "props": {"merge": False}}
+
+    if op == "set_formula":
+        cell = p.get("cell", "")
+        formula = p.get("formula", "")
+        if not cell or not formula:
+            return None
+        return {"command": "set", "path": f"/{sheet}/{cell}", "props": {"formula": formula}}
+
+    if op == "set_cell_style":
+        cell = p.get("cell", "")
+        props = p.get("props", {})
+        if not cell or not props:
+            return None
+        return {"command": "set", "path": f"/{sheet}/{cell}", "props": props}
+
+    return None
+
+
+@router.post("/quick-edit/table-op", response_model=TableOpResponse)
+async def quick_edit_table_op(
+    req: TableOpRequest,
+    user: User = Depends(get_current_user),
+):
+    """执行结构化表格操作（插入/删除行列、合并/取消合并、设置公式等）。
+
+    前端表格操作按钮（合并单元格、插入行等）调用此接口。
+    """
+    mgr = get_office_manager()
+    if not mgr.available:
+        raise HTTPException(status_code=503, detail="OfficeCLI is not installed")
+
+    docs_dir = _get_docs_dir(user.id, req.workspace)
+    file_path = _safe_path(docs_dir, req.path)
+
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    ext = file_path.suffix.lower()
+    if ext not in _PREVIEWABLE_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"Unsupported file type '{ext}'")
+
+    batch_cmd = _build_batch_cmd(req)
+    if batch_cmd is None:
+        raise HTTPException(status_code=400, detail=f"Invalid operation or params: {req.operation}")
+
+    logger.info("[QE-table] %s on %s/%s params=%s", req.operation, req.path, req.sheet, req.params)
+
+    _backup_doc(file_path)
+
+    try:
+        # 用 batch 执行单条命令（一次 open/save 周期）
+        result = await mgr.batch(str(file_path), [batch_cmd])
+
+        if not result.success:
+            return TableOpResponse(
+                status="error",
+                error=result.error or "Unknown error",
+                message=f"操作失败: {req.operation}",
+            )
+
+        # 渲染新预览
+        preview_result = await mgr.view_html(str(file_path))
+        preview_html = _fix_html_newlines(preview_result.data) if preview_result.success else None
+
+        return TableOpResponse(
+            status="ok",
+            preview_html=preview_html,
+            message=f"✅ {req.operation} 成功",
+        )
+    except Exception as e:
+        logger.exception("[QE-table] Error")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Quick Edit: PPT theme ─────────────────────────────────────────────
+
+
+class ThemeEditRequest(BaseModel):
+    """请求：修改 PPT 主题配色/字体。"""
+
+    path: str
+    workspace: str = ""
+    props: dict[str, str]
+    """主题属性：
+    - accent1~accent6: 主题配色（十六进制如 4472C4）
+    - headingFont: 标题字体
+    - bodyFont: 正文字体
+    - dk1/lt1/dk2/lt2: 基础色
+    - hyperlink: 超链接色
+    """
+
+
+@router.post("/quick-edit/theme", response_model=QuickEditStyleResponse)
+async def quick_edit_theme(
+    req: ThemeEditRequest,
+    user: User = Depends(get_current_user),
+):
+    """修改 PPT 主题颜色和字体方案。"""
+    mgr = get_office_manager()
+    if not mgr.available:
+        raise HTTPException(status_code=503, detail="OfficeCLI is not installed")
+
+    docs_dir = _get_docs_dir(user.id, req.workspace)
+    file_path = _safe_path(docs_dir, req.path)
+
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    if file_path.suffix.lower() != ".pptx":
+        raise HTTPException(status_code=400, detail="Theme editing is only supported for .pptx files")
+
+    if not req.props:
+        raise HTTPException(status_code=400, detail="No theme props provided")
+
+    _backup_doc(file_path)
+
+    logger.info("[QE-theme] %d prop(s) on %s", len(req.props), req.path)
+
+    result = await mgr.set_props(str(file_path), "/theme", dict(req.props))
+
+    results = [{
+        "element": "/theme",
+        "success": result.success,
+        "error": result.error if not result.success else "",
+    }]
+
+    # 渲染新预览
+    preview_result = await mgr.view_html(str(file_path))
+    preview_html = _fix_html_newlines(preview_result.data) if preview_result.success else None
+
+    return QuickEditStyleResponse(
+        status="ok" if result.success else "error",
+        preview_html=preview_html,
+        results=results,
+        message="主题已更新" if result.success else f"主题更新失败: {result.error}",
+    )

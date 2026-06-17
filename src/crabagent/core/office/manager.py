@@ -268,7 +268,7 @@ class OfficeManager:
     ) -> OfficeResult:
         """在单次打开/保存周期内批量执行多个操作。"""
         payload = json.dumps(commands)
-        return await self.exec("batch", file_path, payload)
+        return await self.exec("batch", file_path, "--commands", payload)
 
     async def help_for(self, fmt: str) -> OfficeResult:
         """获取指定格式的帮助参考（属性列表等）。"""

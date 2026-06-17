@@ -7,6 +7,7 @@ import { DocumentPreview } from "./DocumentPreview";
 import { DocOutline, OutlineItem } from "./DocOutline";
 import { DocToolbar, EditElementStyle } from "./DocToolbar";
 import * as documentsApi from "../api/documents";
+import type { TableOp } from "./DocToolbar";
 
 type Tab = "preview" | "timeline";
 
@@ -72,6 +73,8 @@ export function DocumentPanel({
   const [editElementStyle, setEditElementStyle] = useState<EditElementStyle | undefined>();
   const iframeRef = useRef<HTMLDivElement>(null);
   const highlightRef = useRef<typeof pendingHighlight>(null);
+  const [cellRange, setCellRange] = useState<string | null>(null);
+  const [activeSheet, setActiveSheet] = useState<string>("Sheet1");
 
   const handleQuickEdit = useCallback(async (oldText: string, newText: string) => {
     if (!doc?.filePath) return;
@@ -116,6 +119,57 @@ export function DocumentPanel({
       console.error("Style edit failed:", e);
     }
   }, [doc?.filePath, doc?.workspace]);
+
+  const handleTableOp = useCallback(async (op: TableOp) => {
+    if (!doc?.filePath) return;
+    try {
+      const params = { ...op.params };
+      if ((op.operation === "merge_cells" || op.operation === "unmerge_cells") && cellRange) {
+        params.range = cellRange;
+      }
+      if (op.operation === "set_formula" && cellRange && !cellRange.includes(":")) {
+        params.cell = cellRange;
+      }
+      const result = await documentsApi.quickEditTableOp({
+        path: doc.filePath,
+        workspace: doc.workspace || "",
+        operation: op.operation,
+        sheet: activeSheet,
+        params,
+      });
+      if (result.preview_html) {
+        setLocalPreviewHtml(result.preview_html);
+      } else {
+        onRefreshPreview?.();
+      }
+    } catch (e: any) {
+      console.error("Table op failed:", e);
+    }
+  }, [doc?.filePath, doc?.workspace, cellRange, onRefreshPreview, activeSheet]);
+
+  const handleCellEdit = useCallback(async (path: string, newText: string) => {
+    if (!doc?.filePath) return;
+    try {
+      const m = path.match(/\/([^/]+)\/([A-Z]+\d+)$/);
+      if (!m) return;
+      const sheet = m[1];
+      const cell = m[2];
+      const result = await documentsApi.quickEditTableOp({
+        path: doc.filePath,
+        workspace: doc.workspace || "",
+        operation: "set_cell_style",
+        sheet,
+        params: { cell, props: { value: newText } },
+      });
+      if (result.preview_html) {
+        setLocalPreviewHtml(result.preview_html);
+      } else {
+        onRefreshPreview?.();
+      }
+    } catch (e: any) {
+      console.error("Cell edit failed:", e);
+    }
+  }, [doc?.filePath, doc?.workspace, onRefreshPreview]);
 
   // Clear local preview when doc changes
   useEffect(() => {
@@ -261,6 +315,8 @@ export function DocumentPanel({
                 const selectedText = highlightRef.current?.text || "";
                 onAIEdit?.(instruction, selectedText);
               }}
+              fileType={doc.fileName.split(".").pop()?.toLowerCase()}
+              onTableOp={handleTableOp}
             />
           )}
           {tab === "preview" ? (
@@ -273,6 +329,11 @@ export function DocumentPanel({
               onStyleEdit={handleStyleEdit}
               onOutlineChange={setOutlineItems}
               onOutlineActive={setOutlineActive}
+              onCellEdit={handleCellEdit}
+              onCellRangeSelect={(range, sheet) => {
+                setCellRange(range);
+                if (sheet) setActiveSheet(sheet);
+              }}
               onEditElement={(info) => {
                 if (!info) {
                   // Deselected — deactivate toolbar

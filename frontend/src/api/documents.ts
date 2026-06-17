@@ -116,6 +116,39 @@ export function quickEditStyle(
   return api.post("/documents/quick-edit/style", req);
 }
 
+// ── Quick Edit: Table Operations ──────────────────────────────────
+
+export interface TableOpRequest {
+  path: string;
+  workspace?: string;
+  operation: string;
+  sheet?: string;
+  params: Record<string, unknown>;
+}
+
+export interface TableOpResponse {
+  status: string;
+  preview_html: string | null;
+  message: string;
+  error?: string;
+}
+
+export function quickEditTableOp(
+  req: TableOpRequest,
+): Promise<TableOpResponse> {
+  return api.post("/documents/quick-edit/table-op", req);
+}
+
+// ── Quick Edit: PPT Theme ─────────────────────────────────────────
+
+export function quickEditTheme(
+  path: string,
+  props: Record<string, string>,
+  workspace = "",
+): Promise<QuickEditStyleResponse> {
+  return api.post("/documents/quick-edit/theme", { path, props, workspace });
+}
+
 export async function deleteDocument(
   path: string,
   workspace = "",

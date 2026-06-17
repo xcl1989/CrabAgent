@@ -1,6 +1,9 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Bold, Italic, Underline, Type, Palette, Sparkles } from "lucide-react";
+import {
+  Bold, Italic, Underline, Type, Palette, Sparkles,
+  TableCellsMerge, TableCellsSplit, Plus, FunctionSquare, Minus,
+} from "lucide-react";
 import { cn } from "../lib/cn";
 
 export interface EditElementStyle {
@@ -11,22 +14,33 @@ export interface EditElementStyle {
   color: string;
 }
 
+export interface TableOp {
+  operation: string;
+  params: Record<string, unknown>;
+}
+
 interface Props {
   active: boolean;
   style?: EditElementStyle;
   onStyleChange: (props: Record<string, string | number | boolean>) => void;
   onAIEdit: (instruction: string) => void;
   className?: string;
+  /** "docx" | "xlsx" | "pptx" — controls which format-specific buttons are shown */
+  fileType?: string;
+  /** Callback for structured table operations (Excel only) */
+  onTableOp?: (op: TableOp) => void;
 }
 
 const FONT_SIZES = [10, 12, 14, 16, 18, 20, 24, 28, 32, 40, 48];
 
-export function DocToolbar({ active, style, onStyleChange, onAIEdit, className }: Props) {
+export function DocToolbar({ active, style, onStyleChange, onAIEdit, className, fileType, onTableOp }: Props) {
   const { t } = useTranslation();
   const [showFontMenu, setShowFontMenu] = useState(false);
   const [showColorMenu, setShowColorMenu] = useState(false);
   const [showAIInput, setShowAIInput] = useState(false);
   const [aiText, setAiText] = useState("");
+  const [showFormulaInput, setShowFormulaInput] = useState(false);
+  const [formulaText, setFormulaText] = useState("");
 
   const handleSendAI = () => {
     const txt = aiText.trim();
@@ -36,12 +50,23 @@ export function DocToolbar({ active, style, onStyleChange, onAIEdit, className }
     setShowAIInput(false);
   };
 
+  const handleSendFormula = () => {
+    const txt = formulaText.trim();
+    if (!txt) return;
+    const formula = txt.startsWith("=") ? txt.slice(1) : txt;
+    onTableOp?.({ operation: "set_formula", params: { cell: "A1", formula } });
+    setFormulaText("");
+    setShowFormulaInput(false);
+  };
+
   const btnBase = cn(
     "w-7 h-7 flex items-center justify-center rounded transition-colors",
     active
       ? "text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
       : "text-[var(--text-tertiary)] opacity-40 cursor-not-allowed",
   );
+
+  const isExcel = fileType === "xlsx";
 
   return (
     <div className={cn("flex items-center gap-0.5 px-2 py-1 border-b border-[var(--border)] bg-[var(--bg-secondary)]", className)}>
@@ -135,6 +160,74 @@ export function DocToolbar({ active, style, onStyleChange, onAIEdit, className }
           </div>
         )}
       </div>
+
+      {/* ── Excel-only: table operations ── */}
+      {isExcel && onTableOp && (
+        <>
+          <div className="w-px h-5 bg-[var(--border)] mx-1" />
+
+          {/* Merge cells */}
+          <button
+            onClick={() => onTableOp({ operation: "merge_cells", params: { range: "A1:B1" } })}
+            className={cn(btnBase, "hover:bg-[var(--bg-tertiary)]")}
+            title="合并单元格"
+          >
+            <TableCellsMerge size={14} />
+          </button>
+
+          {/* Unmerge cells */}
+          <button
+            onClick={() => onTableOp({ operation: "unmerge_cells", params: { range: "A1:B1" } })}
+            className={cn(btnBase, "hover:bg-[var(--bg-tertiary)]")}
+            title="取消合并"
+          >
+            <TableCellsSplit size={14} />
+          </button>
+
+          {/* Insert row */}
+          <button
+            onClick={() => onTableOp({ operation: "insert_row", params: { after_row: 1 } })}
+            className={cn(btnBase, "hover:bg-[var(--bg-tertiary)]")}
+            title="插入行"
+          >
+            <Plus size={14} />
+          </button>
+
+          {/* Formula input */}
+          <div className="relative flex items-center">
+            {showFormulaInput && (
+              <input
+                type="text"
+                value={formulaText}
+                onChange={(e) => setFormulaText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleSendFormula();
+                  if (e.key === "Escape") { setShowFormulaInput(false); setFormulaText(""); }
+                }}
+                placeholder="如 SUM(A1:A10)"
+                autoFocus
+                className="w-32 h-7 px-2 text-[11px] rounded bg-[var(--bg-tertiary)] border border-[var(--brand)] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] focus:outline-none mr-1"
+              />
+            )}
+            <button
+              onClick={() => setShowFormulaInput((v) => !v)}
+              className={cn(btnBase, "hover:bg-[var(--bg-tertiary)]")}
+              title="设置公式"
+            >
+              <FunctionSquare size={14} />
+            </button>
+          </div>
+
+          {/* Delete row (danger) */}
+          <button
+            onClick={() => onTableOp({ operation: "delete_row", params: { row: 1 } })}
+            className={cn(btnBase, "hover:bg-red-500/10 hover:text-red-500")}
+            title="删除行"
+          >
+            <Minus size={13} />
+          </button>
+        </>
+      )}
 
       <div className="flex-1" />
 
