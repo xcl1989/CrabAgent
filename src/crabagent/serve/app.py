@@ -7,11 +7,12 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-import litellm
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-litellm.set_verbose = False
+from crabagent.core import configure_litellm
+
+configure_litellm()
 
 # Log to file in crabagent config directory
 _log_file = Path.home() / ".crabagent" / "serve.log"
@@ -22,8 +23,6 @@ logging.getLogger().addHandler(_fh)
 
 logger = logging.getLogger(__name__)
 
-logging.getLogger("LiteLLM").setLevel(logging.WARNING)
-logging.getLogger("primp").setLevel(logging.WARNING)
 logging.getLogger("ddgs.ddgs").setLevel(logging.WARNING)
 
 

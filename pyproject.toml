@@ -42,6 +42,7 @@ dependencies = [
     "uvicorn>=0.29",
     "redis>=5.0",
     "icalendar>=5.0",
+    "jieba>=0.42",
 ]
 
 [project.optional-dependencies]

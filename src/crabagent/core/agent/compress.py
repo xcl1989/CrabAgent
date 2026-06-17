@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 
 import litellm
@@ -36,45 +37,62 @@ async def compress_context(context: AgentContext, llm_params: dict, model: str) 
         )
     )
 
-    try:
-        response = await litellm.acompletion(
-            model=model,
-            **llm_params,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            max_tokens=8192,
-            stream=True,
-            stream_options={"include_usage": True},
-        )
+    last_exc: Exception | None = None
+    for attempt in range(settings.llm_retry_max + 1):
+        try:
+            response = await litellm.acompletion(
+                model=model,
+                **llm_params,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                max_tokens=8192,
+                stream=True,
+                stream_options={"include_usage": True},
+            )
 
-        content_buf = ""
-        reasoning_buf = ""
-        async for chunk in response:
-            if not chunk.choices:
-                continue
-            delta = chunk.choices[0].delta
-            piece = ""
-            if delta.content:
-                piece = delta.content
-                content_buf += piece
-            elif hasattr(delta, "reasoning_content") and delta.reasoning_content:
-                # Collect reasoning separately — never mix into the summary
-                reasoning_buf += delta.reasoning_content
+            content_buf = ""
+            reasoning_buf = ""
+            async for chunk in response:
+                if not chunk.choices:
+                    continue
+                delta = chunk.choices[0].delta
+                piece = ""
+                if delta.content:
+                    piece = delta.content
+                    content_buf += piece
+                elif hasattr(delta, "reasoning_content") and delta.reasoning_content:
+                    reasoning_buf += delta.reasoning_content
 
-            if piece:
-                await context.event_bus.emit(
-                    AgentEvent(
-                        type=EventType.COMPRESS_DELTA,
-                        data={"text": piece},
+                if piece:
+                    await context.event_bus.emit(
+                        AgentEvent(
+                            type=EventType.COMPRESS_DELTA,
+                            data={"text": piece},
+                        )
                     )
-                )
 
-        # Prefer actual content; fall back to reasoning only if content is empty
-        summary = content_buf.strip() or reasoning_buf.strip()
-    except Exception as e:
-        logger.warning("Context compression failed, keeping original: %s", e)
+            # Prefer actual content; fall back to reasoning only if content is empty
+            summary = content_buf.strip() or reasoning_buf.strip()
+            last_exc = None
+            break  # success
+        except (litellm.exceptions.RateLimitError, litellm.exceptions.Timeout,
+                litellm.exceptions.APIConnectionError, litellm.exceptions.ServiceUnavailableError,
+                litellm.exceptions.InternalServerError) as exc:
+            last_exc = exc
+            delay = min(settings.llm_retry_base_delay * (2 ** attempt), settings.llm_retry_max_delay)
+            logger.warning(
+                "Compress LLM call failed (attempt %d/%d): %s, retrying in %.1fs",
+                attempt + 1, settings.llm_retry_max + 1, exc, delay,
+            )
+            await asyncio.sleep(delay)
+        except Exception as exc:
+            last_exc = exc
+            break  # non-retryable error
+
+    if last_exc is not None:
+        logger.warning("Context compression failed after retries, keeping original: %s", last_exc)
         await context.event_bus.emit(
             AgentEvent(
                 type=EventType.CONTEXT_COMPRESSED,

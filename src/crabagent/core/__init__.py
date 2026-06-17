@@ -1,3 +1,24 @@
+import logging
+
+import litellm
+
+logger = logging.getLogger(__name__)
+
+
+def configure_litellm() -> None:
+    """Centralised litellm initialisation for all entry points (CLI + Serve)."""
+    from crabagent.core.config import settings
+
+    litellm.set_verbose = False
+    litellm.num_retries = settings.llm_retry_max
+    litellm.request_timeout = settings.llm_request_timeout
+    litellm.drop_params = True
+    litellm.suppress_debug_info = True
+    logging.getLogger("LiteLLM").setLevel(logging.WARNING)
+    logging.getLogger("primp").setLevel(logging.WARNING)
+    logger.debug("litellm configured: retries=%d timeout=%ds", settings.llm_retry_max, settings.llm_request_timeout)
+
+
 import crabagent.core.agent.tools.bash  # noqa: F401
 import crabagent.core.agent.tools.edit  # noqa: F401
 import crabagent.core.agent.tools.glob  # noqa: F401

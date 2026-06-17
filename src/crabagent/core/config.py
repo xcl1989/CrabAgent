@@ -70,6 +70,12 @@ class Settings(BaseSettings):
     memory_auto_recall: bool = True
     memory_max_inject: int = 5
 
+    # ── LLM retry / resilience ──
+    llm_retry_max: int = 3
+    llm_retry_base_delay: float = 2.0
+    llm_retry_max_delay: float = 60.0
+    llm_request_timeout: int = 120
+
     browser_strategy: str = "dom"
     browser_screenshot_to_llm: bool = True
     browser_screenshot_history: int = 3

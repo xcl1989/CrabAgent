@@ -11,6 +11,7 @@ class EventType(StrEnum):
     AGENT_START = "agent_start"
     AGENT_END = "agent_end"
     AGENT_ERROR = "agent_error"
+    AGENT_INFO = "agent_info"
     ITERATION_START = "iteration_start"
     ITERATION_END = "iteration_end"
     TOOL_CALL = "tool_call"

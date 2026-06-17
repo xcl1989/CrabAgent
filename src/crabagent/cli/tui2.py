@@ -1705,11 +1705,9 @@ async def run_dual_tui(args):
         fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
         root_logger.addHandler(fh)
 
-    logging.getLogger("LiteLLM").setLevel(logging.WARNING)
-    logging.getLogger("primp").setLevel(logging.WARNING)
     logging.getLogger("ddgs.ddgs").setLevel(logging.WARNING)
 
-    import litellm
+    from crabagent.core import configure_litellm
 
-    litellm.set_verbose = False
+    configure_litellm()
     await DualPanelTui(args).run()

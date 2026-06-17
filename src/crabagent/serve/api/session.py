@@ -75,57 +75,74 @@ class SearchResultItem(BaseModel):
 @router.get("/search", response_model=list[SearchResultItem])
 async def search_sessions(
     q: str = Query(..., min_length=1, description="Search keyword"),
+    workspace: str | None = Query(None, description="Filter by workspace path"),
     limit: int = Query(20, ge=1, le=100),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Full-text search across session titles and message content.
 
-    Uses FTS5 for English (fast) + LIKE for Chinese/CJK (FTS5 unicode61
-    doesn't segment CJK characters), merges and deduplicates results.
+    Uses jieba-tokenized FTS5 (messages_fts_cjk) for Chinese + English,
+    with LIKE fallback for edge cases.
     """
     seen = set()
     items = []
 
-    # 1) FTS5 search (fast for English, may miss CJK)
-    fts_sql = text("""
+    # Tokenize query with jieba for CJK-aware FTS5 search
+    from crabagent.core.fts import segment as _segment
+    tokenized_q = _segment(q).strip() or q
+    # Use prefix matching (*) so partial token search works
+    # e.g. "项目" → "项目*" matches token "项目管理"
+    fts_query = " ".join(t + "*" for t in tokenized_q.split()) if tokenized_q else tokenized_q
+
+    # 1) FTS5-CJK search (jieba-tokenized, handles Chinese + English)
+    ws_filter = "AND c.workspace = :workspace" if workspace else ""
+    cjk_sql = text(f"""
         SELECT c.session_id, c.title, m.content, m.role, c.updated_at
-        FROM messages_fts
-        JOIN messages m ON messages_fts.rowid = m.id
+        FROM messages_fts_cjk
+        JOIN messages m ON messages_fts_cjk.rowid = m.id
         JOIN conversations c ON m.conversation_id = c.id
-        WHERE messages_fts MATCH :q
+        WHERE messages_fts_cjk MATCH :q
           AND c.user_id = :user_id
+          {ws_filter}
           AND m.role IN ('user', 'assistant')
           AND m.compressed = 0
         ORDER BY rank
         LIMIT :lim
     """)
+    cjk_params: dict = {"q": fts_query, "user_id": user.id, "lim": limit}
+    if workspace:
+        cjk_params["workspace"] = workspace
     try:
-        result = await db.execute(fts_sql, {"q": q, "user_id": user.id, "lim": limit})
-        fts_rows = result.fetchall()
+        result = await db.execute(cjk_sql, cjk_params)
+        cjk_rows = result.fetchall()
     except Exception:
-        fts_rows = []
+        cjk_rows = []
 
-    # 2) LIKE search (catches CJK that FTS5 misses)
-    like_sql = text("""
+    # 2) LIKE search (catches anything FTS5 misses)
+    like_sql = text(f"""
         SELECT c.session_id, c.title, m.content, m.role, c.updated_at
         FROM messages m
         JOIN conversations c ON m.conversation_id = c.id
         WHERE c.user_id = :user_id
           AND m.content LIKE :like_q
+          {ws_filter}
           AND m.role IN ('user', 'assistant')
           AND m.compressed = 0
         ORDER BY c.updated_at DESC
         LIMIT :lim
     """)
+    like_params: dict = {"like_q": f"%{q}%", "user_id": user.id, "lim": limit}
+    if workspace:
+        like_params["workspace"] = workspace
     try:
-        result = await db.execute(like_sql, {"like_q": f"%{q}%", "user_id": user.id, "lim": limit})
+        result = await db.execute(like_sql, like_params)
         like_rows = result.fetchall()
     except Exception:
         like_rows = []
 
     # 3) Merge: FTS5 first (ranked), then LIKE (deduplicated)
-    for row in fts_rows + like_rows:
+    for row in cjk_rows + like_rows:
         if len(items) >= limit:
             break
         session_id = row[0]
@@ -160,18 +177,22 @@ async def search_sessions(
             title=row[1] or "",
             snippet=snippet,
             role=role,
-            updated_at=row[4].isoformat() if row[4] else None,
+            updated_at=str(row[4]) if row[4] else None,
         ))
 
     # Also search titles directly (supplements FTS5 results)
-    title_sql = text("""
+    title_sql = text(f"""
         SELECT session_id, title, updated_at FROM conversations
         WHERE user_id = :user_id
           AND title LIKE :like_q
+          {'AND workspace = :workspace' if workspace else ''}
         ORDER BY updated_at DESC
         LIMIT :lim
     """)
-    result = await db.execute(title_sql, {"like_q": f"%{q}%", "user_id": user.id, "lim": limit})
+    title_params: dict = {"like_q": f"%{q}%", "user_id": user.id, "lim": limit}
+    if workspace:
+        title_params["workspace"] = workspace
+    result = await db.execute(title_sql, title_params)
     for row in result.fetchall():
         if row[0] not in seen:
             items.append(SearchResultItem(
@@ -179,7 +200,7 @@ async def search_sessions(
                 title=row[1] or "",
                 snippet="",
                 role="",
-                updated_at=row[2].isoformat() if row[2] else None,
+                updated_at=str(row[2]) if row[2] else None,
             ))
 
     return items[:limit]

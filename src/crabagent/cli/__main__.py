@@ -76,9 +76,9 @@ def main():
     logging.getLogger("primp").setLevel(logging.WARNING)
     logging.getLogger("ddgs.ddgs").setLevel(logging.WARNING)
 
-    import litellm
+    from crabagent.core import configure_litellm
 
-    litellm.set_verbose = False
+    configure_litellm()
 
     if args.build_desktop:
         _run_build_desktop()

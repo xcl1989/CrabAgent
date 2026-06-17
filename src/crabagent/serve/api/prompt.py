@@ -288,7 +288,7 @@ async def prompt_async(
     else:
         db_content = req.message
 
-    await save_message(
+    saved_msg = await save_message(
         db,
         conversation_id=conv.id,
         sequence=user_msg_seq,
@@ -296,6 +296,14 @@ async def prompt_async(
         content=db_content,
         branch_id=active_branch,
     )
+    _pending_fts_id = saved_msg.id
+
+    # Index user message for FTS5-CJK (after db session operations are done)
+    try:
+        from crabagent.core.fts import index_message
+        await index_message(_pending_fts_id, db_content)
+    except Exception:
+        pass
 
     workspace = Path(conv.workspace) if conv.workspace else Path.cwd()
     workspace = workspace.resolve()

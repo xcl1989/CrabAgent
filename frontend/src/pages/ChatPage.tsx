@@ -789,6 +789,7 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
           onQuickAction={handleQuickAction}
           mobileOpen={mobileSidebarOpen}
           onMobileClose={() => setMobileSidebarOpen(false)}
+          workspace={activeSession?.workspace || workspace || undefined}
         />
       )}
       {mode === "work" && (

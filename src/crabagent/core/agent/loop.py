@@ -117,6 +117,8 @@ async def run_agent(
 
     _stream_retries = 0
     _max_stream_retries = 2
+    _llm_retry_count = 0
+    _llm_retry_max = settings.llm_retry_max
     context.metadata["_llm_params"] = dict(llm)
     context.metadata["_resolved_model"] = model.split("/", 1)[-1] if "/" in model else model
 
@@ -383,12 +385,106 @@ async def run_agent(
 
         except Exception as e:
             err_name = type(e).__name__
-            if _stream_retries < _max_stream_retries and "MidStreamFallback" in err_name:
+
+            # ── MidStreamFallback (existing) ──
+            if "MidStreamFallback" in err_name and _stream_retries < _max_stream_retries:
                 _stream_retries += 1
                 logger.warning("Stream error (retry %d/%d): %s", _stream_retries, _max_stream_retries, e)
                 continue
-            logger.error(f"Agent loop error: {e}", exc_info=True)
-            await context.event_bus.emit(AgentEvent(type=EventType.AGENT_ERROR, data={"error": str(e)}))
+
+            # ── Determine retry strategy ──
+            retryable = False
+            user_message = ""
+            backoff_delay = 0.0
+
+            if isinstance(e, litellm.exceptions.RateLimitError):
+                retryable = True
+                backoff_delay = min(
+                    settings.llm_retry_base_delay * (2 ** _llm_retry_count),
+                    settings.llm_retry_max_delay,
+                )
+                user_message = f"⚠️ API 速率已达上限，{backoff_delay:.0f}秒后自动重试…"
+
+            elif isinstance(e, (litellm.exceptions.Timeout, asyncio.TimeoutError)):
+                retryable = True
+                backoff_delay = min(
+                    settings.llm_retry_base_delay * (1.5 ** _llm_retry_count),
+                    settings.llm_retry_max_delay,
+                )
+                user_message = f"⏱️ API 请求超时，{backoff_delay:.0f}秒后自动重试…"
+
+            elif isinstance(e, litellm.exceptions.APIConnectionError):
+                retryable = True
+                backoff_delay = min(
+                    settings.llm_retry_base_delay * (2 ** _llm_retry_count),
+                    settings.llm_retry_max_delay,
+                )
+                user_message = f"🔌 网络连接失败，{backoff_delay:.0f}秒后自动重试…"
+
+            elif isinstance(e, (litellm.exceptions.ServiceUnavailableError, litellm.exceptions.InternalServerError)):
+                retryable = True
+                backoff_delay = min(
+                    settings.llm_retry_base_delay * (2 ** _llm_retry_count),
+                    settings.llm_retry_max_delay,
+                )
+                user_message = f"⚠️ API 服务暂时不可用（{err_name}），{backoff_delay:.0f}秒后自动重试…"
+
+            elif isinstance(e, litellm.exceptions.ContextWindowExceededError):
+                # Attempt auto-compression then retry
+                await context.event_bus.emit(
+                    AgentEvent(type=EventType.AGENT_INFO, data={"message": "📏 上下文超出模型限制，正在尝试自动压缩…"})
+                )
+                try:
+                    await compress_context(context, llm, model)
+                    _llm_retry_count = 0  # reset since context changed
+                    logger.info("Context auto-compressed after ContextWindowExceededError, retrying")
+                    await context.event_bus.emit(
+                        AgentEvent(type=EventType.AGENT_INFO, data={"message": "✅ 上下文压缩成功，自动重试中…"})
+                    )
+                    continue
+                except Exception:
+                    user_message = "📏 上下文超出模型限制，自动压缩失败。请新建对话或缩短内容后重试。"
+                    logger.warning("Auto-compression also failed after ContextWindowExceededError")
+
+            elif isinstance(e, litellm.exceptions.AuthenticationError):
+                user_message = "🔑 API 密钥无效或已过期，请在「设置」中更新 Provider 配置。"
+                logger.error("AuthenticationError - invalid or expired API key")
+
+            elif isinstance(e, litellm.exceptions.BudgetExceededError):
+                user_message = "💰 API 预算已耗尽，请在 Provider 后台充值或切换模型。"
+
+            elif isinstance(e, litellm.exceptions.ContentPolicyViolationError):
+                user_message = "🚫 内容被安全策略拦截，请修改输入后重试。"
+
+            elif isinstance(e, litellm.exceptions.BadRequestError):
+                user_message = f"❌ 请求参数错误：{e!s}"
+                # BadRequestError includes invalid model, malformed messages, etc.
+                # Log full details for debugging but show compact message to user
+                logger.warning("BadRequestError details: %s", e)
+
+            else:
+                # Generic / unknown error
+                user_message = f"❌ LLM 调用异常：{err_name}"
+
+            # ── Retry if recoverable and under limit ──
+            if retryable and _llm_retry_count < _llm_retry_max:
+                _llm_retry_count += 1
+                logger.warning(
+                    "%s (retry %d/%d, delay=%.1fs): %s",
+                    err_name, _llm_retry_count, _llm_retry_max, backoff_delay, e,
+                )
+                if user_message:
+                    await context.event_bus.emit(
+                        AgentEvent(type=EventType.AGENT_INFO, data={"message": user_message})
+                    )
+                await asyncio.sleep(backoff_delay)
+                continue
+
+            # ── Non-recoverable or retries exhausted ──
+            logger.error(f"Agent loop error (final): {e}", exc_info=True)
+            await context.event_bus.emit(
+                AgentEvent(type=EventType.AGENT_ERROR, data={"error": user_message})
+            )
             break
 
     if context.budget_exhausted:

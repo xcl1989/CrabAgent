@@ -40,6 +40,7 @@ interface Props {
   onQuickAction?: (action: "digest" | "remind" | "inbox") => void;
   mobileOpen?: boolean;
   onMobileClose?: () => void;
+  workspace?: string;
 }
 
 export default function SessionList({
@@ -57,6 +58,7 @@ export default function SessionList({
   onQuickAction,
   mobileOpen = false,
   onMobileClose,
+  workspace,
 }: Props) {
   const { t } = useTranslation();
   const [collapsed, setCollapsed] = useState(false);
@@ -107,7 +109,7 @@ export default function SessionList({
     setSearchLoading(true);
     const timer = setTimeout(async () => {
       try {
-        const results = await searchSessions(query.trim());
+        const results = await searchSessions(query.trim(), workspace);
         setSearchResults(results);
       } catch {
         setSearchResults([]);
@@ -265,7 +267,23 @@ export default function SessionList({
                   key={r.session_id}
                   onClick={() => {
                     const session = sessions.find((s) => s.session_id === r.session_id);
-                    if (session) handleSelect(session);
+                    if (session) {
+                      handleSelect(session);
+                    } else {
+                      // Session not in current list — construct minimal object
+                      handleSelect({
+                        session_id: r.session_id,
+                        title: r.title || "",
+                        workspace: workspace || "",
+                        model: "",
+                        provider: "",
+                        agent: "default",
+                        active_branch: "main",
+                        prompt_locale: "",
+                        created_at: null,
+                        updated_at: r.updated_at,
+                      });
+                    }
                   }}
                   className={cn(
                     "group relative px-3 py-2 cursor-pointer transition-colors",

@@ -1592,11 +1592,9 @@ class TuiSession:
 
 
 async def run_tui(args):
-    logging.getLogger("LiteLLM").setLevel(logging.WARNING)
-    logging.getLogger("primp").setLevel(logging.WARNING)
     logging.getLogger("ddgs.ddgs").setLevel(logging.WARNING)
 
-    import litellm
+    from crabagent.core import configure_litellm
 
-    litellm.set_verbose = False
+    configure_litellm()
     await TuiSession(args).run()

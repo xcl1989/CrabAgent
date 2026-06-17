@@ -183,6 +183,8 @@ export function submitInput(sessionId: string, inputId: string, answer: string):
   return api.post(`/sessions/${sessionId}/user-input`, { input_id: inputId, answer });
 }
 
-export function searchSessions(q: string): Promise<SearchResult[]> {
-  return api.get(`/sessions/search?q=${encodeURIComponent(q)}`);
+export function searchSessions(q: string, workspace?: string): Promise<SearchResult[]> {
+  const params: Record<string, string> = { q };
+  if (workspace) params.workspace = workspace;
+  return api.get(`/sessions/search`, params);
 }

@@ -30,12 +30,26 @@ class PersistenceListener:
             return
         batch = self._buffer[:]
         self._buffer.clear()
+        saved_ids: list[tuple[int, str]] = []
         try:
             async with async_session_factory() as db:
                 for kwargs in batch:
-                    await save_message(db, **kwargs)
+                    msg = await save_message(db, **kwargs)
+                    content = kwargs.get("content", "")
+                    role = kwargs.get("role", "")
+                    if content and role in ("assistant", "user"):
+                        saved_ids.append((msg.id, content))
         except Exception:
             logger.exception("Failed to flush %d messages (conv=%s)", len(batch), self.conversation_id)
+
+        # Index after session closed to avoid SQLite lock conflicts
+        if saved_ids:
+            try:
+                from crabagent.core.fts import index_message
+                for mid, content in saved_ids:
+                    await index_message(mid, content)
+            except Exception:
+                logger.debug("[FTS] Index batch failed (non-fatal)")
 
     async def on_event(self, event: AgentEvent):
         if event.type != EventType.MESSAGE_CREATED:
