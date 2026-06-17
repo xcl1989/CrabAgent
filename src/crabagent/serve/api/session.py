@@ -79,8 +79,15 @@ async def search_sessions(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Full-text search across session titles and message content using FTS5."""
-    # Search in messages via FTS5
+    """Full-text search across session titles and message content.
+
+    Uses FTS5 for English (fast) + LIKE for Chinese/CJK (FTS5 unicode61
+    doesn't segment CJK characters), merges and deduplicates results.
+    """
+    seen = set()
+    items = []
+
+    # 1) FTS5 search (fast for English, may miss CJK)
     fts_sql = text("""
         SELECT c.session_id, c.title, m.content, m.role, c.updated_at
         FROM messages_fts
@@ -95,35 +102,39 @@ async def search_sessions(
     """)
     try:
         result = await db.execute(fts_sql, {"q": q, "user_id": user.id, "lim": limit})
-        rows = result.fetchall()
+        fts_rows = result.fetchall()
     except Exception:
-        # Fallback: LIKE search if FTS5 fails (test run without index)
-        fallback_sql = text("""
-            SELECT c.session_id, c.title, m.content, m.role, c.updated_at
-            FROM messages m
-            JOIN conversations c ON m.conversation_id = c.id
-            WHERE c.user_id = :user_id
-              AND m.content LIKE :like_q
-              AND m.role IN ('user', 'assistant')
-              AND m.compressed = 0
-            ORDER BY c.updated_at DESC
-            LIMIT :lim
-        """)
-        result = await db.execute(fallback_sql, {
-            "like_q": f"%{q}%", "user_id": user.id, "lim": limit,
-        })
-        rows = result.fetchall()
+        fts_rows = []
 
-    seen = set()
-    items = []
-    for row in rows:
+    # 2) LIKE search (catches CJK that FTS5 misses)
+    like_sql = text("""
+        SELECT c.session_id, c.title, m.content, m.role, c.updated_at
+        FROM messages m
+        JOIN conversations c ON m.conversation_id = c.id
+        WHERE c.user_id = :user_id
+          AND m.content LIKE :like_q
+          AND m.role IN ('user', 'assistant')
+          AND m.compressed = 0
+        ORDER BY c.updated_at DESC
+        LIMIT :lim
+    """)
+    try:
+        result = await db.execute(like_sql, {"like_q": f"%{q}%", "user_id": user.id, "lim": limit})
+        like_rows = result.fetchall()
+    except Exception:
+        like_rows = []
+
+    # 3) Merge: FTS5 first (ranked), then LIKE (deduplicated)
+    for row in fts_rows + like_rows:
+        if len(items) >= limit:
+            break
         session_id = row[0]
         if session_id in seen:
             continue
         seen.add(session_id)
         content = row[2] or ""
         role = row[3] or "user"
-        # Extract plain text snippet from possible JSON content_blocks
+        # Extract plain text from possible JSON content_blocks
         plain = content
         if content.startswith("[") and content.endswith("]"):
             try:
