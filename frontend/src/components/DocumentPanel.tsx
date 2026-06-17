@@ -317,6 +317,23 @@ export function DocumentPanel({
               }}
               fileType={doc.fileName.split(".").pop()?.toLowerCase()}
               onTableOp={handleTableOp}
+              onThemeEdit={async (props) => {
+                if (!doc?.filePath) return;
+                try {
+                  const result = await documentsApi.quickEditTheme(
+                    doc.filePath,
+                    props,
+                    doc.workspace || "",
+                  );
+                  if (result.preview_html) {
+                    setLocalPreviewHtml(result.preview_html);
+                  } else {
+                    onRefreshPreview?.();
+                  }
+                } catch (e: any) {
+                  console.error("Theme edit failed:", e);
+                }
+              }}
             />
           )}
           {tab === "preview" ? (

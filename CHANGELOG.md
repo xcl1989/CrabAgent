@@ -9,7 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [0.10.5]
+## [0.11.0]
+
+### Added
+- **Office Deep Editing — Excel Table Enhancements** — full spreadsheet interaction from the preview
+  - **Merge/Unmerge cells**: drag-select multiple cells in the preview (green rectangle with row background for complete coverage), then click "Merge Cells" toolbar button
+  - **Insert/Delete rows & columns**: toolbar buttons for row/column operations
+  - **Formula support**: set formulas via toolbar input (`SUM(A1:A10)`), read computed values back in `office_read`
+  - **Direct cell editing**: double-click any cell → edit inline → save via `data-path` precise targeting
+  - **Batch API**: `POST /api/documents/quick-edit/table-op` for all table operations
+  - Agent tool descriptions updated to expose all merge/formula/theme/table properties to LLMs
+- **PPT Theme Editor** — modify presentation theme colors and fonts from the preview
+  - Backend `POST /api/documents/quick-edit/theme` supports 12 color slots + 2 font slots
+  - Frontend color picker with 12 swatches (accent1~6, dk1/lt1/dk2/lt2, hyperlink/followedhyperlink)
+  - Font selectors for headingFont and bodyFont with 10 font options
+
+### Fixed
+- **Excel batch operations silently failing** — `mgr.batch()` was passing JSON as a positional argument instead of `--commands` flag
+- **Template literal regex escaping** — `\/` and `\d` in template literals were consumed by Vite/esbuild during compilation, causing all regex-based `parseCellPath` to fail for non-trivial spreadsheet data
+- **Hardcoded sheet name** — merge/formula operations hardcoded `"Sheet1"` instead of using the actual sheet name from `data-path`
+- **Cell selection visual feedback** — selection now adds both row-level background (for complete rectangle even on sparse data) and cell-level outlines
+
+---
 
 ### Changed
 - **Dual-Mode Concept — Chat Mode & Work Mode** — CrabAgent's two working modes are now the central design narrative

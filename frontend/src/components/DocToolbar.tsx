@@ -29,11 +29,13 @@ interface Props {
   fileType?: string;
   /** Callback for structured table operations (Excel only) */
   onTableOp?: (op: TableOp) => void;
+  /** Callback for PPT theme changes */
+  onThemeEdit?: (props: Record<string, string>) => void;
 }
 
 const FONT_SIZES = [10, 12, 14, 16, 18, 20, 24, 28, 32, 40, 48];
 
-export function DocToolbar({ active, style, onStyleChange, onAIEdit, className, fileType, onTableOp }: Props) {
+export function DocToolbar({ active, style, onStyleChange, onAIEdit, className, fileType, onTableOp, onThemeEdit }: Props) {
   const { t } = useTranslation();
   const [showFontMenu, setShowFontMenu] = useState(false);
   const [showColorMenu, setShowColorMenu] = useState(false);
@@ -67,6 +69,19 @@ export function DocToolbar({ active, style, onStyleChange, onAIEdit, className, 
   );
 
   const isExcel = fileType === "xlsx";
+  const isPptx = fileType === "pptx";
+
+  // ── PPT Theme picker state ──
+  const [showThemePicker, setShowThemePicker] = useState(false);
+  const [themeColors, setThemeColors] = useState<Record<string, string>>({
+    accent1: "4472C4", accent2: "ED7D31", accent3: "A5A5A5",
+    accent4: "FFC000", accent5: "5B9BD5", accent6: "70AD47",
+    dk1: "000000", lt1: "FFFFFF", dk2: "44546A", lt2: "E7E6E6",
+    hyperlink: "0563C1", followedhyperlink: "954F72",
+  });
+  const [themeFonts, setThemeFonts] = useState({ headingFont: "Calibri Light", bodyFont: "Calibri" });
+  const [showFontPicker, setShowFontPicker] = useState(false);
+  const FONT_LIST = ["Calibri", "Calibri Light", "Arial", "Times New Roman", "Segoe UI", "微软雅黑", "宋体", "Noto Sans CJK", "Montserrat", "Open Sans"];
 
   return (
     <div className={cn("flex items-center gap-0.5 px-2 py-1 border-b border-[var(--border)] bg-[var(--bg-secondary)]", className)}>
@@ -226,6 +241,83 @@ export function DocToolbar({ active, style, onStyleChange, onAIEdit, className, 
           >
             <Minus size={13} />
           </button>
+        </>
+      )}
+
+      {/* ── PPT-only: Theme ── */}
+      {isPptx && onThemeEdit && (
+        <>
+          <div className="w-px h-5 bg-[var(--border)] mx-1" />
+          <div className="relative">
+            <button
+              onClick={() => setShowThemePicker((v) => !v)}
+              className={cn(btnBase, "gap-1 w-auto px-1.5 hover:bg-[var(--bg-tertiary)]")}
+              title="主题配色"
+            >
+              <Palette size={13} />
+              <span className="text-[10px]">主题</span>
+            </button>
+            {showThemePicker && (
+              <div className="absolute top-full left-0 mt-1 z-50 bg-[var(--bg-elevated)] border border-[var(--border)] rounded-lg shadow-[var(--shadow-lg)] p-3 w-72" onClick={(e) => e.stopPropagation()}>
+                <div className="text-xs font-semibold text-[var(--text-primary)] mb-2">主题配色</div>
+                <div className="grid grid-cols-6 gap-1.5 mb-3">
+                  {Object.entries(themeColors).map(([key, val]) => (
+                    <div key={key} className="flex flex-col items-center gap-0.5">
+                      <input
+                        type="color"
+                        value={"#" + val}
+                        onChange={(e) => {
+                          const newVal = e.target.value.replace("#", "");
+                          setThemeColors((prev) => ({ ...prev, [key]: newVal }));
+                        }}
+                        className="w-7 h-7 p-0 border border-[var(--border)] rounded cursor-pointer"
+                        title={key}
+                      />
+                      <span className="text-[8px] text-[var(--text-tertiary)] truncate max-w-full">{key}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="text-xs font-semibold text-[var(--text-primary)] mb-1">字体</div>
+                <div className="flex flex-col gap-1.5 mb-3">
+                  <select
+                    value={themeFonts.headingFont}
+                    onChange={(e) => setThemeFonts((prev) => ({ ...prev, headingFont: e.target.value }))}
+                    className="text-[11px] px-2 py-1 rounded bg-[var(--bg-tertiary)] border border-[var(--border)] text-[var(--text-primary)]"
+                  >
+                    <optgroup label="标题字体">
+                      {FONT_LIST.map((f) => <option key={f} value={f}>{f}</option>)}
+                    </optgroup>
+                  </select>
+                  <select
+                    value={themeFonts.bodyFont}
+                    onChange={(e) => setThemeFonts((prev) => ({ ...prev, bodyFont: e.target.value }))}
+                    className="text-[11px] px-2 py-1 rounded bg-[var(--bg-tertiary)] border border-[var(--border)] text-[var(--text-primary)]"
+                  >
+                    <optgroup label="正文字体">
+                      {FONT_LIST.map((f) => <option key={f} value={f}>{f}</option>)}
+                    </optgroup>
+                  </select>
+                </div>
+                <div className="flex gap-2 justify-end">
+                  <button
+                    onClick={() => setShowThemePicker(false)}
+                    className="px-2 py-1 text-[10px] rounded text-[var(--text-tertiary)] hover:bg-[var(--bg-tertiary)]"
+                  >
+                    取消
+                  </button>
+                  <button
+                    onClick={() => {
+                      onThemeEdit({ ...themeColors, ...themeFonts });
+                      setShowThemePicker(false);
+                    }}
+                    className="px-3 py-1 text-[10px] rounded bg-[var(--accent)] text-white hover:opacity-90"
+                  >
+                    应用主题
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </>
       )}
 

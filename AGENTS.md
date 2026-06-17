@@ -4,7 +4,7 @@
 > 保持简洁——最多约 8000 字符。使用 `update_agents_md` 工具来更新。
 
 ## 版本
-- 当前：**0.10.5**（双模式叙事 — 对话模式 & 工作模式）
+- 当前：**0.11.0**（Office 深度编辑 — 表格增强 + 公式 + PPT 主题）
 - 版本号出现在 7 处：`pyproject.toml`、`src/crabagent/serve/app.py`（`create_app` + `/health`）、CLI 横幅 `src/crabagent/cli/__main__.py`（`_print_banner`）、TUI 横幅 `src/crabagent/cli/tui.py`、`AGENTS.md`、`electron/package.json`、`src/crabagent/electron/package.json`
 - 修改版本时需同步更新全部七处
 
