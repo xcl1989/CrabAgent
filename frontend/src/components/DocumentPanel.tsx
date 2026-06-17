@@ -44,7 +44,7 @@ interface Props {
   /** Notify parent to scroll to an AI highlight target */
   pendingHighlight?: { path?: string; text?: string } | null;
   /** Notify parent when user wants AI to edit text */
-  onAIEdit?: (instruction: string) => void;
+  onAIEdit?: (instruction: string, selectedText: string) => void;
 }
 
 export function DocumentPanel({
@@ -147,10 +147,26 @@ export function DocumentPanel({
 
   const handleStyleChange = useCallback(async (props: Record<string, string | number | boolean>) => {
     if (!doc?.filePath) return;
-    // We need an element path. For now, use a heuristic: last edited element path or "/".
-    // The real path comes from the edit element info callback (to be wired in Step 3).
-    // As a fallback, we apply to the last selected element's path stored in a ref.
-    const elementPath = (highlightRef.current?.path) || doc.filePath;
+    const elementPath = highlightRef.current?.path || "";
+
+    // 1. Instant visual update in iframe
+    const iframe = iframeRef.current?.querySelector("iframe");
+    iframe?.contentWindow?.postMessage({ type: "apply-style", props }, "*");
+
+    // 2. Update toolbar toggle states
+    setEditElementStyle((prev) => {
+      if (!prev) return prev;
+      const next = { ...prev };
+      if ("bold" in props) next.bold = !!props.bold;
+      if ("italic" in props) next.italic = !!props.italic;
+      if ("underline" in props) next.underline = !!props.underline;
+      if ("size" in props) next.fontSize = props.size + "pt";
+      if ("color" in props) next.color = String(props.color);
+      return next;
+    });
+
+    // 3. Persist to backend via API
+    if (!elementPath) return;
     try {
       const result = await documentsApi.quickEditStyle({
         path: doc.filePath,
@@ -241,7 +257,10 @@ export function DocumentPanel({
               active={editElementActive}
               style={editElementStyle}
               onStyleChange={handleStyleChange}
-              onAIEdit={(instruction) => onAIEdit?.(instruction)}
+              onAIEdit={(instruction) => {
+                const selectedText = highlightRef.current?.text || "";
+                onAIEdit?.(instruction, selectedText);
+              }}
             />
           )}
           {tab === "preview" ? (
@@ -255,6 +274,13 @@ export function DocumentPanel({
               onOutlineChange={setOutlineItems}
               onOutlineActive={setOutlineActive}
               onEditElement={(info) => {
+                if (!info) {
+                  // Deselected — deactivate toolbar
+                  setEditElementActive(false);
+                  setEditElementStyle(undefined);
+                  highlightRef.current = null;
+                  return;
+                }
                 setEditElementActive(true);
                 const s = info.style as Record<string, string>;
                 setEditElementStyle({
@@ -264,7 +290,7 @@ export function DocumentPanel({
                   fontSize: s?.fontSize || "14px",
                   color: s?.color || "#000000",
                 });
-                highlightRef.current = { path: info.path };
+                highlightRef.current = { path: info.path, text: info.text };
               }}
             />
           ) : (

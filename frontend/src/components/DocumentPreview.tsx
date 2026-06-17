@@ -15,8 +15,8 @@ interface Props {
   onOutlineChange?: (items: { level: number; text: string; index: number }[]) => void;
   /** 当前可见的大纲索引变化 */
   onOutlineActive?: (index: number) => void;
-  /** 当前编辑元素信息（双击进入编辑时） */
-  onEditElement?: (info: { tagName: string; path: string; style: Record<string, string> }) => void;
+  /** 当前选中元素信息（单击选中或双击编辑时） */
+  onEditElement?: (info: { tagName: string; path: string; text: string; style: Record<string, string> }) => void;
 }
 
 // Injected script for column-resize and row-resize.
@@ -176,37 +176,124 @@ const EDIT_SCRIPT = `
 <script>
 (function() {
   var el = null, oldText = '';
+  var selectedEl = null;
 
-  document.addEventListener('dblclick', function(e) {
-    var t = e.target;
-    if (!t || t.tagName === 'BODY' || t.tagName === 'HTML' || t.tagName === 'SCRIPT' || t.tagName === 'STYLE') return;
-    // Walk up to find a block-level container (skip inline elements like SPAN)
-    var blockTags = ['DIV','P','LI','H1','H2','H3','H4','H5','H6','TD','TH','BLOCKQUOTE','PRE'];
+  // Walk up to a meaningful block-level container
+  function findBlock(target) {
+    var blockTags = ['DIV','P','LI','H1','H2','H3','H4','H5','H6','TD','TH','BLOCKQUOTE','PRE','SPAN'];
+    var t = target;
     while (t && t.parentNode && t.parentNode !== document.body) {
       if (blockTags.indexOf(t.tagName) >= 0 && t.textContent.trim()) break;
       t = t.parentNode;
     }
-    // If we ended up at body or an empty element, try using the original target
     if (t === document.body || !t.textContent.trim()) {
-      t = e.target;
+      t = target;
       while (t && t.parentNode && !t.textContent.trim() && blockTags.indexOf(t.tagName) < 0) {
         t = t.parentNode;
       }
     }
-    if (!t || t === document.body) return;
-    var txt = (t.innerText || t.textContent).trim();
+    return (t && t !== document.body) ? t : null;
+  }
+
+  // Send element info to parent (activates the formatting toolbar)
+  function notifySelected(t) {
+    if (!t) return;
+    selectedEl = t;
+    var cs = window.getComputedStyle(t);
+    var dataPath = t.getAttribute('data-path') || '';
+    var text = (t.innerText || t.textContent || '').trim().substring(0, 2000);
+    window.parent.postMessage({
+      type: 'edit-element-selected',
+      tagName: t.tagName,
+      path: dataPath,
+      text: text,
+      style: {
+        fontWeight: cs.fontWeight,
+        fontStyle: cs.fontStyle,
+        textDecoration: cs.textDecoration,
+        fontSize: cs.fontSize,
+        color: cs.color,
+      }
+    }, '*');
+  }
+
+  // mouseup → check if user selected text (drag-highlight), activate toolbar only when text is selected
+  document.addEventListener('mouseup', function(e) {
+    if (el) return; // don't interfere with text editing
+    setTimeout(function() {
+      var sel = window.getSelection();
+      var selText = sel ? sel.toString().trim() : '';
+      if (selText && selectedEl && selText !== (selectedEl.innerText || '').trim()) {
+        // Partial text selection within an element — report the selected text
+        notifySelectedFromText(selText);
+      } else if (selText) {
+        // Selection available — activate toolbar with the selected text
+        var t = sel.anchorNode ? (sel.anchorNode.parentElement || sel.anchorNode.parentNode) : null;
+        var block = t ? findBlock(t) : null;
+        if (block) {
+          notifySelected(block);
+        } else {
+          notifySelectedFromText(selText);
+        }
+      } else {
+        // No text selected — deselect
+        if (selectedEl) {
+          selectedEl = null;
+          window.parent.postMessage({ type: 'edit-element-deselected' }, '*');
+        }
+      }
+    }, 10);
+  });
+
+  // Also listen for selectionchange (handles select-all, programmatic selection)
+  document.addEventListener('selectionchange', function() {
+    if (el) return;
+    var sel = window.getSelection();
+    var selText = sel ? sel.toString().trim() : '';
+    if (!selText && selectedEl) {
+      // Selection cleared
+      selectedEl = null;
+      window.parent.postMessage({ type: 'edit-element-deselected' }, '*');
+    }
+  });
+
+  function notifySelectedFromText(text) {
+    selectedEl = null;
+    window.parent.postMessage({
+      type: 'edit-element-selected',
+      tagName: 'TEXT',
+      path: '',
+      text: text.substring(0, 2000),
+      style: {
+        fontWeight: '400',
+        fontStyle: 'normal',
+        textDecoration: 'none',
+        fontSize: '14px',
+        color: '#000000',
+      }
+    }, '*');
+  }
+
+  document.addEventListener('dblclick', function(e) {
+    var t = e.target;
+    if (!t || t.tagName === 'BODY' || t.tagName === 'HTML' || t.tagName === 'SCRIPT' || t.tagName === 'STYLE') return;
+    var block = findBlock(t);
+    if (!block) return;
+    var txt = (block.innerText || block.textContent).trim();
     if (!txt) return;
-    t.contentEditable = 'true';
-    t.focus();
+    block.contentEditable = 'true';
+    block.focus();
     try {
       var r = document.createRange();
-      r.selectNodeContents(t);
+      r.selectNodeContents(block);
       var s = window.getSelection();
       s.removeAllRanges();
       s.addRange(r);
     } catch(_) {}
-    el = t;
+    el = block;
     oldText = txt;
+    // Also notify parent about the selected element
+    notifySelected(block);
     // Notify parent that editing started
     window.parent.postMessage({ type: 'quick-edit-active', active: true }, '*');
   });
@@ -231,6 +318,25 @@ const EDIT_SCRIPT = `
   window.addEventListener('message', function(e) {
     if (e.data?.type === 'quick-edit-finish' && el) {
       finish();
+    }
+    // Parent requests style change on selected element
+    if (e.data?.type === 'apply-style' && selectedEl) {
+      var props = e.data.props;
+      for (var k in props) {
+        if (k === 'bold') {
+          selectedEl.style.fontWeight = props[k] ? 'bold' : 'normal';
+        } else if (k === 'italic') {
+          selectedEl.style.fontStyle = props[k] ? 'italic' : 'normal';
+        } else if (k === 'underline') {
+          selectedEl.style.textDecoration = props[k] ? 'underline' : 'none';
+        } else if (k === 'size') {
+          selectedEl.style.fontSize = props[k] + 'pt';
+        } else if (k === 'color') {
+          selectedEl.style.color = props[k];
+        }
+      }
+      // Re-notify parent with updated style
+      notifySelected(selectedEl);
     }
   });
 
@@ -269,6 +375,11 @@ export function DocumentPreview({ html, loading, error, className, onQuickEdit, 
   const [editing, setEditing] = useState(false);
   const [resizing, setResizing] = useState(false);
   const resizeActive = useRef(false);
+  // ── Scroll position memory (survives srcDoc refresh) ──
+  const savedScroll = useRef<number>(0);
+  const prevHtml = useRef<string | null>(null);
+  // Track scroll position from inside iframe
+  const scrollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   editHandlerRef.current = onQuickEdit;
   styleHandlerRef.current = onStyleEdit;
   outlineHandlerRef.current = onOutlineChange;
@@ -305,6 +416,17 @@ export function DocumentPreview({ html, loading, error, className, onQuickEdit, 
         outlineHandlerRef.current?.(data.items as { level: number; text: string; index: number }[]);
       } else if (data.type === "doc-outline-active") {
         outlineActiveHandlerRef.current?.(data.index as number);
+      } else if (data.type === "edit-element-selected") {
+        editElementHandlerRef.current?.({
+          tagName: data.tagName,
+          path: data.path,
+          text: data.text || "",
+          style: data.style,
+        });
+      } else if (data.type === "edit-element-deselected") {
+        editElementHandlerRef.current?.(null as any);
+      } else if (data.type === "doc-scroll-position") {
+        savedScroll.current = data.scrollTop as number;
       }
     };
     window.addEventListener("message", handler);
@@ -345,6 +467,29 @@ export function DocumentPreview({ html, loading, error, className, onQuickEdit, 
     window.addEventListener("mousedown", handler, true);
     return () => window.removeEventListener("mousedown", handler, true);
   }, [editing]);
+
+  // Before html changes, grab current scroll position from the iframe
+  useEffect(() => {
+    if (prevHtml.current !== null && prevHtml.current !== html) {
+      const iframe = iframeRef.current;
+      try {
+        const win = iframe?.contentWindow;
+        if (win) savedScroll.current = win.scrollY || 0;
+      } catch {}
+    }
+    prevHtml.current = html;
+  }, [html]);
+
+  // Restore scroll position after iframe reloads
+  const handleIframeLoad = useCallback(() => {
+    const iframe = iframeRef.current;
+    try {
+      const win = iframe?.contentWindow;
+      if (win && savedScroll.current > 0) {
+        win.scrollTo(0, savedScroll.current);
+      }
+    } catch {}
+  }, []);
 
   if (loading) {
     return (
@@ -400,9 +545,11 @@ const OUTLINE_SCRIPT = `
   });
   observer.observe(document.body, { childList: true, subtree: true });
 
-  // Scroll tracking — update active heading
+  // Scroll tracking — update active heading + report scroll position to parent
   var scrollTimer = null;
   window.addEventListener('scroll', function() {
+    // Report scroll position immediately (low cost)
+    window.parent.postMessage({ type: 'doc-scroll-position', scrollTop: window.scrollY }, '*');
     if (scrollTimer) return;
     scrollTimer = setTimeout(function() {
       scrollTimer = null;
@@ -484,6 +631,7 @@ const allScripts = `${RESIZE_SCRIPT}\n${EDIT_SCRIPT}\n${OUTLINE_SCRIPT}`;
         className="w-full h-full border-0"
         sandbox="allow-scripts allow-same-origin"
         style={{ background: "#fff" }}
+        onLoad={handleIframeLoad}
       />
     </div>
   );

@@ -289,9 +289,10 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
       events: [{ message: `📄 Opening ${name}…`, timestamp: Date.now(), status: "running" }],
       workspace: ws || undefined,
     });
+    setCurrentDocPath(path);
+    setMode("work");
     try {
       const preview = await documentsApi.getPreview(path, ws);
-      setCurrentDocPath(path);
       setDocState((prev) => prev ? {
         ...prev,
         busy: false,
@@ -741,14 +742,17 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
     }
   }, [currentDocPath]);
 
-  const handleAIEdit = useCallback((instruction: string) => {
-    // When user clicks "AI edit this" from toolbar, send to the chat
+  const handleAIEdit = useCallback((instruction: string, selectedText: string) => {
+    // When user clicks "AI edit this" from toolbar, send to the chat with selected text + doc path
     if (!activeSession) return;
-    const text = `请修改当前文档中的这段话：${instruction}`;
+    const docPath = currentDocPath || "";
+    const text = selectedText
+      ? `请修改文档 ${docPath} 中的这段内容（原文如下）：\n\n> ${selectedText}\n\n修改要求：${instruction}`
+      : `请修改文档 ${docPath}：${instruction}`;
     if (text.trim() && !sending) {
       setMessages((prev) => [...prev, { id: `u-${Date.now()}`, role: "user", content: text }]);
       setSending(true);
-      sessionsApi.sendPrompt(activeSession.session_id, text, selectedModel, undefined, selectedAgent, reasoningEffort, selectedProvider ?? undefined, currentDocPath || undefined)
+      sessionsApi.sendPrompt(activeSession.session_id, text, selectedModel, undefined, selectedAgent, reasoningEffort, selectedProvider ?? undefined, docPath || undefined)
         .catch(() => setSending(false));
     }
   }, [activeSession, selectedModel, selectedAgent, reasoningEffort, selectedProvider, currentDocPath, sending, setMessages, setSending]);
