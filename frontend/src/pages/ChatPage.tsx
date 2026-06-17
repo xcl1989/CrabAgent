@@ -14,6 +14,8 @@ import {
   Loader2,
   ChevronDown,
   Check,
+  LayoutPanelLeft,
+  LayoutPanelTop,
 } from "lucide-react";
 import * as sessionsApi from "../api/sessions";
 import * as providersApi from "../api/providers";
@@ -50,6 +52,10 @@ import { useModelSelector } from "../hooks/useModelSelector";
 import { cn } from "../lib/cn";
 import { DocumentPanel, DocState } from "../components/DocumentPanel";
 import { DocOpEvent } from "../components/DocumentTimeline";
+import { CodePanel } from "../components/CodePanel";
+import { PrototypePanel } from "../components/PrototypePanel";
+import { MeetingPanel } from "../components/MeetingPanel";
+import { MarkdownPanel } from "../components/MarkdownPanel";
 import { SSEEvent } from "../api/events";
 import * as documentsApi from "../api/documents";
 
@@ -119,6 +125,30 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
 
   const [docPanelMaximized, setDocPanelMaximized] = useState(false);
 
+  // ── Work mode state ────────────────────────────────────────────
+  type Mode = "chat" | "work";
+  const [mode, setMode] = useState<Mode>(() => {
+    try {
+      const saved = localStorage.getItem("crabagent_mode");
+      if (saved === "work" || saved === "chat") return saved;
+    } catch {}
+    return "chat";
+  });
+  const [pendingHighlight, setPendingHighlight] = useState<{ path?: string; text?: string } | null>(null);
+  type WorkspaceType = "document" | "code" | "prototype" | "meeting" | "markdown";
+  const [workspaceType, setWorkspaceType] = useState<WorkspaceType>("document");
+  const [meetingActive, setMeetingActive] = useState(false);
+
+  const handleStartMeeting = useCallback(() => {
+    setMeetingActive(true);
+    setWorkspaceType("meeting");
+    setMode("work");
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem("crabagent_mode", mode);
+  }, [mode]);
+
   const docPanelWidthRef = useRef(docPanelWidth);
   docPanelWidthRef.current = docPanelWidth;
 
@@ -167,6 +197,8 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
         previewError: null,
         events: [{ message: `📄 ${data.operation as string} ${file}`, timestamp: Date.now(), status: "running" }],
       });
+      // Auto-switch to work mode when AI starts working on a document
+      setMode("work");
     } else if (type === "doc_op_delta") {
       setDocState((prev) => {
         if (!prev) return prev;
@@ -176,6 +208,10 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
           events: [...prev.events, { message: data.message as string, timestamp: Date.now(), status: "running" }],
         };
       });
+      // Track element_path for highlight
+      if (data.element_path) {
+        setPendingHighlight({ path: data.element_path as string });
+      }
     } else if (type === "doc_op_preview") {
       setDocState((prev) => {
         if (!prev) return prev;
@@ -185,6 +221,7 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
       setDocState((prev) => {
         if (!prev) return prev;
         const ok = data.status === "ok";
+        // If we have a pending highlight from delta, keep it for the new preview
         return {
           ...prev,
           busy: false,
@@ -235,6 +272,13 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
   // ── Open Office document from file tree ───────────────────────
   const handleOpenDoc = useCallback(async (path: string, name: string) => {
     const ws = activeSession?.workspace || workspace || "";
+    // HTML and Markdown files go directly to their workspace mode, no doc preview
+    if (name.toLowerCase().endsWith(".html") || name.toLowerCase().endsWith(".md")) {
+      setCurrentDocPath(path);
+      setDocState(null);
+      setMode("work");
+      return;
+    }
     setDocState({
       fileName: name,
       filePath: path,
@@ -293,6 +337,7 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
   const [showDelegate, setShowDelegate] = useState(false);
   const [showResultCompare, setShowResultCompare] = useState(false);
   const [showFiles, setShowFiles] = useState(false);
+  const [showWorkFiles, setShowWorkFiles] = useState(false);
   const [pendingImages, setPendingImages] = useState<string[]>([]);
   const [reasoningEffort, setReasoningEffort] = useState("medium");
   const [agentProfiles, setAgentProfiles] = useState<AgentProfileType[]>([]);
@@ -679,74 +724,524 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
     [],
   );
 
+  // ── Workspace type detection ──────────────────────────────
+  const CODE_EXTS = new Set(["py", "ts", "tsx", "js", "jsx", "json", "go", "rs", "java", "c", "cpp", "css", "scss", "vue", "svelte", "sh", "bash", "yaml", "yml", "toml", "sql"]);
+  const detectWorkspaceType = (name: string): WorkspaceType => {
+    const ext = name.split(".").pop()?.toLowerCase() || "";
+    if (ext === "html") return "prototype";
+    if (ext === "md") return "markdown";
+    if (CODE_EXTS.has(ext)) return "code";
+    return "document";
+  };
+
+  useEffect(() => {
+    if (currentDocPath) {
+      const type = detectWorkspaceType(currentDocPath);
+      setWorkspaceType(type);
+    }
+  }, [currentDocPath]);
+
+  const handleAIEdit = useCallback((instruction: string) => {
+    // When user clicks "AI edit this" from toolbar, send to the chat
+    if (!activeSession) return;
+    const text = `请修改当前文档中的这段话：${instruction}`;
+    if (text.trim() && !sending) {
+      setMessages((prev) => [...prev, { id: `u-${Date.now()}`, role: "user", content: text }]);
+      setSending(true);
+      sessionsApi.sendPrompt(activeSession.session_id, text, selectedModel, undefined, selectedAgent, reasoningEffort, selectedProvider ?? undefined, currentDocPath || undefined)
+        .catch(() => setSending(false));
+    }
+  }, [activeSession, selectedModel, selectedAgent, reasoningEffort, selectedProvider, currentDocPath, sending, setMessages, setSending]);
+
   const completedTasks = taskBoardTasks.filter((t) => t.status === "done");
 
   return (
     <div className="relative flex h-full overflow-hidden bg-[var(--bg-primary)]">
-      <SessionList
-        sessions={sessions}
-        activeId={activeSession?.session_id || null}
-        onSelect={onSelectSession}
-        onNew={onNewSession}
-        onDelete={handleDeleteSession}
-        onOpenProviders={() => setShowProviders(true)}
-        onOpenMcpServers={() => setShowMcpServers(true)}
-        onOpenTasks={() => setShowTasks(true)}
-        onOpenEmail={() => setShowEmail(true)}
-        onOpenScheduledTasks={() => setShowScheduledTasks(true)}
-        onOpenSkills={() => setShowSkills(true)}
-        onQuickAction={handleQuickAction}
-        mobileOpen={mobileSidebarOpen}
-        onMobileClose={() => setMobileSidebarOpen(false)}
-      />
-
-      <div className="flex-1 flex flex-col min-w-0">
-        {/* Toolbar */}
-        <div
-          className="flex items-center gap-1 px-3 h-11 border-b border-[var(--border)] bg-[var(--bg-secondary)]"
-        >
-          <Button
-            size="icon"
-            variant="ghost"
-            onClick={() => setMobileSidebarOpen(true)}
+      {/* ── Session List ── */}
+      {mode === "chat" && (
+        <SessionList
+          sessions={sessions}
+          activeId={activeSession?.session_id || null}
+          onSelect={onSelectSession}
+          onNew={onNewSession}
+          onDelete={handleDeleteSession}
+          onOpenProviders={() => setShowProviders(true)}
+          onOpenMcpServers={() => setShowMcpServers(true)}
+          onOpenTasks={() => setShowTasks(true)}
+          onOpenEmail={() => setShowEmail(true)}
+          onOpenScheduledTasks={() => setShowScheduledTasks(true)}
+          onOpenSkills={() => setShowSkills(true)}
+          onQuickAction={handleQuickAction}
+          mobileOpen={mobileSidebarOpen}
+          onMobileClose={() => setMobileSidebarOpen(false)}
+        />
+      )}
+      {mode === "work" && (
+        <div className="w-12 shrink-0 border-r border-[var(--border)] bg-[var(--bg-secondary)] flex flex-col items-center py-2 gap-2">
+          <button
+            onClick={() => setMode("chat")}
+            className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-[var(--bg-tertiary)] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors"
             title={t("session.sessions")}
-            className="md:hidden"
           >
-            <Menu size={16} />
-          </Button>
-          <WorkspaceSwitcher current={workspace} onChange={setWorkspace} />
-          <div className="flex-1 min-w-0">
-            {activeSession && (
-              <BranchSelector
-                sessionId={activeSession.session_id}
-                activeBranch={activeBranch}
-                onSwitch={handleSwitchBranch}
-                onReplay={startReplay}
-              />
-            )}
+            <MessageSquare size={16} />
+          </button>
+        </div>
+      )}
+
+      {mode === "work" ? (
+        /* ── WORK MODE ───────────────────────────────────────── */
+        <>
+          {/* AI Chat — left sidebar (350px) */}
+          <div className="w-[350px] shrink-0 border-r border-[var(--border)] bg-[var(--bg-primary)] flex flex-col">
+            <div className="flex-1 min-h-0 flex flex-col">
+              {activeSession ? (
+                <>
+                  {replaying && replayProgress.total > 0 && (
+                    <div className="px-4 pt-2 pb-1 border-b border-[var(--border)] bg-[var(--bg-secondary)]">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs text-[var(--success)] flex items-center gap-1.5">
+                          <Sparkles size={11} className="animate-pulse" />
+                          {t("chat.replayingBranch")}
+                        </span>
+                        <span className="text-xs text-[var(--text-tertiary)] font-mono">
+                          {replayProgress.current} / {replayProgress.total}
+                        </span>
+                      </div>
+                      <div className="h-1 rounded-full overflow-hidden bg-[var(--bg-tertiary)]">
+                        <div
+                          className="h-full transition-all duration-200 rounded-full bg-gradient-to-r from-[var(--success)] to-[var(--accent)]"
+                          style={{
+                            width: `${(replayProgress.current / replayProgress.total) * 100}%`,
+                          }}
+                        />
+                      </div>
+                    </div>
+                  )}
+                  <ChatPanel
+                    messages={messages}
+                    connected={connected}
+                    sending={sending}
+                    onToolConfirm={handleToolConfirm}
+                    onUserInput={handleUserInput}
+                    onBranch={handleBranch}
+                    replaying={replaying}
+                    externalSubAgentId={viewingSubAgent}
+                    onSubAgentModalClose={() => setViewingSubAgent(null)}
+                    getSubAgentContent={getSubAgentContent}
+                  />
+                  <McpStatusBar status={mcpStatus} />
+
+                  <div
+                    className="px-2 pt-1"
+                    style={{ paddingBottom: "max(0.5rem, env(safe-area-inset-bottom))" }}
+                    onDrop={handleDrop}
+                    onDragOver={handleDragOver}
+                  >
+                    <AgentBar onAgentClick={handleAgentBarClick} />
+
+                    {/* Agent + Model selectors */}
+                    <div className="mb-1 flex items-center gap-2 flex-wrap">
+                      {agentProfiles.length > 0 && (
+                        <div ref={agentDropdownRef} className="flex items-center gap-1.5 relative">
+                          <span className="text-[11px] text-[var(--text-tertiary)]">
+                            Agent
+                          </span>
+                          <button
+                            onClick={() => setAgentOpen((v) => !v)}
+                            className="flex items-center gap-1.5 text-xs h-7 pl-2.5 pr-1.5 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border)] text-[var(--text-primary)] focus:outline-none focus:border-[var(--brand)] focus:ring-2 focus:ring-[var(--brand)]/30 transition-colors"
+                          >
+                            <span className="truncate max-w-[80px]">
+                              {selectedAgent === "default"
+                                ? "🦀 default"
+                                : (() => {
+                                    const p = agentProfiles.find((a) => a.name === selectedAgent);
+                                    return `${p?.icon || "🤖"} ${p?.display_name || selectedAgent}`;
+                                  })()}
+                            </span>
+                            <ChevronDown size={13} className={cn("text-[var(--text-tertiary)] transition-transform shrink-0", agentOpen && "rotate-180")} />
+                          </button>
+                          {agentOpen && (
+                            <div className="absolute bottom-full mb-1.5 right-0 z-50 min-w-[160px] rounded-lg border border-[var(--border)] bg-[var(--bg-secondary)] shadow-[var(--shadow-lg)] py-1.5">
+                              {[{ name: "default", icon: "🦀", display_name: "default" as const }, ...agentProfiles].map((a) => {
+                                const isSelected = a.name === selectedAgent;
+                                return (
+                                  <button
+                                    key={a.name}
+                                    onClick={async () => {
+                                      setSelectedAgent(a.name);
+                                      setAgentOpen(false);
+                                      if (activeSession) {
+                                        try { await sessionsApi.switchAgent(activeSession.session_id, a.name); } catch {}
+                                      }
+                                    }}
+                                    className={cn(
+                                      "w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left transition-colors",
+                                      isSelected ? "bg-[var(--brand-bg)] text-[var(--brand)]" : "text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]",
+                                    )}
+                                  >
+                                    <span>{a.icon || "🤖"}</span>
+                                    <span className="flex-1 truncate">{a.display_name}</span>
+                                    {isSelected && <Check size={13} className="shrink-0 text-[var(--brand)]" />}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      {modelsLoading ? (
+                        <div className="flex items-center gap-1.5">
+                          <Loader2 size={12} className="animate-spin text-[var(--text-tertiary)]" />
+                          <span className="text-[11px] text-[var(--text-tertiary)]">Loading…</span>
+                        </div>
+                      ) : providerModels.length > 0 ? (
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[11px] text-[var(--text-tertiary)]">
+                            {t("chatPage.model")}
+                          </span>
+                          <ModelSelector
+                            providerModels={providerModels}
+                            selectedModel={selectedModel}
+                            selectedProvider={selectedProvider}
+                            onChange={(modelId, providerName) => {
+                              setSelectedModel(modelId);
+                              setSelectedProvider(providerName);
+                            }}
+                            disabled={modelsLoading}
+                          />
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[11px] text-[var(--text-tertiary)]">
+                            {t("chatPage.model")}
+                          </span>
+                          <input
+                            type="text"
+                            value={selectedModel}
+                            onChange={(e) => setSelectedModel(e.target.value)}
+                            placeholder={t("chatPage.modelPlaceholder")}
+                            className="text-xs h-7 px-2 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border)] text-[var(--text-primary)] font-mono focus:outline-none focus:border-[var(--brand)] focus:ring-2 focus:ring-[var(--brand)]/30 w-24 placeholder:text-[var(--text-tertiary)]"
+                          />
+                          {modelsError && (
+                            <span
+                              className="text-[10px] text-[var(--danger)] cursor-pointer"
+                              title={modelsError}
+                              onClick={() => window.location.reload()}
+                            >
+                              {t("chatPage.retry")}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      <div ref={effortDropdownRef} className="flex items-center gap-1.5 relative">
+                        <span className="text-[11px] text-[var(--text-tertiary)]">
+                          {t("chatPage.effort")}
+                        </span>
+                        <button
+                          onClick={() => setEffortOpen((v) => !v)}
+                          className="flex items-center gap-1.5 text-xs h-7 pl-2.5 pr-1.5 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border)] text-[var(--text-primary)] font-mono focus:outline-none focus:border-[var(--brand)] focus:ring-2 focus:ring-[var(--brand)]/30 transition-colors"
+                        >
+                          <span>{t(`chatPage.reasoning${reasoningEffort.charAt(0).toUpperCase() + reasoningEffort.slice(1)}`)}</span>
+                          <ChevronDown size={13} className={cn("text-[var(--text-tertiary)] transition-transform shrink-0", effortOpen && "rotate-180")} />
+                        </button>
+                        {effortOpen && (
+                          <div className="absolute bottom-full mb-1.5 right-0 z-50 min-w-[120px] rounded-lg border border-[var(--border)] bg-[var(--bg-secondary)] shadow-[var(--shadow-lg)] py-1.5">
+                            {["reasoningLow", "reasoningMedium", "reasoningHigh"].map((key) => {
+                              const label = t(`chatPage.${key}`);
+                              const effort = key.replace("reasoning", "").toLowerCase();
+                              const isSelected = effort === reasoningEffort;
+                              return (
+                                <button
+                                  key={effort}
+                                  onClick={() => {
+                                    setReasoningEffort(effort);
+                                    setEffortOpen(false);
+                                  }}
+                                  className={cn(
+                                    "w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left transition-colors",
+                                    isSelected ? "bg-[var(--brand-bg)] text-[var(--brand)]" : "text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]",
+                                  )}
+                                >
+                                  <span className="flex-1">{label}</span>
+                                  {isSelected && <Check size={13} className="shrink-0 text-[var(--brand)]" />}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Pending images */}
+                    {pendingImages.length > 0 && (
+                      <div className="flex gap-2 mb-2 flex-wrap">
+                        {pendingImages.map((img, i) => (
+                          <div key={i} className="relative inline-block">
+                            <img
+                              src={img}
+                              className="h-16 w-16 object-cover rounded-lg border border-[var(--border)]"
+                              alt=""
+                            />
+                            <button
+                              onClick={() =>
+                                setPendingImages((prev) =>
+                                  prev.filter((_, idx) => idx !== i),
+                                )
+                              }
+                              className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full flex items-center justify-center bg-[var(--danger)] text-white hover:bg-[var(--danger-hover)] transition-colors"
+                              aria-label={t("chatPage.removeImage")}
+                            >
+                              <X size={11} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Input row */}
+                    <div className="flex gap-1.5 items-end">
+                      <ChatInput
+                        sending={sending}
+                        replaying={replaying}
+                        onSend={handleSend}
+                        onAbort={handleAbort}
+                        onImageUpload={handleImageUpload}
+                        onImagePaste={handleImagePaste}
+                        onDelegateOpen={() => setShowDelegate(true)}
+                        showDelegate={true}
+                      />
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="flex-1 flex items-center justify-center px-4">
+                  <div className="text-center">
+                    <div className="w-12 h-12 rounded-2xl mx-auto mb-3 flex items-center justify-center text-2xl"
+                      style={{ background: "linear-gradient(135deg, var(--brand) 0%, var(--brand-active) 100%)" }}
+                    >
+                      🦀
+                    </div>
+                    <p className="text-xs text-[var(--text-tertiary)]">{t("chatPage.welcome")}</p>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
-          <NotificationBell onSwitchSession={onSelectSessionById} onNotificationAction={handleNotificationAction} />
-          {completedTasks.length > 0 && (
+
+          {/* Workspace — right side (flex-1) */}
+          <div className="flex-1 flex flex-col min-w-0 bg-[var(--bg-primary)]">
+            {/* Work mode toolbar */}
+            <div className="flex items-center gap-2 px-3 h-11 border-b border-[var(--border)] bg-[var(--bg-secondary)] shrink-0">
+              <button
+                onClick={() => setMode("chat")}
+                className="flex items-center gap-1 px-2 py-1 rounded text-[11px] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
+              >
+                <MessageSquare size={13} />
+                {t("document.chatMode")}
+              </button>
+              <button
+                onClick={onNewSession}
+                className="flex items-center gap-1 px-2 py-1 rounded text-[11px] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
+              >
+                <Sparkles size={13} />
+                {t("chat.startNewConversation")}
+              </button>
+              <button
+                onClick={handleStartMeeting}
+                className="flex items-center gap-1 px-2 py-1 rounded text-[11px] text-[var(--text-tertiary)] hover:text-[var(--accent)] hover:bg-[var(--accent-bg)] transition-colors"
+              >
+                📝 {t("chat.startMeeting")}
+              </button>
+              <div className="flex-1 min-w-0" />
+              <WorkspaceSwitcher current={workspace} onChange={setWorkspace} />
+              <Button
+                size="icon"
+                variant="ghost"
+                onClick={() => setShowWorkFiles((v) => !v)}
+                title={showWorkFiles ? t("fileTree.hide") : t("fileTree.show")}
+                className={cn(showWorkFiles ? "text-[var(--brand)] bg-[var(--brand-bg)]" : "")}
+              >
+                {showWorkFiles ? <PanelRightClose size={15} /> : <PanelRightOpen size={15} />}
+              </Button>
+              {docState && (
+                <>
+                  <div className="w-px h-4 bg-[var(--border)]" />
+                  <span className="text-sm font-medium truncate text-[var(--text-primary)]">
+                    {docState.fileName}
+                  </span>
+                  <div className="flex-1" />
+                  <button
+                    onClick={() => { setDocState(null); setCurrentDocPath(null); setMeetingActive(false); }}
+                    className="p-1 rounded text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
+                  >
+                    <X size={14} />
+                  </button>
+                </>
+              )}
+              {meetingActive && (
+                <>
+                  <div className="w-px h-4 bg-[var(--border)]" />
+                  <span className="text-sm font-medium text-[var(--text-primary)]">
+                    📝 {t("meeting.titlePlaceholder")}
+                  </span>
+                  <div className="flex-1" />
+                </>
+              )}
+            </div>
+
+            {/* Workspace content — horizontal: content + file list */}
+            <div className="flex-1 min-h-0 flex">
+              {/* Content area (left) */}
+              <div className="flex-1 min-h-0 overflow-hidden">
+                {meetingActive && activeSession ? (
+                  <MeetingPanel
+                    sessionId={activeSession.session_id}
+                    onPrompt={(text) => {
+                      setMessages((prev) => [...prev, { id: `u-${Date.now()}`, role: "user", content: text }]);
+                      setSending(true);
+                      sessionsApi.sendPrompt(activeSession.session_id, text, selectedModel, undefined, selectedAgent, reasoningEffort, selectedProvider ?? undefined, currentDocPath || undefined)
+                        .catch(() => setSending(false));
+                    }}
+                  />
+                ) : workspaceType === "code" && currentDocPath ? (
+                  <CodePanel
+                    key={currentDocPath}
+                    initialPath={currentDocPath}
+                    initialContent=""
+                    workMode={true}
+                  />
+                ) : workspaceType === "prototype" && currentDocPath ? (
+                  <PrototypePanel
+                    key={currentDocPath}
+                    filePath={currentDocPath}
+                    onClose={() => { setDocState(null); setCurrentDocPath(null); }}
+                  />
+                ) : workspaceType === "markdown" && currentDocPath ? (
+                  <MarkdownPanel
+                    key={currentDocPath}
+                    filePath={currentDocPath}
+                    onClose={() => { setDocState(null); setCurrentDocPath(null); }}
+                  />
+                ) : docState ? (
+                  <DocumentPanel
+                    doc={docState}
+                    onClose={() => { setDocState(null); setCurrentDocPath(null); }}
+                    maximized={false}
+                    onToggleMaximize={() => {}}
+                    onDownload={() => {
+                      if (docState?.filePath) {
+                        const link = document.createElement("a");
+                        link.href = `/api/documents/download?path=${encodeURIComponent(docState.filePath)}`;
+                        link.download = docState.fileName;
+                        link.click();
+                      }
+                    }}
+                    onRefreshPreview={async () => {
+                      if (!docState?.filePath) return;
+                      setDocState((prev) => prev ? { ...prev, previewLoading: true } : prev);
+                      try {
+                        const preview = await documentsApi.getPreview(
+                          docState.filePath,
+                          docState.workspace || activeSession?.workspace || "",
+                        );
+                        setDocState((prev) => prev ? {
+                          ...prev,
+                          previewLoading: false,
+                          previewHtml: preview.html,
+                          previewError: null,
+                        } : prev);
+                      } catch (e: any) {
+                        setDocState((prev) => prev ? {
+                          ...prev,
+                          previewLoading: false,
+                          previewError: e?.message || "刷新预览失败",
+                        } : prev);
+                      }
+                    }}
+                    workMode={true}
+                    pendingHighlight={pendingHighlight}
+                    onAIEdit={handleAIEdit}
+                  />
+                ) : (
+                  <div className="h-full flex items-center justify-center text-[var(--text-tertiary)]">
+                    <div className="text-center">
+                      <LayoutPanelTop size={32} className="mx-auto mb-3 opacity-30" />
+                      <p className="text-sm">{t("document.workModeEmpty")}</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* File list in work mode — right side */}
+              <FileBrowser
+                collapsed={!showWorkFiles}
+                onToggle={() => setShowWorkFiles((v) => !v)}
+                sessionId={activeSession?.session_id || null}
+                workspace={activeSession?.workspace || workspace || undefined}
+                onOpenDoc={(path, name) => {
+                  setShowWorkFiles(false);
+                  handleOpenDoc(path, name);
+                }}
+              />
+            </div>
+          </div>
+        </>
+      ) : (
+        <>
+        <div className="flex-1 flex flex-col min-w-0 min-h-0">
+          {/* Toolbar */}
+          <div className="flex items-center gap-1 px-3 h-11 border-b border-[var(--border)] bg-[var(--bg-secondary)]">
             <Button
               size="icon"
               variant="ghost"
-              onClick={() => setShowResultCompare(true)}
-              title={t("taskBoard.title")}
-              className="text-[var(--accent-2)] hover:text-[var(--accent-2)] hover:bg-[var(--accent-2-bg)]"
+              onClick={() => setMobileSidebarOpen(true)}
+              title={t("session.sessions")}
+              className="md:hidden"
             >
-              <Bot size={15} />
+              <Menu size={16} />
             </Button>
-          )}
-          <Button
-            size="icon"
-            variant="ghost"
-            onClick={() => setShowFiles((v) => !v)}
-            title={showFiles ? t("fileTree.hide") : t("fileTree.show")}
-            className={cn(showFiles ? "text-[var(--brand)] bg-[var(--brand-bg)]" : "")}
-          >
-            {showFiles ? <PanelRightClose size={15} /> : <PanelRightOpen size={15} />}
-          </Button>
-        </div>
+            <WorkspaceSwitcher current={workspace} onChange={setWorkspace} />
+            <div className="flex-1 min-w-0">
+              {activeSession && (
+                <BranchSelector
+                  sessionId={activeSession.session_id}
+                  activeBranch={activeBranch}
+                  onSwitch={handleSwitchBranch}
+                  onReplay={startReplay}
+                />
+              )}
+            </div>
+            <NotificationBell onSwitchSession={onSelectSessionById} onNotificationAction={handleNotificationAction} />
+            {completedTasks.length > 0 && (
+              <Button
+                size="icon"
+                variant="ghost"
+                onClick={() => setShowResultCompare(true)}
+                title={t("taskBoard.title")}
+                className="text-[var(--accent-2)] hover:text-[var(--accent-2)] hover:bg-[var(--accent-2-bg)]"
+              >
+                <Bot size={15} />
+              </Button>
+            )}
+            <Button
+              size="icon"
+              variant="ghost"
+              onClick={() => setShowFiles((v) => !v)}
+              title={showFiles ? t("fileTree.hide") : t("fileTree.show")}
+              className={cn(showFiles ? "text-[var(--brand)] bg-[var(--brand-bg)]" : "")}
+            >
+              {showFiles ? <PanelRightClose size={15} /> : <PanelRightOpen size={15} />}
+            </Button>
+            <Button
+              size="icon"
+              variant="ghost"
+              onClick={() => setMode("work")}
+              title={t("document.workMode")}
+              className="text-[var(--text-tertiary)] hover:text-[var(--accent)] hover:bg-[var(--accent-bg)]"
+            >
+              <LayoutPanelLeft size={15} />
+            </Button>
+          </div>
 
         {activeSession ? (
           <>
@@ -1017,9 +1512,9 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
             </div>
           </div>
         )}
-      </div>
+        </div>
 
-      <FileBrowser
+        <FileBrowser
         collapsed={!showFiles}
         onToggle={() => setShowFiles((v) => !v)}
         sessionId={activeSession?.session_id || null}
@@ -1100,6 +1595,8 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
             }}
           />
         </div>
+      )}
+        </>
       )}
 
       <TaskBoard

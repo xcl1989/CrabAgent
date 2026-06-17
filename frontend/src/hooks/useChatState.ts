@@ -181,7 +181,6 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
 
   const selectSession = useCallback(
     async (session: Session, selectedModel: string, models: { id: string }[]) => {
-      setSending(false);
       setActiveSession(session);
       const branch = session.active_branch || "main";
       setActiveBranch(branch);
@@ -189,6 +188,20 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
       const chatMsgs = dbMessagesToChat(msgs);
       populateSubAgentContents(chatMsgs);
       setMessages(chatMsgs);
+
+      // Check if this session has a running agent task — if so, restore "sending" state
+      try {
+        const { getAgentMonitor } = await import("../api/monitor");
+        const monitors = await getAgentMonitor();
+        const hasRunning = monitors.some(
+          (m) => m.session_id === session.session_id && m.status === "running"
+        );
+        setSending(hasRunning);
+      } catch {
+        // If monitor check fails, assume not running
+        setSending(false);
+      }
+
       return session.model || (models.length > 0 ? models[0].id : selectedModel);
     },
     [populateSubAgentContents]
@@ -202,6 +215,48 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
     setMessages([]);
     return selectedModel;
   }, [workspace]);
+
+  // ── Background monitor: detect when non-active sessions finish ──
+  // When a background agent completes, refresh session list so the UI stays in sync.
+  const prevRunningRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      try {
+        const { getAgentMonitor } = await import("../api/monitor");
+        const monitors = await getAgentMonitor();
+        const nowRunning = new Set(monitors.filter((m) => m.status === "running").map((m) => m.session_id));
+        const prevRunning = prevRunningRef.current;
+
+        // Detect sessions that finished (were running, now not)
+        const finished = [...prevRunning].filter((sid) => !nowRunning.has(sid));
+        if (finished.length > 0) {
+          // Refresh session list to update titles/timestamps
+          sessionsApi.listSessions(workspace).then(setSessions);
+        }
+
+        // If the active session is among the finished ones, reload its messages
+        const activeSid = activeSessionRef.current?.session_id;
+        if (activeSid && finished.includes(activeSid)) {
+          setSending(false);
+          const msgs = await sessionsApi.getMessages(activeSid);
+          const chatMsgs = dbMessagesToChat(msgs);
+          populateSubAgentContents(chatMsgs);
+          setMessages((prev) => {
+            const dbTotal = chatMsgs.reduce((s, m) => s + (m.content?.length || 0), 0);
+            const prevTotal = prev.reduce((s, m) => s + (m.content?.length || 0), 0);
+            return dbTotal >= prevTotal ? chatMsgs : prev;
+          });
+        }
+
+        prevRunningRef.current = nowRunning;
+      } catch {
+        // Silently ignore monitor errors
+      }
+    }, 5000); // Check every 5 seconds
+
+    return () => clearInterval(interval);
+  }, [workspace, populateSubAgentContents]);
 
   const selectSessionById = useCallback(
     async (sessionId: string, selectedModel: string, models: { id: string }[]) => {

@@ -61,16 +61,25 @@ async def sync_all_sources(db: AsyncSession, user_id: int = 1) -> dict:
 async def sync_source(db: AsyncSession, source: CalendarIcalSource) -> int:
     """Sync a single source, dispatching by ``source_type``."""
     stype = getattr(source, "source_type", "ical") or "ical"
+
+    # Load default reminder minutes from calendar settings
+    try:
+        from crabagent.core.calendar.store import load_calendar_settings
+        cfg = await load_calendar_settings(db)
+        default_reminder_minutes = cfg.get("default_reminder_minutes", 15)
+    except Exception:
+        default_reminder_minutes = 15
+
     if stype == "caldav":
-        return await _sync_caldav_source(db, source)
-    return await _sync_ical_source(db, source)
+        return await _sync_caldav_source(db, source, default_reminder_minutes)
+    return await _sync_ical_source(db, source, default_reminder_minutes)
 
 
 # ---------------------------------------------------------------------------
 # ICS sync
 # ---------------------------------------------------------------------------
 
-async def _sync_ical_source(db: AsyncSession, source: CalendarIcalSource) -> int:
+async def _sync_ical_source(db: AsyncSession, source: CalendarIcalSource, default_reminder_minutes: int = 15) -> int:
     """Fetch a static ICS URL and upsert events."""
     try:
         import httpx
@@ -90,14 +99,14 @@ async def _sync_ical_source(db: AsyncSession, source: CalendarIcalSource) -> int
     cal = Calendar.from_ical(resp.text)
     vevents = list(cal.walk("VEVENT"))
 
-    return await _upsert_events(db, source, vevents)
+    return await _upsert_events(db, source, vevents, default_reminder_minutes)
 
 
 # ---------------------------------------------------------------------------
 # CalDAV sync (企业微信)
 # ---------------------------------------------------------------------------
 
-async def _sync_caldav_source(db: AsyncSession, source: CalendarIcalSource) -> int:
+async def _sync_caldav_source(db: AsyncSession, source: CalendarIcalSource, default_reminder_minutes: int = 15) -> int:
     """Sync via CalDAV protocol.
 
     企业微信 CalDAV note: the REPORT/calendar-query response only returns
@@ -233,7 +242,7 @@ async def _sync_caldav_source(db: AsyncSession, source: CalendarIcalSource) -> i
             raise RuntimeError("CalDAV 认证失败，请在企业微信重新获取密码并更新配置") from e
         raise
 
-    return await _upsert_events(db, source, vevents)
+    return await _upsert_events(db, source, vevents, default_reminder_minutes)
 
 
 # ---------------------------------------------------------------------------
@@ -244,6 +253,7 @@ async def _upsert_events(
     db: AsyncSession,
     source: CalendarIcalSource,
     vevents: list,
+    default_reminder_minutes: int = 15,
 ) -> int:
     """Upsert VEVENT components into calendar_events table.
 
@@ -322,7 +332,7 @@ async def _upsert_events(
                 location=location,
                 ical_uid=uid,
                 ical_source_id=source.id,
-                reminder_minutes=0,
+                reminder_minutes=default_reminder_minutes,
             )
             db.add(event)
         synced += 1

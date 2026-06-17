@@ -1,8 +1,31 @@
 # 🦀 CrabAgent
 
-> **Your AI Knowledge Work Platform** — Not another coding assistant. A platform where AI agents learn your projects, remember your decisions, and grow with you. Runs in terminal, browser, or desktop.
+> **AI Knowledge Work Platform** — Chat when you need answers, Work when you need results. Two modes, one seamless experience. Runs in terminal, browser, or desktop.
 
-CrabAgent is a local-first platform for knowledge work. You bring your projects and API keys. It brings a team of AI agents that **remember what you did, learn how you work, and get smarter the more you use them.**
+CrabAgent is a local-first AI platform with **two working modes** that adapt to what you're doing:
+
+| | Chat Mode 💬 | Work Mode 🛠️ |
+|---|---|---|
+| **Layout** | Session list + conversation | AI sidebar + live workspace |
+| **Focus** | Talk, ask, brainstorm | Create, edit, build |
+| **Right panel** | — | Document preview / code editor / prototype / meeting notes |
+| **Switch** | Click 🛠️ icon in toolbar | Click 💬 icon or AI auto-switches when opening files |
+
+You don't pick a mode upfront. Start chatting, and when the AI starts working on a document or code file, the workspace slides open automatically. Switch back to Chat Mode anytime for a clean conversation view.
+
+```
+Chat Mode                          Work Mode
+┌──────┬──────────────┐           ┌──┬──────────┬────────────────┐
+│      │              │           │  │ AI Chat  │   Workspace    │
+│ Sess │  Conversation│           │ 💬│ Sidebar  │  ┌──────────┐  │
+│ List │              │           │  │ (350px)  │  │ Document │  │
+│      │              │           │  │          │  │ Preview  │  │
+│      │              │           │  │ Input    │  │ Code     │  │
+│      │              │           │  │          │  │ Prototype│  │
+│      │              │           │  │          │  │ Meeting  │  │
+└──────┴──────────────┘           │  │          │  └──────────┘  │
+                                  └──┴──────────┴────────────────┘
+```
 
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
@@ -11,23 +34,88 @@ CrabAgent is a local-first platform for knowledge work. You bring your projects 
 
 ---
 
-## Why CrabAgent
+## 💬 Chat Mode — Pure Conversation
 
-Most AI tools are temporary workers — they help with one task, then forget everything. CrabAgent is different:
+The default mode. Session list on the left, full-width conversation on the right. No distractions.
 
-| What makes it special | What it means for you |
-|----------------------|-----------------------|
-| **🧠 Project Memory** | It remembers what you did in each project. Open it tomorrow and it picks up where you left off. |
-| **📈 Learns your style** | The more you use it, the better it understands your preferences, your code style, your decision patterns. |
-| **🤖 AI Team** | Specialized agents (coder, researcher, analyst, writer) that collaborate. Delegate, parallelize, chain into workflows. |
-| **🔒 Local-first** | All data stays on your machine. API keys encrypted. No telemetry. No vendor lock-in. |
-
-The difference compounds over time:
+**Best for:**
+- Asking questions and getting AI-powered answers
+- Brainstorming and exploring ideas
+- Quick research via web search and browser automation
+- Delegating tasks to specialized AI agents (researcher, analyst, coder, writer)
+- Multi-turn conversations with full project memory
 
 ```
-Day 1:   "It's a helpful AI tool."
-Week 1:  "It remembers my project. Nice."
-Month 1: "My entire workflow runs through it. Can't go back."
+You: "帮我分析一下这个项目的架构"
+AI: [reads files, analyzes patterns, generates structured report]
+You: "把分析结果整理成一份 Word 文档"
+AI: [creates document] → auto-switches to Work Mode with preview
+```
+
+---
+
+## 🛠️ Work Mode — AI + Live Workspace
+
+When the AI creates or opens a file, the interface splits: AI chat shrinks to a 350px sidebar on the left, and the **workspace** takes over the right side. Everything the AI does is visible in real time.
+
+### Workspace types
+
+| Type | What shows | Trigger |
+|------|-----------|---------|
+| 📄 **Document** | Office document preview (`.docx` / `.xlsx` / `.pptx`) with outline, timeline, and inline edit | AI creates/opens an Office file |
+| 💻 **Code** | Monaco-based code editor with syntax highlighting | AI works on a code file |
+| 🔬 **Prototype** | Split-pane: source code on left, live preview on right | AI builds an HTML/JS prototype |
+| 📝 **Meeting** | Structured meeting notes panel with action item extraction | You click "Start Meeting" |
+
+### Work Mode features
+
+- **Real-time preview**: watch the AI edit a document and see changes reflected instantly
+- **Inline editing**: double-click text in document preview to edit directly
+- **AI Edit toolbar**: Bold, italic, font size, color — one click to style selected text
+- **Natural language edit**: type instructions like "make the heading red" and the AI applies it
+- **Document timeline**: see the full history of AI operations on the document
+- **File browser**: browse project files without leaving Work Mode
+- **One-click switch back to Chat Mode** when you're done
+
+```
+Work Mode in action:
+
+You: "读取 sales.xlsx 汇总 Q1 数据，做成一份报告"
+                          │
+  ┌───────────────────────┼───────────────────────────────┐
+  │  AI Chat Sidebar      │  Workspace (Document Preview) │
+  │                       │                               │
+  │  AI: Reading file...  │  ┌─────────────────────────┐  │
+  │  AI: Q1 total: $1.2M  │  │  Q1 Sales Report        │  │
+  │  AI: Creating doc...  │  │  ───────────────        │  │
+  │  AI: Done! ✓          │  │  Total: $1.2M           │  │
+  │                       │  │  Growth: +23%           │  │
+  │  [Input: continue...] │  │  ...                    │  │
+  │                       │  └─────────────────────────┘  │
+  └───────────────────────┴───────────────────────────────┘
+```
+
+---
+
+## 🤖 AI Team
+
+Both modes have access to a team of specialized agents:
+
+| Agent | Role | Best for |
+|-------|------|----------|
+| **Researcher** | Web researcher | Search, browse, collect data |
+| **Analyst** | Data analyst | Compare, identify patterns, generate reports |
+| **Coder** | Code expert | Write, review, debug, refactor |
+| **Writer** | Content writer | Write, edit, translate, format |
+| **Plan Creator** | Task planner | Decompose complex tasks into workflows |
+
+### Orchestration modes
+
+```
+Delegate      → @researcher "find competitor pricing"
+Parallel      → Run 3 agents simultaneously on different tasks
+Pipeline      → research → analyze → write (with data flow)
+Handoff       → Pass context from one agent to another
 ```
 
 ---
@@ -45,7 +133,7 @@ Incoming email: "明天下午3点开会讨论新功能"
       └─ 🔗 Links task to email conversation — click to view full context
 ```
 
-No rules, no regex. Just LLM-powered understanding that knows the difference between a newsletter and a real to-do.
+No rules, no regex. Just LLM-powered understanding.
 
 ---
 
@@ -66,11 +154,9 @@ You (WeChat): "看一下26年1月有啥工作"
 - **Proactive notifications** — task deadlines, scheduled task results, email summaries auto-pushed
 - **Conversational** — multi-turn chat with full project memory
 
-**Notification sync:** When an email arrives, the summary pushes to WeChat *with full context injected* — so you can say "reply to that email" and the Agent knows exactly who and what.
-
 ---
 
-## Project Memory — The Foundation
+## 🧠 Project Memory & Self-Evolving Agents
 
 Every time you work in a project, CrabAgent automatically extracts lessons and preferences. Next time you open it, it already knows:
 
@@ -82,31 +168,7 @@ Every time you work in a project, CrabAgent automatically extracts lessons and p
 ====================
 ```
 
-This is **not a summary generated on the fly**. It's built from lessons your agents have already learned — zero extra token cost, zero context cache invalidation.
-
----
-
-## Self-Evolving Agents
-
-Every task teaches your agents something. After each run, they reflect on what worked (and what didn't) and store the insight permanently.
-
-### Dual-engine reflection
-
-```
-Agent completes a task
-    │
-    ├─ Rule engine (instant)
-    │   └─ "Too many iterations → break tasks into smaller steps"
-    │
-    └─ LLM reflection (1-3s)
-        ├─ Extracts actionable lessons:
-        │   "DuckDuckGo returns fewer Chinese results — use English keywords"
-        │   "Prefer web_scrape over web_search for unstable sites"
-        ├─ Auto-filters generic praise ("completed in X steps")
-        └─ Learns from failures — captures error patterns
-```
-
-### Persistent memory layers
+After each task, agents reflect on what worked (and what didn't) and store the insight permanently:
 
 | Layer | Scope | What's stored |
 |-------|-------|---------------|
@@ -114,61 +176,20 @@ Agent completes a task
 | **User Preferences** | Per user | Communication style, tool preferences, rejected patterns |
 | **Agent Lessons** | Per agent | Technical strategies, pitfalls, effective approaches |
 
-### View growth
-
-```bash
-# TUI
-/agent_stats coder
-# → Tasks: 23  Success: 91%  Avg time: 14s
-# → Lessons: 18 (rule: 3, LLM: 15)
-
-# Web UI: Agent Team → Learning Stats
-```
-
----
-
-## AI Team
-
-### Built-in agents
-
-| Agent | Role | Best for |
-|-------|------|----------|
-| **Researcher** | Web researcher | Search, browse, collect data |
-| **Analyst** | Data analyst | Compare, identify patterns, generate reports |
-| **Coder** | Code expert | Write, review, debug, refactor |
-| **Writer** | Content writer | Write, edit, translate, format |
-| **Plan Creator** | Task planner | Decompose complex tasks into workflows |
-
-### Orchestration modes
-
-```
-Delegate      → @researcher "find competitor pricing"
-Parallel      → Run 3 agents simultaneously on different tasks
-Pipeline      → research → analyze → write (with data flow)
-Handoff       → Pass context from one agent to another
-```
-
-### Real-time monitoring
-
-- 🟣 **Running** — step count, elapsed time, tool calls
-- 🟢 **Done** — duration, tokens, iterations
-- 🔴 **Error** — error summary
-- Web: sidebar task board with split-view result comparison
-
 ---
 
 ## Quick Start
 
 ```bash
 pip install crabagent
-
 crabagent init
 
 # TUI — interactive REPL with slash commands
 crabagent
 
-# Web UI
+# Web UI — Chat Mode & Work Mode
 crabagent --serve          # → http://localhost:5210
+                           #   Default login: admin / xcl1989
 
 # Single-shot CLI
 crabagent "organize this directory"
@@ -181,33 +202,27 @@ Build the Electron wrapper (requires Python + `crabagent` installed on your syst
 ```bash
 # One-command build (from git clone):
 make desktop
-# → electron/dist-electron/CrabAgent-0.9.7-arm64.dmg
+# → electron/dist-electron/CrabAgent-0.10.5-arm64.dmg
 
 # Or from pip install:
 crabagent --build-desktop
-```
-
-Or run directly in your browser:
-
-```bash
-crabagent --serve          # → http://localhost:5210
 ```
 
 ---
 
 ## Features
 
-### 🧠 Project Memory
-Remembers your project context across sessions. Zero extra cost.
+### 🛠️ Work Mode
+Split-pane workspace with live document preview, code editor, prototype builder, meeting notes, and Markdown editor. AI chat sidebar stays interactive while you work.
+
+### 📝 Markdown Editor
+Split-pane editor for `.md` files — source on the left, live rendered preview on the right. Bidirectional scroll sync, GFM tables, syntax-highlighted code blocks. Switch between Source / Split / Preview views.
 
 ### 📄 Intelligent Document Processing
 AI agents can read, create, edit, and preview Office documents (`.docx`, `.xlsx`, `.pptx`) directly in conversations.
-```
-> Read sales.xlsx and summarize the Q1 data
-> Create a project proposal document
-> Update slide 3 title to "Q2 Roadmap"
-```
-Document panel opens alongside chat — drag to resize, maximize for full view.
+
+### 🧠 Project Memory
+Remembers your project context across sessions. Zero extra cost.
 
 ### 🖼️ Multi-modal
 Paste/drop images into conversations. Auto-detects vision model support.
@@ -216,10 +231,6 @@ Paste/drop images into conversations. Auto-detects vision model support.
 ```bash
 pip install 'crabagent[browser]'
 playwright install chromium
-```
-```
-> Open https://news.ycombinator.com and show top 5
-> Search Google for "Python async", extract results
 ```
 
 ### 🔌 MCP Client
@@ -233,9 +244,6 @@ Connect external MCP servers (stdio + HTTP). Tools auto-discover and get prefixe
 
 ### 🦀 Snapshots (Molt)
 Auto-snapshot files before changes. Roll back anytime without Git.
-```
-/molt rollback <id>
-```
 
 ### 🔧 Custom Tools
 Drop a `.py` file in `.crabagent/tools/` — or let the AI create one for you in a conversation.
@@ -330,4 +338,3 @@ GNU Affero General Public License v3 (AGPLv3) for non-commercial use.
 Commercial use requires a separate license. Contact the author.
 
 See [LICENSE](LICENSE).
-ee [LICENSE](LICENSE).

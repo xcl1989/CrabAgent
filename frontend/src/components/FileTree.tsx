@@ -3,7 +3,7 @@ import { Folder, FolderOpen, FileText, ChevronRight, ChevronDown, Loader2, Image
 import { FileEntry, isImageFile } from "../api/files";
 import { cn } from "../lib/cn";
 
-const OFFICE_EXTS = [".xlsx", ".docx", ".pptx"];
+const OFFICE_EXTS = [".xlsx", ".docx", ".pptx", ".html", ".md"];
 
 function isOfficeFile(name: string): boolean {
   const ext = name.split(".").pop()?.toLowerCase();

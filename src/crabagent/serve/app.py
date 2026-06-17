@@ -59,7 +59,9 @@ async def lifespan(app: FastAPI):
     from crabagent.serve.scheduler import get_scheduler
 
     try:
-        await get_scheduler().start()
+        sched = get_scheduler()
+        sched.set_global_event_queues(app.state.global_event_queues)
+        await sched.start()
         logger.info("Scheduler started")
     except Exception as e:
         logger.exception("Failed to start scheduler: %s", e)
@@ -102,10 +104,11 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     app = FastAPI(
         title="CrabAgent",
-        version="0.10.4",
+        version="0.10.5",
         lifespan=lifespan,
     )
     app.state.event_queues = {}
+    app.state.global_event_queues = {}  # SSE /events/global queues
     app.state.active_agents = {}
     app.state.active_sub_agents = {}
 
@@ -176,7 +179,7 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     async def health():
-        return {"status": "ok", "version": "0.10.4"}
+        return {"status": "ok", "version": "0.10.5"}
 
     _mount_spa(app)
 

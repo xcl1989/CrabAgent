@@ -1,16 +1,30 @@
 from __future__ import annotations
 
+import asyncio
 import mimetypes
+import socket
+import sys
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from crabagent.core.database import User, get_db
 from crabagent.serve.deps import get_current_user
 
 router = APIRouter(prefix="/files", tags=["files"])
+
+# ── Temporary HTTP servers for HTML preview ──────────────────────────
+_html_servers: dict[int, asyncio.subprocess.Process] = {}
+_html_server_lock = asyncio.Lock()
+
+
+def _find_free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("", 0))
+        return s.getsockname()[1]
 
 _IMAGE_EXTENSIONS = frozenset(
     {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".ico", ".bmp", ".avif"}
@@ -110,6 +124,39 @@ async def read_file(
     return {"path": path, "content": content, "truncated": False}
 
 
+@router.post("/write")
+async def write_file(
+    req: WriteFileRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from crabagent.core.config import settings
+
+    if req.absolute:
+        target = Path(req.path).resolve()
+        if not str(target).startswith(str(Path.home())):
+            raise HTTPException(status_code=400, detail="Absolute path must be under home directory")
+    else:
+        workspace = settings.workspace.resolve()
+        t = _resolve_path(workspace, req.path.lstrip("/"))
+        if not t:
+            raise HTTPException(status_code=400, detail="Path outside workspace")
+        target = t
+
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(req.content, encoding="utf-8")
+        return {"status": "ok", "path": req.path, "size": target.stat().st_size}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to write file: {e}")
+
+
+class WriteFileRequest(BaseModel):
+    path: str
+    content: str
+    absolute: bool = False
+
+
 @router.get("/image")
 async def get_image(
     path: str = Query(..., description="Relative path from workspace, or absolute path when absolute=true"),
@@ -148,6 +195,104 @@ async def get_image(
 
     media_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
     return FileResponse(str(target), media_type=media_type)
+
+
+@router.get("/serve/{file_path:path}")
+async def serve_file(
+    file_path: str,
+    token: str = Query(..., description="JWT token for auth"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Serve any file with correct Content-Type.
+    
+    Path is treated as absolute filesystem path (with leading /) or
+    relative to workspace. Uses token query param for auth (same as /files/image).
+    """
+    from crabagent.core.config import settings
+    from crabagent.serve.services.auth import decode_access_token, get_user_by_id
+    from fastapi.responses import HTMLResponse
+
+    payload = decode_access_token(token)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    try:
+        user_id = int(payload["sub"])
+    except (KeyError, ValueError):
+        raise HTTPException(status_code=401, detail="Invalid token payload")
+    user = await get_user_by_id(db, user_id)
+    if not user or not user.enabled:
+        raise HTTPException(status_code=401, detail="User not found or disabled")
+
+    if file_path.startswith("/"):
+        target = Path(file_path).resolve()
+    else:
+        workspace = settings.workspace.resolve()
+        t = _resolve_path(workspace, file_path.lstrip("/"))
+        if not t:
+            raise HTTPException(status_code=400, detail="Path outside workspace")
+        target = t
+
+    if not target.exists() or not target.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    media_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+    return FileResponse(str(target), media_type=media_type)
+
+
+@router.post("/serve-dir")
+async def start_http_server(
+    path: str = Query(..., description="Absolute directory path to serve"),
+    user: User = Depends(get_current_user),
+):
+    """Start a temporary Python http.server in the given directory for HTML preview."""
+    target = Path(path).resolve()
+    if not target.is_dir():
+        raise HTTPException(status_code=400, detail="Not a directory or does not exist")
+
+    port = _find_free_port()
+    proc = await asyncio.create_subprocess_exec(
+        sys.executable, "-m", "http.server", str(port),
+        "--directory", str(target),
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    async with _html_server_lock:
+        _html_servers[port] = proc
+
+    # Wait for the server to actually start listening
+    for _ in range(20):
+        try:
+            _, writer = await asyncio.wait_for(
+                asyncio.open_connection("127.0.0.1", port), timeout=0.5
+            )
+            writer.close()
+            await writer.wait_closed()
+            break
+        except (OSError, asyncio.TimeoutError):
+            await asyncio.sleep(0.1)
+    else:
+        proc.terminate()
+        raise HTTPException(status_code=500, detail="Preview server failed to start")
+
+    return {"port": port, "url": f"http://localhost:{port}"}
+
+
+@router.post("/stop-server")
+async def stop_http_server(
+    port: int = Query(..., description="Port of the server to stop"),
+    user: User = Depends(get_current_user),
+):
+    """Stop a previously started HTTP server."""
+    async with _html_server_lock:
+        proc = _html_servers.pop(port, None)
+    if proc:
+        proc.terminate()
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=5)
+        except asyncio.TimeoutError:
+            proc.kill()
+        return {"status": "stopped", "port": port}
+    return {"status": "not_found", "port": port}
 
 
 @router.get("/git-status")

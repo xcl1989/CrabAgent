@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.10.5]
+
+### Changed
+- **Dual-Mode Concept — Chat Mode & Work Mode** — CrabAgent's two working modes are now the central design narrative
+  - **Chat Mode 💬** — session list + full-width conversation panel. The default for asking questions, brainstorming, research, and agent delegation
+  - **Work Mode 🛠️** — AI chat shrinks to a 350px sidebar, workspace panel takes over the right side with real-time document preview, code editor, prototype builder, or meeting notes
+  - **Auto-switch**: when AI creates or opens a file, the interface automatically transitions from Chat Mode to Work Mode; user can switch back with one click
+  - **Workspace types**: Document (Office preview + inline edit + timeline), Code (Monaco editor), Prototype (split source/preview), Meeting (structured notes + action items)
+
+### Updated
+- **README (EN & ZH)** — fully rewritten to lead with the Chat Mode / Work Mode concept, with ASCII layout diagrams, workspace type table, and real-world workflow examples
+- **Platform tagline** — from "Your AI Knowledge Work Platform" to "AI Knowledge Work Platform — Chat when you need answers, Work when you need results"
+
+---
+
 ## [0.10.4]
 
 ### Added

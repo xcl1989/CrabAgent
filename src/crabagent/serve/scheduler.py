@@ -28,10 +28,15 @@ class SchedulerService:
     def __init__(self):
         self._scheduler = AsyncIOScheduler()
         self._job_ids: dict[int, str] = {}
+        self._global_event_queues: dict | None = None
         self._email_polling_users: dict[int, int] = {}  # user_id -> interval_seconds
         self._processed_message_ids: set[str] = set()  # dedup across poll cycles
         self._poll_failures: dict[int, int] = {}  # user_id -> consecutive failure count
         self._wechat_loop = None  # WeChatMessageLoop instance (if running)
+
+    def set_global_event_queues(self, queues: dict) -> None:
+        """Inject reference to the app's global SSE event queues for Web notifications."""
+        self._global_event_queues = queues
 
     async def start(self):
         self._scheduler.start()
@@ -1376,14 +1381,23 @@ async def _calendar_morning_brief():
         logger.error("[Calendar] Morning brief job failed: %s", e)
 
 
+# Track which task deadlines have been sent a reminder (in-memory, survives scheduler lifetime)
+_task_reminded: set[int] = set()
+
+
 async def _calendar_event_reminder():
-    """Check for events that need reminders (every 5 minutes)."""
+    """Check for events and task deadlines that need reminders (every 5 minutes).
+
+    Sends notifications via:
+      1. WeChat (if connected)
+      2. Web (global SSE queue → frontend toast)
+    """
     import datetime
 
     from sqlalchemy import select
 
     from crabagent.core.calendar.store import load_calendar_settings
-    from crabagent.core.database import CalendarEvent
+    from crabagent.core.database import CalendarEvent, Task
 
     try:
         async with async_session_factory() as db:
@@ -1394,7 +1408,7 @@ async def _calendar_event_reminder():
             now = datetime.datetime.now()
             check_until = now + datetime.timedelta(minutes=30)
 
-            # Find events that need reminding
+            # ── 1. CalendarEvent reminders ──
             result = await db.execute(
                 select(CalendarEvent).where(
                     CalendarEvent.reminder_sent == False,  # noqa: E712
@@ -1403,36 +1417,97 @@ async def _calendar_event_reminder():
                     CalendarEvent.start_time <= check_until,
                 )
             )
-            events = list(result.scalars().all())
+            cal_events = list(result.scalars().all())
 
-            if not events:
+            # ── 2. Task deadline reminders ──
+            task_result = await db.execute(
+                select(Task).where(
+                    Task.deadline.isnot(None),
+                    Task.deadline > now,
+                    Task.deadline <= check_until,
+                    Task.status.in_(["pending", "in_progress"]),
+                )
+            )
+            tasks = list(task_result.scalars().all())
+
+            if not cal_events and not tasks:
                 return
 
-            reminded = 0
-            for event in events:
+            # Build list of (kind, id, text, time_str, title)
+            reminders: list[tuple[str, str, str, str, str]] = []
+
+            for event in cal_events:
                 should_remind_at = event.start_time - datetime.timedelta(minutes=event.reminder_minutes)
-                if now >= should_remind_at:
-                    # Build reminder text
-                    time_str = event.start_time.strftime("%H:%M")
-                    text = f"⏰ 即将开始：{event.title}\n⏱️ {time_str}"
-                    if event.location:
-                        text += f"\n📍 {event.location}"
+                if now < should_remind_at:
+                    continue
+                time_str = event.start_time.strftime("%H:%M")
+                text = f"⏰ 即将开始：{event.title}\n⏱️ {time_str}"
+                if event.location:
+                    text += f"\n📍 {event.location}"
+                reminders.append(("event", str(event.id), text, time_str, event.title))
+                event.reminder_sent = True
 
-                    # Push via WeChat
-                    try:
-                        from crabagent.core.wechat import WeChatNotification
+            for task in tasks:
+                tid = task.id if isinstance(task.id, int) else 0
+                if tid and tid in _task_reminded:
+                    continue
+                should_remind_at = task.deadline - datetime.timedelta(minutes=15)
+                if now < should_remind_at:
+                    continue
+                time_str = task.deadline.strftime("%H:%M")
+                text = f"⏰ 任务截止：{task.title}\n⏱️ {time_str}"
+                if task.project:
+                    text += f"\n📁 {task.project}"
+                reminders.append(("task", str(task.id), text, time_str, task.title))
+                if tid:
+                    _task_reminded.add(tid)
 
-                        notif = WeChatNotification()
-                        await notif.send(text)
-                    except Exception:
-                        pass
+            if not reminders:
+                return
 
-                    event.reminder_sent = True
-                    reminded += 1
+            # ── 3. Push notifications ──
+            for kind, item_id, text, time_str, title in reminders:
+                # 3a. WeChat
+                try:
+                    from crabagent.core.wechat import WeChatNotification
 
-            if reminded > 0:
-                await db.commit()
-                logger.info("[Calendar] Sent %d event reminders", reminded)
+                    notif = WeChatNotification()
+                    await notif.send(text)
+                except Exception:
+                    pass
+
+                # 3b. Web notification (global SSE)
+                try:
+                    sched = get_scheduler()
+                    queues = getattr(sched, "_global_event_queues", None)
+                    if queues:
+                        from crabagent.core.event import AgentEvent, EventType
+
+                        event = AgentEvent(
+                            type=EventType.NOTIFICATION,
+                            data={
+                                "kind": kind,
+                                "id": item_id,
+                                "title": title,
+                                "time": time_str,
+                                "text": text,
+                            },
+                        )
+                        dead_queues: list[str] = []
+                        for qid, (q, _ts) in list(queues.items()):
+                            try:
+                                q.put_nowait(event)
+                            except asyncio.QueueFull:
+                                dead_queues.append(qid)
+                        for qid in dead_queues:
+                            queues.pop(qid, None)
+                except Exception:
+                    pass
+
+            await db.commit()
+            ev_count = sum(1 for r in reminders if r[0] == "event")
+            tk_count = sum(1 for r in reminders if r[0] == "task")
+            logger.info("[Calendar] Sent %d reminders (%d events, %d tasks)", len(reminders), ev_count, tk_count)
 
     except Exception as e:
         logger.error("[Calendar] Event reminder job failed: %s", e)

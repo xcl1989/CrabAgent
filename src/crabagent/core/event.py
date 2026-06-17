@@ -48,6 +48,9 @@ class EventType(StrEnum):
     DOC_OP_PREVIEW = "doc_op_preview"
     DOC_OP_DONE = "doc_op_done"
 
+    # System notifications (calendar reminders, etc.)
+    NOTIFICATION = "notification"
+
 
 @dataclass
 class AgentEvent:

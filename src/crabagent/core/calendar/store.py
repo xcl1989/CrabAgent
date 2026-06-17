@@ -320,6 +320,7 @@ _DEFAULT_SETTINGS = {
     "morning_brief_time": "08:00",
     "morning_brief_channel": "wechat",
     "event_reminder_enabled": True,
+    "default_reminder_minutes": 15,  # used for iCal-synced events
 }
 
 

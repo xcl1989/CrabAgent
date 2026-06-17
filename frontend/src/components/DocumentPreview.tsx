@@ -11,6 +11,12 @@ interface Props {
   onQuickEdit?: (oldText: string, newText: string) => void;
   /** 用户拖拽列边框调整宽度后触发 */
   onStyleEdit?: (element: string, props: Record<string, string | number | boolean>) => void;
+  /** 大纲变化时通知父组件 */
+  onOutlineChange?: (items: { level: number; text: string; index: number }[]) => void;
+  /** 当前可见的大纲索引变化 */
+  onOutlineActive?: (index: number) => void;
+  /** 当前编辑元素信息（双击进入编辑时） */
+  onEditElement?: (info: { tagName: string; path: string; style: Record<string, string> }) => void;
 }
 
 // Injected script for column-resize and row-resize.
@@ -252,16 +258,22 @@ const EDIT_SCRIPT = `
 </script>
 `;
 
-export function DocumentPreview({ html, loading, error, className, onQuickEdit, onStyleEdit }: Props) {
+export function DocumentPreview({ html, loading, error, className, onQuickEdit, onStyleEdit, onOutlineChange, onOutlineActive, onEditElement }: Props) {
   const { t } = useTranslation();
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const editHandlerRef = useRef(onQuickEdit);
   const styleHandlerRef = useRef(onStyleEdit);
+  const outlineHandlerRef = useRef(onOutlineChange);
+  const outlineActiveHandlerRef = useRef(onOutlineActive);
+  const editElementHandlerRef = useRef(onEditElement);
   const [editing, setEditing] = useState(false);
   const [resizing, setResizing] = useState(false);
   const resizeActive = useRef(false);
   editHandlerRef.current = onQuickEdit;
   styleHandlerRef.current = onStyleEdit;
+  outlineHandlerRef.current = onOutlineChange;
+  outlineActiveHandlerRef.current = onOutlineActive;
+  editElementHandlerRef.current = onEditElement;
 
   // Listen for messages from iframe
   useEffect(() => {
@@ -289,6 +301,10 @@ export function DocumentPreview({ html, loading, error, className, onQuickEdit, 
           document.body.style.cursor = '';
           document.body.style.userSelect = '';
         }
+      } else if (data.type === "doc-outline" && data.items) {
+        outlineHandlerRef.current?.(data.items as { level: number; text: string; index: number }[]);
+      } else if (data.type === "doc-outline-active") {
+        outlineActiveHandlerRef.current?.(data.index as number);
       }
     };
     window.addEventListener("message", handler);
@@ -357,7 +373,94 @@ export function DocumentPreview({ html, loading, error, className, onQuickEdit, 
     );
   }
 
-  const allScripts = `${RESIZE_SCRIPT}\n${EDIT_SCRIPT}`;
+  // Injected script for outline extraction + scroll tracking + highlight + element info.
+const OUTLINE_SCRIPT = `
+<script>
+(function() {
+  function extractOutline() {
+    var headings = document.querySelectorAll('h1, h2, h3, h4, h5, h6');
+    var items = [];
+    headings.forEach(function(h, i) {
+      h.setAttribute('data-outline-idx', i);
+      items.push({
+        level: parseInt(h.tagName[1]),
+        text: h.textContent.trim().substring(0, 80),
+        index: i
+      });
+    });
+    window.parent.postMessage({ type: 'doc-outline', items: items }, '*');
+  }
+
+  setTimeout(extractOutline, 200);
+
+  var outlineTimer = null;
+  var observer = new MutationObserver(function() {
+    if (outlineTimer) clearTimeout(outlineTimer);
+    outlineTimer = setTimeout(extractOutline, 300);
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
+
+  // Scroll tracking — update active heading
+  var scrollTimer = null;
+  window.addEventListener('scroll', function() {
+    if (scrollTimer) return;
+    scrollTimer = setTimeout(function() {
+      scrollTimer = null;
+      var headings = document.querySelectorAll('[data-outline-idx]');
+      var activeIdx = 0;
+      headings.forEach(function(h) {
+        var rect = h.getBoundingClientRect();
+        if (rect.top < 80) {
+          activeIdx = parseInt(h.getAttribute('data-outline-idx'));
+        }
+      });
+      window.parent.postMessage({ type: 'doc-outline-active', index: activeIdx }, '*');
+    }, 100);
+  });
+
+  // Listen for scroll requests from parent
+  window.addEventListener('message', function(e) {
+    if (e.data && e.data.type === 'doc-outline-scroll') {
+      var el = document.querySelector('[data-outline-idx="' + e.data.index + '"]');
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  });
+
+  // Listen for highlight requests from parent
+  window.addEventListener('message', function(e) {
+    if (e.data && e.data.type === 'highlight-element') {
+      var target = null;
+      // Try data-path first
+      if (e.data.path) {
+        target = document.querySelector('[data-path="' + e.data.path + '"]');
+      }
+      // Fallback: try text matching
+      if (!target && e.data.text) {
+        var candidates = document.querySelectorAll('p, td, h1, h2, h3, h4, span, div');
+        for (var i = 0; i < candidates.length; i++) {
+          if (candidates[i].textContent.includes(e.data.text)) {
+            target = candidates[i];
+            break;
+          }
+        }
+      }
+      if (!target) return;
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      var orig = target.style.backgroundColor;
+      var origTransition = target.style.transition;
+      target.style.transition = 'background-color 0.3s';
+      target.style.backgroundColor = 'rgba(255, 230, 0, 0.35)';
+      setTimeout(function() {
+        target.style.backgroundColor = orig;
+        setTimeout(function() { target.style.transition = origTransition; }, 500);
+      }, 2500);
+    }
+  });
+})();
+</script>
+`;
+
+const allScripts = `${RESIZE_SCRIPT}\n${EDIT_SCRIPT}\n${OUTLINE_SCRIPT}`;
   const injectedHtml = html.includes("</body>")
     ? html.replace("</body>", `${allScripts}\n</body>`)
     : html + allScripts;

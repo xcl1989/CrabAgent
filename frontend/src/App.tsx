@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { api } from "./api/client";
 import LoginPage from "./pages/LoginPage";
 import ChatPage from "./pages/ChatPage";
@@ -9,12 +9,27 @@ import UsagePage from "./pages/UsagePage";
 import CalendarPage from "./pages/CalendarPage";
 import { NavBar } from "./components/NavBar";
 import { cn } from "./lib/cn";
+import { connectGlobalSSE } from "./api/monitor";
+import { toast } from "./components/ui/Toast";
 
 export type PageId = "chat" | "agents" | "memory" | "usage" | "calendar" | "settings";
 
 function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
   const [page, setPage] = useState<PageId>("chat");
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+
+  // Connect to global SSE for system notifications (calendar reminders, etc.)
+  useEffect(() => {
+    const es = connectGlobalSSE((event) => {
+      if (event.type === "notification") {
+        const d = event.data as Record<string, string>;
+        const text = d.text || "";
+        // Show a toast notification — first line is title, rest is body
+        toast.info(text);
+      }
+    });
+    return () => es.close();
+  }, []);
 
   return (
     <div className="flex flex-col h-dvh overflow-hidden">

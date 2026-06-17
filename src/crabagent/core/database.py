@@ -399,7 +399,11 @@ class TokenUsage(Base):
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
 
 
-engine = create_async_engine(settings.db_url, echo=False, connect_args={"check_same_thread": False})
+engine = create_async_engine(
+    settings.db_url,
+    echo=False,
+    connect_args={"check_same_thread": False, "timeout": 30},  # timeout=busy_timeout seconds
+)
 async_session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 

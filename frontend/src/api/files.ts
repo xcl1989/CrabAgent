@@ -45,6 +45,38 @@ export function getImageUrl(path: string, absolute: boolean = false): string {
   return `/api/files/image?${params}`;
 }
 
+let _activePreviewServer: { filePath: string; port: number; url: string } | null = null;
+
+export function getActivePreviewUrl(): string | null {
+  return _activePreviewServer?.url ?? null;
+}
+
+export function clearPreviewServer(): void {
+  _activePreviewServer = null;
+}
+
+export async function startPreviewServer(filePath: string): Promise<{ port: number; url: string }> {
+  // Stop previous server if any
+  if (_activePreviewServer) {
+    try {
+      await api.post(`/files/stop-server?port=${_activePreviewServer.port}`, {});
+    } catch {}
+  }
+  const dir = filePath.substring(0, filePath.lastIndexOf("/"));
+  const res = await api.post<{ port: number; url: string }>(`/files/serve-dir?path=${encodeURIComponent(dir)}`, {});
+  _activePreviewServer = { filePath, port: res.port, url: `${res.url}/${encodeURIComponent(filePath.split("/").pop() || "")}` };
+  return _activePreviewServer;
+}
+
+export async function stopPreviewServer(): Promise<void> {
+  if (_activePreviewServer) {
+    try {
+      await api.post(`/files/stop-server?port=${_activePreviewServer.port}`, {});
+    } catch {}
+    _activePreviewServer = null;
+  }
+}
+
 export interface GitChange {
   status: string;
   file: string;
@@ -76,4 +108,8 @@ export async function getGitDiff(path?: string, cached?: boolean, workspace?: st
   if (cached) params.set("cached", "true");
   if (workspace) params.set("workspace", workspace);
   return api.get<GitDiffResult>(`/files/git-diff?${params}`);
+}
+
+export async function saveFile(path: string, content: string, absolute?: boolean): Promise<{ status: string; path: string; size: number }> {
+  return api.post("/files/write", { path, content, absolute });
 }

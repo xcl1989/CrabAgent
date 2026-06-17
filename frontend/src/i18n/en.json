@@ -31,7 +31,8 @@
     "enabled": "Enabled",
     "disabled": "Disabled",
     "noResults": "No results",
-    "settings": "Settings"
+    "settings": "Settings",
+    "saved": "Saved"
   },
   "login": {
     "title": "CrabAgent",
@@ -85,6 +86,7 @@
     "replayingBranch": "Replaying branch",
     "welcomeSubtitle": "Start a conversation or pick a quick template below",
     "startNewConversation": "Start New Conversation",
+    "startMeeting": "📝 Start Meeting",
     "contextCompression": "Context Compression"
   },
   "agents": {
@@ -629,6 +631,19 @@
   },
   "document": {
     "title": "Document",
+    "workMode": "Work Mode",
+    "chatMode": "Chat Mode",
+    "outline": "Outline",
+    "outlineEmpty": "No headings detected",
+    "bold": "Bold",
+    "italic": "Italic",
+    "underline": "Underline",
+    "fontSize": "Font Size",
+    "color": "Color",
+    "aiEditThis": "AI Edit",
+    "aiEditPlaceholder": "Edit instruction…",
+    "selectToEdit": "Double-click text to edit",
+    "workModeEmpty": "Nothing to work on. Ask AI to create or open a file.",
     "tabPreview": "Preview",
     "tabTimeline": "Timeline",
     "download": "Download",
@@ -642,5 +657,29 @@
     "previewFailed": "Preview unavailable",
     "maximize": "Maximize",
     "restore": "Restore"
+  },
+  "codePanel": {
+    "selectFile": "Select a file from the file browser"
+  },
+  "prototype": {
+    "preview": "Preview",
+    "source": "Source",
+    "split": "Split",
+    "startingServer": "Starting preview server…"
+  },
+  "meeting": {
+    "titlePlaceholder": "Meeting title…",
+    "participantsPlaceholder": "Participants…",
+    "speakerPlaceholder": "Speaker",
+    "notePlaceholder": "Type meeting notes…",
+    "end": "End Meeting",
+    "ended": "Meeting ended. AI is generating summary…"
+  },
+  "markdownPanel": {
+    "source": "Source",
+    "split": "Split",
+    "preview": "Preview",
+    "modified": "Modified",
+    "empty": "Nothing to preview yet."
   }
 }

@@ -369,6 +369,7 @@ async def office_edit(
     await _emit(context, EventType.DOC_OP_DELTA, {
         "file": file_path,
         "message": desc,
+        "element_path": element_path,
     })
 
     # 执行操作

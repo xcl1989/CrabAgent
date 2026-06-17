@@ -31,7 +31,8 @@
     "enabled": "已启用",
     "disabled": "已禁用",
     "noResults": "暂无结果",
-    "settings": "设置"
+    "settings": "设置",
+    "saved": "已保存"
   },
   "login": {
     "title": "CrabAgent",
@@ -85,6 +86,7 @@
     "replayingBranch": "回放分支",
     "welcomeSubtitle": "开始对话或选择一个快速模板",
     "startNewConversation": "开始新对话",
+    "startMeeting": "📝 开始会议",
     "contextCompression": "上下文压缩"
   },
   "agents": {
@@ -629,6 +631,19 @@
   },
   "document": {
     "title": "文档",
+    "workMode": "工作模式",
+    "chatMode": "会话模式",
+    "outline": "大纲",
+    "outlineEmpty": "未检测到标题结构",
+    "bold": "加粗",
+    "italic": "斜体",
+    "underline": "下划线",
+    "fontSize": "字号",
+    "color": "颜色",
+    "aiEditThis": "AI 改这段",
+    "aiEditPlaceholder": "输入修改指令…",
+    "selectToEdit": "双击文字开始编辑",
+    "workModeEmpty": "暂无内容，让 AI 创建或打开一个文件",
     "tabPreview": "预览",
     "tabTimeline": "时间线",
     "download": "下载",
@@ -642,5 +657,29 @@
     "previewFailed": "预览不可用",
     "maximize": "最大化",
     "restore": "还原"
+  },
+  "codePanel": {
+    "selectFile": "在文件浏览器中选择一个文件"
+  },
+  "prototype": {
+    "preview": "预览",
+    "source": "源码",
+    "split": "分屏",
+    "startingServer": "正在启动预览服务器…"
+  },
+  "meeting": {
+    "titlePlaceholder": "会议标题…",
+    "participantsPlaceholder": "参会人…",
+    "speakerPlaceholder": "发言人",
+    "notePlaceholder": "输入会议记录…",
+    "end": "结束会议",
+    "ended": "会议已结束，AI 正在生成纪要…"
+  },
+  "markdownPanel": {
+    "source": "源码",
+    "split": "分屏",
+    "preview": "预览",
+    "modified": "已修改",
+    "empty": "暂无内容可预览。"
   }
 }

@@ -1,9 +1,11 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { X, Download, RefreshCw, Eye, Clock, FileText, Maximize2, Minimize2, FileSpreadsheet, Presentation } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "../lib/cn";
 import { DocumentTimeline, DocOpEvent } from "./DocumentTimeline";
 import { DocumentPreview } from "./DocumentPreview";
+import { DocOutline, OutlineItem } from "./DocOutline";
+import { DocToolbar, EditElementStyle } from "./DocToolbar";
 import * as documentsApi from "../api/documents";
 
 type Tab = "preview" | "timeline";
@@ -37,6 +39,12 @@ interface Props {
   /** Toggle maximize / restore */
   onToggleMaximize?: () => void;
   className?: string;
+  /** Work mode: show outline + toolbar */
+  workMode?: boolean;
+  /** Notify parent to scroll to an AI highlight target */
+  pendingHighlight?: { path?: string; text?: string } | null;
+  /** Notify parent when user wants AI to edit text */
+  onAIEdit?: (instruction: string) => void;
 }
 
 export function DocumentPanel({
@@ -47,12 +55,23 @@ export function DocumentPanel({
   maximized,
   onToggleMaximize,
   className,
+  workMode,
+  pendingHighlight,
+  onAIEdit,
 }: Props) {
   const { t } = useTranslation();
   const [tab, setTab] = useState<Tab>("preview");
   const [editing, setEditing] = useState(false);
   // Local preview override from quick-edit, cleared on next refresh
   const [localPreviewHtml, setLocalPreviewHtml] = useState<string | null>(null);
+  // Outline state
+  const [outlineItems, setOutlineItems] = useState<OutlineItem[]>([]);
+  const [outlineActive, setOutlineActive] = useState<number>(0);
+  // Toolbar state
+  const [editElementActive, setEditElementActive] = useState(false);
+  const [editElementStyle, setEditElementStyle] = useState<EditElementStyle | undefined>();
+  const iframeRef = useRef<HTMLDivElement>(null);
+  const highlightRef = useRef<typeof pendingHighlight>(null);
 
   const handleQuickEdit = useCallback(async (oldText: string, newText: string) => {
     if (!doc?.filePath) return;
@@ -101,7 +120,50 @@ export function DocumentPanel({
   // Clear local preview when doc changes
   useEffect(() => {
     setLocalPreviewHtml(null);
+    setOutlineItems([]);
+    setOutlineActive(0);
   }, [doc?.previewHtml]);
+
+  // Send highlight message to iframe when pendingHighlight changes
+  useEffect(() => {
+    if (!pendingHighlight || !iframeRef.current) return;
+    const iframe = iframeRef.current.querySelector("iframe");
+    if (!iframe || !iframe.contentWindow) return;
+    // Wait a bit for iframe to load new content
+    const timer = setTimeout(() => {
+      iframe.contentWindow?.postMessage({
+        type: "highlight-element",
+        path: pendingHighlight.path,
+        text: pendingHighlight.text,
+      }, "*");
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [pendingHighlight, localPreviewHtml, doc?.previewHtml]);
+
+  const handleOutlineScroll = useCallback((index: number) => {
+    const iframe = iframeRef.current?.querySelector("iframe");
+    iframe?.contentWindow?.postMessage({ type: "doc-outline-scroll", index }, "*");
+  }, []);
+
+  const handleStyleChange = useCallback(async (props: Record<string, string | number | boolean>) => {
+    if (!doc?.filePath) return;
+    // We need an element path. For now, use a heuristic: last edited element path or "/".
+    // The real path comes from the edit element info callback (to be wired in Step 3).
+    // As a fallback, we apply to the last selected element's path stored in a ref.
+    const elementPath = (highlightRef.current?.path) || doc.filePath;
+    try {
+      const result = await documentsApi.quickEditStyle({
+        path: doc.filePath,
+        workspace: doc.workspace || "",
+        changes: [{ element: elementPath, props }],
+      });
+      if (result.preview_html) {
+        setLocalPreviewHtml(result.preview_html);
+      }
+    } catch (e: any) {
+      console.error("Style edit failed:", e);
+    }
+  }, [doc?.filePath, doc?.workspace]);
 
   const handleDownload = useCallback(() => {
     onDownload?.();
@@ -165,19 +227,50 @@ export function DocumentPanel({
       )}
 
       {/* Content */}
-      <div className="flex-1 overflow-hidden">
-        {tab === "preview" ? (
-          <DocumentPreview
-            html={localPreviewHtml ?? doc.previewHtml}
-            loading={doc.previewLoading}
-            error={doc.previewError || undefined}
-            className="h-full"
-            onQuickEdit={handleQuickEdit}
-            onStyleEdit={handleStyleEdit}
+      <div className="flex-1 overflow-hidden flex">
+        {workMode && tab === "preview" && !doc.fileName.toLowerCase().endsWith(".xlsx") && !doc.fileName.toLowerCase().endsWith(".pptx") && (
+          <DocOutline
+            items={outlineItems}
+            activeIndex={outlineActive}
+            onSelect={handleOutlineScroll}
           />
-        ) : (
-          <DocumentTimeline events={doc.events} className="h-full overflow-y-auto" />
         )}
+        <div className="flex-1 flex flex-col overflow-hidden" ref={iframeRef}>
+          {workMode && tab === "preview" && (
+            <DocToolbar
+              active={editElementActive}
+              style={editElementStyle}
+              onStyleChange={handleStyleChange}
+              onAIEdit={(instruction) => onAIEdit?.(instruction)}
+            />
+          )}
+          {tab === "preview" ? (
+            <DocumentPreview
+              html={localPreviewHtml ?? doc.previewHtml}
+              loading={doc.previewLoading}
+              error={doc.previewError || undefined}
+              className="h-full"
+              onQuickEdit={handleQuickEdit}
+              onStyleEdit={handleStyleEdit}
+              onOutlineChange={setOutlineItems}
+              onOutlineActive={setOutlineActive}
+              onEditElement={(info) => {
+                setEditElementActive(true);
+                const s = info.style as Record<string, string>;
+                setEditElementStyle({
+                  bold: s?.fontWeight ? Number(s.fontWeight) >= 600 : false,
+                  italic: s?.fontStyle === "italic",
+                  underline: typeof s?.textDecoration === "string" && s.textDecoration.includes("underline") || false,
+                  fontSize: s?.fontSize || "14px",
+                  color: s?.color || "#000000",
+                });
+                highlightRef.current = { path: info.path };
+              }}
+            />
+          ) : (
+            <DocumentTimeline events={doc.events} className="h-full overflow-y-auto" />
+          )}
+        </div>
       </div>
 
       {/* Bottom actions */}
