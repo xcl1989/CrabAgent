@@ -75,8 +75,8 @@ async def delete_messages(db: AsyncSession, conversation_id: int) -> int:
 
 def message_to_dict(msg: Message) -> dict:
     d: dict = {"role": msg.role}
-    # agent_switch / compress / experience → user for the LLM
-    if d["role"] in ("agent_switch", "compress", "experience"):
+    # agent_switch / compress / experience / workspace → user for the LLM
+    if d["role"] in ("agent_switch", "compress", "experience", "workspace"):
         d["role"] = "user"
 
     if msg.content:

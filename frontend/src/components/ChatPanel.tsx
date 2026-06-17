@@ -539,6 +539,7 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(
           }
 
           if (msg.role === "tool_result") return null;
+          if (msg.role === "workspace") return null;
 
           if (msg.role === "stats" && msg.stats) {
             const s = msg.stats;

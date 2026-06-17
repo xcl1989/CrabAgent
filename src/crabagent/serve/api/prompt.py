@@ -127,6 +127,8 @@ class PromptRequest(BaseModel):
     agent: str | None = None
     reasoning_effort: str | None = None
     file_context: str = ""
+    workspace_type: str = ""
+    work_mode: bool = False
 
 
 @router.post("/sessions/{session_id}/prompt", status_code=status.HTTP_202_ACCEPTED)
@@ -203,6 +205,55 @@ async def prompt_async(
     if agent_changed:
         try:
             await conv_svc.update_conversation(db, session_id, agent=effective_agent)
+        except Exception:
+            pass
+
+    # --- Workspace context switch (same pattern as agent_switch) ---
+    _work_changed = (
+        req.work_mode
+        and req.file_context
+        and (
+            req.file_context != (conv.current_file or "")
+            or req.workspace_type != (conv.workspace_type or "")
+        )
+    )
+    if _work_changed:
+        file_name = req.file_context.split("/")[-1]
+        _type_labels = {
+            "document": "Office 文档",
+            "code": "代码文件",
+            "prototype": "原型/HTML",
+            "markdown": "Markdown 文档",
+        }
+        _type_label = _type_labels.get(req.workspace_type, "文件")
+        _hints = {
+            "document": "用户正在编辑此 Office 文档。使用 office_edit 工具修改时无需指定文件路径。",
+            "code": "用户正在编辑此代码文件。",
+            "prototype": "用户正在编辑此 HTML 原型，右侧有实时预览。",
+            "markdown": "用户正在编辑此 Markdown 文档。",
+        }
+        _hint = _hints.get(req.workspace_type, "用户正在编辑此文件。")
+        ws_content = (
+            f"📎 [工作区切换] {_type_label}: {file_name}\n"
+            f"路径: {req.file_context}\n{_hint}"
+        )
+        ws_seq = user_msg_seq
+        await save_message(
+            db,
+            conversation_id=conv.id,
+            sequence=ws_seq,
+            role="workspace",
+            content=ws_content,
+            branch_id=active_branch,
+        )
+        user_msg_seq += 1
+        # Persist current file for next-change detection
+        try:
+            await conv_svc.update_conversation(
+                db, session_id,
+                current_file=req.file_context,
+                workspace_type=req.workspace_type,
+            )
         except Exception:
             pass
 
@@ -359,6 +410,10 @@ async def prompt_async(
     context.metadata["locale"] = locale
     if req.file_context:
         context.metadata["current_doc"] = req.file_context
+    if req.workspace_type:
+        context.metadata["workspace_type"] = req.workspace_type
+    if req.work_mode:
+        context.metadata["work_mode"] = req.work_mode
 
     if req.images or local_images:
         from crabagent.core.agent.token_limits import is_vision_model

@@ -64,6 +64,8 @@ class Conversation(Base):
     system_prompt: Mapped[str] = mapped_column(Text, default="")
     prompt_locale: Mapped[str] = mapped_column(String(10), default="")
     source: Mapped[str] = mapped_column(String(20), default="chat")  # chat | wechat | email | scheduled
+    current_file: Mapped[str] = mapped_column(Text, default="")
+    workspace_type: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
@@ -509,6 +511,10 @@ async def init_db() -> None:
             await conn.execute(text("ALTER TABLE conversations ADD COLUMN prompt_locale VARCHAR(10) DEFAULT ''"))
         if "source" not in columns:
             await conn.execute(text("ALTER TABLE conversations ADD COLUMN source VARCHAR(20) DEFAULT 'chat'"))
+        if "current_file" not in columns:
+            await conn.execute(text("ALTER TABLE conversations ADD COLUMN current_file TEXT DEFAULT ''"))
+        if "workspace_type" not in columns:
+            await conn.execute(text("ALTER TABLE conversations ADD COLUMN workspace_type TEXT DEFAULT ''"))
 
         result = await conn.execute(text("PRAGMA table_info(email_configs)"))
         columns = [row[1] for row in result.fetchall()]

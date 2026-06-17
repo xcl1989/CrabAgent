@@ -542,6 +542,8 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
         reasoningEffort,
         selectedProvider ?? undefined,
         currentDocPath || undefined,
+        mode === "work" ? workspaceType : undefined,
+        mode === "work",
       );
     } catch {
       setSending(false);
@@ -743,19 +745,25 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
   }, [currentDocPath]);
 
   const handleAIEdit = useCallback((instruction: string, selectedText: string) => {
-    // When user clicks "AI edit this" from toolbar, send to the chat with selected text + doc path
+    // Workspace context (file path, type) is already injected via workspace message.
+    // Only need to send the selected text + instruction.
     if (!activeSession) return;
-    const docPath = currentDocPath || "";
     const text = selectedText
-      ? `请修改文档 ${docPath} 中的这段内容（原文如下）：\n\n> ${selectedText}\n\n修改要求：${instruction}`
-      : `请修改文档 ${docPath}：${instruction}`;
+      ? `修改这段内容（原文）：\n\n> ${selectedText}\n\n修改要求：${instruction}`
+      : instruction;
     if (text.trim() && !sending) {
       setMessages((prev) => [...prev, { id: `u-${Date.now()}`, role: "user", content: text }]);
       setSending(true);
-      sessionsApi.sendPrompt(activeSession.session_id, text, selectedModel, undefined, selectedAgent, reasoningEffort, selectedProvider ?? undefined, docPath || undefined)
+      sessionsApi.sendPrompt(
+        activeSession.session_id, text, selectedModel, undefined, selectedAgent,
+        reasoningEffort, selectedProvider ?? undefined,
+        currentDocPath || undefined,
+        mode === "work" ? workspaceType : undefined,
+        mode === "work",
+      )
         .catch(() => setSending(false));
     }
-  }, [activeSession, selectedModel, selectedAgent, reasoningEffort, selectedProvider, currentDocPath, sending, setMessages, setSending]);
+  }, [activeSession, selectedModel, selectedAgent, reasoningEffort, selectedProvider, currentDocPath, mode, workspaceType, sending, setMessages, setSending]);
 
   const completedTasks = taskBoardTasks.filter((t) => t.status === "done");
 

@@ -79,11 +79,15 @@ export function sendPrompt(
   reasoningEffort?: string,
   provider?: string,
   fileContext?: string,
+  workspaceType?: string,
+  workMode?: boolean,
 ): Promise<{ status: string }> {
   return api.post(`/sessions/${sessionId}/prompt`, {
     message, model, provider, images, agent,
     reasoning_effort: reasoningEffort,
     file_context: fileContext || undefined,
+    workspace_type: workspaceType || undefined,
+    work_mode: workMode || undefined,
   });
 }
 
