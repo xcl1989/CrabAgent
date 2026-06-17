@@ -6,7 +6,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, Query, status
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from crabagent.core.database import Conversation, Message, User, get_db
@@ -62,6 +62,116 @@ async def list_sessions(
 ):
     convs = await conv_svc.list_conversations(db, user.id, workspace=workspace)
     return [_conv_to_response(c) for c in convs]
+
+
+class SearchResultItem(BaseModel):
+    session_id: str
+    title: str
+    snippet: str
+    role: str
+    updated_at: str | None = None
+
+
+@router.get("/search", response_model=list[SearchResultItem])
+async def search_sessions(
+    q: str = Query(..., min_length=1, description="Search keyword"),
+    limit: int = Query(20, ge=1, le=100),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Full-text search across session titles and message content using FTS5."""
+    # Search in messages via FTS5
+    fts_sql = text("""
+        SELECT c.session_id, c.title, m.content, m.role, c.updated_at
+        FROM messages_fts
+        JOIN messages m ON messages_fts.rowid = m.id
+        JOIN conversations c ON m.conversation_id = c.id
+        WHERE messages_fts MATCH :q
+          AND c.user_id = :user_id
+          AND m.role IN ('user', 'assistant')
+          AND m.compressed = 0
+        ORDER BY rank
+        LIMIT :lim
+    """)
+    try:
+        result = await db.execute(fts_sql, {"q": q, "user_id": user.id, "lim": limit})
+        rows = result.fetchall()
+    except Exception:
+        # Fallback: LIKE search if FTS5 fails (test run without index)
+        fallback_sql = text("""
+            SELECT c.session_id, c.title, m.content, m.role, c.updated_at
+            FROM messages m
+            JOIN conversations c ON m.conversation_id = c.id
+            WHERE c.user_id = :user_id
+              AND m.content LIKE :like_q
+              AND m.role IN ('user', 'assistant')
+              AND m.compressed = 0
+            ORDER BY c.updated_at DESC
+            LIMIT :lim
+        """)
+        result = await db.execute(fallback_sql, {
+            "like_q": f"%{q}%", "user_id": user.id, "lim": limit,
+        })
+        rows = result.fetchall()
+
+    seen = set()
+    items = []
+    for row in rows:
+        session_id = row[0]
+        if session_id in seen:
+            continue
+        seen.add(session_id)
+        content = row[2] or ""
+        role = row[3] or "user"
+        # Extract plain text snippet from possible JSON content_blocks
+        plain = content
+        if content.startswith("[") and content.endswith("]"):
+            try:
+                import json as _j
+                blocks = _j.loads(content)
+                texts = []
+                for b in blocks:
+                    if isinstance(b, dict) and b.get("type") == "text":
+                        texts.append(b.get("text", ""))
+                plain = " ".join(texts)
+            except Exception:
+                pass
+        # Build snippet around match
+        idx = plain.lower().find(q.lower())
+        if idx >= 0:
+            start = max(0, idx - 40)
+            end = min(len(plain), idx + len(q) + 40)
+            snippet = ("…" if start > 0 else "") + plain[start:end] + ("…" if end < len(plain) else "")
+        else:
+            snippet = plain[:100]
+        items.append(SearchResultItem(
+            session_id=session_id,
+            title=row[1] or "",
+            snippet=snippet,
+            role=role,
+            updated_at=row[4].isoformat() if row[4] else None,
+        ))
+
+    # Also search titles directly (supplements FTS5 results)
+    title_sql = text("""
+        SELECT session_id, title, updated_at FROM conversations
+        WHERE user_id = :user_id
+          AND title LIKE :like_q
+        ORDER BY updated_at DESC
+        LIMIT :lim
+    """)
+    result = await db.execute(title_sql, {"like_q": f"%{q}%", "user_id": user.id, "lim": limit})
+    for row in result.fetchall():
+        if row[0] not in seen:
+            items.append(SearchResultItem(
+                session_id=row[0],
+                title=row[1] or "",
+                snippet="",
+                role="",
+                updated_at=row[2].isoformat() if row[2] else None,
+            ))
+
+    return items[:limit]
 
 
 class WorkspaceInfo(BaseModel):

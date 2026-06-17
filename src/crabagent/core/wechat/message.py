@@ -720,6 +720,13 @@ async def _run_agent_for_wechat(msg: IncomingMessage, client: WeChatClient | Non
     except Exception as e:
         logger.warning("[WeChatLoop] Failed to save user message: %s", e)
 
+    # ---- Voice-only: promote ASR text to message content ----
+    if not msg.content and msg.attachments:
+        for att in msg.attachments:
+            if att.media_type == "voice" and att.asr_text:
+                msg.content = att.asr_text
+                break
+
     # ---- Process attachments into query content ----
     query: str | list[dict] = msg.content
     if msg.attachments:
@@ -785,12 +792,14 @@ async def _run_agent_for_wechat(msg: IncomingMessage, client: WeChatClient | Non
 
             elif att.media_type == "voice":
                 asr = att.asr_text or "(无法识别的语音消息)"
-                content_blocks.append(
-                    {
-                        "type": "text",
-                        "text": f"[用户发送了语音消息] {asr}",
-                    }
-                )
+                # If ASR was already promoted to msg.content, skip the wrapper
+                if not (msg.content == asr):
+                    content_blocks.append(
+                        {
+                            "type": "text",
+                            "text": f"[用户发送了语音消息] {asr}",
+                        }
+                    )
 
             elif att.media_type == "file":
                 if client:
@@ -801,12 +810,25 @@ async def _run_agent_for_wechat(msg: IncomingMessage, client: WeChatClient | Non
                             save_dir.mkdir(parents=True, exist_ok=True)
                             file_path = save_dir / (att.file_name or f"file_{att.file_size}")
                             file_path.write_bytes(raw_bytes)
-                            content_blocks.append(
-                                {
-                                    "type": "text",
-                                    "text": f"[用户发送了文件「{att.file_name}」，已保存到 {file_path}]",
-                                }
-                            )
+                            # Auto-extract content for readable file types
+                            file_content = await _extract_file_content(file_path, att.file_name or "")
+                            if file_content:
+                                content_blocks.append(
+                                    {
+                                        "type": "text",
+                                        "text": (
+                                            f"[用户发送了文件「{att.file_name}」，已保存到 {file_path}]\n\n"
+                                            f"文件内容如下：\n{file_content}"
+                                        ),
+                                    }
+                                )
+                            else:
+                                content_blocks.append(
+                                    {
+                                        "type": "text",
+                                        "text": f"[用户发送了文件「{att.file_name}」，已保存到 {file_path}]",
+                                    }
+                                )
                         else:
                             content_blocks.append(
                                 {
@@ -1204,6 +1226,41 @@ async def _maybe_archive_after_reply(conv_id: int, title: str) -> None:
 
     except Exception as e:
         logger.error("[WeChatLoop] Archive task failed: %s", e)
+
+
+async def _extract_file_content(file_path, original_name: str) -> str | None:
+    """Try to read readable file content; return content string or None.
+
+    Handles plain text files (txt, md, csv, json, yaml, code, config, etc.)
+    and Office documents (xlsx, docx, pptx) via OfficeCLI.
+    """
+    ext = original_name.rsplit(".", 1)[-1].lower() if "." in original_name else ""
+    text_exts = {
+        "txt", "md", "csv", "json", "yaml", "yml", "toml", "xml",
+        "py", "ts", "tsx", "js", "jsx", "go", "rs", "java", "c", "cpp",
+        "sh", "bash", "sql", "css", "scss", "html", "vue", "svelte",
+        "ini", "cfg", "conf", "env", "log", "gradle", "kt", "swift",
+    }
+    if ext in text_exts:
+        try:
+            content = file_path.read_text("utf-8")
+            if len(content) > 8000:
+                content = content[:8000] + "\n\n... (文件过长，已截断)"
+            return content
+        except Exception:
+            return None
+    if ext in ("xlsx", "docx", "pptx"):
+        try:
+            from crabagent.core.office.manager import get_office_manager
+            mgr = get_office_manager()
+            if mgr.available:
+                result = await mgr.view_text(str(file_path), mode="text", max_lines=200)
+                if result.success and result.data:
+                    text = result.data[:8000]
+                    return text
+        except Exception:
+            pass
+    return None
 
 
 def _extract_last_assistant_text(context) -> str:

@@ -533,6 +533,37 @@ async def init_db() -> None:
         if "compressed" not in columns:
             await conn.execute(text("ALTER TABLE messages ADD COLUMN compressed BOOLEAN DEFAULT 0"))
 
+        # ── FTS5 full-text search index for messages ─────────────
+        try:
+            await conn.execute(text(
+                "CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5("
+                "content, content=messages, content_rowid=id, tokenize='unicode61')"
+            ))
+            # Sync existing messages (idempotent: skip if already indexed)
+            await conn.execute(text(
+                "INSERT INTO messages_fts(rowid, content) "
+                "SELECT id, content FROM messages "
+                "WHERE id > IFNULL((SELECT max(rowid) FROM messages_fts), 0)"
+            ))
+            # Triggers for incremental sync
+            await conn.execute(text(
+                "CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN "
+                "INSERT INTO messages_fts(rowid, content) VALUES (new.id, new.content); END"
+            ))
+            await conn.execute(text(
+                "CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN "
+                "INSERT INTO messages_fts(messages_fts, rowid, content) "
+                "VALUES('delete', old.id, old.content); END"
+            ))
+            await conn.execute(text(
+                "CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE ON messages BEGIN "
+                "INSERT INTO messages_fts(messages_fts, rowid, content) "
+                "VALUES('delete', old.id, old.content); "
+                "INSERT INTO messages_fts(rowid, content) VALUES (new.id, new.content); END"
+            ))
+        except Exception as e:
+            logger.warning("FTS5 setup failed (non-fatal): %s", e)
+
         result = await conn.execute(text("PRAGMA table_info(molts)"))
         columns = [row[1] for row in result.fetchall()]
         if "method" not in columns:

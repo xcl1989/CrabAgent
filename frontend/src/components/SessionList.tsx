@@ -17,9 +17,10 @@ import {
   Bell,
   Inbox,
   Sparkles,
+  Loader2,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { Session } from "../api/sessions";
+import { Session, SearchResult, searchSessions } from "../api/sessions";
 import { formatDate } from "../api/time";
 import { Button, EmptyState, ConfirmDialog } from "./ui";
 import { cn } from "../lib/cn";
@@ -60,6 +61,8 @@ export default function SessionList({
   const { t } = useTranslation();
   const [collapsed, setCollapsed] = useState(false);
   const [query, setQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<SearchResult[] | null>(null);
+  const [searchLoading, setSearchLoading] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Session | null>(null);
   const [quickMenuOpen, setQuickMenuOpen] = useState(false);
   const quickMenuRef = useRef<HTMLDivElement>(null);
@@ -93,6 +96,26 @@ export default function SessionList({
       document.removeEventListener("keydown", onKey);
     };
   }, [quickMenuOpen]);
+
+  // ── Debounced full-text search via API ────────────────
+  useEffect(() => {
+    if (!query.trim()) {
+      setSearchResults(null);
+      setSearchLoading(false);
+      return;
+    }
+    setSearchLoading(true);
+    const timer = setTimeout(async () => {
+      try {
+        const results = await searchSessions(query.trim());
+        setSearchResults(results);
+      } catch {
+        setSearchResults([]);
+      }
+      setSearchLoading(false);
+    }, 300);
+    return () => { clearTimeout(timer); setSearchLoading(false); };
+  }, [query]);
 
   const filtered = query.trim()
     ? sessions.filter((s) =>
@@ -209,7 +232,7 @@ export default function SessionList({
       </div>
 
       {/* Search */}
-      {sessions.length > 4 && (
+      {sessions.length > 2 && (
         <div className="p-2 border-b border-[var(--border-subtle)]">
           <div className="relative">
             <Search
@@ -228,7 +251,54 @@ export default function SessionList({
 
       {/* List */}
       <div className="flex-1 overflow-y-auto">
-        {sessions.length === 0 ? (
+        {searchResults !== null ? (
+          /* ── Search results ── */
+          searchResults.length === 0 ? (
+            <div className="p-4 text-xs text-center text-[var(--text-tertiary)]">
+              {t("common.noResults")}
+            </div>
+          ) : (
+            searchResults.map((r) => {
+              const isActive = activeId === r.session_id;
+              return (
+                <div
+                  key={r.session_id}
+                  onClick={() => {
+                    const session = sessions.find((s) => s.session_id === r.session_id);
+                    if (session) handleSelect(session);
+                  }}
+                  className={cn(
+                    "group relative px-3 py-2 cursor-pointer transition-colors",
+                    "border-l-2",
+                    isActive
+                      ? "bg-[var(--bg-tertiary)] border-l-[var(--brand)]"
+                      : "border-l-transparent hover:bg-[var(--bg-tertiary)]/60",
+                  )}
+                >
+                  <div className="min-w-0">
+                    <div className="truncate text-sm text-[var(--text-primary)] flex items-center gap-1.5">
+                      <span className="truncate">{r.title || `(${t("session.untitled")})`}</span>
+                      <span className={cn(
+                        "inline-flex items-center px-1 py-px rounded text-[9px] font-medium shrink-0",
+                        r.role === "user" ? "bg-[var(--brand-bg)] text-[var(--brand)]" : "bg-[var(--accent-bg)] text-[var(--accent)]",
+                      )}>
+                        {r.role === "user" ? "问" : "答"}
+                      </span>
+                    </div>
+                    {r.snippet && (
+                      <div className="text-[11px] mt-0.5 text-[var(--text-tertiary)] leading-relaxed line-clamp-2">
+                        {r.snippet}
+                      </div>
+                    )}
+                    <div className="text-[10px] mt-0.5 text-[var(--text-tertiary)] font-mono">
+                      {r.updated_at ? formatDate(r.updated_at) : ""}
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          )
+        ) : sessions.length === 0 ? (
           <EmptyState
             compact
             icon={<MessageSquare size={24} />}

@@ -13,6 +13,14 @@ export interface Session {
   updated_at: string | null;
 }
 
+export interface SearchResult {
+  session_id: string;
+  title: string;
+  snippet: string;
+  role: string;
+  updated_at: string | null;
+}
+
 export interface Message {
   id: number;
   sequence: number;
@@ -173,4 +181,8 @@ export function deleteTodo(sessionId: string, todoId: number): Promise<void> {
 
 export function submitInput(sessionId: string, inputId: string, answer: string): Promise<void> {
   return api.post(`/sessions/${sessionId}/user-input`, { input_id: inputId, answer });
+}
+
+export function searchSessions(q: string): Promise<SearchResult[]> {
+  return api.get(`/sessions/search?q=${encodeURIComponent(q)}`);
 }
