@@ -92,8 +92,6 @@ export function DocumentPanel({
       if (result.status === "no_match") {
         console.warn("Quick edit: text not found:", oldText);
       }
-      // Also trigger server refresh so next page load has latest
-      onRefreshPreview?.();
     } catch (e: any) {
       console.error("Quick edit failed:", e);
       onRefreshPreview?.();

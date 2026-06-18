@@ -392,7 +392,9 @@ def _describe_op(
                 "- accent1~accent6: 主题配色\n"
                 "- headingFont: 标题字体 / bodyFont: 正文字体\n\n"
                 "表格创建属性（add table）：\n"
-                "- data: 内联数据 'H1,H2;R1C1,R1C2' 或 CSV\n"
+                "- data: 表格数据。支持两种格式：\n"
+                "  - JSON 二维数组（推荐）：[['A','B'],['1','2']]\n"
+                "  - CSV 字符串（兼容）：'A,B;1,2'\n"
                 "- style: 表格样式（medium1~4, light1~3, dark1~2）\n"
                 "- headerFill/bodyFill: 表头/正文背景色\n"
                 "- border.all/border.horizontal/border.vertical: 边框",

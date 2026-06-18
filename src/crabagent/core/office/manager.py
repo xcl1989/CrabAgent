@@ -207,26 +207,24 @@ class OfficeManager:
 
         # 分离定位参数和普通属性
         pass_props: dict[str, Any] = {}
-        table_data: Any = None
         for k, v in (props or {}).items():
             if k == "index":
                 cmd.extend(["--index", str(int(v))])
             elif k in ("after", "before"):
                 cmd.extend([f"--{k}", str(v)])
             elif k == "data":
-                table_data = v
+                # data 转为 CSV 字符串通过 --prop 传递
+                if isinstance(v, list):
+                    v = ";".join(",".join(str(c) for c in row) for row in v)
+                pass_props[k] = v
             else:
                 pass_props[k] = v
 
         for k, v in pass_props.items():
             cmd.extend(["--prop", f"{k}={v}"])
 
-        # table 的 data 用 stdin 传递，避免命令行参数长度限制
-        stdin_data: bytes | None = None
-        if table_data is not None:
-            stdin_data = json.dumps(table_data).encode("utf-8")
-
-        return await self._exec_with_stdin(cmd, stdin_data)
+        # 用 exec 执行（所有参数已在 cmd 中，无需 stdin）
+        return await self.exec(*cmd[1:])
 
     async def remove_element(self, file_path: str, element_path: str) -> OfficeResult:
         """删除文档中的元素。"""
