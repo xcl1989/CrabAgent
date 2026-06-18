@@ -217,6 +217,7 @@ export default function FileBrowser({
               selectedPath={tree.selectedPath}
               absolute={tree.absolute}
               onOpenDoc={onOpenDoc}
+              onRefresh={tree.refresh}
             />
           )}
         </div>
@@ -276,6 +277,7 @@ export default function FileBrowser({
                 selectedPath={tree.selectedPath}
                 absolute={tree.absolute}
                 onOpenDoc={onOpenDoc}
+                onRefresh={tree.refresh}
               />
             )}
             <ErrorBoundary>

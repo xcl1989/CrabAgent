@@ -9,6 +9,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.11.1]
+
+### Added
+- **File Tree Context Menu** — right-click any file or folder in the file browser to manage files
+  - **Rename** — inline edit with Enter to confirm, Esc to cancel
+  - **Delete** — confirmation dialog with folder/file distinction
+  - **New file / New folder** — inline input on directory nodes, auto-expand parent
+  - **Download** — browser download with token auth
+  - **Copy path** — copy absolute path to clipboard
+  - Backend: `DELETE /api/files/manage`, `POST /api/files/rename`, `POST /api/files/create`, `GET /api/files/download`
+- **Chat File Upload** — upload any file type (not just images) from the chat input
+  - Click 📎 button or drag-and-drop or paste files into the input
+  - Office documents (.docx/.xlsx/.pptx), PDFs, text files supported
+  - Files stored in `~/.crabagent/uploads/{user_id}/` — not in workspace
+  - Uploaded file paths injected into the prompt for Agent to process
+  - Pending files shown as cards with icon, name, and size
+- **LLM Retry with Live Countdown** — users now see exactly what's happening when API calls fail
+  - New `LLM_RETRY` SSE event with phase, attempt number, and countdown
+  - Frontend retry card: spinner + message + "X秒后重试（第2/3次）" + progress bar
+  - Countdown ticks at 1-second intervals for real-time feedback
+
+### Fixed
+- **grep tool** — `{ts,tsx}` brace expansion in `include` parameter silently matched zero files (fnmatch doesn't support `{a,b}`)
+- **grep tool** — single-file path search returned "path does not exist" error
+- **grep tool** — binary files (databases, images) returned garbled text wasting tokens
+- **glob tool** — `Path.glob()` traversed node_modules before filtering (2274 files scanned, 2241 wasted); now uses `os.walk` with pre-pruning (33 files, 132x faster)
+- **glob tool** — brace patterns like `*.{ts,tsx}` returned empty results
+- **edit tool** — `old_string` not found raised `ValueError` crash instead of friendly error message (count check was after `index()`)
+- **read tool** — directory listing hid all dotfiles (.env, .gitignore, etc.) preventing discovery of config files
+- **read tool** — binary files returned garbled content instead of a "Binary file" notice
+- **glob/grep/read** — inconsistent exclude directory lists across three tools; now aligned (`.crabagent` → `molts` subdirectory)
+- **WeChat file download** — `.docx`/`.xlsx`/`.pdf` files from WeChat failed to download because AES decryption validation only checked image magic bytes (JPEG/PNG); now supports all common file types (ZIP/PDF/text/structured data)
+- **LLM double-retry** — litellm's built-in retry (`num_retries=3`) stacked with manual loop retry, causing up to 12 actual retry attempts; litellm retry now disabled (`num_retries=0`)
+- **LLM retry counter leak** — `_llm_retry_count` never reset on success, so after one failed iteration, subsequent iterations had fewer retry attempts available
+
+### Changed
+- **glob/grep/read tools** — all three now accept `context` parameter for workspace-aware path resolution
+- **glob tool description** — documents brace expansion support
+- **`api.del()`** — now accepts optional body parameter for DELETE requests with payload
+
+---
+
 ## [0.11.0]
 
 ### Added

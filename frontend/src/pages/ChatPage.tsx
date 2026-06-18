@@ -16,6 +16,7 @@ import {
   Check,
   LayoutPanelLeft,
   LayoutPanelTop,
+  FileText,
 } from "lucide-react";
 import * as sessionsApi from "../api/sessions";
 import * as providersApi from "../api/providers";
@@ -343,6 +344,7 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
   const [showFiles, setShowFiles] = useState(false);
   const [showWorkFiles, setShowWorkFiles] = useState(false);
   const [pendingImages, setPendingImages] = useState<string[]>([]);
+  const [pendingFiles, setPendingFiles] = useState<{ name: string; path: string; size: number }[]>([]);
   const [reasoningEffort, setReasoningEffort] = useState("medium");
   const [agentProfiles, setAgentProfiles] = useState<AgentProfileType[]>([]);
   const [agentOpen, setAgentOpen] = useState(false);
@@ -350,7 +352,7 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
   const agentDropdownRef = useRef<HTMLDivElement>(null);
   const effortDropdownRef = useRef<HTMLDivElement>(null);
   const [selectedAgent, setSelectedAgent] = useState("default");
-  const [localeMismatch, setLocaleMismatch] = useState<{ pendingText: string; pendingImages: string[] } | null>(null);
+  const [localeMismatch, setLocaleMismatch] = useState<{ pendingText: string; pendingImages: string[]; pendingFiles: { name: string; path: string; size: number }[] } | null>(null);
   const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
   const [mcpStatus, setMcpStatus] = useState<McpServerStatus[]>([]);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -452,6 +454,9 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
     [selectSessionById, selectedModel, models, setSelectedModel],
   );
 
+  const _OFFICE_EXTS = [".docx", ".xlsx", ".pptx"];
+  const _TEXT_EXTS = [".pdf", ".csv", ".txt", ".md", ".json", ".xml", ".html", ".htm", ".py", ".js", ".ts", ".tsx", ".jsx", ".java", ".go", ".rs", ".c", ".cpp", ".h", ".sh", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".sql", ".r", ".rb", ".php", ".css", ".scss", ".vue", ".svelte"];
+
   const processImageFile = (file: File) => {
     if (pendingImages.length >= 5) return;
     if (file.size > 5 * 1024 * 1024) return;
@@ -464,27 +469,54 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
     reader.readAsDataURL(file);
   };
 
-  const handleImagePaste = (e: React.ClipboardEvent) => {
-    const items = e.clipboardData?.items;
-    if (!items) return;
-    for (const item of Array.from(items)) {
-      if (item.type.startsWith("image/")) {
-        e.preventDefault();
-        const file = item.getAsFile();
-        if (file) processImageFile(file);
-        return;
-      }
+  const processDocFile = async (file: File) => {
+    const ext = "." + file.name.split(".").pop()?.toLowerCase();
+    if (!_OFFICE_EXTS.includes(ext) && !_TEXT_EXTS.includes(ext)) return;
+
+    try {
+      const { uploadFile } = await import("../api/files");
+      const result = await uploadFile(file);
+      setPendingFiles((prev) => [
+        ...prev,
+        { name: file.name, path: result.path, size: result.size },
+      ]);
+    } catch (e) {
+      console.error("File upload failed:", e);
     }
   };
 
-  const handleImageUpload = () => {
+  const processFile = (file: File) => {
+    if (file.type.startsWith("image/")) {
+      processImageFile(file);
+    } else {
+      processDocFile(file);
+    }
+  };
+
+  const handleFilePaste = (e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    let hasFile = false;
+    for (const item of Array.from(items)) {
+      if (item.kind === "file") {
+        const file = item.getAsFile();
+        if (file) {
+          hasFile = true;
+          processFile(file);
+        }
+      }
+    }
+    if (hasFile) e.preventDefault();
+  };
+
+  const handleFileUpload = () => {
     const el = document.createElement("input");
     el.type = "file";
-    el.accept = "image/*";
+    el.accept = "image/*,.docx,.xlsx,.pptx,.pdf,.csv,.txt,.md,.json,.xml,.html,.htm";
     el.multiple = true;
     el.onchange = (e) => {
       const files = (e.target as HTMLInputElement).files;
-      if (files) Array.from(files).forEach(processImageFile);
+      if (files) Array.from(files).forEach(processFile);
     };
     el.click();
   };
@@ -492,7 +524,7 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     const files = e.dataTransfer?.files;
-    if (files) Array.from(files).forEach(processImageFile);
+    if (files) Array.from(files).forEach(processFile);
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -509,8 +541,15 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
     return matches;
   };
 
-  const doSend = async (text: string, images: string[]) => {
+  const doSend = async (text: string, images: string[], files: { name: string; path: string; size: number }[] = []) => {
     if (!activeSession || sending) return;
+
+    // Append file references to the prompt text
+    if (files.length > 0) {
+      const fileList = files.map((f) => `- ${f.path} (${f.name}, ${(f.size / 1024).toFixed(0)}KB)`).join("\n");
+      text = text + (text ? "\n\n" : "") + `📎 附件：\n${fileList}\n\n请先读取附件内容，然后根据我的请求处理。`;
+    }
+
     setMessages((prev) => [
       ...prev,
       {
@@ -554,19 +593,21 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
   };
 
   const handleSend = async (text: string) => {
-    if ((!text.trim() && pendingImages.length === 0) || !activeSession || sending)
+    if ((!text.trim() && pendingImages.length === 0 && pendingFiles.length === 0) || !activeSession || sending)
       return;
 
     // Check locale mismatch
     const currentLocale = i18n.language;
     if (activeSession.prompt_locale && activeSession.prompt_locale !== currentLocale) {
-      setLocaleMismatch({ pendingText: text, pendingImages: [...pendingImages] });
+      setLocaleMismatch({ pendingText: text, pendingImages: [...pendingImages], pendingFiles: [...pendingFiles] });
       return;
     }
 
     const images = [...pendingImages];
+    const files = [...pendingFiles];
     setPendingImages([]);
-    doSend(text, images);
+    setPendingFiles([]);
+    doSend(text, images, files);
   };
 
   const handleSendWithLocale = async (text: string, images: string[], locale: string) => {
@@ -580,7 +621,7 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
     if (activeSession) {
       setActiveSession({ ...activeSession, prompt_locale: locale });
     }
-    doSend(text, images);
+    doSend(text, images, localeMismatch?.pendingFiles ?? []);
   };
 
   const handleToolConfirm = async (confirmId: string, approved: boolean) => {
@@ -1014,6 +1055,32 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
                       </div>
                     )}
 
+                    {/* Pending files (documents, text, etc.) */}
+                    {pendingFiles.length > 0 && (
+                      <div className="flex gap-2 mb-2 flex-wrap">
+                        {pendingFiles.map((f, i) => (
+                          <div key={i} className="relative flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--bg-tertiary)] max-w-[200px]">
+                            <FileText size={14} className="shrink-0 text-[var(--accent)]" />
+                            <div className="min-w-0">
+                              <div className="text-xs text-[var(--text-primary)] truncate">{f.name}</div>
+                              <div className="text-[10px] text-[var(--text-tertiary)]">{(f.size / 1024).toFixed(0)}KB</div>
+                            </div>
+                            <button
+                              onClick={() =>
+                                setPendingFiles((prev) =>
+                                  prev.filter((_, idx) => idx !== i),
+                                )
+                              }
+                              className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full flex items-center justify-center bg-[var(--danger)] text-white hover:bg-[var(--danger-hover)] transition-colors"
+                              aria-label="Remove file"
+                            >
+                              <X size={11} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
                     {/* Input row */}
                     <div className="flex gap-1.5 items-end">
                       <ChatInput
@@ -1021,8 +1088,8 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
                         replaying={replaying}
                         onSend={handleSend}
                         onAbort={handleAbort}
-                        onImageUpload={handleImageUpload}
-                        onImagePaste={handleImagePaste}
+                        onFileUpload={handleFileUpload}
+                        onFilePaste={handleFilePaste}
                         onDelegateOpen={() => setShowDelegate(true)}
                         showDelegate={true}
                       />
@@ -1466,6 +1533,32 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
                 </div>
               )}
 
+              {/* Pending files (documents, text, etc.) */}
+              {pendingFiles.length > 0 && (
+                <div className="flex gap-2 mb-2 flex-wrap">
+                  {pendingFiles.map((f, i) => (
+                    <div key={i} className="relative flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--bg-tertiary)] max-w-[200px]">
+                      <FileText size={14} className="shrink-0 text-[var(--accent)]" />
+                      <div className="min-w-0">
+                        <div className="text-xs text-[var(--text-primary)] truncate">{f.name}</div>
+                        <div className="text-[10px] text-[var(--text-tertiary)]">{(f.size / 1024).toFixed(0)}KB</div>
+                      </div>
+                      <button
+                        onClick={() =>
+                          setPendingFiles((prev) =>
+                            prev.filter((_, idx) => idx !== i),
+                          )
+                        }
+                        className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full flex items-center justify-center bg-[var(--danger)] text-white hover:bg-[var(--danger-hover)] transition-colors"
+                        aria-label="Remove file"
+                      >
+                        <X size={11} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
               {/* Input row */}
               <div className="flex gap-1.5 sm:gap-2 items-end">
                 <ChatInput
@@ -1473,8 +1566,8 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
                   replaying={replaying}
                   onSend={handleSend}
                   onAbort={handleAbort}
-                  onImageUpload={handleImageUpload}
-                  onImagePaste={handleImagePaste}
+                  onFileUpload={handleFileUpload}
+                  onFilePaste={handleFilePaste}
                   onDelegateOpen={() => setShowDelegate(true)}
                   showDelegate={true}
                 />
@@ -1738,7 +1831,8 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
                   const { pendingText } = localeMismatch;
                   setLocaleMismatch(null);
                   setPendingImages([]);
-                  doSend(pendingText, []);
+                  setPendingFiles([]);
+                  doSend(pendingText, [], []);
                 }}
               >
                 {t("localeMismatch.keep")}

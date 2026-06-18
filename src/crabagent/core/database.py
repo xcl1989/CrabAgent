@@ -1190,7 +1190,7 @@ async def agent_memory_search_vector(
     """
     from crabagent.core.memory_embed import cosine_similarity, decode_embedding, encode_query
 
-    query_vec = encode_query(query)
+    query_vec = await encode_query(query)
     if query_vec is None:
         if fallback:
             return await agent_memory_search(user_id, query, memory_type=memory_type, limit=limit)
@@ -1273,7 +1273,7 @@ async def agent_memory_ensure_embedding(memory_id: int, key: str, content: str) 
     from crabagent.core.memory_embed import encode
 
     text = f"{key}: {content}"
-    blob = encode(text)
+    blob = await encode(text)
     if blob is None:
         return
 

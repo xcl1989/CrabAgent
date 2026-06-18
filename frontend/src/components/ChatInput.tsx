@@ -8,8 +8,8 @@ interface Props {
   replaying: boolean;
   onSend: (text: string) => void;
   onAbort: () => void;
-  onImageUpload: () => void;
-  onImagePaste: (e: React.ClipboardEvent) => void;
+  onFileUpload: () => void;
+  onFilePaste: (e: React.ClipboardEvent) => void;
   onDelegateOpen: () => void;
   showDelegate?: boolean;
 }
@@ -19,8 +19,8 @@ export default function ChatInput({
   replaying,
   onSend,
   onAbort,
-  onImageUpload,
-  onImagePaste,
+  onFileUpload,
+  onFilePaste,
   onDelegateOpen,
   showDelegate,
 }: Props) {
@@ -50,9 +50,9 @@ export default function ChatInput({
       <Button
         size="icon"
         variant="outline"
-        onClick={onImageUpload}
+        onClick={onFileUpload}
         disabled={sending || replaying}
-        title={t("chat.attachImage")}
+        title={t("chat.attachFile")}
         className="h-9 w-9 sm:h-10 sm:w-10"
       >
         <Paperclip size={15} />
@@ -73,7 +73,7 @@ export default function ChatInput({
         value={input}
         onChange={(e) => setInput(e.target.value)}
         onKeyDown={handleKeyDown}
-        onPaste={onImagePaste}
+        onPaste={onFilePaste}
         placeholder={t("chat.placeholder")}
         disabled={sending || replaying}
         ref={inputRef}

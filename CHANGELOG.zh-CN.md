@@ -8,6 +8,47 @@ English version: [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
+## [0.11.1]
+
+### 新增
+- **文件树右键菜单** — 在文件浏览器中右键任意文件/文件夹即可管理
+  - **重命名** — 内联编辑，Enter 确认，Esc 取消
+  - **删除** — 确认弹窗，区分文件/文件夹
+  - **新建文件/文件夹** — 目录节点上内联输入，自动展开父目录
+  - **下载** — 浏览器下载（token 认证）
+  - **复制路径** — 复制绝对路径到剪贴板
+  - 后端新增：`DELETE /api/files/manage`、`POST /api/files/rename`、`POST /api/files/create`、`GET /api/files/download`
+- **聊天文件上传** — 输入框支持上传任意文件类型（不再限于图片）
+  - 点击 📎 按钮、拖拽或粘贴文件到输入框
+  - 支持 Office 文档（.docx/.xlsx/.pptx）、PDF、文本文件等
+  - 文件存储在 `~/.crabagent/uploads/{user_id}/`，不污染工作目录
+  - 上传后文件路径自动注入 prompt，Agent 可直接读取处理
+  - 待发送文件以卡片形式展示（图标 + 文件名 + 大小）
+- **LLM 重试实时倒计时** — API 调用失败时用户能看到完整的重试过程
+  - 新增 `LLM_RETRY` SSE 事件，包含阶段、重试次数、倒计时秒数
+  - 前端重试卡片：旋转图标 + 错误信息 + "X秒后重试（第2/3次）" + 进度条
+  - 每秒更新倒计时，用户全程感知
+
+### 修复
+- **grep 工具** — `{ts,tsx}` 花括号扩展静默匹配零个文件（fnmatch 不支持 `{a,b}` 语法）
+- **grep 工具** — 传文件路径搜索报"路径不存在"错误
+- **grep 工具** — 二进制文件（数据库、图片）返回乱码浪费 token
+- **glob 工具** — `Path.glob()` 先遍历 node_modules 再过滤（扫了 2274 个文件，2241 个浪费）；改用 `os.walk` 预剪枝（33 个文件，提速 132 倍）
+- **glob 工具** — `*.{ts,tsx}` 花括号模式返回空结果
+- **edit 工具** — `old_string` 不存在时 `ValueError` 崩溃，而非友好错误提示（count 检查在 `index()` 之后）
+- **read 工具** — 目录列表隐藏所有 dotfiles（.env、.gitignore 等），无法发现配置文件
+- **read 工具** — 二进制文件返回乱码而非"Binary file"提示
+- **glob/grep/read** — 三个工具的排除目录列表不一致；已统一（`.crabagent` → 只排除 `molts` 子目录）
+- **微信文件下载** — `.docx`/`.xlsx`/`.pdf` 文件下载失败，因为 AES 解密验证只检查图片 magic bytes（JPEG/PNG）；现支持所有常见文件类型（ZIP/PDF/文本/结构化数据）
+- **LLM 双重重试** — litellm 内置重试（`num_retries=3`）与手动循环重试叠加，实际重试高达 12 次；现已关闭 litellm 内置重试（`num_retries=0`）
+- **LLM 重试计数泄漏** — `_llm_retry_count` 成功后不重置，导致后续迭代可用重试次数递减
+
+### 变更
+- **glob/grep/read 工具** — 三个工具均新增 `context` 参数，支持 workspace 感知的路径解析
+- **`api.del()`** — 支持可选 body 参数用于带请求体的 DELETE 请求
+
+---
+
 ## [0.11.0]
 
 ### 新增

@@ -18,6 +18,67 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+
+# ── File type detection for media download validation ────────────────
+
+# Common magic bytes for various file types
+_FILE_MAGIC = {
+    b"\xff\xd8\xff": "JPEG image",
+    b"\x89PNG": "PNG image",
+    b"PK\x03\x04": "ZIP/Office (docx/xlsx/pptx)",
+    b"%PDF": "PDF document",
+    b"GIF8": "GIF image",
+    b"RIFF": "WEBP/WAV/AVI",
+    b"\x00\x00\x01\x00": "ICO image",
+    b"ftyp": "MP4/MOV video",
+}
+
+# Text file extensions that suggest plaintext content
+_TEXT_EXTS = {".txt", ".csv", ".json", ".xml", ".html", ".htm", ".md", ".py", ".js", ".ts", ".log"}
+
+
+def _is_plaintext_file(data: bytes) -> bool:
+    """Check if data starts with a known file magic signature."""
+    for magic, label in _FILE_MAGIC.items():
+        if data[:len(magic)] == magic:
+            return True
+    # Check for common text: ASCII/UTF-8 without null bytes in first 512 bytes
+    if len(data) > 0 and b"\x00" not in data[:512]:
+        sample = data[:512]
+        try:
+            sample.decode("utf-8")
+            return True  # Looks like text
+        except (UnicodeDecodeError, Exception):
+            pass
+    return False
+
+
+def _looks_valid(data: bytes, media_type: str = "") -> bool:
+    """Heuristic check: does this data look like a valid decrypted file?
+
+    For non-image types (files, videos), we check if the data looks
+    like a real file rather than random AES output.
+    """
+    if len(data) < 4:
+        return False
+    # Already covered by _is_plaintext_file above, but double-check
+    if _is_plaintext_file(data):
+        return True
+    # For file type attachments, check PK (Office files) or other structured formats
+    if data[:4] == b"PK\x03\x04" or data[:4] == b"PK\x05\x06":
+        return True
+    # Check if there's reasonable structure (not all random bytes)
+    # AES ECB on random data would produce near-uniform byte distribution
+    # Real files have structure — we check for low-entropy regions
+    if len(data) > 100:
+        # Sample 256 bytes and check if there are repeated byte values
+        # (real files have structure, random AES output doesn't)
+        sample = data[:256]
+        unique = len(set(sample))
+        if unique < 200:  # Real files tend to have repeats
+            return True
+    return False
+
 # Default base URL for iLink API
 DEFAULT_BASE_URL = "https://ilinkai.weixin.qq.com"
 
@@ -532,9 +593,12 @@ class WeChatClient:
 
         encrypted = resp.content
 
-        # If CDN already returned plaintext image, skip decryption
-        if encrypted[:2] == b'\xff\xd8' or encrypted[:4] == b'\x89PNG':
-            logger.info("[iLink] CDN returned plaintext image, skipping AES decrypt")
+        # Determine media type for validation
+        att_media_type = attachment.media_type or ""
+
+        # If CDN already returned plaintext file, skip decryption
+        if _is_plaintext_file(encrypted):
+            logger.info("[iLink] CDN returned plaintext file (%d bytes), skipping decrypt", len(encrypted))
             return encrypted
 
         # Resolve AES key — prefer the top-level aeskey (hex format) over
@@ -545,13 +609,13 @@ class WeChatClient:
                 from crabagent.core.wechat.crypto import decrypt
                 decrypted = decrypt(encrypted, aes_key)
                 
-                # Verify decrypted data is a valid image
-                if decrypted[:2] == b'\xff\xd8' or decrypted[:4] == b'\x89PNG':
+                # Verify decrypted data looks like a valid file
+                if _is_plaintext_file(decrypted) or _looks_valid(decrypted, att_media_type):
                     logger.info("[iLink] AES decrypt OK: %d bytes plaintext", len(decrypted))
                     return decrypted
-                
-                # Decryption produced invalid image — try alternative key interpretations
-                logger.warning("[iLink] AES decrypt produced invalid image, trying alternative keys...")
+
+                # Decryption produced unrecognized data — try alternative key interpretations
+                logger.warning("[iLink] AES decrypt produced unrecognized data, trying alternative keys...")
                 
                 import hashlib as _hl
                 from cryptography.hazmat.primitives.ciphers import Cipher as _Cipher, algorithms as _alg, modes as _modes
@@ -570,8 +634,8 @@ class WeChatClient:
                         c = _Cipher(_alg.AES(alt_k), _modes.ECB())
                         d = c.decryptor()
                         result = d.update(encrypted) + d.finalize()
-                        if result[:2] == b'\xff\xd8' or result[:4] == b'\x89PNG':
-                            logger.info("[iLink] Valid image with alt key '%s'", label)
+                        if _is_plaintext_file(result) or _looks_valid(result, att_media_type):
+                            logger.info("[iLink] Valid data with alt key '%s'", label)
                             pad = result[-1]
                             if 1 <= pad <= 16:
                                 result = result[:-pad]
@@ -579,7 +643,7 @@ class WeChatClient:
                     except Exception:
                         pass
                 
-                logger.error("[iLink] All key interpretations failed, image data is corrupted")
+                logger.error("[iLink] All key interpretations failed, data is corrupted")
                 return b""
             except Exception as e:
                 logger.error("[iLink] AES decrypt failed: %s", e)

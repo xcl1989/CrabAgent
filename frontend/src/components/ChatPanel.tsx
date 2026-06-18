@@ -49,6 +49,14 @@ interface ChatMessage {
   sub_agent_elapsed?: number;
   sub_agent_tokens?: number;
   sub_agent_iterations?: number;
+  retry_info?: {
+    phase: "retrying" | "countdown" | "exhausted";
+    message: string;
+    attempt: number;
+    max_attempts: number;
+    remaining_seconds?: number;
+    delay_seconds?: number;
+  };
 }
 
 interface Props {
@@ -762,6 +770,45 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(
                 <div className="flex items-start gap-2 px-4 py-3 rounded-xl text-sm bg-[var(--danger-bg)] border border-[var(--danger-border)] text-[var(--danger)]">
                   <AlertTriangle size={14} className="mt-0.5 shrink-0" />
                   <div className="whitespace-pre-wrap break-words">{msg.content}</div>
+                </div>
+              </div>
+            );
+          }
+
+          if (msg.role === "retry" && msg.retry_info) {
+            const ri = msg.retry_info;
+            const isCountdown = ri.phase === "countdown";
+            const remaining = ri.remaining_seconds ?? 0;
+            const totalDelay = ri.delay_seconds ?? 0;
+            const progress = totalDelay > 0 ? ((totalDelay - remaining) / totalDelay) * 100 : 0;
+
+            return (
+              <div key={msg.id} className="mb-3">
+                <div className="flex items-center gap-3 px-4 py-3 rounded-xl text-sm bg-[var(--warning-bg,rgba(245,158,11,0.08))] border border-[var(--warning-border,rgba(245,158,11,0.2))] text-[var(--warning-text,#f59e0b)]">
+                  <Loader2 size={14} className="shrink-0 animate-spin" />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-medium">{ri.message}</span>
+                      {!isCountdown && ri.delay_seconds ? (
+                        <span className="text-xs opacity-80">
+                          {ri.delay_seconds.toFixed(0)}秒后重试（第{ri.attempt}/{ri.max_attempts}次）
+                        </span>
+                      ) : null}
+                      {isCountdown ? (
+                        <span className="text-xs opacity-80">
+                          {remaining}秒后重试（第{ri.attempt}/{ri.max_attempts}次）
+                        </span>
+                      ) : null}
+                    </div>
+                    {totalDelay > 0 ? (
+                      <div className="mt-1.5 h-1 rounded-full bg-[var(--border)] overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-[var(--warning-text,#f59e0b)] transition-all duration-1000 ease-linear"
+                          style={{ width: `${progress}%` }}
+                        />
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
               </div>
             );

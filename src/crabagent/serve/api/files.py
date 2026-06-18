@@ -6,7 +6,7 @@ import socket
 import sys
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File as FastFile, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -395,3 +395,173 @@ async def git_diff(
 
     except Exception as e:
         return {"is_git": True, "diff": "", "error": str(e)}
+
+
+# ── File management: delete / rename / create / download ─────────────
+
+
+def _resolve_file_path(raw_path: str, absolute: bool = False) -> Path:
+    """Resolve a file path safely, preventing path traversal."""
+    if absolute:
+        target = Path(raw_path).resolve()
+        if not str(target).startswith(str(Path.home())):
+            raise HTTPException(status_code=400, detail="Absolute path must be under home directory")
+        return target
+    else:
+        from crabagent.core.config import settings
+
+        workspace = settings.workspace.resolve()
+        t = _resolve_path(workspace, raw_path.lstrip("/"))
+        if not t:
+            raise HTTPException(status_code=400, detail="Path outside workspace")
+        return t
+
+
+class DeleteRequest(BaseModel):
+    path: str
+    absolute: bool = False
+
+
+class RenameRequest(BaseModel):
+    old_path: str
+    new_path: str
+    absolute: bool = False
+
+
+class CreateRequest(BaseModel):
+    path: str
+    entry_type: str = "file"  # "file" or "directory"
+    absolute: bool = False
+
+
+@router.delete("/manage")
+async def delete_entry(
+    req: DeleteRequest,
+    user: User = Depends(get_current_user),
+):
+    """Delete a file or directory."""
+    import shutil
+
+    target = _resolve_file_path(req.path, req.absolute)
+    if not target.exists():
+        raise HTTPException(status_code=404, detail="Path not found")
+    if target.is_dir():
+        shutil.rmtree(target)
+    else:
+        target.unlink()
+    return {"status": "ok", "path": req.path}
+
+
+@router.post("/rename")
+async def rename_entry(
+    req: RenameRequest,
+    user: User = Depends(get_current_user),
+):
+    """Rename or move a file/directory."""
+    old = _resolve_file_path(req.old_path, req.absolute)
+    new = _resolve_file_path(req.new_path, req.absolute)
+    if not old.exists():
+        raise HTTPException(status_code=404, detail="Source not found")
+    if new.exists():
+        raise HTTPException(status_code=409, detail="Target already exists")
+    new.parent.mkdir(parents=True, exist_ok=True)
+    old.rename(new)
+    return {"status": "ok", "old_path": req.old_path, "new_path": req.new_path}
+
+
+@router.post("/create")
+async def create_entry(
+    req: CreateRequest,
+    user: User = Depends(get_current_user),
+):
+    """Create a new file or directory."""
+    target = _resolve_file_path(req.path, req.absolute)
+    if target.exists():
+        raise HTTPException(status_code=409, detail="Path already exists")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if req.entry_type == "directory":
+        target.mkdir(parents=True)
+    else:
+        target.write_text("", encoding="utf-8")
+    return {"status": "ok", "path": req.path, "type": req.entry_type}
+
+
+@router.get("/download")
+async def download_file(
+    path: str = Query(...),
+    absolute: bool = Query(False),
+    token: str = Query(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Download a file with token auth (for direct browser download)."""
+    from crabagent.serve.services.auth import decode_access_token, get_user_by_id
+
+    payload = decode_access_token(token)
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    user = await get_user_by_id(db, int(user_id))
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+
+    target = _resolve_file_path(path, absolute)
+    if not target.exists() or not target.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    media_type, _ = mimetypes.guess_type(str(target))
+    return FileResponse(str(target), filename=target.name, media_type=media_type)
+
+
+# ── General file upload ─────────────────────────────────────────────
+
+
+def _get_uploads_dir(user_id: int) -> Path:
+    """Get the user's uploads directory, creating it if needed."""
+    base = Path.home() / ".crabagent" / "uploads" / str(user_id)
+    base.mkdir(parents=True, exist_ok=True)
+    return base
+
+
+# Max upload size: 20 MB
+_MAX_UPLOAD_SIZE = 20 * 1024 * 1024
+
+
+@router.post("/upload")
+async def upload_file(
+    file: UploadFile = FastFile(...),
+    user: User = Depends(get_current_user),
+):
+    """Upload any file to the user's uploads directory.
+
+    Files are stored in ~/.crabagent/uploads/{user_id}/ — NOT in the workspace.
+    Returns the absolute path so the agent can read the file.
+    """
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No file provided")
+
+    content = await file.read()
+    if len(content) > _MAX_UPLOAD_SIZE:
+        raise HTTPException(status_code=413, detail="File too large (max 20MB)")
+
+    uploads_dir = _get_uploads_dir(user.id)
+
+    # Sanitize filename — prevent path traversal
+    safe_name = Path(file.filename).name
+    dest = uploads_dir / safe_name
+
+    # Avoid overwriting: append timestamp suffix if file exists
+    if dest.exists():
+        stem = dest.stem
+        suffix = dest.suffix
+        import time as _time
+
+        dest = uploads_dir / f"{stem}_{int(_time.time())}{suffix}"
+
+    dest.write_bytes(content)
+
+    return {
+        "status": "ok",
+        "file": file.filename,
+        "size": len(content),
+        "path": str(dest),
+    }

@@ -86,6 +86,54 @@ def _truncate_result(result: object, max_chars: int) -> object:
     return result
 
 
+async def _emit_retry_with_countdown(
+    context: AgentContext,
+    message: str,
+    error_detail: str,
+    attempt: int,
+    max_attempts: int,
+    delay_seconds: float,
+) -> None:
+    """Emit LLM_RETRY events: one initial announcement, then countdown ticks."""
+    # Initial announcement
+    await context.event_bus.emit(
+        AgentEvent(
+            type=EventType.LLM_RETRY,
+            data={
+                "phase": "retrying",
+                "message": message,
+                "error_detail": error_detail,
+                "attempt": attempt,
+                "max_attempts": max_attempts,
+                "delay_seconds": delay_seconds,
+            },
+        )
+    )
+
+    # Emit countdown ticks at 1-second intervals (only for delays >= 2s)
+    remaining = int(delay_seconds)
+    while remaining > 1:
+        await asyncio.sleep(1)
+        remaining -= 1
+        await context.event_bus.emit(
+            AgentEvent(
+                type=EventType.LLM_RETRY,
+                data={
+                    "phase": "countdown",
+                    "message": message,
+                    "attempt": attempt,
+                    "max_attempts": max_attempts,
+                    "remaining_seconds": remaining,
+                },
+            )
+        )
+
+    # Sleep the remaining fractional second
+    frac = delay_seconds - int(delay_seconds)
+    if frac > 0:
+        await asyncio.sleep(frac)
+
+
 async def run_agent(
     context: AgentContext,
     query: str | list[dict],
@@ -272,6 +320,10 @@ async def run_agent(
 
             context.messages.append(assistant_msg)
 
+            # Reset retry counters on success
+            _llm_retry_count = 0
+            _stream_retries = 0
+
             await context.event_bus.emit(AgentEvent(type=EventType.MESSAGE_CREATED, data={"message": assistant_msg}))
 
             await context.event_bus.emit(AgentEvent(type=EventType.TEXT_DONE, data={"text": full_text}))
@@ -386,10 +438,31 @@ async def run_agent(
         except Exception as e:
             err_name = type(e).__name__
 
-            # ── MidStreamFallback (existing) ──
-            if "MidStreamFallback" in err_name and _stream_retries < _max_stream_retries:
+            # ── Stream mid-point errors (partial response received then cut) ──
+            _stream_errors = (
+                "MidStreamFallback",
+                "RemoteProtocolError",
+                "ReadError",
+                "IncompleteReadError",
+            )
+            if any(s in err_name for s in _stream_errors) and _stream_retries < _max_stream_retries:
                 _stream_retries += 1
+                stream_delay = 1.0 * _stream_retries
                 logger.warning("Stream error (retry %d/%d): %s", _stream_retries, _max_stream_retries, e)
+                await context.event_bus.emit(
+                    AgentEvent(
+                        type=EventType.LLM_RETRY,
+                        data={
+                            "reason": "stream_error",
+                            "message": f"🔄 流式连接中断（{err_name}）",
+                            "attempt": _stream_retries,
+                            "max_attempts": _max_stream_retries,
+                            "delay_seconds": stream_delay,
+                            "phase": "retrying",
+                        },
+                    )
+                )
+                await asyncio.sleep(stream_delay)
                 continue
 
             # ── Determine retry strategy ──
@@ -403,7 +476,7 @@ async def run_agent(
                     settings.llm_retry_base_delay * (2 ** _llm_retry_count),
                     settings.llm_retry_max_delay,
                 )
-                user_message = f"⚠️ API 速率已达上限，{backoff_delay:.0f}秒后自动重试…"
+                user_message = "⚠️ API 速率已达上限"
 
             elif isinstance(e, (litellm.exceptions.Timeout, asyncio.TimeoutError)):
                 retryable = True
@@ -411,7 +484,7 @@ async def run_agent(
                     settings.llm_retry_base_delay * (1.5 ** _llm_retry_count),
                     settings.llm_retry_max_delay,
                 )
-                user_message = f"⏱️ API 请求超时，{backoff_delay:.0f}秒后自动重试…"
+                user_message = "⏱️ API 请求超时"
 
             elif isinstance(e, litellm.exceptions.APIConnectionError):
                 retryable = True
@@ -419,7 +492,7 @@ async def run_agent(
                     settings.llm_retry_base_delay * (2 ** _llm_retry_count),
                     settings.llm_retry_max_delay,
                 )
-                user_message = f"🔌 网络连接失败，{backoff_delay:.0f}秒后自动重试…"
+                user_message = "🔌 网络连接失败"
 
             elif isinstance(e, (litellm.exceptions.ServiceUnavailableError, litellm.exceptions.InternalServerError)):
                 retryable = True
@@ -427,7 +500,15 @@ async def run_agent(
                     settings.llm_retry_base_delay * (2 ** _llm_retry_count),
                     settings.llm_retry_max_delay,
                 )
-                user_message = f"⚠️ API 服务暂时不可用（{err_name}），{backoff_delay:.0f}秒后自动重试…"
+                user_message = f"⚠️ API 服务暂时不可用（{err_name}）"
+
+            elif isinstance(e, (ConnectionError, OSError)):
+                retryable = True
+                backoff_delay = min(
+                    settings.llm_retry_base_delay * (2 ** _llm_retry_count),
+                    settings.llm_retry_max_delay,
+                )
+                user_message = "🔌 网络异常"
 
             elif isinstance(e, litellm.exceptions.ContextWindowExceededError):
                 # Attempt auto-compression then retry
@@ -458,32 +539,54 @@ async def run_agent(
 
             elif isinstance(e, litellm.exceptions.BadRequestError):
                 user_message = f"❌ 请求参数错误：{e!s}"
-                # BadRequestError includes invalid model, malformed messages, etc.
-                # Log full details for debugging but show compact message to user
                 logger.warning("BadRequestError details: %s", e)
 
             else:
-                # Generic / unknown error
-                user_message = f"❌ LLM 调用异常：{err_name}"
+                # Generic / unknown error — still retry once for safety
+                retryable = True
+                backoff_delay = settings.llm_retry_base_delay
+                user_message = f"❌ LLM 调用异常（{err_name}）"
 
             # ── Retry if recoverable and under limit ──
             if retryable and _llm_retry_count < _llm_retry_max:
                 _llm_retry_count += 1
+
+                # Emit countdown ticks for user visibility
+                await _emit_retry_with_countdown(
+                    context,
+                    message=user_message,
+                    error_detail=str(e)[:200],
+                    attempt=_llm_retry_count,
+                    max_attempts=_llm_retry_max,
+                    delay_seconds=backoff_delay,
+                )
+
                 logger.warning(
                     "%s (retry %d/%d, delay=%.1fs): %s",
                     err_name, _llm_retry_count, _llm_retry_max, backoff_delay, e,
                 )
-                if user_message:
-                    await context.event_bus.emit(
-                        AgentEvent(type=EventType.AGENT_INFO, data={"message": user_message})
-                    )
                 await asyncio.sleep(backoff_delay)
                 continue
 
             # ── Non-recoverable or retries exhausted ──
+            final_msg = user_message
+            if retryable and _llm_retry_count >= _llm_retry_max:
+                final_msg += f"（已重试 {_llm_retry_max} 次仍失败）"
+
             logger.error(f"Agent loop error (final): {e}", exc_info=True)
             await context.event_bus.emit(
-                AgentEvent(type=EventType.AGENT_ERROR, data={"error": user_message})
+                AgentEvent(
+                    type=EventType.LLM_RETRY,
+                    data={
+                        "phase": "exhausted",
+                        "message": final_msg,
+                        "attempt": _llm_retry_count,
+                        "max_attempts": _llm_retry_max,
+                    },
+                )
+            )
+            await context.event_bus.emit(
+                AgentEvent(type=EventType.AGENT_ERROR, data={"error": final_msg})
             )
             break
 

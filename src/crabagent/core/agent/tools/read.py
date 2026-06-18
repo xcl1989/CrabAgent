@@ -1,4 +1,39 @@
+from __future__ import annotations
+
+from typing import Any
+
 from crabagent.core.agent.tools.registry import registry
+
+# Shared exclude set — keep in sync with glob.py and grep.py
+_SKIP_DIRS = {
+    ".git",
+    "__pycache__",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".mypy_cache",
+    "node_modules",
+    ".venv",
+    "venv",
+    ".eggs",
+    ".egg-info",
+    "dist",
+    "build",
+    "molts",
+    ".opencode",
+    "site-packages",
+    ".npm",
+    ".cargo",
+}
+
+
+def _is_binary(filepath: str) -> bool:
+    """Quick heuristic: read first 4KB and check for NUL bytes."""
+    try:
+        with open(filepath, "rb") as f:
+            chunk = f.read(4096)
+        return b"\x00" in chunk
+    except (OSError, PermissionError):
+        return True
 
 
 @registry.register(
@@ -27,35 +62,47 @@ from crabagent.core.agent.tools.registry import registry
         "required": ["file_path"],
     },
 )
-def read_file(file_path: str, offset: int = 1, limit: int = 2000) -> str:
+def read_file(
+    file_path: str,
+    offset: int = 1,
+    limit: int = 2000,
+    context: Any = None,
+) -> str:
     from pathlib import Path
 
-    path = Path(file_path)
+    # ── Resolve path (prefer workspace context when available) ──────────
+    base = file_path
+    if context is not None and hasattr(context, "workspace") and context.workspace:
+        try:
+            p = Path(file_path)
+            if not p.is_absolute():
+                base = str(Path(context.workspace) / file_path)
+        except Exception:
+            pass
+
+    path = Path(base)
     if not path.exists():
         return f"Error: path does not exist: {file_path}"
 
+    # ── Directory listing ───────────────────────────────────────────────
     if path.is_dir():
-        _SKIP_DIRS = {
-            ".git",
-            "__pycache__",
-            ".pytest_cache",
-            ".ruff_cache",
-            "node_modules",
-            ".venv",
-            "venv",
-            ".eggs",
-            "dist",
-            "build",
-            ".opencode",
-            ".crabagent",
-        }
         entries = []
         for entry in sorted(path.iterdir()):
-            if entry.name.startswith(".") or entry.name in _SKIP_DIRS:
+            # Only skip known noise directories; show dotfiles (.env, .gitignore, etc.)
+            if entry.is_dir() and entry.name in _SKIP_DIRS:
                 continue
             suffix = "/" if entry.is_dir() else ""
             entries.append(entry.name + suffix)
-        return "\n".join(entries)
+        return "\n".join(entries) if entries else "(empty directory)"
+
+    # ── File reading ────────────────────────────────────────────────────
+    # Skip binary files
+    if _is_binary(str(path)):
+        size = path.stat().st_size
+        return (
+            f"[Binary file: {file_path} ({size:,} bytes)]\n"
+            f"Binary content not displayed. Use a specialized tool to inspect."
+        )
 
     try:
         lines = path.read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)

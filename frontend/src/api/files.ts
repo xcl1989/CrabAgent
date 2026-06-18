@@ -113,3 +113,46 @@ export async function getGitDiff(path?: string, cached?: boolean, workspace?: st
 export async function saveFile(path: string, content: string, absolute?: boolean): Promise<{ status: string; path: string; size: number }> {
   return api.post("/files/write", { path, content, absolute });
 }
+
+// ── General file upload ────────────────────────────────────────────
+
+export async function uploadFile(
+  file: File,
+): Promise<{ status: string; file: string; size: number; path: string }> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const res = await fetch("/api/files/upload", {
+    method: "POST",
+    body: formData,
+    headers: api.getToken()
+      ? { Authorization: `Bearer ${api.getToken()!}` }
+      : undefined,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+// ── File management: delete / rename / create / download ───────────
+
+export async function deleteFile(path: string, absolute?: boolean): Promise<{ status: string }> {
+  return api.del("/files/manage", { path, absolute });
+}
+
+export async function renameFile(oldPath: string, newPath: string, absolute?: boolean): Promise<{ status: string }> {
+  return api.post("/files/rename", { old_path: oldPath, new_path: newPath, absolute });
+}
+
+export async function createEntry(path: string, entryType: "file" | "directory", absolute?: boolean): Promise<{ status: string }> {
+  return api.post("/files/create", { path, entry_type: entryType, absolute });
+}
+
+export function getDownloadUrl(path: string, absolute?: boolean): string {
+  const params = new URLSearchParams({ path });
+  if (absolute) params.set("absolute", "true");
+  const token = api.getToken();
+  if (token) params.set("token", token);
+  return `/api/files/download?${params.toString()}`;
+}

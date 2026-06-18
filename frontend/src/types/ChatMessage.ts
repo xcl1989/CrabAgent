@@ -20,4 +20,13 @@ export interface ChatMessage {
   sub_agent_elapsed?: number;
   sub_agent_tokens?: number;
   sub_agent_iterations?: number;
+  // LLM retry status
+  retry_info?: {
+    phase: "retrying" | "countdown" | "exhausted";
+    message: string;
+    attempt: number;
+    max_attempts: number;
+    remaining_seconds?: number;
+    delay_seconds?: number;
+  };
 }

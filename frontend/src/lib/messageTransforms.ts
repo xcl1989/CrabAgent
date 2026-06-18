@@ -88,6 +88,46 @@ export function sseEventToMessages(event: SSEEvent, messages: ChatMessage[]): Ch
     return updated;
   }
 
+  if (event.type === "llm_retry") {
+    const phase = (event.data.phase as string) || "retrying";
+    const msg = (event.data.message as string) || "";
+    const attempt = (event.data.attempt as number) || 0;
+    const maxAttempts = (event.data.max_attempts as number) || 0;
+
+    if (phase === "exhausted") {
+      // Remove any existing retry messages, then push final error
+      const filtered = updated.filter((m) => m.role !== "retry");
+      filtered.push({
+        id: `e-${Date.now()}`,
+        role: "error",
+        content: msg,
+      });
+      return filtered;
+    }
+
+    if (phase === "countdown") {
+      // Update existing retry message with countdown
+      const remaining = (event.data.remaining_seconds as number) || 0;
+      const existing = updated.find((m) => m.role === "retry");
+      if (existing) {
+        existing.retry_info = { phase: "countdown", message: msg, attempt, max_attempts: maxAttempts, remaining_seconds: remaining };
+        return [...updated];
+      }
+      return updated;
+    }
+
+    // phase === "retrying" — initial announcement
+    const delay = (event.data.delay_seconds as number) || 0;
+    const filtered = updated.filter((m) => m.role !== "retry");
+    filtered.push({
+      id: `retry-${Date.now()}`,
+      role: "retry",
+      content: "",
+      retry_info: { phase: "retrying", message: msg, attempt, max_attempts: maxAttempts, delay_seconds: delay, remaining_seconds: Math.ceil(delay) },
+    });
+    return filtered;
+  }
+
   if (event.type === "tool_confirm_request") {
     updated.push({
       id: `cf-${event.data.confirm_id}`,
