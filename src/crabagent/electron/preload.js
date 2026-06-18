@@ -1,8 +1,18 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
-// Expose a minimal API to the renderer process
-// Currently empty - all communication goes through HTTP to the Python backend
 contextBridge.exposeInMainWorld('electronAPI', {
-  // Placeholder for future IPC needs
+  // Platform info
   platform: process.platform,
+  arch: process.arch,
+  electronVersion: process.versions.electron,
+  nodeVersion: process.versions.node,
+
+  // Window control
+  minimize: () => ipcRenderer.send('window-minimize'),
+  maximize: () => ipcRenderer.send('window-maximize'),
+  close: () => ipcRenderer.send('window-close'),
+  isMaximized: () => ipcRenderer.invoke('window-is-maximized'),
+  onMaximizeChange: (callback) => {
+    ipcRenderer.on('window-maximized-changed', (_event, maximized) => callback(maximized));
+  },
 });

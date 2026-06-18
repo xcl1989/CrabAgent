@@ -35,12 +35,20 @@ mkdir -p electron/resources
 cp dist/crabagent-backend electron/resources/
 echo "  Done."
 
-# 5. Build Electron .dmg
-echo "[5/5] Building Electron .dmg..."
+# 5. Build Electron .app
+echo "[5/6] Building Electron .app..."
 cd "$PROJECT_ROOT/electron"
 npm ci --silent 2>/dev/null
-npm run build:mac
+npx electron-builder --mac --dir -p never 2>&1 | tail -5
+
+# 6. Create .dmg using system hdiutil (no network needed)
+echo "[6/6] Creating .dmg with hdiutil..."
+APP_DIR="$PROJECT_ROOT/electron/dist-electron/mac-arm64"
+DMG_NAME="CrabAgent-$(node -e "console.log(require('./package.json').version)")-arm64.dmg"
+DMG_PATH="$PROJECT_ROOT/electron/dist-electron/$DMG_NAME"
+rm -f "$DMG_PATH"  # remove old if any
+hdiutil create -volname "CrabAgent" -srcfolder "$APP_DIR/CrabAgent.app" -ov -format UDZO "$DMG_PATH" 2>&1
 
 echo ""
 echo "=== Build Complete! ==="
-ls -lh "$PROJECT_ROOT/electron/dist-electron/"*.dmg 2>/dev/null || echo "Check electron/dist-electron/ for output"
+ls -lh "$DMG_PATH"
