@@ -58,17 +58,28 @@ function resolvePath(cmd) {
 function startBackend() {
   return new Promise((resolve, reject) => {
     const env = { ...process.env, PYTHONUNBUFFERED: '1' };
+
+    // Priority 1: bundled crabagent-backend binary (self-contained .app)
+    const bundledBin = path.join(process.resourcesPath, 'crabagent-backend');
+    if (fs.existsSync(bundledBin)) {
+      log(`Starting bundled backend: ${bundledBin}`);
+      python = spawn(bundledBin, ['--serve'], { stdio: 'pipe', env });
+      python.on('error', (e) => { log(`Bundled backend error: ${e.message}`); reject(e); });
+      python.on('exit', (c) => log(`Bundled backend exited (${c})`));
+      python.stdout.on('data', (d) => d.toString().split('\n').filter(Boolean).forEach((l) => log(`[py] ${l}`)));
+      python.stderr.on('data', (d) => d.toString().split('\n').filter(Boolean).forEach((l) => log(`[py] ${l}`)));
+      return setTimeout(resolve, 500);
+    }
+
+    // Priority 2: crabagent CLI from PATH
     const crabagentBin = resolvePath('crabagent');
     const pythonBin = resolvePath('python3') || 'python3';
 
-    log(`crabagent: ${crabagentBin || 'not found'}`);
-    log(`python3: ${pythonBin}`);
-
     const cmd = crabagentBin || pythonBin;
     const args = crabagentBin ? ['--serve'] : ['-m', 'crabagent.cli', '--serve'];
+    log(`Backend binary not bundled, using system: ${cmd} ${args.join(' ')}`);
 
     python = spawn(cmd, args, { stdio: 'pipe', env });
-
     python.on('error', (e) => { log(`Backend error: ${e.message}`); reject(e); });
     python.on('exit', (c) => log(`Backend exited (${c})`));
     python.stdout.on('data', (d) => d.toString().split('\n').filter(Boolean).forEach((l) => log(`[py] ${l}`)));
