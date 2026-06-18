@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import fnmatch
 import os
+import re
+from typing import Any
 
 from crabagent.core.agent.tools.registry import registry
 
@@ -18,12 +20,56 @@ _DEFAULT_IGNORE_DIRS = {
     "build",
     ".mypy_cache",
     ".pytest_cache",
+    ".ruff_cache",
     ".egg-info",
+    ".eggs",
     "site-packages",
+    "molts",
+    ".opencode",
+    "venv",
 }
 
 # ── Hard limit on how many files to open before aborting ────────────────
 _MAX_FILE_SCAN = 10_000
+
+# ── Skip files larger than this (avoid reading huge binaries/logs) ──────
+_MAX_FILE_SIZE = 5 * 1024 * 1024  # 5 MB
+
+
+def _expand_braces(pattern: str) -> list[str]:
+    """Expand shell-style brace patterns like ``*.{ts,js}`` into a list
+    of plain patterns: ``["*.ts", "*.js"]``.
+
+    ``fnmatch`` does not support ``{a,b}`` syntax, so we expand it
+    ourselves before calling ``fnmatch``.
+    """
+    # Handle at most one brace group per pattern (covers the vast majority
+    # of real-world cases like *.{py,pyi} or *.{ts,tsx,js}).
+    m = re.search(r"\{([^}]+)\}", pattern)
+    if not m:
+        return [pattern]
+    prefix = pattern[: m.start()]
+    suffix = pattern[m.end() :]
+    options = m.group(1).split(",")
+    return [f"{prefix}{opt}{suffix}" for opt in options]
+
+
+def _match_include(fname: str, patterns: list[str]) -> bool:
+    """Check whether *fname* matches any of the include patterns."""
+    for pat in patterns:
+        if fnmatch.fnmatch(fname, pat):
+            return True
+    return False
+
+
+def _is_binary(filepath: str) -> bool:
+    """Quick heuristic: read first 4KB and check for NUL bytes."""
+    try:
+        with open(filepath, "rb") as f:
+            chunk = f.read(4096)
+        return b"\x00" in chunk
+    except (OSError, PermissionError):
+        return True  # if we can't even read it, treat as binary/skip
 
 
 @registry.register(
@@ -47,7 +93,11 @@ _MAX_FILE_SCAN = 10_000
             },
             "include": {
                 "type": "string",
-                "description": 'File glob pattern to include (e.g. "*.py", "*.{ts,js}").',
+                "description": (
+                    'File glob pattern to filter files (e.g. "*.py"). '
+                    "Supports brace expansion: '*.{ts,tsx,js}' matches "
+                    "all three extensions."
+                ),
             },
             "ignore_dirs": {
                 "type": "array",
@@ -62,10 +112,7 @@ _MAX_FILE_SCAN = 10_000
             },
             "max_depth": {
                 "type": "integer",
-                "description": (
-                    "Maximum directory recursion depth. "
-                    "Default: 15. Use -1 for unlimited."
-                ),
+                "description": ("Maximum directory recursion depth. Default: 15. Use -1 for unlimited."),
             },
         },
         "required": ["pattern"],
@@ -77,11 +124,46 @@ def grep_files(
     include: str | None = None,
     ignore_dirs: list[str] | None = None,
     max_depth: int = 15,
+    context: Any = None,
 ) -> str:
-    import re
+    # ── Resolve root (prefer workspace context when available) ──────────
+    base = path
+    if context is not None and hasattr(context, "workspace") and context.workspace:
+        try:
+            # If path is relative, resolve against workspace
+            import pathlib
 
-    # ── Resolve root ────────────────────────────────────────────────────
-    root_path = os.path.abspath(path)
+            p = pathlib.Path(path)
+            if not p.is_absolute():
+                base = str(pathlib.Path(context.workspace) / path)
+        except Exception:
+            pass
+
+    # ── Single-file mode: if *path* is a file, grep it directly ────────
+    resolved = os.path.abspath(base)
+    if os.path.isfile(resolved):
+        try:
+            regex_inner = re.compile(pattern)
+        except re.error as e:
+            return f"Error: invalid regex: {e}"
+        single_results: list[str] = []
+        try:
+            if os.path.getsize(resolved) <= _MAX_FILE_SIZE and not _is_binary(resolved):
+                with open(resolved, encoding="utf-8", errors="replace") as fh:
+                    for lineno, line in enumerate(fh, 1):
+                        if regex_inner.search(line):
+                            single_results.append(f"{resolved}:{lineno}: {line.rstrip()}")
+                            if len(single_results) >= 200:
+                                single_results.append("[Truncated: showing first 200 matches.]")
+                                break
+        except (OSError, PermissionError):
+            return f"Error: cannot read file: {resolved}"
+        if not single_results:
+            return "No matches found."
+        return "\n".join(single_results)
+
+    # ── Directory mode ──────────────────────────────────────────────────
+    root_path = os.path.abspath(base)
     if not os.path.isdir(root_path):
         return f"Error: path does not exist or is not a directory: {path}"
 
@@ -92,19 +174,10 @@ def grep_files(
         return f"Error: invalid regex: {e}"
 
     # ── Normalise ignore set ────────────────────────────────────────────
-    skip_dirs: set[str] = (
-        set(ignore_dirs)
-        if ignore_dirs is not None
-        else _DEFAULT_IGNORE_DIRS
-    )
+    skip_dirs: set[str] = set(ignore_dirs) if ignore_dirs is not None else _DEFAULT_IGNORE_DIRS
 
-    # ── Build a file-name filter (fnmatch) from *include* ───────────────
-    # We only check the base filename, not the full path, matching the
-    # original glob‑like behaviour (e.g.  include="*.py").
-    def _match_include(fname: str) -> bool:
-        if include is None:
-            return True
-        return fnmatch.fnmatch(fname, include)
+    # ── Build include patterns (with brace expansion) ───────────────────
+    include_patterns = _expand_braces(include) if include else []
 
     results: list[str] = []
     scanned = 0
@@ -128,8 +201,9 @@ def grep_files(
 
         # --- Process files ---
         for fname in files:
-            if not _match_include(fname):
-                continue
+            if include_patterns:
+                if not _match_include(fname, include_patterns):
+                    continue
 
             scanned += 1
             if scanned > _MAX_FILE_SCAN:
@@ -149,7 +223,12 @@ def grep_files(
 
             fpath = os.path.join(current_root, fname)
             try:
-                with open(fpath, "r", encoding="utf-8", errors="replace") as fh:
+                # Skip oversized files and binary files
+                if os.path.getsize(fpath) > _MAX_FILE_SIZE:
+                    continue
+                if _is_binary(fpath):
+                    continue
+                with open(fpath, encoding="utf-8", errors="replace") as fh:
                     for lineno, line in enumerate(fh, 1):
                         if regex.search(line):
                             results.append(f"{fpath}:{lineno}: {line.rstrip()}")
@@ -168,8 +247,5 @@ def grep_files(
 
     output = "\n".join(results[:200])
     if len(results) == 200:
-        output += (
-            "\n[Truncated: showing first 200 matches. "
-            "Refine your pattern or path for more precise results.]"
-        )
+        output += "\n[Truncated: showing first 200 matches. Refine your pattern or path for more precise results.]"
     return output
