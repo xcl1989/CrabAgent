@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-PyInstaller spec for CrabAgent --serve mode.
-Target: standalone binary in dist/crabagent-backend/
+PyInstaller spec for CrabAgent --cli mode.
+Target: standalone binary in dist/crabagent/
 """
 
 import os
@@ -10,7 +10,7 @@ from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_submodules, collect_data_files
 
-# ── Package-relative paths (works for both source and pip-installed) ──
+# ── Package-relative paths ────────────────────────────────────
 import crabagent as _crabagent
 _CRABAGENT_ROOT = Path(os.path.dirname(_crabagent.__file__))
 _ICON_DIR = _CRABAGENT_ROOT / "electron" / "build"
@@ -25,6 +25,7 @@ block_cipher = None
 
 # ── Project paths ──────────────────────────────────────────────
 # PyInstaller spec doesn't have __file__, use cwd
+# When built via _run_build_desktop(), _fix_spec_paths() adjusts these
 PROJECT_ROOT = Path(os.getcwd())
 SRC = PROJECT_ROOT / "src"
 STATIC = SRC / "crabagent" / "static"
@@ -41,7 +42,7 @@ EXCLUDES = [
     "idlelib", "lib2to3", "turtledemo",
     # Docs / data
     "pydoc_data", "pydoc",
-    # Browser automation (not needed in serve mode)
+    # Browser automation (not needed in cli mode)
     "playwright", "selenium",
     # Scientific computing (not used)
     "numpy", "pandas", "matplotlib", "scipy", "sklearn",
@@ -52,7 +53,8 @@ EXCLUDES = [
     "boto3", "botocore", "azure", "google.cloud",
     # Network debugging
     "tornado", "django", "flask",
-    # Email (keep because pkg_resources needs it)
+    # Server-specific (not needed in cli mode)
+    "uvicorn", "starlette", "fastapi",
     # ML frameworks (not used — litellm calls remote APIs, no local inference)
     "transformers", "onnxruntime", "torch",
     "tensorflow", "keras", "tf2onnx",
@@ -82,70 +84,12 @@ EXCLUDES = [
 ]
 
 # ── Platform-specific exclusions ───────────────────────────────
-# On Windows, some modules in the exclude list are actually needed
-# (msvcrt, win32api, win32com, msilib). Remove them so PyInstaller
-# keeps them bundled.
 if sys.platform == "win32":
     _WIN_SAFE = {"msvcrt", "win32api", "win32com", "msilib"}
     EXCLUDES = [x for x in EXCLUDES if x not in _WIN_SAFE]
 
 # ── Hidden imports (dynamic imports PyInstaller can't see) ─────
 HIDDEN_IMPORTS = [
-    # Serve mode
-    "uvicorn",
-    "uvicorn.logging",
-    "uvicorn.loops",
-    "uvicorn.loops.auto",
-    "uvicorn.protocols",
-    "uvicorn.protocols.http",
-    "uvicorn.protocols.http.auto",
-    "uvicorn.protocols.websockets",
-    "uvicorn.protocols.websockets.auto",
-    "uvicorn.middleware",
-    "uvicorn.middleware.proxy_headers",
-    "starlette",
-    "starlette.applications",
-    "starlette.routing",
-    "starlette.middleware",
-    "starlette.middleware.cors",
-    "starlette.responses",
-    "starlette.staticfiles",
-    "starlette.requests",
-    "fastapi",
-    "fastapi.routing",
-    "fastapi.openapi",
-    "fastapi.openapi.utils",
-    "fastapi.middleware",
-    "fastapi.middleware.cors",
-    # API routers (imported dynamically in create_app)
-    "crabagent.serve.api.agent",
-    "crabagent.serve.api.auth",
-    "crabagent.serve.api.branch",
-    "crabagent.serve.api.confirm",
-    "crabagent.serve.api.event",
-    "crabagent.serve.api.files",
-    "crabagent.serve.api.input",
-    "crabagent.serve.api.mcp_server",
-    "crabagent.serve.api.memory",
-    "crabagent.serve.api.message",
-    "crabagent.serve.api.molt",
-    "crabagent.serve.api.notification",
-    "crabagent.serve.api.prompt",
-    "crabagent.serve.api.provider",
-    "crabagent.serve.api.replay",
-    "crabagent.serve.api.scheduled_task",
-    "crabagent.serve.api.session",
-    "crabagent.serve.api.settings",
-    "crabagent.serve.api.todo",
-    # Serve services
-    "crabagent.serve.services",
-    "crabagent.serve.services.persistence",
-    "crabagent.serve.services.conversation",
-    "crabagent.serve.services.message",
-    "crabagent.serve.services.auth",
-    "crabagent.serve.scheduler",
-    "crabagent.serve.deps",
-    "crabagent.serve.app",
     # Core modules
     "crabagent.core.database",
     "crabagent.core.config",
@@ -241,15 +185,19 @@ HIDDEN_IMPORTS = [
     "jose.backends",
     "jose.backends.cryptography_backend",
     "litellm",
-    # Only the critical hidden imports that PyInstaller can't auto-discover.
-    # DO NOT use collect_submodules('litellm') — it pulls 500+ modules and makes
-    # the frozen binary extremely slow to start (~15s vs ~3s).
     "litellm.litellm_core_utils.tokenizers",
     "litellm.litellm_core_utils.token_counter",
     "tiktoken_ext",
     "tiktoken_ext.openai_public",
     "pydantic",
     "pydantic_settings",
+    # WeChat (needed in cli mode for message polling)
+    "crabagent.core.wechat",
+    "crabagent.core.wechat.client",
+    "crabagent.core.wechat.auth",
+    "crabagent.core.wechat.message",
+    "crabagent.core.wechat.config",
+    "crabagent.core.wechat.crypto",
 ]
 
 # ── Data files: static frontend assets ─────────────────────────
@@ -260,7 +208,7 @@ if STATIC.exists():
             rel = f.relative_to(SRC)
             DATAS.append((str(f), str(rel.parent)))
 
-# ── litellm: all data files via collect_data_files (JSON, YAML, etc.) ──
+# ── litellm: all data files via collect_data_files ──────────────
 _litellm_datas = collect_data_files('litellm', include_py_files=False)
 DATAS.extend(_litellm_datas)
 print(f"[spec] Collected {len(_litellm_datas)} litellm data files")
@@ -282,13 +230,13 @@ a = Analysis(
 # ── PYZ ────────────────────────────────────────────────────────
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
-# ── EXE (scripts only — binaries/datas go in COLLECT for onedir) ──
+# ── EXE ────────────────────────────────────────────────────────
 exe = EXE(
     pyz,
     a.scripts,
     [],
     exclude_binaries=True,
-    name="crabagent-backend",
+    name="crabagent",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -303,25 +251,25 @@ exe = EXE(
     icon=_icon,
 )
 
-# ── COLLECT (onedir: files on disk — no decompression overhead at startup) ──
+# ── COLLECT (onedir) ──────────────────────────────────────────
 coll = COLLECT(
     exe,
     a.binaries,
     a.datas,
     a.zipfiles,
-    name="crabagent-backend",
+    name="crabagent-cli",
 )
 
 # ── macOS .app bundle ────────────────────────────────────────
 app = BUNDLE(
     coll,
-    name="CrabAgent.app",
+    name="CrabAgent CLI.app",
     icon=str(_ICON_DIR / "icon.png") if sys.platform == "darwin" and (_ICON_DIR / "icon.png").exists() else None,
-    bundle_identifier="com.crabagent.app",
+    bundle_identifier="com.crabagent.cli",
     info_plist={
         "CFBundleShortVersionString": _crabagent.__version__,
         "CFBundleVersion": _crabagent.__version__,
-        "CFBundleName": "CrabAgent",
-        "CFBundleDisplayName": "CrabAgent",
+        "CFBundleName": "CrabAgent CLI",
+        "CFBundleDisplayName": "CrabAgent CLI",
     },
 )

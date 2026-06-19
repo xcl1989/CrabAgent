@@ -42,12 +42,18 @@ def _resolve_path_or_current(file_path: str, context: Any = None) -> tuple[str |
 
 
 async def _ensure_available() -> str | None:
-    """确保 OfficeCLI 可用，必要时自动检测。返回错误信息或 None。"""
+    """确保 OfficeCLI 可用，必要时自动检测+自动安装。返回错误信息或 None。"""
     mgr = get_office_manager()
     if not mgr.available:
-        # 自动触发检测（兼容 detect 未提前调用的场景）
+        # 先尝试检测（可能已安装在非标准路径）
         if await mgr.detect():
             return None
+        # 自动下载安装
+        logger.info("OfficeCLI not found — attempting auto-install…")
+        if await mgr.install():
+            logger.info("OfficeCLI auto-install succeeded")
+            return None
+        # 安装失败，显示安装指引
         from crabagent.core.office.manager import _INSTALL_HINT
         return _INSTALL_HINT
     return None

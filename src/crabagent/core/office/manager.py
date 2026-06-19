@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
 import shutil
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -63,6 +65,79 @@ else:
     )
 
 
+# ── auto-install helpers ────────────────────────────────────────────────
+
+
+def _determine_asset() -> str | None:
+    """Determine the OfficeCLI release asset name for the current platform."""
+    import platform as _platform
+
+    machine = _platform.machine().lower()
+    if machine in ("amd64", "x86_64", "x64"):
+        norm = "x64"
+    elif machine in ("arm64", "aarch64"):
+        norm = "arm64"
+    else:
+        return None
+
+    if sys.platform == "darwin":
+        return f"officecli-mac-{norm}"
+    elif sys.platform == "win32":
+        return f"officecli-win-{norm}.exe"
+    elif sys.platform == "linux":
+        is_musl = _detect_musl()
+        prefix = "linux-alpine" if is_musl else "linux"
+        return f"officecli-{prefix}-{norm}"
+
+    return None
+
+
+def _detect_musl() -> bool:
+    """Detect if running on musl-based Linux (Alpine, etc.)."""
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["ldd", "--version"], capture_output=True, text=True, timeout=10
+        )
+        if "musl" in (result.stdout + result.stderr).lower():
+            return True
+    except Exception:
+        pass
+    try:
+        with open("/etc/alpine-release"):
+            return True
+    except Exception:
+        pass
+    return False
+
+
+async def _resolve_latest_version() -> str | None:
+    """Resolve the latest OfficeCLI release version tag via redirect.
+
+    Follows /releases/latest and extracts the tag from the final URL.
+    Tries CDN mirror first, then GitHub.
+    """
+    import httpx
+
+    urls = [
+        "https://d.officecli.ai/releases/latest",
+        "https://github.com/iOfficeAI/OfficeCLI/releases/latest",
+    ]
+    async with httpx.AsyncClient(timeout=30) as client:
+        for url in urls:
+            try:
+                resp = await client.get(url, follow_redirects=True, timeout=15)
+                final_url = str(resp.url)
+                if "/tag/v" in final_url:
+                    version = final_url.rsplit("/tag/", 1)[-1]
+                    if version.startswith("v"):
+                        logger.debug("Resolved latest OfficeCLI version: %s", version)
+                        return version
+            except Exception:
+                continue
+    return None
+
+
 class OfficeManager:
     """OfficeCLI binary 管理器。
 
@@ -79,6 +154,12 @@ class OfficeManager:
         self._binary_path: str | None = None
         self._available: bool = False
         self._version: str = ""
+        self._install_status: dict = {"status": "not_found", "message": "", "progress": 0}
+        self._install_task: asyncio.Task | None = None
+
+    def get_install_status(self) -> dict:
+        """Return current install progress (thread-safe read)."""
+        return dict(self._install_status)
 
     # ── detection ────────────────────────────────────────────────────────
 
@@ -117,6 +198,157 @@ class OfficeManager:
             self._version = "unknown"
         logger.info("OfficeCLI detected: %s (%s)", path, self._version)
         return True
+
+    # ── auto-install ──────────────────────────────────────────────────────
+
+    async def install(self, force: bool = False) -> bool:
+        """Auto-download and install OfficeCLI binary.
+
+        Downloads the appropriate binary for the current platform
+        (from CDN mirror with GitHub fallback), verifies the SHA256
+        checksum, and installs to ``~/.officecli/``.
+
+        Args:
+            force: If True, re-download even if already available.
+
+        Returns:
+            True if installation succeeded and the binary is usable.
+        """
+        if not force and self._available:
+            self._install_status.update({"status": "ready", "message": "Already installed", "progress": 100})
+            return True
+
+        self._install_status.update({"status": "installing", "message": "Preparing...", "progress": 0})
+        import httpx
+
+        dest_dir = Path.home() / ".officecli"
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        binary_name = "officecli.exe" if IS_WINDOWS else "officecli"
+        dest_path = dest_dir / binary_name
+
+        # 1. Determine asset name
+        asset = _determine_asset()
+        if not asset:
+            logger.error("Unsupported platform: %s %s",
+                         sys.platform, __import__("platform").machine())
+            self._install_status.update({"status": "failed", "message": f"Unsupported platform: {sys.platform}", "progress": 0})
+            return False
+
+        # 2. Resolve latest version
+        self._install_status.update({"message": "Resolving latest version...", "progress": 5})
+        version = await _resolve_latest_version()
+        if version:
+            logger.info("Latest OfficeCLI version: %s", version)
+            mirror_base = f"https://d.officecli.ai/releases/download/{version}"
+            github_base = f"https://github.com/iOfficeAI/OfficeCLI/releases/download/{version}"
+        else:
+            logger.warning("Could not resolve latest version; using 'latest' path")
+            mirror_base = "https://d.officecli.ai/releases/latest/download"
+            github_base = "https://github.com/iOfficeAI/OfficeCLI/releases/latest/download"
+
+        self._install_status.update({"message": f"Downloading OfficeCLI ({asset})...", "progress": 10})
+        logger.info("Downloading OfficeCLI (%s)...", asset)
+
+        # 3. Download binary (mirror → GitHub fallback)
+        content: bytes | None = None
+        checksum_text: str | None = None
+
+        async with httpx.AsyncClient(timeout=300, follow_redirects=True) as client:
+            for idx, url in enumerate((f"{mirror_base}/{asset}", f"{github_base}/{asset}")):
+                self._install_status.update({"message": f"Downloading... ({idx + 1}/2)", "progress": 15})
+                try:
+                    resp = await client.get(url, timeout=120)
+                    resp.raise_for_status()
+                    content = resp.content
+                    logger.info("Downloaded from %s", url)
+                    self._install_status.update({"message": "Download complete, verifying...", "progress": 70})
+                    break
+                except Exception as e:
+                    logger.debug("Download failed from %s: %s", url, e)
+
+            if content is None:
+                logger.error("Failed to download OfficeCLI from all sources")
+                self._install_status.update({"status": "failed", "message": "Download failed from all sources", "progress": 0})
+                return False
+
+            # 4. Download SHA256 checksums
+            self._install_status.update({"message": "Downloading checksum...", "progress": 75})
+            for url in (f"{mirror_base}/SHA256SUMS", f"{github_base}/SHA256SUMS"):
+                try:
+                    resp = await client.get(url, timeout=30)
+                    resp.raise_for_status()
+                    checksum_text = resp.text
+                    break
+                except Exception:
+                    continue
+
+        # 5. Verify checksum
+        self._install_status.update({"message": "Verifying checksum...", "progress": 80})
+        if checksum_text:
+            expected_hash = None
+            for line in checksum_text.splitlines():
+                parts = line.strip().split()
+                if len(parts) >= 2 and parts[1] == asset:
+                    expected_hash = parts[0]
+                    break
+            if expected_hash:
+                actual_hash = hashlib.sha256(content).hexdigest()
+                if actual_hash.lower() != expected_hash.lower():
+                    logger.error("Checksum mismatch for %s: expected %s, got %s",
+                                 asset, expected_hash, actual_hash)
+                    self._install_status.update({"status": "failed", "message": "Checksum mismatch", "progress": 0})
+                    return False
+                logger.info("Checksum verified")
+            else:
+                logger.warning("No checksum entry for %s in SHA256SUMS", asset)
+        else:
+            logger.warning("SHA256SUMS unavailable; skipping checksum verification")
+
+        # 6. Write to temporary path
+        self._install_status.update({"message": "Installing...", "progress": 85})
+        tmp_path = dest_dir / f"{binary_name}.new"
+        try:
+            tmp_path.write_bytes(content)
+        except OSError as e:
+            logger.error("Failed to write binary: %s", e)
+            self._install_status.update({"status": "failed", "message": f"Cannot write: {e}", "progress": 0})
+            return False
+
+        if not IS_WINDOWS:
+            tmp_path.chmod(0o755)
+
+        # 7. macOS: quarantine + ad-hoc code signing
+        if sys.platform == "darwin":
+            self._install_status.update({"message": "Signing binary...", "progress": 90})
+            import subprocess
+            try:
+                subprocess.run(["xattr", "-d", "com.apple.quarantine", str(tmp_path)],
+                               capture_output=True, timeout=30)
+                rc = subprocess.run(["codesign", "-v", "--strict", str(tmp_path)],
+                                    capture_output=True, timeout=30)
+                if rc.returncode != 0:
+                    subprocess.run(["codesign", "-s", "-", "-f", str(tmp_path)],
+                                   capture_output=True, timeout=30)
+            except Exception as e:
+                logger.warning("macOS codesign step failed (non-fatal): %s", e)
+
+        # 8. Atomic replace
+        self._install_status.update({"message": "Finalizing...", "progress": 95})
+        try:
+            tmp_path.rename(dest_path)
+        except OSError as e:
+            logger.error("Failed to install binary: %s", e)
+            self._install_status.update({"status": "failed", "message": f"Cannot install: {e}", "progress": 0})
+            return False
+
+        # 9. Re-detect
+        if await self._set_binary(str(dest_path)):
+            logger.info("OfficeCLI installed at %s", dest_path)
+            self._install_status.update({"status": "ready", "message": f"Installed v{self._version}", "progress": 100})
+            return True
+        logger.error("Installed binary at %s failed verification", dest_path)
+        self._install_status.update({"status": "failed", "message": "Binary failed verification", "progress": 0})
+        return False
 
     # ── properties ──────────────────────────────────────────────────────
 

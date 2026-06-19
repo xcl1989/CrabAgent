@@ -1,5 +1,15 @@
 const API_BASE = "/api";
 
+export class ApiError extends Error {
+  status: number;
+  data: any;
+  constructor(message: string, status: number, data: any) {
+    super(message);
+    this.status = status;
+    this.data = data;
+  }
+}
+
 class ApiClient {
   private token: string | null = null;
 
@@ -37,7 +47,7 @@ class ApiClient {
     }
     if (res.status === 204) return undefined as T;
     const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+    if (!res.ok) throw new ApiError(data.detail || `HTTP ${res.status}`, res.status, data);
     return data;
   }
 

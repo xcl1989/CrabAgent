@@ -1557,8 +1557,36 @@ def _run_build_desktop():
     import platform
     import shutil
     import tempfile
+    import subprocess
+    import os
+    import re
 
     import crabagent as _ca
+
+    def _fix_spec_paths(spec_path: Path, pkg_dir: Path):
+        """Fix PyInstaller spec paths for pip-installed layout (no src/ directory)."""
+        content = spec_path.read_text("utf-8")
+        content = content.replace(
+            'PROJECT_ROOT = Path(os.getcwd())',
+            f'PROJECT_ROOT = Path(r"{pkg_dir}")'
+        )
+        content = content.replace(
+            'SRC = PROJECT_ROOT / "src"',
+            f'SRC = Path(r"{pkg_dir}")'
+        )
+        content = content.replace(
+            'STATIC = SRC / "crabagent" / "static"',
+            'STATIC = SRC / "static"'
+        )
+        content = content.replace(
+            'str(SRC / "crabagent" / "__main__.py")',
+            'str(SRC / "__main__.py")'
+        )
+        content = content.replace(
+            'str(SRC / "crabagent" / "runtime_hooks.py")',
+            'str(SRC / "runtime_hooks.py")'
+        )
+        spec_path.write_text(content, "utf-8")
 
     is_windows = platform.system() == "Windows"
     pkg_dir = Path(_ca.__file__).parent
@@ -1576,10 +1604,27 @@ def _run_build_desktop():
     try:
         shutil.copytree(electron_src, work_dir / "electron")
         shutil.copy2(spec_src, work_dir / "crabagent.spec")
+        # Fix spec paths for pip-installed layout (no src/ directory)
+        _fix_spec_paths(work_dir / "crabagent.spec", pkg_dir)
+
+        # Generate .ico from .png for Windows builds
+        if is_windows:
+            icon_png = pkg_dir / "electron" / "build" / "icon.png"
+            icon_ico = work_dir / "electron" / "build" / "icon.ico"
+            if icon_png.exists():
+                try:
+                    from PIL import Image
+                    img = Image.open(str(icon_png))
+                    img.save(str(icon_ico), format="ICO",
+                             sizes=[(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
+                    print("   Generated icon.ico from icon.png")
+                except Exception as e:
+                    print(f"   Warning: could not generate icon.ico ({e})")
 
         print("\n[1/4] Installing Electron dependencies...")
         npm_result = subprocess.run(["npm", "install", "--silent"], cwd=str(work_dir / "electron"),
-                                   capture_output=True, text=True, timeout=120)
+                                   capture_output=True, encoding='utf-8', errors='replace', timeout=120,
+                                   shell=is_windows)
         if npm_result.returncode != 0:
             print("npm install failed:", npm_result.stderr[-300:])
             sys.exit(1)
@@ -1587,9 +1632,10 @@ def _run_build_desktop():
 
         print("\n[2/4] Compiling Python backend with PyInstaller...")
         pyi = subprocess.run([sys.executable, "-m", "pip", "install", "pyinstaller", "-q"],
-                           capture_output=True, timeout=60)
+                           capture_output=True, timeout=60, shell=is_windows)
         pyi_result = subprocess.run(["pyinstaller", str(work_dir / "crabagent.spec"), "--clean", "--noconfirm"],
-                                   capture_output=True, text=True, timeout=600)
+                                   capture_output=True, encoding='utf-8', errors='replace', timeout=600,
+                                   cwd=str(work_dir), shell=is_windows)
         if pyi_result.returncode != 0:
             print("PyInstaller failed:", pyi_result.stderr[-400:])
             sys.exit(1)
@@ -1633,15 +1679,26 @@ def _run_build_desktop():
 
         print("\n[4/4] Building Electron installer...")
         eb_target = "--win" if is_windows else "--mac"
+        eb_args = ["npx", "electron-builder", eb_target, "--dir"]
+        if is_windows:
+            eb_args.append("--config.win.sign=false")
         env = {**dict(os.environ), "CSC_IDENTITY_AUTO_DISCOVERY": "false"}
         electron_result = subprocess.run(
-            ["npx", "electron-builder", eb_target, "--dir"],
-            cwd=str(work_dir / "electron"), capture_output=True, text=True, timeout=300,
-            env=env,
+            eb_args,
+            cwd=str(work_dir / "electron"), capture_output=True, encoding='utf-8', errors='replace', timeout=300,
+            env=env, shell=is_windows,
         )
-        if electron_result.returncode != 0:
-            print("Electron build failed:", electron_result.stderr[-400:])
-            sys.exit(1)
+        if is_windows:
+            # On Windows, code signing may fail due to permissions but app is still built
+            dist_dir = work_dir / "electron" / "dist-electron"
+            app_dirs = list(dist_dir.glob("win-unpacked"))
+            if not app_dirs:
+                print("Electron build failed:", electron_result.stderr[-400:])
+                sys.exit(1)
+        else:
+            if electron_result.returncode != 0:
+                print("Electron build failed:", electron_result.stderr[-400:])
+                sys.exit(1)
         print("   Done.")
 
         dist_dir = work_dir / "electron" / "dist-electron"

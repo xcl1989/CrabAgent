@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import datetime
 import json
@@ -9,7 +10,7 @@ import shutil
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
 from crabagent.core.config import settings
@@ -26,6 +27,40 @@ _DOC_EXTENSIONS = {".docx", ".xlsx", ".pptx"}
 _PREVIEWABLE_EXTENSIONS = {".docx", ".xlsx", ".pptx"}
 
 # ── helpers ───────────────────────────────────────────────────────
+
+
+async def _ensure_officecli() -> bool:
+    """确保 OfficeCLI 可用，自动检测+后台自动安装。
+
+    如果安装需要时间，会在后台启动安装任务并返回 False，
+    前端可通过 ``GET /api/officecli/status`` 轮询进度。
+
+    Returns:
+        True — OfficeCLI 已就绪，可以直接使用
+        False — 安装任务已启动，需要等待完成
+
+    Raises:
+        HTTPException(503) — 安装已失败，不再重试
+    """
+    mgr = get_office_manager()
+    if mgr.available:
+        return True
+    if await mgr.detect():
+        return True
+
+    status = mgr.get_install_status()
+
+    # 安装已失败 → 直接报错，不再重试
+    if status["status"] == "failed":
+        raise HTTPException(status_code=503, detail=status.get("message", "OfficeCLI installation failed"))
+
+    # 正在安装中 → 返回 False，前端继续轮询
+    if status["status"] == "installing":
+        return False
+
+    # 未安装 → 后台启动安装
+    mgr._install_task = asyncio.create_task(mgr.install())
+    return False
 
 
 def _get_docs_dir(user_id: int, workspace: str = "") -> Path:
@@ -134,10 +169,12 @@ async def preview_document(
     user: User = Depends(get_current_user),
 ):
     """获取文档的 HTML 预览（需要 OfficeCLI）。"""
+    if not await _ensure_officecli():
+        return JSONResponse(status_code=503, content={
+            "detail": "OfficeCLI is being installed, please retry",
+            "installing": True,
+        })
     mgr = get_office_manager()
-    if not mgr.available:
-        raise HTTPException(status_code=503, detail="OfficeCLI is not installed")
-
     docs_dir = _get_docs_dir(user.id, workspace)
     file_path = _safe_path(docs_dir, path)
 
@@ -279,9 +316,9 @@ async def quick_edit_style(
     前端拖拽列边框调整宽度后，调用此接口持久化。
     每个 change 对应一次 officecli set 操作。
     """
+    if not await _ensure_officecli():
+        return JSONResponse(status_code=503, content={"installing": True, "detail": "OfficeCLI is being installed"})
     mgr = get_office_manager()
-    if not mgr.available:
-        raise HTTPException(status_code=503, detail="OfficeCLI is not installed")
 
     docs_dir = _get_docs_dir(user.id, req.workspace)
     file_path = _safe_path(docs_dir, req.path)
@@ -354,9 +391,9 @@ async def quick_edit_text(
     后端直接用 OfficeCLI 的 set --find / --replace 全局查找替换，
     无需预先定位元素路径。
     """
+    if not await _ensure_officecli():
+        return JSONResponse(status_code=503, content={"installing": True, "detail": "OfficeCLI is being installed"})
     mgr = get_office_manager()
-    if not mgr.available:
-        raise HTTPException(status_code=503, detail="OfficeCLI is not installed")
 
     # 解析文件路径
     docs_dir = _get_docs_dir(user.id, req.workspace)
@@ -573,9 +610,9 @@ async def quick_edit_table_op(
 
     前端表格操作按钮（合并单元格、插入行等）调用此接口。
     """
+    if not await _ensure_officecli():
+        return JSONResponse(status_code=503, content={"installing": True, "detail": "OfficeCLI is being installed"})
     mgr = get_office_manager()
-    if not mgr.available:
-        raise HTTPException(status_code=503, detail="OfficeCLI is not installed")
 
     docs_dir = _get_docs_dir(user.id, req.workspace)
     file_path = _safe_path(docs_dir, req.path)
@@ -644,9 +681,9 @@ async def quick_edit_theme(
     user: User = Depends(get_current_user),
 ):
     """修改 PPT 主题颜色和字体方案。"""
+    if not await _ensure_officecli():
+        return JSONResponse(status_code=503, content={"installing": True, "detail": "OfficeCLI is being installed"})
     mgr = get_office_manager()
-    if not mgr.available:
-        raise HTTPException(status_code=503, detail="OfficeCLI is not installed")
 
     docs_dir = _get_docs_dir(user.id, req.workspace)
     file_path = _safe_path(docs_dir, req.path)

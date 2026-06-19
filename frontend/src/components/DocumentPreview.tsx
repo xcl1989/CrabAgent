@@ -684,11 +684,21 @@ export function DocumentPreview({ html, loading, error, className, onQuickEdit, 
     } catch {}
   }, []);
 
-  if (loading) {
+  if (loading && !error) {
     return (
       <div className={cn("flex flex-col items-center justify-center h-full gap-3", className)}>
         <Loader2 size={24} className="animate-spin text-[var(--text-tertiary)]" />
         <span className="text-xs text-[var(--text-tertiary)]">{t("document.loadingPreview")}</span>
+      </div>
+    );
+  }
+
+  if (loading && error) {
+    // Loading with a status message (e.g. OfficeCLI install progress)
+    return (
+      <div className={cn("flex flex-col items-center justify-center h-full gap-3 p-6", className)}>
+        <Loader2 size={24} className="animate-spin text-[var(--accent)]" />
+        <span className="text-xs text-[var(--accent)] text-center whitespace-pre-line">{error}</span>
       </div>
     );
   }

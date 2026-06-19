@@ -35,7 +35,8 @@
     "extraResources": [
       {
         "from": "resources/crabagent-backend",
-        "to": "crabagent-backend"
+        "to": "crabagent-backend",
+        "filter": ["**/*"]
       }
     ],
     "mac": {

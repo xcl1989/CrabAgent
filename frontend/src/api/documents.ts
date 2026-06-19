@@ -1,4 +1,5 @@
-import { api } from "./client";
+import { api, ApiError } from "./client";
+import type { OfficeCliStatus } from "./officecli";
 
 export interface DocFileInfo {
   name: string;
@@ -57,10 +58,47 @@ export function getDownloadUrl(path: string): string {
 export async function getPreview(
   path: string,
   workspace = "",
+  onInstallProgress?: (status: OfficeCliStatus) => void,
 ): Promise<DocPreviewResponse> {
   const params: Record<string, string> = { path };
   if (workspace) params.workspace = workspace;
-  return api.get("/documents/preview", params);
+  try {
+    return await api.get("/documents/preview", params);
+  } catch (e: any) {
+    if (e instanceof ApiError && e.status === 503 && e.data?.installing) {
+      // OfficeCLI is being installed — poll status and retry
+      await _waitForInstall(onInstallProgress);
+      return api.get("/documents/preview", params);
+    }
+    throw e;
+  }
+}
+
+async function _waitForInstall(
+  onProgress?: (status: OfficeCliStatus) => void,
+): Promise<void> {
+  const { getOfficeCliStatus } = await import("./officecli");
+  return new Promise((resolve) => {
+    const poll = async () => {
+      try {
+        const status = await getOfficeCliStatus();
+        onProgress?.(status);
+        if (status.status === "ready" || status.available) {
+          resolve();
+          return;
+        }
+        if (status.status === "failed") {
+          resolve(); // let the caller handle the retry error
+          return;
+        }
+      } catch {
+        // ignore poll errors
+      }
+      setTimeout(poll, 2000);
+    };
+    // Start polling after 1s delay
+    setTimeout(poll, 1000);
+  });
 }
 
 export function saveDocument(

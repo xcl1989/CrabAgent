@@ -295,21 +295,35 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
     });
     setCurrentDocPath(path);
     setMode("work");
+    let installTimer: ReturnType<typeof setTimeout> | null = null;
     try {
-      const preview = await documentsApi.getPreview(path, ws);
+      const preview = await documentsApi.getPreview(path, ws, (status) => {
+        // Show install progress in preview error area
+        const pct = status.progress || 0;
+        const msg = status.message || "Installing...";
+        const progressMsg = `⏳ 正在自动安装 OfficeCLI... ${pct}%\n${msg}`;
+        setDocState((prev) => prev ? { ...prev, previewError: progressMsg, previewLoading: true } : prev);
+      });
+      if (installTimer) clearTimeout(installTimer);
       setDocState((prev) => prev ? {
         ...prev,
         busy: false,
         previewLoading: false,
         previewHtml: preview.html,
+        previewError: null,
         events: [...prev.events, { message: `✅ Opened ${name}`, timestamp: Date.now(), status: "done" }],
       } : prev);
     } catch (e: any) {
+      if (installTimer) clearTimeout(installTimer);
+      // If it was an install failure, show a more helpful message
+      const isInstallFail = e?.message?.includes("OfficeCLI");
       setDocState((prev) => prev ? {
         ...prev,
         busy: false,
         previewLoading: false,
-        previewError: e?.message || "Failed to open document",
+        previewError: isInstallFail
+          ? "❌ OfficeCLI 安装失败。请手动安装：\nwinget install HaiYing.OfficeCLI\n或访问 https://github.com/iOfficeAI/OfficeCLI/releases"
+          : (e?.message || "Failed to open document"),
         events: [...prev.events, { message: `❌ Failed: ${e?.message || "Unknown error"}`, timestamp: Date.now(), status: "error" }],
       } : prev);
     }
