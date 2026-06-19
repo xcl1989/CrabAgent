@@ -34,6 +34,38 @@ function saveWindowState() {
 // ── Logging ──
 function log(msg) { console.log(`[CrabAgent] ${msg}`); }
 
+// ── Loading screen (shown while backend starts up) ──
+const LOADING_HTML = `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0d1117; color: #c9d1d9;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    height: 100vh; user-select: none; -webkit-app-region: drag;
+  }
+  .logo { width: 48px; height: 48px; margin-bottom: 28px; }
+  .spinner {
+    width: 36px; height: 36px; margin-bottom: 20px;
+    border: 3px solid rgba(88,166,255,0.15);
+    border-top-color: #58a6ff; border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .title { font-size: 16px; font-weight: 600; color: #e6edf3; margin-bottom: 6px; }
+  .subtitle { font-size: 13px; color: #6e7681; }
+</style></head>
+<body>
+  <svg class="logo" viewBox="0 0 48 48" fill="none">
+    <path d="M24 4L6 14v20l18 10 18-10V14L24 4z" stroke="#58a6ff" stroke-width="2" fill="rgba(88,166,255,0.08)"/>
+    <circle cx="24" cy="24" r="7" fill="#58a6ff"/>
+    <path d="M24 17v14M17 24h14" stroke="#0d1117" stroke-width="2"/>
+  </svg>
+  <div class="spinner"></div>
+  <div class="title">CrabAgent</div>
+  <div class="subtitle">正在启动，请稍候…</div>
+</body></html>`;
+
 // ── Kill existing process on port (cross-platform) ──
 function killExistingBackend() {
   try {
@@ -96,17 +128,39 @@ function startBackend() {
   return new Promise((resolve, reject) => {
     const env = { ...process.env, PYTHONUNBUFFERED: '1' };
 
-    // Priority 1: bundled crabagent-backend binary (self-contained app)
+    // Priority 1: crabagent CLI from PATH (fastest, most reliable)
+    const crabagentBin = resolvePath('crabagent');
+    if (crabagentBin) {
+      log(`Starting system crabagent: ${crabagentBin}`);
+      python = spawn(crabagentBin, ['--serve'], { stdio: 'pipe', env });
+      python.on('error', (e) => { log(`System crabagent error: ${e.message}`); reject(e); });
+      python.on('exit', (c) => log(`System crabagent exited (${c})`));
+      python.stdout.on('data', (d) => d.toString().split('\n').filter(Boolean).forEach((l) => log(`[py] ${l}`)));
+      python.stderr.on('data', (d) => d.toString().split('\n').filter(Boolean).forEach((l) => log(`[py] ${l}`)));
+      return setTimeout(resolve, 500);
+    }
+
+    // Priority 2: bundled crabagent-backend binary (self-contained app)
     const backendName = isWin ? 'crabagent-backend.exe' : 'crabagent-backend';
-    const bundledBin = path.join(process.resourcesPath, backendName);
-    if (fs.existsSync(bundledBin)) {
-      log(`Starting bundled backend: ${bundledBin}`);
+
+    // onedir mode: binary is inside a directory
+    const bundledDir = path.join(process.resourcesPath, 'crabagent-backend');
+    const bundledBin = path.join(bundledDir, backendName);
+    const bundledBinFlat = path.join(process.resourcesPath, backendName);
+
+    // Check onedir first, then flat onefile
+    const actualBin = fs.existsSync(bundledBin) ? bundledBin
+                    : fs.existsSync(bundledBinFlat) ? bundledBinFlat
+                    : null;
+
+    if (actualBin) {
+      log(`Starting bundled backend: ${actualBin}`);
       const spawnOpts = {
         stdio: 'pipe',
         env,
         ...(isWin ? { windowsHide: true } : {}),
       };
-      python = spawn(bundledBin, ['--serve'], spawnOpts);
+      python = spawn(actualBin, ['--serve'], spawnOpts);
       python.on('error', (e) => { log(`Bundled backend error: ${e.message}`); reject(e); });
       python.on('exit', (c) => log(`Bundled backend exited (${c})`));
       python.stdout.on('data', (d) => d.toString().split('\n').filter(Boolean).forEach((l) => log(`[py] ${l}`)));
@@ -114,22 +168,12 @@ function startBackend() {
       return setTimeout(resolve, 500);
     }
 
-    // Priority 2: crabagent CLI from PATH
-    const crabagentBin = resolvePath('crabagent');
+    // Priority 3: python3 -m crabagent.cli
     const pythonBin = resolvePath(isWin ? 'python' : 'python3') || (isWin ? 'python' : 'python3');
-
-    const cmd = crabagentBin || pythonBin;
-    const args = crabagentBin ? ['--serve'] : ['-m', 'crabagent.cli', '--serve'];
-    log(`Backend binary not bundled, using system: ${cmd} ${args.join(' ')}`);
-
-    const spawnOpts2 = {
-      stdio: 'pipe',
-      env,
-      ...(isWin ? { windowsHide: true } : {}),
-    };
-    python = spawn(cmd, args, spawnOpts2);
-    python.on('error', (e) => { log(`Backend error: ${e.message}`); reject(e); });
-    python.on('exit', (c) => log(`Backend exited (${c})`));
+    log(`Fallback to python3: ${pythonBin}`);
+    python = spawn(pythonBin, ['-m', 'crabagent.cli', '--serve'], { stdio: 'pipe', env });
+    python.on('error', (e) => { log(`Python backend error: ${e.message}`); reject(e); });
+    python.on('exit', (c) => log(`Python backend exited (${c})`));
     python.stdout.on('data', (d) => d.toString().split('\n').filter(Boolean).forEach((l) => log(`[py] ${l}`)));
     python.stderr.on('data', (d) => d.toString().split('\n').filter(Boolean).forEach((l) => log(`[py] ${l}`)));
     setTimeout(resolve, 500);
@@ -347,43 +391,10 @@ function createWindow() {
 
   if (saved.maximized) win.maximize();
 
-  win.loadURL(URL);
+  // Load a local loading screen first (instant — no network needed)
+  win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(LOADING_HTML));
 
-  // Auto-login
-  let injected = false;
-  win.webContents.on('dom-ready', async () => {
-    if (injected) return;
-    injected = true;
-    try {
-      const body = JSON.stringify({ username: 'admin', password: 'xcl1989' });
-      const tokenResp = await new Promise((resolve, reject) => {
-        const req = http.request(
-          `${URL}/api/auth/login`,
-          { method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } },
-          (res) => {
-            let data = '';
-            res.on('data', (c) => (data += c));
-            res.on('end', () => {
-              try { resolve(JSON.parse(data).access_token); } catch (e) { reject(e); }
-            });
-          }
-        );
-        req.on('error', reject);
-        req.write(body);
-        req.end();
-      });
-
-      await win.webContents.executeJavaScript(
-        `window.localStorage.setItem('crab_token','${tokenResp}')`,
-      );
-      log('Auto-login done');
-      win.webContents.reload();
-    } catch (e) {
-      log(`Auto-login skipped: ${e.message}`);
-    }
-  });
-
-  // Show window when ready
+  // Show window immediately
   win.once('ready-to-show', () => {
     win.show();
   });
@@ -433,17 +444,52 @@ if (!gotLock) {
   });
 }
 
+// ── Helper: auto-login via admin credentials ──
+async function autoLogin() {
+  try {
+    const body = JSON.stringify({ username: 'admin', password: 'xcl1989' });
+    const token = await new Promise((resolve, reject) => {
+      const req = http.request(`${URL}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+      }, (res) => {
+        let data = '';
+        res.on('data', (c) => (data += c));
+        res.on('end', () => {
+          try { resolve(JSON.parse(data).access_token); } catch (e) { reject(e); }
+        });
+      });
+      req.on('error', reject);
+      req.write(body);
+      req.end();
+    });
+    await win?.webContents.executeJavaScript(
+      `window.localStorage.setItem('crab_token','${token}')`,
+    );
+    log('Auto-login done');
+  } catch (e) {
+    log(`Auto-login: ${e.message}`);
+  }
+}
+
 // ── App lifecycle ──
 app.whenReady().then(async () => {
   killExistingBackend();
+
+  // Show window immediately (blank until backend is ready)
+  createAppMenu();
+  createWindow();
+  createTray();
+
+  // Start backend in background
   await startBackend();
   log('Waiting for backend...');
   await waitForServer();
   log('Backend ready!');
 
-  createAppMenu();
-  createWindow();
-  createTray();
+  // Auto-login, then load the real SPA (replaces loading screen)
+  await autoLogin();
+  if (win) win.loadURL(URL);
 
   // macOS: re-show window on dock click
   app.on('activate', () => {
@@ -455,7 +501,7 @@ app.whenReady().then(async () => {
   });
 }).catch((e) => {
   log(`Error: ${e.message}`);
-  app.quit();
+  // Don't quit — window is already visible
 });
 
 app.on('window-all-closed', () => {

@@ -8,6 +8,8 @@ import os
 import sys
 from pathlib import Path
 
+from PyInstaller.utils.hooks import collect_submodules, collect_data_files
+
 block_cipher = None
 
 # ── Project paths ──────────────────────────────────────────────
@@ -40,6 +42,13 @@ EXCLUDES = [
     # Network debugging
     "tornado", "django", "flask",
     # Email (keep because pkg_resources needs it)
+    # ML frameworks (not used — litellm calls remote APIs, no local inference)
+    "transformers", "onnxruntime", "torch",
+    "tensorflow", "keras", "tf2onnx",
+    # Database drivers not used (SQLite only)
+    "psycopg2", "MySQLdb", "_mysql_connector",
+    # HuggingFace hub (not needed without transformers)
+    "hf_xet", "huggingface_hub",
     # Unnecessary stdlib
     "xml.etree.cElementTree",  # use xml.etree.ElementTree instead
     "dbm", "dbm.dumb", "dbm.gnu", "dbm.ndbm",
@@ -47,7 +56,7 @@ EXCLUDES = [
     "turtle", "turtledemo",
     "webbrowser",
     "pdb", "profile", "pstats", "cProfile",
-    "audiodev", "audioop", "colorsys", "imghdr",
+    "audiodev", "audioop", "imghdr",
     "nis", "ossaudiodev", "sndhdr", "spwd",
     "tabnanny", "this", "antigravity",
     "uu", "xdrlib", "pyclbr",
@@ -216,13 +225,18 @@ HIDDEN_IMPORTS = [
     "passlib",
     "passlib.hash",
     "bcrypt",
-    "python_jose",
-    "python_jose.jws",
-    "python_jose.jwt",
-    "python_jose.jwe",
-    "python_jose.backends",
-    "python_jose.backends.cryptography_backend",
+    "jose",
+    "jose.jwt",
+    "jose.backends",
+    "jose.backends.cryptography_backend",
     "litellm",
+    # Only the critical hidden imports that PyInstaller can't auto-discover.
+    # DO NOT use collect_submodules('litellm') — it pulls 500+ modules and makes
+    # the frozen binary extremely slow to start (~15s vs ~3s).
+    "litellm.litellm_core_utils.tokenizers",
+    "litellm.litellm_core_utils.token_counter",
+    "tiktoken_ext",
+    "tiktoken_ext.openai_public",
     "pydantic",
     "pydantic_settings",
 ]
@@ -235,13 +249,10 @@ if STATIC.exists():
             rel = f.relative_to(SRC)
             DATAS.append((str(f), str(rel.parent)))
 
-# ── litellm: model cost map JSON (required at runtime) ───────
-import litellm as _litellm
-_LITELLM_DIR = os.path.dirname(_litellm.__file__)
-_LITELLM_COST_FILE = os.path.join(_LITELLM_DIR, "model_prices_and_context_window_backup.json")
-if os.path.exists(_LITELLM_COST_FILE):
-    DATAS.append((_LITELLM_COST_FILE, "litellm"))
-    print(f"[spec] Added litellm cost map ({os.path.getsize(_LITELLM_COST_FILE)} bytes)")
+# ── litellm: all data files via collect_data_files (JSON, YAML, etc.) ──
+_litellm_datas = collect_data_files('litellm', include_py_files=False)
+DATAS.extend(_litellm_datas)
+print(f"[spec] Collected {len(_litellm_datas)} litellm data files")
 
 # ── Analysis ───────────────────────────────────────────────────
 a = Analysis(
@@ -252,7 +263,7 @@ a = Analysis(
     hiddenimports=HIDDEN_IMPORTS,
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[],
+    runtime_hooks=[str(SRC / "crabagent" / "runtime_hooks.py")],
     excludes=EXCLUDES,
     noarchive=False,
 )
@@ -260,28 +271,33 @@ a = Analysis(
 # ── PYZ ────────────────────────────────────────────────────────
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
-# ── EXE (onedir, not onefile) ──────────────────────────────────
+# ── EXE (scripts only — binaries/datas go in COLLECT for onedir) ──
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
     [],
+    exclude_binaries=True,
     name="crabagent-backend",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=False,         # no UPX installed
+    upx=False,
     upx_exclude=[],
-    runtime_tmpdir=None,
-    console=True,       # CLI tool with console
+    console=True,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    contents_directory=".",
+)
+
+# ── COLLECT (onedir: files on disk — no decompression overhead at startup) ──
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    a.zipfiles,
+    name="crabagent-backend",
 )
 
 # ── macOS .app bundle (optional, uncomment when icon is ready) ─

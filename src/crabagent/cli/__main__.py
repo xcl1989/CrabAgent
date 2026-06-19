@@ -759,10 +759,10 @@ def _print_banner(context, provider: str, model: str):
         from rich.text import Text
 
         console = Console()
-        t = Text("CrabAgent v0.11.2", style="bold")
+        t = Text("CrabAgent v0.11.3", style="bold")
         console.print(t)
     except ImportError:
-        print("CrabAgent v0.11.2")
+        print("CrabAgent v0.11.3")
 
     print(f"  provider: {provider}  model: {model}")
     print(f"  workspace: {context.workspace}")
@@ -1615,9 +1615,18 @@ def _run_build_desktop():
                     print(f"Error: Backend binary not found in {work_dir / 'dist'}")
                     sys.exit(1)
         else:
-            # macOS: single binary
-            backend_bin = work_dir / "dist" / "crabagent-backend"
-            shutil.copy2(backend_bin, resources_dir / "crabagent-backend")
+            # macOS: onedir mode — copy entire directory
+            backend_dir = work_dir / "dist" / "crabagent-backend"
+            if backend_dir.is_dir():
+                dest = resources_dir / "crabagent-backend"
+                if dest.exists():
+                    shutil.rmtree(dest)
+                shutil.copytree(backend_dir, dest)
+                print(f"   Copied backend directory ({sum(f.stat().st_size for f in dest.rglob('*') if f.is_file()) // 1024 // 1024} MB)")
+            else:
+                # Fallback: single binary (legacy onefile mode)
+                backend_bin = work_dir / "dist" / "crabagent-backend"
+                shutil.copy2(backend_bin, resources_dir / "crabagent-backend")
         print("   Done.")
 
         print("\n[4/4] Building Electron installer...")

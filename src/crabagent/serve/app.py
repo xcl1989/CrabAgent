@@ -55,32 +55,25 @@ async def lifespan(app: FastAPI):
     app.state._mcp_task = mcp_task
     logger.info("MCP servers initializing in background")
 
-    from crabagent.serve.scheduler import get_scheduler
+    # Non-critical init runs in background — scheduler, OfficeCLI detection, etc.
+    # These don't block the app from serving requests.
+    background_init = asyncio.create_task(_background_startup(app))
+    app.state._background_init = background_init
 
-    try:
-        sched = get_scheduler()
-        sched.set_global_event_queues(app.state.global_event_queues)
-        await sched.start()
-        logger.info("Scheduler started")
-    except Exception as e:
-        logger.exception("Failed to start scheduler: %s", e)
+    yield  # ← App starts serving requests immediately
 
-    # Detect OfficeCLI binary for office document tools
-    from crabagent.core.office.manager import get_office_manager
-
-    office_mgr = get_office_manager()
-    if await office_mgr.detect():
-        app.state.office_available = True
-        logger.info("OfficeCLI available — office tools enabled")
-    else:
-        app.state.office_available = False
-        logger.info("OfficeCLI not found — office tools will report helpful install message")
-
-    yield
-
-    # No explicit cleanup needed for OfficeManager
+    # ── Cleanup ──
 
     monitor_task.cancel()
+
+    # Wait for background init if still running
+    background_init = getattr(app.state, "_background_init", None)
+    if background_init and not background_init.done():
+        background_init.cancel()
+        try:
+            await background_init
+        except (asyncio.CancelledError, Exception):
+            pass
 
     # Wait for background MCP init to finish (if still running) before cleanup
     mcp_task = getattr(app.state, "_mcp_task", None)
@@ -100,10 +93,40 @@ async def lifespan(app: FastAPI):
         pass
 
 
+async def _background_startup(app: FastAPI) -> None:
+    """Run non-critical startup tasks in background (scheduler, OfficeCLI, etc.)."""
+    import asyncio
+
+    # ── Scheduler startup ──
+    try:
+        from crabagent.serve.scheduler import get_scheduler
+
+        sched = get_scheduler()
+        sched.set_global_event_queues(app.state.global_event_queues)
+        await sched.start()
+        logger.info("Scheduler started")
+    except Exception as e:
+        logger.exception("Failed to start scheduler: %s", e)
+
+    # ── OfficeCLI detection ──
+    try:
+        from crabagent.core.office.manager import get_office_manager
+
+        office_mgr = get_office_manager()
+        if await office_mgr.detect():
+            app.state.office_available = True
+            logger.info("OfficeCLI available — office tools enabled")
+        else:
+            app.state.office_available = False
+            logger.info("OfficeCLI not found — office tools will report helpful install message")
+    except Exception as e:
+        logger.exception("OfficeCLI detection failed: %s", e)
+
+
 def create_app() -> FastAPI:
     app = FastAPI(
         title="CrabAgent",
-        version="0.11.2",
+        version="0.11.3",
         lifespan=lifespan,
     )
     app.state.event_queues = {}
@@ -178,7 +201,7 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     async def health():
-        return {"status": "ok", "version": "0.11.2"}
+        return {"status": "ok", "version": "0.11.3"}
 
     _mount_spa(app)
 
