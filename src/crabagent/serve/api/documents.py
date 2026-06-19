@@ -393,7 +393,9 @@ async def quick_edit_text(
                 "path": "/",
                 "props": {"find": old, "replace": new},
             }]).encode("utf-8")
-            binary = mgr.binary_path or "/usr/local/bin/officecli"
+            binary = mgr.binary_path
+            if not binary:
+                raise HTTPException(status_code=503, detail="OfficeCLI is not installed")
             result = await mgr._exec_with_stdin(
                 [binary, "batch", str(file_path), "--json"],
                 stdin_data=batch_cmds,
@@ -405,7 +407,9 @@ async def quick_edit_text(
             logger.info("[QE] Paragraph split mode: %d segments", len([s for s in new.split("\n") if s.strip()]))
             # 复杂情况：用户按了 Enter，需要把原段落拆成多个段落
             # 1) 用 officecli query "paragraph" --find <old_text> 查找原段落路径
-            binary = mgr.binary_path or "/usr/local/bin/officecli"
+            binary = mgr.binary_path
+            if not binary:
+                raise HTTPException(status_code=503, detail="OfficeCLI is not installed")
             query_result = await mgr._exec_with_stdin(
                 [binary, "query", str(file_path), "paragraph", "--find", old, "--json"],
             )

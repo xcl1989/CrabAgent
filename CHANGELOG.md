@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.11.2] — Windows Full Compatibility
+
+### Added
+- **Windows Desktop App** — `crabagent --build-desktop` now detects the platform and produces a Windows NSIS installer (.exe) on Windows or macOS .dmg
+  - New `scripts/build-desktop.ps1` PowerShell build script for Windows
+  - electron-builder config: `win` target (NSIS) with desktop/start-menu shortcuts, custom install path, zh_CN + en_US installer UI
+  - Electron `main.js` fully cross-platform: `netstat`+`taskkill` port cleanup, `where` path resolution, `explorer` folder open, `windowsHide` console suppression, `taskkill /T /F` process tree kill
+- **OfficeCLI Windows Support** — probe paths now include `%LOCALAPPDATA%`, `%PROGRAMFILES%`, `%PROGRAMFILES(X86)%` with `.exe` suffix; install hint shows `winget install HaiYing.OfficeCLI` on Windows
+
+### Fixed
+- **bash tool on Windows** — 6 Unix-specific issues fixed:
+  - Shell profile commands (`.zprofile`, `.bash_profile`) caused syntax errors in cmd.exe → platform-detected skip on Windows
+  - Hardcoded `utf-8` decode caused garbled output (GBK/cp936) → dynamic encoding via `locale.getpreferredencoding()`
+  - `nohup ... & echo $!` background mode failed → PowerShell `Start-Process` alternative
+  - `ps -p {pid}` process check failed → `tasklist` alternative
+  - `start_new_session=True` (POSIX-only) → `creationflags=CREATE_NEW_PROCESS_GROUP|CREATE_NO_WINDOW` on Windows
+  - Tool description now says "shell command" instead of "bash command" on Windows
+- **TUI crash on Windows** — `logging.FileHandler("/tmp/crabagent.log")` hardcoded Unix path → `tempfile.gettempdir()`
+- **OfficeCLI "not installed" on Windows** — `_PROBE_LOCATIONS` were all Unix paths; `documents.py` hardcoded `/usr/local/bin/officecli` as fallback → proper 503 error
+- **sandbox.py** — danger path list only had Unix paths; now includes `C:\Windows\System32`, `C:\Program Files`, Windows privilege commands (`runas`, `takeown`, `icacls`, `bcdedit`, `reg delete HKLM`), and physical drive write detection
+- **files.py** — `http.server` subprocess popped up a console window on Windows → `CREATE_NO_WINDOW` flag
+- **PyInstaller spec** — excluded `msvcrt`, `win32api`, `win32com`, `msilib` which are needed on Windows → conditional exclusion list
+
+---
+
 ## [0.11.1]
 
 ### Added

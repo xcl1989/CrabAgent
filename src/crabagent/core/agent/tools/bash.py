@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import subprocess
+import sys
 import tempfile
 import time
 from typing import Any
@@ -11,12 +12,54 @@ from crabagent.core.agent.tools.sandbox import truncate_output, validate_command
 
 logger = logging.getLogger(__name__)
 
+# ── Platform detection ─────────────────────────────────────────────────
+IS_WINDOWS = sys.platform == "win32"
+
 # Emit BASH_OUTPUT events at most every N seconds
 _EMIT_INTERVAL = 0.15
 
 # When reading stream chunks, timeout per individual read() call.
 # Prevents hanging if the process stalls without producing output.
 _CHUNK_READ_TIMEOUT = 60
+
+# On Windows, console output uses the system codepage (e.g. cp936/GBK for
+# Chinese).  We try to force UTF-8 via environment variables, but decode
+# with a sensible fallback encoding if that fails.
+if IS_WINDOWS:
+    import locale
+
+    _ENCODING = locale.getpreferredencoding(False) or "utf-8"
+else:
+    _ENCODING = "utf-8"
+
+
+def _build_subprocess_kwargs(workdir: str | None = None) -> dict:
+    """Build platform-appropriate kwargs for subprocess creation."""
+    kwargs: dict[str, Any] = {}
+    if workdir:
+        kwargs["cwd"] = workdir
+    if IS_WINDOWS:
+        # CREATE_NEW_PROCESS_GROUP allows Ctrl-Break; CREATE_NO_WINDOW
+        # suppresses the console popup on GUI-launched processes.
+        kwargs["creationflags"] = (
+            subprocess.CREATE_NEW_PROCESS_GROUP
+            | getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        )
+    else:
+        kwargs["start_new_session"] = True
+    return kwargs
+
+
+def _get_subprocess_env() -> dict[str, str]:
+    """Return an environment dict that encourages UTF-8 output."""
+    env = os.environ.copy()
+    if IS_WINDOWS:
+        # Force Python child processes to use UTF-8, and set the console
+        # codepage to 65001 (UTF-8).  Non-Python programs may still emit
+        # the OEM codepage, which _ENCODING handles.
+        env["PYTHONIOENCODING"] = "utf-8"
+        env["PYTHONUTF8"] = "1"
+    return env
 
 
 async def _emit_bash_output(context: Any, text: str, tool_call_id: str = "") -> None:
@@ -33,19 +76,30 @@ async def _emit_bash_output(context: Any, text: str, tool_call_id: str = "") -> 
     )
 
 
-@registry.register(
-    name="bash",
-    description=(
+if IS_WINDOWS:
+    _TOOL_DESCRIPTION = (
+        "Execute a shell command (Windows cmd.exe / PowerShell). "
+        "For long-running services (dev servers, watchers), "
+        "set background=true to run in background and return immediately. "
+        "Use Windows commands: dir, type, tasklist, taskkill, etc."
+    )
+else:
+    _TOOL_DESCRIPTION = (
         "Execute a bash command. For long-running services (dev servers, watchers), "
         "set background=true to run in background and return immediately. "
         "Do NOT use osascript or open new Terminal windows."
-    ),
+    )
+
+
+@registry.register(
+    name="bash",
+    description=_TOOL_DESCRIPTION,
     parameters={
         "type": "object",
         "properties": {
             "command": {
                 "type": "string",
-                "description": "The bash command to execute.",
+                "description": "The shell command to execute.",
             },
             "workdir": {
                 "type": "string",
@@ -95,14 +149,18 @@ async def bash_command(
     if background:
         return await _run_background(command, workdir, context)
 
-    # Source user profile to get correct PATH (macOS Python, homebrew, etc.)
-    _profile_cmd = (
-        "export SHELL=$(echo $SHELL 2>/dev/null || echo /bin/sh); "
-        "[ -f ~/.zprofile ] && . ~/.zprofile; "
-        "[ -f ~/.bash_profile ] && . ~/.bash_profile; "
-        "[ -f ~/.profile ] && . ~/.profile; "
-    )
-    full_command = _profile_cmd + command
+    # On Unix, source user profile to get correct PATH (homebrew, etc.)
+    # On Windows, profiles don't apply — just run the command directly.
+    if IS_WINDOWS:
+        full_command = command
+    else:
+        _profile_cmd = (
+            "export SHELL=$(echo $SHELL 2>/dev/null || echo /bin/sh); "
+            "[ -f ~/.zprofile ] && . ~/.zprofile; "
+            "[ -f ~/.bash_profile ] && . ~/.bash_profile; "
+            "[ -f ~/.profile ] && . ~/.profile; "
+        )
+        full_command = _profile_cmd + command
 
     try:
         proc = await asyncio.create_subprocess_shell(
@@ -110,8 +168,8 @@ async def bash_command(
             stdin=subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            cwd=workdir,
-            start_new_session=True,
+            env=_get_subprocess_env(),
+            **_build_subprocess_kwargs(workdir),
         )
 
         timeout_sec = timeout / 1000.0
@@ -185,7 +243,7 @@ async def _stream_output(
             if not chunk:
                 break
 
-            text = chunk.decode("utf-8", errors="replace")
+            text = chunk.decode(_ENCODING, errors="replace")
             sink.append(text)
             buf += text
 
@@ -227,6 +285,36 @@ def _format_result(
     return truncate_output(output)
 
 
+# ── Platform-specific helpers ──────────────────────────────────────────
+
+
+async def _check_process_alive(pid: int | str) -> str:
+    """Check if a process is still running. Returns command-line or empty."""
+    if IS_WINDOWS:
+        cmd = f'tasklist /FI "PID eq {pid}" /FO CSV /NH'
+    else:
+        cmd = f"ps -p {pid} -o pid=,command="
+    try:
+        check = await asyncio.create_subprocess_shell(
+            cmd,
+            stdin=subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            **_build_subprocess_kwargs(),
+        )
+        out, _ = await asyncio.wait_for(check.communicate(), timeout=5)
+        text = out.decode(_ENCODING, errors="replace").strip()
+        if IS_WINDOWS:
+            # tasklist output: "python.exe","1234","Console","1","1,234 KB"
+            # Return the image name
+            if text and "INFO:" not in text:
+                return text.split(",")[0].strip('"')
+            return ""
+        return text
+    except Exception:
+        return ""
+
+
 async def _auto_background(
     proc: asyncio.subprocess.Process,
     collected_stdout: list[str],
@@ -243,7 +331,7 @@ async def _auto_background(
 
     # Write already-collected output to log file
     try:
-        with open(log_file, "w") as f:
+        with open(log_file, "w", encoding="utf-8") as f:
             f.write("".join(collected_stdout))
             if collected_stderr:
                 f.write("\n[stderr]\n")
@@ -280,23 +368,20 @@ async def _auto_background(
 
     # Check if process is still alive
     await asyncio.sleep(1)
-    status_line = ""
-    try:
-        check = await asyncio.create_subprocess_shell(
-            f"ps -p {pid} -o pid=,command=",
-            stdin=subprocess.DEVNULL,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-        )
-        out, _ = await asyncio.wait_for(check.communicate(), timeout=5)
-        if out.strip():
-            status_line = f"  command: {out.decode().strip()}\n"
-    except Exception:
-        pass
+    alive_info = await _check_process_alive(pid)
+    status_line = f"  command: {alive_info}\n" if alive_info else ""
 
     partial_out = "".join(collected_stdout)
     partial_err = "".join(collected_stderr)
     result = _format_result(partial_out, partial_err, -1)
+
+    # Platform-specific tail/kill hints
+    if IS_WINDOWS:
+        tail_hint = f"  查看最新输出: powershell -c \"Get-Content -Tail 50 '{log_file}'\"\n"
+        kill_hint = f"  终止: taskkill /PID {pid} /F\n"
+    else:
+        tail_hint = f"  查看最新输出: tail -50 {log_file}\n"
+        kill_hint = f"  终止: kill {pid}\n"
 
     return (
         f"{result}\n"
@@ -304,8 +389,8 @@ async def _auto_background(
         f"  PID: {pid}\n"
         f"{status_line}"
         f"  日志: {log_file}\n"
-        f"  查看最新输出: tail -50 {log_file}\n"
-        f"  终止: kill {pid}\n"
+        f"{tail_hint}"
+        f"{kill_hint}"
     )
 
 
@@ -343,33 +428,61 @@ async def _drain_to_fd(
 async def _run_background(
     command: str, workdir: str | None = None, context: Any = None
 ) -> str:
-    """Start command in background via nohup and return immediately."""
+    """Start command in background and return immediately."""
 
     log_dir = tempfile.gettempdir()
     pid = os.getpid()
     log_file = os.path.join(log_dir, f"crabagent-bg-{pid}.log")
 
-    _profile_cmd = (
-        "export SHELL=$(echo $SHELL 2>/dev/null || echo /bin/sh); "
-        "[ -f ~/.zprofile ] && . ~/.zprofile; "
-        "[ -f ~/.bash_profile ] && . ~/.bash_profile; "
-        "[ -f ~/.profile ] && . ~/.profile; "
-    )
-    wrapped = f"nohup {_profile_cmd} {command} > {log_file} 2>&1 & echo $!"
+    if IS_WINDOWS:
+        # Windows: use START /B to launch in background.
+        # We run a small wrapper via cmd.exe that echoes the PID.
+        # Use PowerShell for reliable PID capture.
+        wrapped = (
+            f'$ErrorActionPreference="SilentlyContinue"; '
+            f'$p = Start-Process -FilePath "cmd.exe" '
+            f'-ArgumentList "/c {command}" '
+            f'-WindowStyle Hidden -PassThru '
+            f'-RedirectStandardOutput "{log_file}" '
+            f'-RedirectStandardError "{log_file}.err"; '
+            f'Write-Output $p.Id'
+        )
+        shell_executable = "powershell"
+        shell_prefix = ["-NoProfile", "-Command", wrapped]
+    else:
+        _profile_cmd = (
+            "export SHELL=$(echo $SHELL 2>/dev/null || echo /bin/sh); "
+            "[ -f ~/.zprofile ] && . ~/.zprofile; "
+            "[ -f ~/.bash_profile ] && . ~/.bash_profile; "
+            "[ -f ~/.profile ] && . ~/.profile; "
+        )
+        wrapped = f"nohup {_profile_cmd} {command} > {log_file} 2>&1 & echo $!"
+        shell_executable = None
+        shell_prefix = None
 
     try:
-        proc = await asyncio.create_subprocess_shell(
-            wrapped,
-            stdin=subprocess.DEVNULL,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=workdir,
-            start_new_session=True,
-        )
+        spawn_kwargs = _build_subprocess_kwargs(workdir)
+        spawn_kwargs["stdin"] = subprocess.DEVNULL
+        spawn_kwargs["stdout"] = asyncio.subprocess.PIPE
+        spawn_kwargs["stderr"] = asyncio.subprocess.PIPE
+        spawn_kwargs["env"] = _get_subprocess_env()
+
+        if IS_WINDOWS:
+            # Use create_subprocess_exec to invoke powershell explicitly
+            proc = await asyncio.create_subprocess_exec(
+                shell_executable, *shell_prefix,
+                **spawn_kwargs,
+            )
+        else:
+            proc = await asyncio.create_subprocess_shell(
+                wrapped,
+                **spawn_kwargs,
+            )
+
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10)
 
-        pid_str = stdout.decode("utf-8", errors="replace").strip()
-        err_str = stderr.decode("utf-8", errors="replace").strip()
+        pid_str = stdout.decode(_ENCODING, errors="replace").strip()
+        err_str = stderr.decode(_ENCODING, errors="replace").strip()
 
         if proc.returncode != 0 or not pid_str:
             return f"[background] failed to start\n{err_str}"
@@ -381,27 +494,29 @@ async def _run_background(
         )
 
         await asyncio.sleep(1)
-        try:
-            check = await asyncio.create_subprocess_shell(
-                f"ps -p {pid_str} -o pid=,command=",
-                stdin=subprocess.DEVNULL,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
+        alive_info = await _check_process_alive(pid_str)
+        if alive_info:
+            if IS_WINDOWS:
+                tail_hint = f"  powershell: Get-Content -Tail 20 '{log_file}'"
+            else:
+                tail_hint = f"  tail: tail -f {log_file}"
+            return (
+                f"[background] PID={pid_str} — process is running\n"
+                f"  command: {alive_info}\n"
+                f"  log: {log_file}\n"
+                f"  {tail_hint}"
             )
-            out, _ = await asyncio.wait_for(check.communicate(), timeout=5)
-            if out.strip():
-                return (
-                    f"[background] PID={pid_str} — process is running\n"
-                    f"  command: {out.decode().strip()}\n"
-                    f"  log: {log_file}\n"
-                    f"  tail: tail -f {log_file}"
-                )
+
+        if IS_WINDOWS:
+            return f"[background] PID={pid_str}\n  log: {log_file}\n  check: tasklist /FI \"PID eq {pid_str}\""
+        else:
+            return f"[background] PID={pid_str}\n  log: {log_file}\n  check: ps -p {pid_str}"
+    except TimeoutError:
+        try:
+            proc.kill()
+            await asyncio.wait_for(proc.wait(), timeout=3)
         except Exception:
             pass
-
-        return f"[background] PID={pid_str}\n  log: {log_file}\n  check: ps -p {pid_str}"
-    except TimeoutError:
-        proc.kill()
         return "[background] error: shell timed out starting background process"
     except Exception as e:
         return f"[background] error: {e}"

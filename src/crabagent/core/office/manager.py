@@ -5,10 +5,13 @@ import json
 import logging
 import os
 import shutil
+import sys
 from dataclasses import dataclass
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+IS_WINDOWS = sys.platform == "win32"
 
 
 @dataclass
@@ -22,13 +25,42 @@ class OfficeResult:
 
 
 # ── known locations to probe when officecli is not on PATH ──────────────
-_PROBE_LOCATIONS = [
-    "/usr/local/bin/officecli",
-    "/opt/homebrew/bin/officecli",
-    os.path.expanduser("~/.officecli/officecli"),
-    os.path.expanduser("~/.local/bin/officecli"),
-    "/usr/bin/officecli",
-]
+if IS_WINDOWS:
+    _PROBE_LOCATIONS = [
+        os.path.join(os.environ.get("LOCALAPPDATA", ""), "officecli", "officecli.exe"),
+        os.path.join(os.environ.get("PROGRAMFILES", ""), "officecli", "officecli.exe"),
+        os.path.join(os.environ.get("PROGRAMFILES(X86)", ""), "officecli", "officecli.exe"),
+        os.path.expanduser("~/.officecli/officecli.exe"),
+    ]
+else:
+    _PROBE_LOCATIONS = [
+        "/usr/local/bin/officecli",
+        "/opt/homebrew/bin/officecli",
+        os.path.expanduser("~/.officecli/officecli"),
+        os.path.expanduser("~/.local/bin/officecli"),
+        "/usr/bin/officecli",
+    ]
+
+# ── install hint (platform-specific) ────────────────────────────────────
+if IS_WINDOWS:
+    _INSTALL_HINT = (
+        "❌ OfficeCLI is not installed.\n\n"
+        "Install via winget (recommended):\n"
+        "```\n"
+        "winget install HaiYing.OfficeCLI\n"
+        "```\n"
+        "Or download from: https://github.com/iOfficeAI/OfficeCLI/releases\n"
+        "(Choose officecli-win-x64.exe for 64-bit Windows)"
+    )
+else:
+    _INSTALL_HINT = (
+        "❌ OfficeCLI is not installed.\n\n"
+        "Install with one command:\n"
+        "```bash\n"
+        "curl -fsSL https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.sh | bash\n"
+        "```\n"
+        "Or download from: https://github.com/iOfficeAI/OfficeCLI/releases"
+    )
 
 
 class OfficeManager:
@@ -66,8 +98,11 @@ class OfficeManager:
 
         # 2) probe known locations
         for candidate in _PROBE_LOCATIONS:
-            if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
-                return await self._set_binary(candidate)
+            if os.path.isfile(candidate):
+                # On Unix, check executable permission; on Windows,
+                # any .exe file that exists is potentially runnable.
+                if IS_WINDOWS or os.access(candidate, os.X_OK):
+                    return await self._set_binary(candidate)
 
         logger.info("OfficeCLI not found — office tools will be unavailable")
         return False
@@ -118,11 +153,7 @@ class OfficeManager:
         if not cmd:
             return OfficeResult(
                 success=False,
-                error=(
-                    "OfficeCLI is not installed. "
-                    "Install with: curl -fsSL https://raw.githubusercontent.com/"
-                    "iOfficeAI/OfficeCLI/main/install.sh | bash"
-                ),
+                error=_INSTALL_HINT,
             )
         return await self._exec_with_stdin(cmd, timeout=timeout)
 
@@ -281,7 +312,7 @@ class OfficeManager:
         if not self._available:
             return OfficeResult(
                 success=False,
-                error="OfficeCLI is not installed.",
+                error=_INSTALL_HINT,
             )
 
         logger.debug("officecli: %s", " ".join(cmd))

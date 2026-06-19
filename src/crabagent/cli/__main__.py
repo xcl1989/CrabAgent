@@ -63,7 +63,7 @@ def main():
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
     parser.add_argument("--no-persist", action="store_true", help="Disable conversation persistence")
     parser.add_argument("--old", action="store_true", help="Use legacy single-panel TUI")
-    parser.add_argument("--build-desktop", action="store_true", help="Build desktop .dmg package")
+    parser.add_argument("--build-desktop", action="store_true", help="Build desktop app (.dmg on macOS, .exe on Windows)")
 
     args = parser.parse_args()
     subcmd_words = {"init", "provider", "skill", "models"}
@@ -759,10 +759,10 @@ def _print_banner(context, provider: str, model: str):
         from rich.text import Text
 
         console = Console()
-        t = Text("CrabAgent v0.11.1", style="bold")
+        t = Text("CrabAgent v0.11.2", style="bold")
         console.print(t)
     except ImportError:
-        print("CrabAgent v0.11.1")
+        print("CrabAgent v0.11.2")
 
     print(f"  provider: {provider}  model: {model}")
     print(f"  workspace: {context.workspace}")
@@ -1548,10 +1548,17 @@ async def _handle_skill_show_slash(arg: str):
 
 
 def _run_build_desktop():
-    """Build the desktop .dmg package from pip-installed crabagent."""
-    import shutil, subprocess, tempfile
+    """Build the desktop app package from pip-installed crabagent.
+
+    Produces a .dmg on macOS or a .exe (NSIS installer) on Windows.
+    """
+    import platform
+    import shutil
+    import tempfile
 
     import crabagent as _ca
+
+    is_windows = platform.system() == "Windows"
     pkg_dir = Path(_ca.__file__).parent
     electron_src = pkg_dir / "electron"
     spec_src = pkg_dir / "crabagent.spec"
@@ -1562,6 +1569,7 @@ def _run_build_desktop():
 
     work_dir = Path(tempfile.mkdtemp(prefix="crabagent-build-"))
     print(f"Working directory: {work_dir}")
+    print(f"Target platform: {platform.system()}")
 
     try:
         shutil.copytree(electron_src, work_dir / "electron")
@@ -1586,29 +1594,71 @@ def _run_build_desktop():
         print("   Done.")
 
         print("\n[3/4] Assembling app bundle...")
-        backend_bin = work_dir / "dist" / "crabagent-backend"
         resources_dir = work_dir / "electron" / "resources"
         resources_dir.mkdir(exist_ok=True)
-        shutil.copy2(backend_bin, resources_dir / "crabagent-backend")
+
+        if is_windows:
+            # PyInstaller onedir: dist/crabagent-backend/ (directory with exe + DLLs)
+            backend_dir = work_dir / "dist" / "crabagent-backend"
+            if backend_dir.exists():
+                dest = resources_dir / "crabagent-backend"
+                if dest.exists():
+                    shutil.rmtree(dest)
+                shutil.copytree(backend_dir, dest)
+                print(f"   Copied backend directory ({sum(f.stat().st_size for f in dest.rglob('*') if f.is_file()) // 1024 // 1024} MB)")
+            else:
+                # Fallback: single exe
+                backend_exe = work_dir / "dist" / "crabagent-backend.exe"
+                if backend_exe.exists():
+                    shutil.copy2(backend_exe, resources_dir / "crabagent-backend.exe")
+                else:
+                    print(f"Error: Backend binary not found in {work_dir / 'dist'}")
+                    sys.exit(1)
+        else:
+            # macOS: single binary
+            backend_bin = work_dir / "dist" / "crabagent-backend"
+            shutil.copy2(backend_bin, resources_dir / "crabagent-backend")
         print("   Done.")
 
-        print("\n[4/4] Building Electron .dmg...")
-        electron_result = subprocess.run(["npx", "electron-builder", "--mac", "--dir"],
+        print("\n[4/4] Building Electron installer...")
+        eb_target = "--win" if is_windows else "--mac"
+        env = {**dict(os.environ), "CSC_IDENTITY_AUTO_DISCOVERY": "false"}
+        electron_result = subprocess.run(
+            ["npx", "electron-builder", eb_target, "--dir"],
             cwd=str(work_dir / "electron"), capture_output=True, text=True, timeout=300,
-            env={**dict(os.environ), "CSC_IDENTITY_AUTO_DISCOVERY": "false"})
+            env=env,
+        )
         if electron_result.returncode != 0:
             print("Electron build failed:", electron_result.stderr[-400:])
             sys.exit(1)
         print("   Done.")
 
-        dist_dirs = list((work_dir / "electron" / "dist-electron").glob("*.app"))
-        if dist_dirs:
-            size = subprocess.run(["du", "-sh", str(dist_dirs[0])], capture_output=True, text=True).stdout.strip()
-            print(f"\n✅ Build complete: {dist_dirs[0]}")
-            print(f"   Size: {size}")
-            print(f"   Open with: open {dist_dirs[0]}")
+        dist_dir = work_dir / "electron" / "dist-electron"
+        if is_windows:
+            # Look for unpacked app dir
+            app_dirs = list(dist_dir.glob("win-unpacked"))
+            if app_dirs:
+                exe_files = list(app_dirs[0].glob("*.exe"))
+                for exe in exe_files:
+                    size_mb = exe.stat().st_size // 1024 // 1024
+                    print(f"\n  ✅ Build complete: {exe}")
+                    print(f"     Size: {size_mb} MB")
+                    print(f"     Open with: start {exe}")
+            else:
+                print(f"\n  ✅ Build complete. Check: {dist_dir}")
         else:
-            print(f"\n✅ Build complete. Check: {work_dir / 'electron' / 'dist-electron'}")
+            dist_dirs = list(dist_dir.glob("*.app"))
+            if dist_dirs:
+                size_result = subprocess.run(
+                    ["du", "-sh", str(dist_dirs[0])],
+                    capture_output=True, text=True
+                )
+                size = size_result.stdout.strip()
+                print(f"\n✅ Build complete: {dist_dirs[0]}")
+                print(f"   Size: {size}")
+                print(f"   Open with: open {dist_dirs[0]}")
+            else:
+                print(f"\n  ✅ Build complete. Check: {dist_dir}")
 
     except Exception as e:
         print(f"\nBuild failed: {e}")

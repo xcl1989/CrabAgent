@@ -61,6 +61,14 @@ EXCLUDES = [
     "debugpy", "pydevd",
 ]
 
+# ── Platform-specific exclusions ───────────────────────────────
+# On Windows, some modules in the exclude list are actually needed
+# (msvcrt, win32api, win32com, msilib). Remove them so PyInstaller
+# keeps them bundled.
+if sys.platform == "win32":
+    _WIN_SAFE = {"msvcrt", "win32api", "win32com", "msilib"}
+    EXCLUDES = [x for x in EXCLUDES if x not in _WIN_SAFE]
+
 # ── Hidden imports (dynamic imports PyInstaller can't see) ─────
 HIDDEN_IMPORTS = [
     # Serve mode

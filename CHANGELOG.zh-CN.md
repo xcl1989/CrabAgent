@@ -8,6 +8,31 @@ English version: [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
+## [0.11.2] — Windows 全面兼容
+
+### 新增
+- **Windows 桌面应用** — `crabagent --build-desktop` 自动检测平台，Windows 上生成 NSIS 安装器（.exe），macOS 上生成 .dmg
+  - 新增 `scripts/build-desktop.ps1` PowerShell 构建脚本
+  - electron-builder 配置：NSIS 目标，支持桌面/开始菜单快捷方式、自定义安装路径、中英文安装界面
+  - Electron `main.js` 全面跨平台：`netstat`+`taskkill` 端口清理、`where` 路径解析、`explorer` 打开目录、`windowsHide` 隐藏控制台、`taskkill /T /F` 进程树终止
+- **OfficeCLI Windows 支持** — 探测路径新增 `%LOCALAPPDATA%`、`%PROGRAMFILES%`、`%PROGRAMFILES(X86)%`（含 `.exe` 后缀）；Windows 安装提示 `winget install HaiYing.OfficeCLI`
+
+### 修复
+- **bash 工具在 Windows 上** — 修复 6 个 Unix 专用问题：
+  - shell profile 命令（`.zprofile`、`.bash_profile`）在 cmd.exe 中语法错误 → Windows 上跳过
+  - 硬编码 `utf-8` 解码导致中文乱码（GBK/cp936）→ 动态检测 `locale.getpreferredencoding()`
+  - `nohup ... & echo $!` 后台模式失败 → 改用 PowerShell `Start-Process`
+  - `ps -p {pid}` 进程检查失败 → 改用 `tasklist`
+  - `start_new_session=True`（仅 POSIX）→ Windows 上用 `creationflags=CREATE_NEW_PROCESS_GROUP|CREATE_NO_WINDOW`
+  - 工具描述在 Windows 上改为"shell command"而非"bash command"
+- **TUI 在 Windows 上崩溃** — `logging.FileHandler("/tmp/crabagent.log")` 硬编码 Unix 路径 → 改用 `tempfile.gettempdir()`
+- **OfficeCLI 在 Windows 上提示"未安装"** — 探测路径全为 Unix；`documents.py` fallback 硬编码 `/usr/local/bin/officecli` → 改为正确的 503 错误
+- **sandbox.py** — 危险路径列表仅有 Unix 路径；现已包含 `C:\Windows\System32`、`C:\Program Files`，Windows 特权命令（`runas`、`takeown`、`icacls`、`bcdedit`、`reg delete HKLM`），以及物理设备写入检测
+- **files.py** — `http.server` 子进程在 Windows 上弹出控制台窗口 → 添加 `CREATE_NO_WINDOW` 标志
+- **PyInstaller spec** — 排除列表中的 `msvcrt`、`win32api`、`win32com`、`msilib` 在 Windows 上是必需的 → 改为条件排除
+
+---
+
 ## [0.11.1]
 
 ### 新增

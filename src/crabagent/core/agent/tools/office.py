@@ -48,14 +48,8 @@ async def _ensure_available() -> str | None:
         # 自动触发检测（兼容 detect 未提前调用的场景）
         if await mgr.detect():
             return None
-        return (
-            "❌ OfficeCLI is not installed.\n\n"
-            "Install with one command:\n"
-            "```bash\n"
-            "curl -fsSL https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.sh | bash\n"
-            "```\n"
-            "Or download from: https://github.com/iOfficeAI/OfficeCLI/releases"
-        )
+        from crabagent.core.office.manager import _INSTALL_HINT
+        return _INSTALL_HINT
     return None
 
 

@@ -194,17 +194,19 @@ crabagent --serve          # → http://localhost:5210
 crabagent "帮我整理这个目录"
 ```
 
-### 桌面应用 (macOS, 开发模式)
+### 桌面应用 (macOS & Windows)
 
 构建 Electron 壳（需要系统已安装 Python 和 `crabagent`）：
 
 ```bash
 # 从 git clone 项目一条命令构建：
-make desktop
-# → electron/dist-electron/CrabAgent-0.10.5-arm64.dmg
+make desktop                       # macOS → CrabAgent-x.x.x-arm64.dmg
 
-# 或者从 pip 安装后：
-crabagent --build-desktop
+# 或者从 pip 安装后（自动检测平台）：
+crabagent --build-desktop          # macOS → .dmg | Windows → .exe 安装器
+
+# Windows (PowerShell)：
+.\scripts\build-desktop.ps1        # → CrabAgent-x.x.x-setup.exe
 ```
 
 ---

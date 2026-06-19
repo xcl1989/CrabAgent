@@ -195,17 +195,19 @@ crabagent --serve          # → http://localhost:5210
 crabagent "organize this directory"
 ```
 
-### Desktop App (macOS, development)
+### Desktop App (macOS & Windows)
 
 Build the Electron wrapper (requires Python + `crabagent` installed on your system):
 
 ```bash
 # One-command build (from git clone):
-make desktop
-# → electron/dist-electron/CrabAgent-0.10.5-arm64.dmg
+make desktop                       # macOS → CrabAgent-x.x.x-arm64.dmg
 
-# Or from pip install:
-crabagent --build-desktop
+# Or from pip install (auto-detects platform):
+crabagent --build-desktop          # macOS → .dmg | Windows → .exe installer
+
+# Windows (PowerShell):
+.\scripts\build-desktop.ps1        # → CrabAgent-x.x.x-setup.exe
 ```
 
 ---

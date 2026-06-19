@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import re
+import sys
 
 from crabagent.core.config import settings
+
+IS_WINDOWS = sys.platform == "win32"
 
 _DESTRUCTIVE_PATTERNS = [
     (r"rm\s+-rf\s+/(?:\s|$)", "rm -rf /"),
@@ -17,21 +20,45 @@ _DESTRUCTIVE_PATTERNS = [
     (r"\bfork\s+bomb\b", "fork bomb"),
 ]
 
+# Windows-specific dangerous patterns
+if IS_WINDOWS:
+    _DESTRUCTIVE_PATTERNS.extend([
+        (r"\bformat\s+[a-z]:", "format drive"),
+        (r"\bdiskpart\b", "diskpart"),
+        (r"\bcd\s+\\.*\\Windows\\System32", "cd to System32"),
+        (r"\bdel\s+/[fsq]\s+[a-z]:\\Windows", "delete Windows files"),
+        (r"\brmdir\s+/s\s+/q\s+[a-z]:\\Windows", "rmdir Windows"),
+        (r"\breg\s+delete\s+HKLM", "delete registry HKLM"),
+    ])
+
 _COMPILED = [re.compile(pat, re.IGNORECASE) for pat, _ in _DESTRUCTIVE_PATTERNS]
 _LABELS = [label for _, label in _DESTRUCTIVE_PATTERNS]
 
-_CRITICAL_DIRS = (
-    "/etc/passwd",
-    "/etc/shadow",
-    "/etc/sudoers",
-    "/boot",
-    "/usr/bin",
-    "/usr/sbin",
-    "/bin",
-    "/sbin",
-    "/System",
-    "/Library/System",
-)
+if IS_WINDOWS:
+    _CRITICAL_DIRS = (
+        r"C:\Windows\System32",
+        r"C:\Windows\System32\config",
+        r"C:\Windows\System32\drivers",
+        r"C:\Windows\System32\config\SAM",
+        r"C:\Windows\System32\config\SYSTEM",
+        r"C:\Program Files",
+        r"C:\Program Files (x86)",
+        r"%WINDIR%",
+        r"%SYSTEMROOT%",
+    )
+else:
+    _CRITICAL_DIRS = (
+        "/etc/passwd",
+        "/etc/shadow",
+        "/etc/sudoers",
+        "/boot",
+        "/usr/bin",
+        "/usr/sbin",
+        "/bin",
+        "/sbin",
+        "/System",
+        "/Library/System",
+    )
 
 _DANGEROUS_PIPES = ("curl", "wget")
 
@@ -41,6 +68,16 @@ _PRIVILEGE_CMDS = (
     "chmod 777",
     "chmod 666",
     "chown root",
+    # Windows elevated commands
+    "runas ",
+    "takeown ",
+    "icacls ",
+    "net user",
+    "net localgroup",
+    "reg add HKLM",
+    "reg delete HKLM",
+    "sc config",
+    "bcdedit",
 )
 
 _BACKGROUND_PATTERNS = (
@@ -73,6 +110,11 @@ def validate_command(command: str) -> str | None:
 
     if "> /dev/sd" in command or "> /dev/hd" in command:
         return "Command blocked: direct write to block device"
+
+    # Windows block device write detection
+    lower_for_block = command.lower()
+    if r"\\.\physicaldrive" in lower_for_block or r"\\\\.\physicaldrive" in lower_for_block:
+        return "Command blocked: direct write to physical drive"
 
     if settings.bash_block_background:
         for bg_pat in _BACKGROUND_PATTERNS:

@@ -1701,7 +1701,9 @@ async def run_dual_tui(args):
         ):
             root_logger.removeHandler(handler)
     if not any(isinstance(h, logging.FileHandler) for h in root_logger.handlers):
-        fh = logging.FileHandler("/tmp/crabagent.log", mode="a")
+        import tempfile as _tempfile
+        _log_path = os.path.join(_tempfile.gettempdir(), "crabagent.log")
+        fh = logging.FileHandler(_log_path, mode="a")
         fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
         root_logger.addHandler(fh)
 

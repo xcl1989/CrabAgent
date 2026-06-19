@@ -1,5 +1,5 @@
 const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain } = require('electron');
-const { spawn, execSync } = require('child_process');
+const { spawn, execSync, exec } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
@@ -7,6 +7,7 @@ const http = require('http');
 const PORT = 5210;
 const URL = `http://127.0.0.1:${PORT}`;
 const isMac = process.platform === 'darwin';
+const isWin = process.platform === 'win32';
 
 let python = null;
 let win = null;
@@ -33,37 +34,79 @@ function saveWindowState() {
 // ── Logging ──
 function log(msg) { console.log(`[CrabAgent] ${msg}`); }
 
-// ── Kill existing process on port ──
+// ── Kill existing process on port (cross-platform) ──
 function killExistingBackend() {
   try {
-    const result = execSync(`lsof -ti:${PORT} 2>/dev/null || true`, { encoding: 'utf-8' });
-    const pids = result.trim().split('\n').filter(Boolean);
-    for (const pid of pids) {
-      try { process.kill(Number(pid), 'SIGTERM'); log(`Killed existing process ${pid}`); } catch {}
-    }
-    if (pids.length > 0) {
-      const deadline = Date.now() + 3000;
-      while (Date.now() < deadline) {
-        try { execSync(`lsof -ti:${PORT} 2>/dev/null`); } catch { break; }
+    if (isWin) {
+      // Windows: use netstat to find PID listening on PORT
+      const result = execSync(
+        `netstat -aon | findstr :${PORT} | findstr LISTENING`,
+        { encoding: 'utf-8', shell: 'cmd.exe', stdio: ['pipe', 'pipe', 'ignore'] }
+      );
+      const pids = new Set();
+      for (const line of result.trim().split('\n')) {
+        const parts = line.trim().split(/\s+/);
+        const pid = parts[parts.length - 1];
+        if (pid && /^\d+$/.test(pid)) pids.add(pid);
+      }
+      for (const pid of pids) {
+        try {
+          execSync(`taskkill /PID ${pid} /T /F`, { shell: 'cmd.exe', stdio: 'ignore' });
+          log(`Killed existing process ${pid}`);
+        } catch {}
+      }
+      // Brief wait for port release
+      if (pids.size > 0) {
+        const deadline = Date.now() + 3000;
+        while (Date.now() < deadline) {
+          try {
+            execSync(`netstat -aon | findstr :${PORT} | findstr LISTENING`,
+              { shell: 'cmd.exe', stdio: 'ignore' });
+          } catch { break; }
+        }
+      }
+    } else {
+      // macOS/Linux: use lsof
+      const result = execSync(`lsof -ti:${PORT} 2>/dev/null || true`, { encoding: 'utf-8' });
+      const pids = result.trim().split('\n').filter(Boolean);
+      for (const pid of pids) {
+        try { process.kill(Number(pid), 'SIGTERM'); log(`Killed existing process ${pid}`); } catch {}
+      }
+      if (pids.length > 0) {
+        const deadline = Date.now() + 3000;
+        while (Date.now() < deadline) {
+          try { execSync(`lsof -ti:${PORT} 2>/dev/null`); } catch { break; }
+        }
       }
     }
   } catch {}
 }
 
+// ── Resolve binary path (cross-platform) ──
 function resolvePath(cmd) {
-  try { return execSync(`/bin/bash -l -c 'command -v ${cmd} 2>/dev/null'`, { encoding: 'utf-8' }).trim(); }
-  catch { return null; }
+  try {
+    if (isWin) {
+      return execSync(`where ${cmd} 2>nul`, { encoding: 'utf-8', shell: 'cmd.exe' }).trim().split('\n')[0];
+    }
+    return execSync(`/bin/bash -l -c 'command -v ${cmd} 2>/dev/null'`, { encoding: 'utf-8' }).trim();
+  } catch { return null; }
 }
 
 function startBackend() {
   return new Promise((resolve, reject) => {
     const env = { ...process.env, PYTHONUNBUFFERED: '1' };
 
-    // Priority 1: bundled crabagent-backend binary (self-contained .app)
-    const bundledBin = path.join(process.resourcesPath, 'crabagent-backend');
+    // Priority 1: bundled crabagent-backend binary (self-contained app)
+    const backendName = isWin ? 'crabagent-backend.exe' : 'crabagent-backend';
+    const bundledBin = path.join(process.resourcesPath, backendName);
     if (fs.existsSync(bundledBin)) {
       log(`Starting bundled backend: ${bundledBin}`);
-      python = spawn(bundledBin, ['--serve'], { stdio: 'pipe', env });
+      const spawnOpts = {
+        stdio: 'pipe',
+        env,
+        ...(isWin ? { windowsHide: true } : {}),
+      };
+      python = spawn(bundledBin, ['--serve'], spawnOpts);
       python.on('error', (e) => { log(`Bundled backend error: ${e.message}`); reject(e); });
       python.on('exit', (c) => log(`Bundled backend exited (${c})`));
       python.stdout.on('data', (d) => d.toString().split('\n').filter(Boolean).forEach((l) => log(`[py] ${l}`)));
@@ -73,13 +116,18 @@ function startBackend() {
 
     // Priority 2: crabagent CLI from PATH
     const crabagentBin = resolvePath('crabagent');
-    const pythonBin = resolvePath('python3') || 'python3';
+    const pythonBin = resolvePath(isWin ? 'python' : 'python3') || (isWin ? 'python' : 'python3');
 
     const cmd = crabagentBin || pythonBin;
     const args = crabagentBin ? ['--serve'] : ['-m', 'crabagent.cli', '--serve'];
     log(`Backend binary not bundled, using system: ${cmd} ${args.join(' ')}`);
 
-    python = spawn(cmd, args, { stdio: 'pipe', env });
+    const spawnOpts2 = {
+      stdio: 'pipe',
+      env,
+      ...(isWin ? { windowsHide: true } : {}),
+    };
+    python = spawn(cmd, args, spawnOpts2);
     python.on('error', (e) => { log(`Backend error: ${e.message}`); reject(e); });
     python.on('exit', (c) => log(`Backend exited (${c})`));
     python.stdout.on('data', (d) => d.toString().split('\n').filter(Boolean).forEach((l) => log(`[py] ${l}`)));
@@ -98,6 +146,23 @@ function waitForServer(maxWait = 60000) {
     }
     check();
   });
+}
+
+// ── Kill backend process (cross-platform) ──
+function killBackend() {
+  if (!python) return;
+  try {
+    if (isWin) {
+      // Windows: SIGTERM/SIGKILL don't work, use taskkill on the process tree
+      execSync(`taskkill /PID ${python.pid} /T /F`, { shell: 'cmd.exe', stdio: 'ignore' });
+      log('Backend killed via taskkill');
+    } else {
+      python.kill('SIGTERM');
+      setTimeout(() => { if (python && !python.killed) python.kill('SIGKILL'); }, 3000);
+    }
+  } catch (e) {
+    log(`Backend kill error: ${e.message}`);
+  }
 }
 
 // ── Create tray ──
@@ -124,8 +189,12 @@ function createTray() {
     {
       label: '打开工作目录',
       click: () => {
-        const { exec } = require('child_process');
-        exec(`open "${process.env.HOME}/.crabagent"`);
+        const crabagentDir = path.join(app.getPath('home'), '.crabagent');
+        if (isWin) {
+          exec(`explorer "${crabagentDir}"`);
+        } else {
+          exec(`open "${crabagentDir}"`);
+        }
       },
     },
     { type: 'separator' },
@@ -149,7 +218,7 @@ function createTray() {
   ]);
 
   tray.setContextMenu(contextMenu);
-  
+
   // Double-click tray icon to show window
   tray.on('double-click', () => showWindow());
 }
@@ -267,6 +336,8 @@ function createWindow() {
     minHeight: 600,
     title: 'CrabAgent',
     show: false,  // show after ready
+    // On Windows, use a consistent icon
+    ...(isWin ? { icon: path.join(__dirname, 'build', 'icon.png') } : {}),
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -330,10 +401,7 @@ function createWindow() {
     }
     // Clean up
     saveWindowState();
-    if (python && !python.killed) {
-      python.kill('SIGTERM');
-      setTimeout(() => { if (python && !python.killed) python.kill('SIGKILL'); }, 3000);
-    }
+    killBackend();
   });
 
   win.on('closed', () => { win = null; });

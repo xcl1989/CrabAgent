@@ -250,11 +250,17 @@ async def start_http_server(
         raise HTTPException(status_code=400, detail="Not a directory or does not exist")
 
     port = _find_free_port()
+    spawn_kwargs: dict = {
+        "stdout": asyncio.subprocess.DEVNULL,
+        "stderr": asyncio.subprocess.DEVNULL,
+    }
+    if sys.platform == "win32":
+        import subprocess as _sp
+        spawn_kwargs["creationflags"] = getattr(_sp, "CREATE_NO_WINDOW", 0)
     proc = await asyncio.create_subprocess_exec(
         sys.executable, "-m", "http.server", str(port),
         "--directory", str(target),
-        stdout=asyncio.subprocess.DEVNULL,
-        stderr=asyncio.subprocess.DEVNULL,
+        **spawn_kwargs,
     )
     async with _html_server_lock:
         _html_servers[port] = proc

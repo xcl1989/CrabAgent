@@ -103,7 +103,7 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     app = FastAPI(
         title="CrabAgent",
-        version="0.11.1",
+        version="0.11.2",
         lifespan=lifespan,
     )
     app.state.event_queues = {}
@@ -178,7 +178,7 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     async def health():
-        return {"status": "ok", "version": "0.11.1"}
+        return {"status": "ok", "version": "0.11.2"}
 
     _mount_spa(app)
 
