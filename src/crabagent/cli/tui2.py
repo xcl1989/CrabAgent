@@ -38,6 +38,7 @@ from rich.console import Console
 from rich.markdown import Markdown
 from rich.text import Text
 
+from crabagent import __version__
 from crabagent.cli.tui import SLASH_COMMANDS, TuiSession
 from crabagent.core.agent.loop import run_agent
 from crabagent.core.event import AgentEvent, EventType
@@ -318,7 +319,7 @@ class DualPanelTui(TuiSession):
 
         self.agent_ctx.event_bus.subscribe(self._on_agent_event)
 
-        self._append_md(f"**CrabAgent v0.7.4**\n\n  workspace: `{self.agent_ctx.workspace}`\n")
+        self._append_md(f"**CrabAgent v{__version__}**\n\n  workspace: `{self.agent_ctx.workspace}`\n")
 
         app = self._build_application()
         self._app = app
@@ -1220,7 +1221,7 @@ class DualPanelTui(TuiSession):
             if self.agent_ctx:
                 self.agent_ctx.messages.clear()
             self._reset_output()
-            self._append_md("**CrabAgent v0.7.4**\n")
+            self._append_md(f"**CrabAgent v{__version__}**\n")
         elif cmd == "/history":
             if self.agent_ctx:
                 self._append_md(
@@ -1302,7 +1303,7 @@ class DualPanelTui(TuiSession):
         elif cmd == "/new":
             await self._handle_new_session()
             self._reset_output()
-            self._append_md("**CrabAgent v0.7.4**\n")
+            self._append_md(f"**CrabAgent v{__version__}**\n")
         elif cmd == "/sessions":
             await self._handle_sessions_popup()
         elif cmd == "/session":
@@ -1713,3 +1714,4 @@ async def run_dual_tui(args):
 
     configure_litellm()
     await DualPanelTui(args).run()
+

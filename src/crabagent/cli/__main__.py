@@ -759,10 +759,12 @@ def _print_banner(context, provider: str, model: str):
         from rich.text import Text
 
         console = Console()
-        t = Text("CrabAgent v0.11.3", style="bold")
+        from crabagent import __version__
+        t = Text(f"CrabAgent v{__version__}", style="bold")
         console.print(t)
     except ImportError:
-        print("CrabAgent v0.11.3")
+        from crabagent import __version__
+        print(f"CrabAgent v{__version__}")
 
     print(f"  provider: {provider}  model: {model}")
     print(f"  workspace: {context.workspace}")

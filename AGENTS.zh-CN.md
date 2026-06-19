@@ -4,9 +4,11 @@
 > 保持简洁——最多约 8000 字符。使用 `update_agents_md` 工具来更新。
 
 ## 版本
-- 当前：**0.9.9.post1**（Office 文档能力 — 后端工具 + 前端预览）
-- 版本号出现在 7 处：`pyproject.toml`、`src/crabagent/serve/app.py`（`create_app` + `/health`）、CLI 横幅 `src/crabagent/cli/__main__.py`（`_print_banner`）、TUI 横幅 `src/crabagent/cli/tui.py`、`AGENTS.md`、`electron/package.json`、`src/crabagent/electron/package.json`
-- 修改版本时需同步更新全部七处
+- 当前：**0.11.3**（桌面端启动优化 — 加载页 + onedir 打包 + 后台初始化）
+- **版本唯一源头：`pyproject.toml`**
+- Python 代码通过 `from crabagent import __version__` 动态读取，自动同步
+- Electron `package.json` 需手动运行 `python3 scripts/sync_version.py` 同步
+- 修改版本号只需改 `pyproject.toml` 一处，然后运行 `python3 scripts/sync_version.py` 更新 Electron 配置
 
 ## Office 文档能力
 

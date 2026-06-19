@@ -10,6 +10,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from crabagent import __version__
 from crabagent.core import configure_litellm
 
 configure_litellm()
@@ -126,7 +127,7 @@ async def _background_startup(app: FastAPI) -> None:
 def create_app() -> FastAPI:
     app = FastAPI(
         title="CrabAgent",
-        version="0.11.3",
+        version=__version__,
         lifespan=lifespan,
     )
     app.state.event_queues = {}
@@ -201,7 +202,7 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     async def health():
-        return {"status": "ok", "version": "0.11.3"}
+        return {"status": "ok", "version": __version__}
 
     _mount_spa(app)
 

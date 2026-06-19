@@ -16,6 +16,7 @@ from rich.markdown import Markdown
 from rich.spinner import Spinner
 from rich.text import Text
 
+from crabagent import __version__
 from crabagent.core.agent.context import AgentContext
 from crabagent.core.agent.loop import run_agent
 from crabagent.core.config import settings
@@ -464,7 +465,7 @@ class TuiSession:
 
     def _print_banner(self):
         self.console.print(
-            f"[bold]CrabAgent v0.11.3[/bold]\n"
+            f"[bold]CrabAgent v{__version__}[/bold]\n"
             f"  provider: {self._provider_display}  "
             f"model: {self.agent_ctx.model or 'default'}\n"
             f"  workspace: {self.agent_ctx.workspace}\n"
