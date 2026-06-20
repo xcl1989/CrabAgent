@@ -156,6 +156,33 @@ You (WeChat): "看一下26年1月有啥工作"
 
 ---
 
+## 🔑 ChatGPT Subscription — Use Your Plus/Pro Membership
+
+Already paying for ChatGPT Plus or Pro? Use it directly in CrabAgent — **no API key, no extra cost**.
+
+```
+Settings → Providers → Add → "ChatGPT Subscription (Plus/Pro)"
+       │
+       ├─ 🔐 Click "Login ChatGPT" → get a device code
+       ├─ 🌐 Open auth.openai.com/codex/device in browser
+       ├─ ✍️ Sign in with ChatGPT, enter the code
+       ├─ ✅ CrabAgent auto-detects login
+       └─ 📊 Click "View Usage" → see real-time quota:
+            ┌──────────────────────────────────┐
+            │ Plan: PLUS     Limit: premium     │
+            │                                   │
+            │ 5h window   ██░░░░░░░  12.3%      │
+            │ 7d window   █░░░░░░░░   3.1%      │
+            │ Reset in: 4.2h / 6.2d             │
+            └──────────────────────────────────┘
+```
+
+**Available models:** `gpt-5.4`, `gpt-5.3-codex`, `gpt-5.3-instant`, `gpt-5.2-codex`, and more — all powered by your ChatGPT subscription.
+
+**How it works:** CrabAgent uses the same OAuth Device Code flow as the official OpenAI Codex CLI. Your ChatGPT login is stored locally and auto-refreshed. All API calls go through `chatgpt.com/backend-api/codex`, using your subscription quota — not paid API credits.
+
+---
+
 ## 🧠 Project Memory & Self-Evolving Agents
 
 Every time you work in a project, CrabAgent automatically extracts lessons and preferences. Next time you open it, it already knows:

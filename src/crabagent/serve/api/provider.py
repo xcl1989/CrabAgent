@@ -30,6 +30,7 @@ class ProviderResponse(BaseModel):
     base_url: str
     api_key_preview: str
     extra_models: list[str] = []
+    auth_type: str = "api_key"  # "api_key" or "oauth"
     proxy_enabled: bool = False
     proxy_url: str = ""
 
@@ -45,12 +46,14 @@ class CatalogEntry(BaseModel):
     display_name: str
     base_url: str
     variants: list[CatalogVariant] = []
+    auth_type: str = "api_key"  # "api_key" or "oauth"
+    models: list[str] = []
 
 
 class CreateProviderRequest(BaseModel):
     name: str
     type: str
-    api_key: str
+    api_key: str = ""  # Optional for OAuth-based providers (e.g., chatgpt)
     display_name: str = ""
     base_url: str = ""
     variant_id: str | None = None
@@ -87,6 +90,7 @@ def _to_response(p) -> ProviderResponse:
             proxy_url = extra.get("proxy_url", "")
         except Exception:
             pass
+    is_oauth = p.provider_type == "chatgpt"
     return ProviderResponse(
         name=p.name,
         display_name=p.display_name,
@@ -94,7 +98,8 @@ def _to_response(p) -> ProviderResponse:
         is_default=p.is_default,
         enabled=p.enabled,
         base_url=p.base_url,
-        api_key_preview=_mask_key(p.api_key),
+        api_key_preview="OAuth" if is_oauth else _mask_key(p.api_key),
+        auth_type="oauth" if is_oauth else "api_key",
         extra_models=extra_models,
         proxy_enabled=proxy_enabled,
         proxy_url=proxy_url,
@@ -107,7 +112,9 @@ async def get_catalog(user: User = Depends(get_current_user)):
         CatalogEntry(
             type=k,
             display_name=v["display_name"],
-            base_url=v["base_url"],
+            base_url=v.get("base_url", ""),
+            auth_type=v.get("auth_type", "api_key"),
+            models=v.get("models", []),
             variants=[
                 CatalogVariant(id=vv["id"], display_name=vv["display_name"], base_url=vv["base_url"])
                 for vv in v.get("variants", [])
@@ -131,13 +138,23 @@ async def create_provider_endpoint(req: CreateProviderRequest, user: User = Depe
 
     catalog = PROVIDER_CATALOG.get(req.type)
     variant_url = resolve_catalog_variant(req.type, req.variant_id)
-    base_url = req.base_url or variant_url or (catalog["base_url"] if catalog else "")
+    base_url = req.base_url or variant_url or (catalog.get("base_url", "") if catalog else "")
+
+    # OAuth-based providers (e.g., chatgpt) don't need an api_key
+    auth_type = catalog.get("auth_type", "api_key") if catalog else "api_key"
+    if auth_type == "oauth":
+        api_key = req.api_key or "oauth-managed"  # placeholder; auth handled externally
+    else:
+        if not req.api_key:
+            raise HTTPException(status_code=400, detail="API key is required")
+        api_key = req.api_key
+
     display_name = req.display_name or (catalog["display_name"] if catalog else req.name)
 
     p = await create_provider(
         name=req.name,
         provider_type=req.type,
-        api_key=req.api_key,
+        api_key=api_key,
         display_name=display_name,
         base_url=base_url,
         is_default=req.is_default,
@@ -200,7 +217,8 @@ async def update_provider_endpoint(name: str, req: UpdateProviderRequest, user: 
         is_default=p.is_default,
         enabled=p.enabled,
         base_url=p.base_url,
-        api_key_preview=_mask_key(p.api_key),
+        api_key_preview=_mask_key(p.api_key) if p.provider_type != "chatgpt" else "OAuth",
+        auth_type="oauth" if p.provider_type == "chatgpt" else "api_key",
         extra_models=extra_models,
         proxy_enabled=proxy_enabled,
         proxy_url=proxy_url,
@@ -219,6 +237,18 @@ async def get_provider_models(name: str, user: User = Depends(get_current_user))
     p = await get_provider(name)
     if not p:
         raise HTTPException(status_code=404, detail="Provider not found")
+
+    # ChatGPT subscription provider — return preset model list
+    if p.provider_type == "chatgpt":
+        from crabagent.core.provider_store import CHATGPT_MODELS
+
+        existing_ids = set()
+        models = [{"id": m, "owned_by": "chatgpt"} for m in CHATGPT_MODELS]
+        existing_ids = {m["id"] for m in models}
+        for mid in p.extra.get("extra_models", []):
+            if mid and mid not in existing_ids:
+                models.append({"id": mid, "owned_by": "custom"})
+        return models
 
     models = []
 

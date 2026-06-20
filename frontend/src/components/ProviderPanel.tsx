@@ -1,8 +1,9 @@
 import { useTranslation } from "react-i18next";
-import { useState } from "react";
-import { Plus, Trash2, Star, StarOff, ChevronDown, ChevronRight, X, Check } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { Plus, Trash2, Star, StarOff, ChevronDown, ChevronRight, X, Check, ExternalLink, Loader2 } from "lucide-react";
 import { Provider, CatalogEntry } from "../api/providers";
 import * as providersApi from "../api/providers";
+import * as chatgptApi from "../api/chatgpt";
 import { Modal, Button, Input, PasswordInput, ConfirmDialog, EmptyState } from "./ui";
 import { toast } from "./ui/Toast";
 import { cn } from "../lib/cn";
@@ -34,6 +35,76 @@ export default function ProviderPanel({
   const [modelBusy, setModelBusy] = useState<string | null>(null);
   const [proxyInput, setProxyInput] = useState<Record<string, string>>({});
   const [proxyBusy, setProxyBusy] = useState<string | null>(null);
+  const [chatgptAuth, setChatgptAuth] = useState<chatgptApi.ChatGPTAuthStatus | null>(null);
+  const [chatgptDeviceCode, setChatgptDeviceCode] = useState<chatgptApi.DeviceCodeInfo | null>(null);
+  const [chatgptBusy, setChatgptBusy] = useState(false);
+  const [chatgptPolling, setChatgptPolling] = useState(false);
+  const [chatgptAccount, setChatgptAccount] = useState<chatgptApi.ChatGPTAccountInfo | null>(null);
+  const [chatgptAccountBusy, setChatgptAccountBusy] = useState(false);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Check ChatGPT auth status when a chatgpt provider exists
+  const chatgptProvider = providers.find((p) => p.type === "chatgpt");
+  useEffect(() => {
+    if (chatgptProvider) {
+      chatgptApi.getAuthStatus().then(setChatgptAuth).catch(() => {});
+    }
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, [chatgptProvider?.name]);
+
+  const handleChatgptLogin = async () => {
+    setChatgptBusy(true);
+    try {
+      const code = await chatgptApi.startDeviceCode();
+      setChatgptDeviceCode(code);
+      // Start polling
+      setChatgptPolling(true);
+      const poll = async () => {
+        try {
+          const status = await chatgptApi.pollDeviceAuth(code.device_auth_id, code.user_code);
+          if (status.authenticated) {
+            setChatgptAuth(status);
+            setChatgptPolling(false);
+            setChatgptDeviceCode(null);
+            if (pollRef.current) clearInterval(pollRef.current);
+            toast.success("ChatGPT 登录成功");
+          }
+        } catch {
+          // Ignore polling errors
+        }
+      };
+      pollRef.current = setInterval(poll, (code.interval || 5) * 1000);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to start login");
+    } finally {
+      setChatgptBusy(false);
+    }
+  };
+
+  const handleChatgptLogout = async () => {
+    try {
+      await chatgptApi.logout();
+      setChatgptAuth({ authenticated: false });
+      setChatgptAccount(null);
+      toast.success("已退出 ChatGPT 登录");
+    } catch {
+      toast.error("退出失败");
+    }
+  };
+
+  const handleChatgptAccountInfo = async () => {
+    setChatgptAccountBusy(true);
+    try {
+      const info = await chatgptApi.getAccountInfo();
+      setChatgptAccount(info);
+    } catch {
+      toast.error("获取账户信息失败");
+    } finally {
+      setChatgptAccountBusy(false);
+    }
+  };
 
   const handleAddExtraModel = async (providerName: string) => {
     const modelId = (newModelInput[providerName] || "").trim();
@@ -114,8 +185,14 @@ export default function ProviderPanel({
 
   const handleAdd = async () => {
     setError(null);
-    if (!formName || !formKey || !formType) {
-      setError("All fields required");
+    if (!formName || !formType) {
+      setError("Name and type are required");
+      return;
+    }
+    // OAuth-based providers don't need api_key
+    const isOAuth = selectedCatalog?.auth_type === "oauth";
+    if (!isOAuth && !formKey) {
+      setError("API key is required");
       return;
     }
     setBusy(true);
@@ -266,6 +343,153 @@ export default function ProviderPanel({
                   </div>
                   {expandedProvider === p.name && (
                     <div className="px-3 pb-3 pt-1 border-t border-[var(--border)] space-y-3">
+                      {/* ChatGPT OAuth Section */}
+                      {p.type === "chatgpt" && (
+                        <div className="pt-1.5 space-y-2">
+                          <div className="text-[11px] font-medium text-[var(--text-secondary)] flex items-center gap-1.5">
+                            ChatGPT 订阅登录
+                            {chatgptAuth?.authenticated ? (
+                              <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-green-500/15 text-green-600 border border-green-500/20">
+                                <Check size={9} /> 已连接
+                              </span>
+                            ) : (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--danger-bg)] text-[var(--danger)] border border-[var(--danger-border)]">
+                                未登录
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Device Code Login UI */}
+                          {chatgptDeviceCode && chatgptPolling && (
+                            <div className="p-3 rounded-lg bg-[var(--bg-secondary)] border border-[var(--border)] space-y-2">
+                              <p className="text-xs text-[var(--text-primary)]">
+                                1. 打开下方链接，登录 ChatGPT 账号
+                              </p>
+                              <a
+                                href={chatgptDeviceCode.verification_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 text-xs text-[var(--brand)] hover:underline"
+                              >
+                                {chatgptDeviceCode.verification_url}
+                                <ExternalLink size={10} />
+                              </a>
+                              <p className="text-xs text-[var(--text-primary)]">2. 输入以下授权码：</p>
+                              <div className="flex items-center gap-2">
+                                <code className="px-3 py-1.5 rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border)] text-sm font-mono tracking-wider text-[var(--brand)]">
+                                  {chatgptDeviceCode.user_code}
+                                </code>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(chatgptDeviceCode.user_code);
+                                    toast.success("已复制到剪贴板");
+                                  }}
+                                >
+                                  复制
+                                </Button>
+                              </div>
+                              <div className="flex items-center gap-1.5 text-[11px] text-[var(--text-tertiary)]">
+                                <Loader2 size={10} className="animate-spin" />
+                                等待授权完成...
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Auth Buttons */}
+                          <div className="flex items-center gap-2">
+                            {chatgptAuth?.authenticated ? (
+                              <>
+                                <Button variant="secondary" size="sm" onClick={handleChatgptAccountInfo} loading={chatgptAccountBusy}>
+                                  {chatgptAccountBusy ? "查询中..." : "查看额度"}
+                                </Button>
+                                <Button variant="ghost" size="sm" onClick={handleChatgptLogout} className="text-[var(--danger)]">
+                                  退出登录
+                                </Button>
+                              </>
+                            ) : (
+                              <Button variant="brand" size="sm" onClick={handleChatgptLogin} loading={chatgptBusy}>
+                                登录 ChatGPT
+                              </Button>
+                            )}
+                          </div>
+
+                          {/* Account Info Display */}
+                          {chatgptAccount && (
+                            <div className="p-3 rounded-lg bg-[var(--bg-secondary)] border border-[var(--border)] text-[11px] space-y-2">
+                              {/* Basic info */}
+                              <div className="flex justify-between">
+                                <span className="text-[var(--text-tertiary)]">邮箱</span>
+                                <span className="text-[var(--text-primary)]">{chatgptAccount.email || "—"}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-[var(--text-tertiary)]">订阅</span>
+                                <span className="px-1.5 py-0.5 rounded bg-[var(--brand-bg)] text-[var(--brand)] border border-[var(--brand-border)] font-medium uppercase text-[10px]">
+                                  {chatgptAccount.plan || "?"}
+                                </span>
+                              </div>
+
+                              {/* Real-time usage */}
+                              {chatgptAccount.rate_limits && !chatgptAccount.rate_limits.error && (
+                                <div className="pt-2 border-t border-[var(--border)] space-y-2.5">
+                                  <div className="text-[var(--text-secondary)] font-medium flex items-center gap-1.5">
+                                    实时额度
+                                    {chatgptAccount.rate_limits.active_limit && (
+                                      <span className="text-[10px] px-1 py-0.5 rounded bg-[var(--bg-tertiary)] text-[var(--text-tertiary)]">
+                                        {chatgptAccount.rate_limits.active_limit}
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  {/* Primary window (5h) */}
+                                  {chatgptAccount.rate_limits.primary && (
+                                    <UsageBar
+                                      label="5 小时窗口"
+                                      usedPercent={chatgptAccount.rate_limits.primary.used_percent}
+                                      windowText={chatgptAccount.rate_limits.primary.window_hours ? `${chatgptAccount.rate_limits.primary.window_hours}h 滚动窗口` : ""}
+                                      resetText={chatgptAccount.rate_limits.primary.reset_after_minutes ? `${chatgptAccount.rate_limits.primary.reset_after_minutes}min 后重置` : ""}
+                                    />
+                                  )}
+
+                                  {/* Secondary window (7d) */}
+                                  {chatgptAccount.rate_limits.secondary && (
+                                    <UsageBar
+                                      label="7 天窗口"
+                                      usedPercent={chatgptAccount.rate_limits.secondary.used_percent}
+                                      windowText={chatgptAccount.rate_limits.secondary.window_days ? `${chatgptAccount.rate_limits.secondary.window_days}d 滚动窗口` : ""}
+                                      resetText={chatgptAccount.rate_limits.secondary.reset_after_hours ? `${chatgptAccount.rate_limits.secondary.reset_after_hours}h 后重置` : ""}
+                                    />
+                                  )}
+
+                                  {/* Credits */}
+                                  {chatgptAccount.rate_limits.credits && (
+                                    <div className="flex justify-between text-[10px] text-[var(--text-tertiary)]">
+                                      <span>Credits</span>
+                                      <span>
+                                        {chatgptAccount.rate_limits.credits.unlimited ? "无限" :
+                                         chatgptAccount.rate_limits.credits.has_credits ? `余额: ${chatgptAccount.rate_limits.credits.balance || "—"}` :
+                                         "无额外 credits"}
+                                      </span>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+
+                              {chatgptAccount.rate_limits?.error && (
+                                <div className="pt-2 border-t border-[var(--border)] text-[var(--danger)]">
+                                  {chatgptAccount.rate_limits.error}
+                                </div>
+                              )}
+
+                              {!chatgptAccount.email && !chatgptAccount.plan && (
+                                <div className="text-[var(--text-tertiary)]">无法获取账户信息，请重新登录</div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
                       {/* Proxy Section */}
                       <div className="pt-1.5">
                         <div className="flex items-center justify-between mb-1.5">
@@ -390,7 +614,7 @@ export default function ProviderPanel({
               </select>
               {selectedCatalog && (
                 <p className="text-[11px] text-[var(--text-tertiary)] font-mono">
-                  Base URL: {displayBaseUrl}
+                  Base URL: {selectedCatalog.auth_type === "oauth" ? "OAuth (无需 Base URL)" : displayBaseUrl}
                 </p>
               )}
             </div>
@@ -419,12 +643,26 @@ export default function ProviderPanel({
               onChange={(e) => setFormName(e.target.value)}
               placeholder={t("provider.namePlaceholder2")}
             />
-            <PasswordInput
-              label={t("provider.apiKey")}
-              value={formKey}
-              onChange={(e) => setFormKey(e.target.value)}
-              placeholder={t("provider.apiKeyPlaceholder2")}
-            />
+            {selectedCatalog?.auth_type === "oauth" ? (
+              <div className="px-3 py-3 rounded-lg bg-[var(--brand-bg)] border border-[var(--brand-border)] text-xs text-[var(--text-secondary)]">
+                <div className="font-medium text-[var(--text-primary)] mb-1">🔒 OAuth 认证</div>
+                <p>此 Provider 使用 ChatGPT 订阅登录，无需 API Key。</p>
+                <p className="mt-1">添加后请在 Provider 列表中点击「登录 ChatGPT」完成授权。</p>
+                {selectedCatalog.models && selectedCatalog.models.length > 0 && (
+                  <p className="mt-1 text-[var(--text-tertiary)]">
+                    可用模型: {selectedCatalog.models.slice(0, 4).join(", ")}
+                    {selectedCatalog.models.length > 4 ? " ..." : ""}
+                  </p>
+                )}
+              </div>
+            ) : (
+              <PasswordInput
+                label={t("provider.apiKey")}
+                value={formKey}
+                onChange={(e) => setFormKey(e.target.value)}
+                placeholder={t("provider.apiKeyPlaceholder2")}
+              />
+            )}
           </div>
         )}
       </Modal>
@@ -439,5 +677,37 @@ export default function ProviderPanel({
         onConfirm={() => { if (deleteTarget) handleDelete(deleteTarget); }}
       />
     </>
+  );
+}
+
+function UsageBar({
+  label,
+  usedPercent,
+  windowText,
+  resetText,
+}: {
+  label: string;
+  usedPercent: number | null | undefined;
+  windowText?: string;
+  resetText?: string;
+}) {
+  const pct = usedPercent ?? 0;
+  const barColor = pct >= 80 ? "bg-[var(--danger)]" : pct >= 50 ? "bg-amber-500" : "bg-[var(--brand)]";
+  return (
+    <div className="space-y-1">
+      <div className="flex justify-between items-center">
+        <span className="text-[var(--text-tertiary)]">{label}</span>
+        <span className="text-[var(--text-primary)] font-medium">{pct.toFixed(1)}%</span>
+      </div>
+      <div className="h-1.5 rounded-full bg-[var(--bg-tertiary)] overflow-hidden">
+        <div className={cn("h-full rounded-full transition-all duration-500", barColor)} style={{ width: `${Math.min(pct, 100)}%` }} />
+      </div>
+      {(windowText || resetText) && (
+        <div className="flex justify-between text-[10px] text-[var(--text-tertiary)]">
+          <span>{windowText}</span>
+          <span>{resetText}</span>
+        </div>
+      )}
+    </div>
   );
 }

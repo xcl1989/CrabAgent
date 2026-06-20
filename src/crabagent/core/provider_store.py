@@ -51,7 +51,27 @@ class ProviderInfo:
     extra: dict[str, Any]
 
 
+CHATGPT_MODELS = [
+    "gpt-5.4",
+    "gpt-5.4-pro",
+    "gpt-5.3-codex",
+    "gpt-5.3-codex-spark",
+    "gpt-5.3-instant",
+    "gpt-5.3-chat-latest",
+    "gpt-5.2-codex",
+    "gpt-5.2",
+    "gpt-5.1-codex-max",
+    "gpt-5.1-codex-mini",
+]
+
+
 PROVIDER_CATALOG: dict[str, dict] = {
+    "chatgpt": {
+        "base_url": "",
+        "display_name": "ChatGPT 订阅 (Plus/Pro)",
+        "auth_type": "oauth",
+        "models": CHATGPT_MODELS,
+    },
     "opencode-go": {"base_url": "https://opencode.ai/zen/go/v1", "display_name": "OpenCode Go"},
     "openai": {"base_url": "https://api.openai.com/v1", "display_name": "OpenAI"},
     "anthropic": {"base_url": "https://api.anthropic.com/v1", "display_name": "Anthropic"},

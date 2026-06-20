@@ -29,6 +29,10 @@ async def _resolve_provider(provider_name: str | None = None) -> ProviderInfo:
 
 
 def _litellm_params(provider: ProviderInfo, proxy: str = "") -> dict:
+    # ChatGPT subscription provider uses litellm's built-in OAuth flow.
+    # No api_key / api_base needed — litellm's ChatGPTConfig handles everything.
+    if provider.provider_type == "chatgpt":
+        return {}
     params: dict = {"api_key": provider.api_key}
     if provider.base_url:
         params["api_base"] = provider.base_url
@@ -158,7 +162,25 @@ async def run_agent(
     llm = _litellm_params(provider, proxy)
     model = context.model or "gpt-4"
     if "/" not in model:
-        model = f"openai/{model}"
+        # ChatGPT subscription provider uses litellm's built-in chatgpt/ prefix
+        if provider.provider_type == "chatgpt":
+            model = f"chatgpt/{model}"
+        else:
+            model = f"openai/{model}"
+
+    # For chatgpt provider, verify OAuth token exists before calling litellm
+    # (litellm would otherwise block trying interactive device code login)
+    if provider.provider_type == "chatgpt":
+        import os
+        token_file = os.path.join(
+            os.getenv("CHATGPT_TOKEN_DIR", os.path.expanduser("~/.config/litellm/chatgpt")),
+            os.getenv("CHATGPT_AUTH_FILE", "auth.json"),
+        )
+        if not os.path.exists(token_file):
+            raise ValueError(
+                "ChatGPT subscription not logged in. "
+                "Please go to Settings → Providers → ChatGPT → Login to authorize first."
+            )
     context.metadata["resolved_model"] = model.split("/", 1)[-1] if "/" in model else model
     context.metadata["resolved_provider"] = provider.name
 

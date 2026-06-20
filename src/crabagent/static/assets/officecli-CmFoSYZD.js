@@ -1,1 +1,0 @@
-import{a as t}from"./index-CBOtNZVK.js";import"./vendor-react-BEFBu0qs.js";import"./vendor-ui-DgScAsCr.js";import"./vendor-markdown-C0jI_Wfn.js";import"./vendor-charts-Ji6WPyEZ.js";async function e(){return t.get("/officecli/status")}export{e as getOfficeCliStatus};

@@ -8,6 +8,32 @@ English version: [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
+## [0.11.5] — ChatGPT 订阅支持
+
+### 新增
+- **ChatGPT Plus/Pro 订阅集成** — 用你现有的 ChatGPT 会员调用 GPT-5.x Codex 模型，无需 API Key
+  - OAuth Device Code 认证：用 ChatGPT 账号在浏览器登录，和 OpenAI Codex CLI 完全相同的官方认证流程
+  - 零 API 费用 — 所有用量走 ChatGPT 订阅额度，不走 API 计费
+  - 支持 10 个模型：`gpt-5.4`、`gpt-5.4-pro`、`gpt-5.3-codex`、`gpt-5.3-codex-spark`、`gpt-5.3-instant`、`gpt-5.3-chat-latest`、`gpt-5.2-codex`、`gpt-5.2`、`gpt-5.1-codex-max`、`gpt-5.1-codex-mini`
+  - Token 自动刷新 — 登录一次，长期有效
+  - 实时额度面板：5 小时和 7 天滚动窗口用量百分比、重置倒计时、credits 余额 — 全部来自 `x-codex-*` 响应头的实时数据
+  - 新增 API 端点：`POST /api/chatgpt/auth/device-code`、`POST /api/chatgpt/auth/poll`、`GET /api/chatgpt/auth/status`、`POST /api/chatgpt/auth/logout`、`GET /api/chatgpt/account`、`GET /api/chatgpt/models`
+  - Provider 目录新增 `chatgpt` 类型（`auth_type: oauth`）
+- **用量进度条组件** — ChatGPT 速率限制可视化进度条，按阈值变色（绿色 < 50%，黄色 50-80%，红色 > 80%）
+
+### 使用方法
+1. 进入 **设置 → Providers → 添加**
+2. 类型选择 **"ChatGPT 订阅 (Plus/Pro)"**
+3. 点击 **添加** — 无需 API Key
+4. 在 Provider 列表中展开 ChatGPT，点击 **"登录 ChatGPT"**
+5. 页面显示一个授权码 — 在浏览器中打开验证链接
+6. 用你的 ChatGPT 账号登录并输入授权码
+7. CrabAgent 自动检测登录成功 — 完成！
+8. 选择模型（如 `gpt-5.4`）即可开始使用
+9. 随时点击 **"查看额度"** 查看实时用量和剩余配额
+
+---
+
 ## [0.11.2] — Windows 全面兼容
 
 ### 新增

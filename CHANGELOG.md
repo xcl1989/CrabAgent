@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.11.5] — ChatGPT Subscription Support
+
+### Added
+- **ChatGPT Plus/Pro Subscription Integration** — use your existing ChatGPT membership to call GPT-5.x Codex models, no API key needed
+  - OAuth Device Code Flow: sign in with your ChatGPT account via browser, same as OpenAI Codex CLI
+  - Zero API cost — all usage goes through your ChatGPT subscription, not paid API billing
+  - 10 models available: `gpt-5.4`, `gpt-5.4-pro`, `gpt-5.3-codex`, `gpt-5.3-codex-spark`, `gpt-5.3-instant`, `gpt-5.3-chat-latest`, `gpt-5.2-codex`, `gpt-5.2`, `gpt-5.1-codex-max`, `gpt-5.1-codex-mini`
+  - Token auto-refresh — login once, stays connected for weeks
+  - Real-time usage dashboard: 5-hour and 7-day rolling window usage percentages, reset countdowns, credits balance — all from live `x-codex-*` response headers
+  - New API endpoints: `POST /api/chatgpt/auth/device-code`, `POST /api/chatgpt/auth/poll`, `GET /api/chatgpt/auth/status`, `POST /api/chatgpt/auth/logout`, `GET /api/chatgpt/account`, `GET /api/chatgpt/models`
+  - Provider catalog now includes `chatgpt` type with `auth_type: oauth`
+- **Usage Bar Component** — visual progress bars for ChatGPT rate limits with color-coded thresholds (green < 50%, amber 50-80%, red > 80%)
+
+### How to Use
+1. Go to **Settings → Providers → Add**
+2. Select **"ChatGPT 订阅 (Plus/Pro)"** as the type
+3. Click **Add** — no API key required
+4. In the provider list, expand the ChatGPT provider and click **"登录 ChatGPT"**
+5. A device code appears — open the verification URL in your browser
+6. Sign in with your ChatGPT account and enter the code
+7. CrabAgent detects login automatically — done!
+8. Select a model (e.g., `gpt-5.4`) and start chatting
+9. Click **"查看额度"** anytime to see real-time usage and remaining quota
+
+---
+
 ## [0.11.2] — Windows Full Compatibility
 
 ### Added

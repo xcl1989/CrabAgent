@@ -1,6 +1,6 @@
 {
   "name": "crabagent-desktop",
-  "version": "0.11.3",
+  "version": "0.11.5",
   "description": "CrabAgent Desktop - AI Agent Platform",
   "main": "main.js",
   "author": "Xie Congling",
@@ -41,20 +41,33 @@
     "mac": {
       "category": "public.app-category.developer-tools",
       "icon": "build/icon.png",
-      "target": ["dmg"],
+      "target": [
+        "dmg"
+      ],
       "darkModeSupport": true
     },
     "dmg": {
       "title": "CrabAgent Installer",
       "iconSize": 128,
       "contents": [
-        { "x": 380, "y": 240, "type": "link", "path": "/Applications" },
-        { "x": 130, "y": 240, "type": "file" }
+        {
+          "x": 380,
+          "y": 240,
+          "type": "link",
+          "path": "/Applications"
+        },
+        {
+          "x": 130,
+          "y": 240,
+          "type": "file"
+        }
       ]
     },
     "win": {
       "icon": "build/icon.png",
-      "target": ["nsis"],
+      "target": [
+        "nsis"
+      ],
       "artifactName": "CrabAgent-${version}-setup.exe"
     },
     "nsis": {
@@ -63,7 +76,10 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "CrabAgent",
-      "installerLanguages": ["zh_CN", "en_US"],
+      "installerLanguages": [
+        "zh_CN",
+        "en_US"
+      ],
       "language": "2052"
     }
   }

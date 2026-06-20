@@ -152,6 +152,7 @@ def create_app() -> FastAPI:
     from crabagent.serve.api.auth import router as auth_router
     from crabagent.serve.api.branch import router as branch_router
     from crabagent.serve.api.calendar import router as calendar_router
+    from crabagent.serve.api.chatgpt_auth import router as chatgpt_router
     from crabagent.serve.api.confirm import router as confirm_router
     from crabagent.serve.api.documents import router as documents_router
     from crabagent.serve.api.email import router as email_router
@@ -200,6 +201,7 @@ def create_app() -> FastAPI:
     app.include_router(email_router, prefix="/api")
     app.include_router(token_usage_router, prefix="/api")
     app.include_router(wechat_router, prefix="/api")
+    app.include_router(chatgpt_router, prefix="/api")
     app.include_router(calendar_router, prefix="/api")
 
     @app.get("/health")

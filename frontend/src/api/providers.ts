@@ -9,6 +9,7 @@ export interface Provider {
   base_url: string;
   api_key_preview: string;
   extra_models?: string[];
+  auth_type?: string;
   proxy_enabled?: boolean;
   proxy_url?: string;
 }
@@ -24,6 +25,8 @@ export interface CatalogEntry {
   display_name: string;
   base_url: string;
   variants: CatalogVariant[];
+  auth_type?: string; // "api_key" or "oauth"
+  models?: string[];
 }
 
 export interface ModelInfo {

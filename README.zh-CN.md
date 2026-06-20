@@ -155,6 +155,33 @@ CrabAgent 替你盯着收件箱，把邮件自动变成任务：
 
 ---
 
+## 🔑 ChatGPT 订阅 — 用你的 Plus/Pro 会员
+
+已经在付 ChatGPT Plus 或 Pro 订阅了？直接在 CrabAgent 里用 — **不需要 API Key，不产生额外费用**。
+
+```
+设置 → Providers → 添加 → "ChatGPT 订阅 (Plus/Pro)"
+       │
+       ├─ 🔐 点击"登录 ChatGPT" → 获取授权码
+       ├─ 🌐 浏览器打开 auth.openai.com/codex/device
+       ├─ ✍️ 用 ChatGPT 账号登录，输入授权码
+       ├─ ✅ CrabAgent 自动检测登录成功
+       └─ 📊 点击"查看额度" → 实时配额面板：
+            ┌──────────────────────────────────┐
+            │ 订阅: PLUS     等级: premium       │
+            │                                   │
+            │ 5小时窗口   ██░░░░░░░  12.3%      │
+            │ 7天窗口     █░░░░░░░░   3.1%      │
+            │ 重置倒计时: 4.2小时 / 6.2天       │
+            └──────────────────────────────────┘
+```
+
+**可用模型：** `gpt-5.4`、`gpt-5.3-codex`、`gpt-5.3-instant`、`gpt-5.2-codex` 等 — 全部走你的 ChatGPT 订阅额度。
+
+**原理：** CrabAgent 使用和 OpenAI Codex CLI 完全相同的 OAuth Device Code 官方认证流程。你的 ChatGPT 登录凭证存储在本地并自动刷新。所有 API 调用通过 `chatgpt.com/backend-api/codex` 走订阅额度 — 不消耗付费 API credits。
+
+---
+
 ## 🧠 项目记忆 & 自进化 Agent
 
 每次你在项目里工作，CrabAgent 自动从对话中提取经验教训和偏好。下次打开，它已经知道了：
