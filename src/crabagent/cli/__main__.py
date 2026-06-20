@@ -1682,6 +1682,23 @@ def _run_build_desktop():
         eb_args = ["npx", "electron-builder", eb_target, "--dir"]
         if is_windows:
             eb_args.append("--config.win.sign=false")
+        else:
+            # macOS: strip existing signatures from embedded Python.framework and
+            # disable code signing entirely to avoid ad-hoc signing failures with
+            # the nested Python framework.
+            python_bin = resources_dir / "crabagent-backend" / "_internal" / "Python.framework"
+            if python_bin.exists():
+                try:
+                    # Replace root Python binary with symlink to avoid
+                    # "bundle format is ambiguous" codesign error
+                    root_python = python_bin / "Python"
+                    versions_python = python_bin / "Versions" / "Current" / "Python"
+                    if root_python.exists() and not root_python.is_symlink():
+                        root_python.unlink()
+                        root_python.symlink_to("Versions/Current/Python")
+                except Exception as e:
+                    print(f"   Warning: Could not fix Python.framework structure: {e}")
+            eb_args.append("--config.mac.identity=null")
         env = {**dict(os.environ), "CSC_IDENTITY_AUTO_DISCOVERY": "false"}
         electron_result = subprocess.run(
             eb_args,
