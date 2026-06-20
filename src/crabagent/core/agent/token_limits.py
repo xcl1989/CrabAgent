@@ -18,6 +18,7 @@ DEFAULT_MODEL_TOKEN_LIMITS: dict[str, int] = {
     "o3": 200_000,
     "o4-mini": 200_000,
     "gpt-5.5": 270_000,
+    "gpt-5.5-pro": 270_000,
     "gpt-5.4": 270_000,
     "gpt-5.4-pro": 270_000,
     "gpt-5.4-mini": 270_000,

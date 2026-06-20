@@ -52,8 +52,14 @@ class ProviderInfo:
 
 
 CHATGPT_MODELS = [
+    # Current generation (verified working on Plus 2026-06)
+    "gpt-5.5",
     "gpt-5.4",
+    "gpt-5.4-mini",
+    # Pro-only models (require ChatGPT Pro subscription)
+    "gpt-5.5-pro",
     "gpt-5.4-pro",
+    # Legacy models (may still work on older accounts)
     "gpt-5.3-codex",
     "gpt-5.3-codex-spark",
     "gpt-5.3-instant",

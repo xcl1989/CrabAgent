@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.11.6] — GPT-5.5 Codex + Hotfixes
+
+### Added
+- **GPT-5.5 Codex support** — `gpt-5.5` and `gpt-5.4-mini` models are now available for ChatGPT Plus subscribers via Codex API
+  - Plus: `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`
+  - Pro: `gpt-5.5-pro`, `gpt-5.4-pro`
+- **Dynamic litellm model registration** — all `chatgpt/*` subscription models are auto-registered at startup, eliminating "model not mapped" errors
+
+### Fixed
+- Outdated ChatGPT subscription model list — verified via live Codex API calls which models actually work on Plus accounts
+- `gpt-5.4-pro` removed from default Plus-accessible models (now correctly marked as Pro-only)
+- Legacy models (`gpt-5.3-codex` etc.) deprecated in Codex API — kept in list for backward compatibility but noted as possibly unavailable
+
+---
+
 ## [0.11.5] — ChatGPT Subscription Support
 
 ### Added

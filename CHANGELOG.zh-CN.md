@@ -8,6 +8,21 @@ English version: [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
+## [0.11.6] — GPT-5.5 Codex 支持 + 修复
+
+### 新增
+- **GPT-5.5 Codex 支持** — `gpt-5.5` 和 `gpt-5.4-mini` 模型现已在 ChatGPT Plus Codex API 中可用
+  - Plus 用户可用：`gpt-5.5`、`gpt-5.4`、`gpt-5.4-mini`
+  - Pro 用户额外可用：`gpt-5.5-pro`、`gpt-5.4-pro`
+- **动态 litellm 模型注册** — 所有 `chatgpt/*` 订阅模型在启动时自动注册，消除 "model not mapped" 错误
+
+### 修复
+- 更新过时的 ChatGPT 订阅模型列表 — 通过实测 Codex API 验证了 Plus 账号实际可用的模型
+- `gpt-5.4-pro` 不再列为 Plus 可用（已正确标记为 Pro-only）
+- 旧版模型（`gpt-5.3-codex` 等）已在 Codex API 中弃用 — 保留在列表中但注明可能不可用
+
+---
+
 ## [0.11.5] — ChatGPT 订阅支持
 
 ### 新增
