@@ -70,7 +70,15 @@ Issues = "https://github.com/xcl1989/CrabAgent/issues"
 packages = ["src/crabagent"]
 
 [tool.hatch.build.targets.sdist]
-exclude = ["electron/node_modules", "electron/dist-electron", "electron/resources"]
+exclude = [
+    "electron/node_modules",
+    "electron/dist-electron",
+    "electron/resources",
+    "src/crabagent/electron/node_modules",
+    "src/crabagent/electron/dist-electron",
+    "src/crabagent/electron/resources",
+    "*.dmg",
+]
 
 [tool.ruff]
 target-version = "py312"

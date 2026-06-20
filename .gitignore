@@ -31,3 +31,4 @@ ROADMAP.md
 docs/
 electron/resources/crabagent-backend
 src/crabagent/VERSION
+*.dmg
