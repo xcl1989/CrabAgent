@@ -306,6 +306,13 @@ def _fix_html_newlines(html: str | None) -> str | None:
     return html
 
 
+async def _render_preview_html(file_path: Path) -> str | None:
+    """Render document preview HTML after a quick-edit mutation."""
+    mgr = get_office_manager()
+    preview_result = await mgr.view_html(str(file_path))
+    return _fix_html_newlines(preview_result.data) if preview_result.success else None
+
+
 @router.post("/quick-edit/style", response_model=QuickEditStyleResponse)
 async def quick_edit_style(
     req: QuickEditStyleRequest,
@@ -369,8 +376,7 @@ async def quick_edit_style(
             logger.exception("[QE-style] Error on %s", change.element)
 
     # 渲染新预览（即使部分失败也返回，让前端看到当前状态）
-    preview_result = await mgr.view_html(str(file_path))
-    preview_html = _fix_html_newlines(preview_result.data) if preview_result.success else None
+    preview_html = await _render_preview_html(file_path)
 
     return QuickEditStyleResponse(
         status="ok" if all_ok else "partial",
@@ -495,9 +501,7 @@ async def quick_edit_text(
                 if not add_result.success:
                     logger.error("[QE] Add paragraph failed at index %d: %s", para_index + idx, add_result.error)
 
-        # 渲染新预览
-        preview_result = await mgr.view_html(str(file_path))
-        preview_html = _fix_html_newlines(preview_result.data) if preview_result.success else None
+        preview_html = await _render_preview_html(file_path)
 
         return QuickEditTextResponse(
             status="ok",
@@ -643,9 +647,7 @@ async def quick_edit_table_op(
                 message=f"操作失败: {req.operation}",
             )
 
-        # 渲染新预览
-        preview_result = await mgr.view_html(str(file_path))
-        preview_html = _fix_html_newlines(preview_result.data) if preview_result.success else None
+        preview_html = await _render_preview_html(file_path)
 
         return TableOpResponse(
             status="ok",
@@ -673,6 +675,29 @@ class ThemeEditRequest(BaseModel):
     - dk1/lt1/dk2/lt2: 基础色
     - hyperlink: 超链接色
     """
+
+
+class StructureEditRequest(BaseModel):
+    """请求：高级结构编辑（PPT / Word / Excel）。"""
+
+    path: str
+    workspace: str = ""
+    operations: list[dict]
+    """操作列表示例：
+    - PPT slide: {"command":"add","parent":"/","type":"slide","props":{"layout":"Title Slide","title":"Q3 Review"}}
+    - PPT placeholder: {"command":"add","parent":"/slide[1]","type":"placeholder","props":{"phType":"body","text":"内容"}}
+    - PPT image/chart: {"command":"add","parent":"/slide[1]","type":"image|chart","props":{...}}
+    - Word paragraph: {"command":"add","parent":"/body","type":"paragraph","props":{"text":"新段落"}}
+    - Word table cell merge: {"command":"set","path":"/body/tbl[1]/tr[2]/tc[1]","props":{"colspan":2}}
+    - Excel style/range: {"command":"set","path":"/Sheet1/A1:C3","props":{"fill":"#FFF2CC","border.all":"single;1pt;000000"}}
+    """
+
+
+class StructureEditResponse(BaseModel):
+    status: str
+    preview_html: str | None = None
+    results: list[dict] = []
+    message: str = ""
 
 
 @router.post("/quick-edit/theme", response_model=QuickEditStyleResponse)
@@ -709,13 +734,101 @@ async def quick_edit_theme(
         "error": result.error if not result.success else "",
     }]
 
-    # 渲染新预览
-    preview_result = await mgr.view_html(str(file_path))
-    preview_html = _fix_html_newlines(preview_result.data) if preview_result.success else None
+    preview_html = await _render_preview_html(file_path)
 
     return QuickEditStyleResponse(
         status="ok" if result.success else "error",
         preview_html=preview_html,
         results=results,
         message="主题已更新" if result.success else f"主题更新失败: {result.error}",
+    )
+
+
+@router.post("/quick-edit/structure", response_model=StructureEditResponse)
+async def quick_edit_structure(
+    req: StructureEditRequest,
+    user: User = Depends(get_current_user),
+):
+    """执行高级结构编辑（PPT / Word / Excel）。"""
+    if not await _ensure_officecli():
+        return JSONResponse(status_code=503, content={"installing": True, "detail": "OfficeCLI is being installed"})
+
+    mgr = get_office_manager()
+    docs_dir = _get_docs_dir(user.id, req.workspace)
+    file_path = _safe_path(docs_dir, req.path)
+
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    ext = file_path.suffix.lower()
+    if ext not in _PREVIEWABLE_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"Unsupported file type '{ext}'")
+
+    if not req.operations:
+        raise HTTPException(status_code=400, detail="No operations provided")
+
+    _backup_doc(file_path)
+    logger.info("[QE-structure] %d op(s) on %s", len(req.operations), req.path)
+
+    results: list[dict] = []
+    all_ok = True
+
+    for idx, op in enumerate(req.operations, start=1):
+        if not isinstance(op, dict):
+            results.append({"index": idx, "success": False, "error": "Operation must be an object"})
+            all_ok = False
+            continue
+
+        command = str(op.get("command", "")).strip().lower()
+        try:
+            if command == "set":
+                path = str(op.get("path", "")).strip()
+                props = op.get("props") or {}
+                if not path or not isinstance(props, dict):
+                    raise ValueError("set operation requires path and props object")
+                result = await mgr.set_props(str(file_path), path, dict(props))
+                target = path
+            elif command == "add":
+                parent = str(op.get("parent", "")).strip()
+                element_type = str(op.get("type", "")).strip()
+                props = op.get("props") or {}
+                if not parent or not element_type:
+                    raise ValueError("add operation requires parent and type")
+                result = await mgr.add_element(str(file_path), parent, element_type, dict(props) if isinstance(props, dict) else {})
+                target = f"{parent} -> {element_type}"
+            elif command == "remove":
+                path = str(op.get("path", "")).strip()
+                if not path:
+                    raise ValueError("remove operation requires path")
+                result = await mgr.remove_element(str(file_path), path)
+                target = path
+            else:
+                raise ValueError(f"Unsupported structure command: {command or '<empty>'}")
+
+            results.append({
+                "index": idx,
+                "command": command,
+                "target": target,
+                "success": result.success,
+                "error": result.error if not result.success else "",
+            })
+            if not result.success:
+                all_ok = False
+        except Exception as e:
+            results.append({
+                "index": idx,
+                "command": command,
+                "success": False,
+                "error": str(e),
+            })
+            all_ok = False
+
+    preview_html = await _render_preview_html(file_path)
+    success_count = sum(1 for item in results if item.get("success"))
+    status = "ok" if all_ok else "partial"
+    return StructureEditResponse(
+        status=status,
+        preview_html=preview_html,
+        results=results,
+        message=f"{len(results)} operation(s), {success_count} succeeded",
     )

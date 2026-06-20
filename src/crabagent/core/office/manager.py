@@ -7,6 +7,7 @@ import logging
 import os
 import shutil
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -156,10 +157,34 @@ class OfficeManager:
         self._version: str = ""
         self._install_status: dict = {"status": "not_found", "message": "", "progress": 0}
         self._install_task: asyncio.Task | None = None
+        self._perf_stats: dict[str, list[float]] = {}
 
     def get_install_status(self) -> dict:
         """Return current install progress (thread-safe read)."""
         return dict(self._install_status)
+
+    def get_perf_stats(self) -> dict[str, dict[str, float | int]]:
+        """Return lightweight rolling performance stats for OfficeCLI commands."""
+        summary: dict[str, dict[str, float | int]] = {}
+        for name, samples in self._perf_stats.items():
+            if not samples:
+                continue
+            summary[name] = {
+                "count": len(samples),
+                "min_ms": round(min(samples), 2),
+                "max_ms": round(max(samples), 2),
+                "avg_ms": round(sum(samples) / len(samples), 2),
+            }
+        return summary
+
+    def clear_perf_stats(self) -> None:
+        self._perf_stats.clear()
+
+    def _record_perf(self, name: str, elapsed_ms: float) -> None:
+        samples = self._perf_stats.setdefault(name, [])
+        samples.append(elapsed_ms)
+        if len(samples) > 50:
+            del samples[:-50]
 
     # ── detection ────────────────────────────────────────────────────────
 
@@ -548,6 +573,8 @@ class OfficeManager:
             )
 
         logger.debug("officecli: %s", " ".join(cmd))
+        op_name = cmd[1] if len(cmd) > 1 else "unknown"
+        start = time.perf_counter()
 
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -561,6 +588,9 @@ class OfficeManager:
             )
             stdout_decoded = stdout.decode("utf-8", errors="replace")
             stderr_decoded = stderr.decode("utf-8", errors="replace")
+
+            elapsed_ms = (time.perf_counter() - start) * 1000
+            self._record_perf(op_name, elapsed_ms)
 
             if proc.returncode != 0:
                 return OfficeResult(

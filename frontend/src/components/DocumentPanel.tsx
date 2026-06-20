@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from "react";
-import { X, Download, RefreshCw, Eye, Clock, FileText, Maximize2, Minimize2, FileSpreadsheet, Presentation } from "lucide-react";
+import { X, Download, RefreshCw, Eye, Clock, FileText, Maximize2, Minimize2, FileSpreadsheet, Presentation, Gauge } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "../lib/cn";
 import { DocumentTimeline, DocOpEvent } from "./DocumentTimeline";
@@ -7,7 +7,7 @@ import { DocumentPreview } from "./DocumentPreview";
 import { DocOutline, OutlineItem } from "./DocOutline";
 import { DocToolbar, EditElementStyle } from "./DocToolbar";
 import * as documentsApi from "../api/documents";
-import type { TableOp } from "./DocToolbar";
+import type { TableOp, StructureOp } from "./DocToolbar";
 
 type Tab = "preview" | "timeline";
 
@@ -75,6 +75,7 @@ export function DocumentPanel({
   const highlightRef = useRef<typeof pendingHighlight>(null);
   const [cellRange, setCellRange] = useState<string | null>(null);
   const [activeSheet, setActiveSheet] = useState<string>("Sheet1");
+  const [perfSummary, setPerfSummary] = useState<string>("");
 
   const handleQuickEdit = useCallback(async (oldText: string, newText: string) => {
     if (!doc?.filePath) return;
@@ -169,6 +170,24 @@ export function DocumentPanel({
     }
   }, [doc?.filePath, doc?.workspace, onRefreshPreview]);
 
+  const handleStructureOp = useCallback(async (op: StructureOp) => {
+    if (!doc?.filePath) return;
+    try {
+      const result = await documentsApi.quickEditStructure({
+        path: doc.filePath,
+        workspace: doc.workspace || "",
+        operations: op.operations,
+      });
+      if (result.preview_html) {
+        setLocalPreviewHtml(result.preview_html);
+      } else {
+        onRefreshPreview?.();
+      }
+    } catch (e: any) {
+      console.error("Structure edit failed:", e);
+    }
+  }, [doc?.filePath, doc?.workspace, onRefreshPreview]);
+
   // Clear local preview when doc changes
   useEffect(() => {
     setLocalPreviewHtml(null);
@@ -236,6 +255,25 @@ export function DocumentPanel({
   const handleDownload = useCallback(() => {
     onDownload?.();
   }, [onDownload]);
+
+  const handleLoadPerf = useCallback(async () => {
+    try {
+      const { getOfficeCliPerf } = await import("../api/officecli");
+      const perf = await getOfficeCliPerf();
+      const stats = Object.entries(perf.stats || {});
+      if (stats.length === 0) {
+        setPerfSummary("暂无 OfficeCLI 性能数据");
+        return;
+      }
+      const text = stats
+        .map(([name, info]) => `${name}: avg ${info.avg_ms}ms / min ${info.min_ms}ms / max ${info.max_ms}ms (${info.count})`)
+        .join(" | ");
+      setPerfSummary(text);
+    } catch (e) {
+      console.error("Load perf failed:", e);
+      setPerfSummary("读取 OfficeCLI 性能数据失败");
+    }
+  }, []);
 
   if (!doc) {
     return (
@@ -332,6 +370,7 @@ export function DocumentPanel({
                   console.error("Theme edit failed:", e);
                 }
               }}
+              onStructureOp={handleStructureOp}
             />
           )}
           {tab === "preview" ? (
@@ -375,6 +414,12 @@ export function DocumentPanel({
         </div>
       </div>
 
+      {perfSummary && (
+        <div className="px-3 py-1 text-[11px] text-[var(--text-secondary)] border-t border-[var(--border)] bg-[var(--bg-secondary)] whitespace-pre-wrap">
+          {perfSummary}
+        </div>
+      )}
+
       {/* Bottom actions */}
       <div className="flex items-center gap-1 px-2 py-1.5 border-t border-[var(--border)] bg-[var(--bg-tertiary)]">
         <button
@@ -395,6 +440,14 @@ export function DocumentPanel({
         >
           <RefreshCw size={12} />
           {t("document.refresh")}
+        </button>
+        <button
+          onClick={handleLoadPerf}
+          className="flex items-center gap-1 px-2 py-1 rounded text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] transition-colors"
+          title="OfficeCLI 性能"
+        >
+          <Gauge size={12} />
+          性能
         </button>
       </div>
     </div>

@@ -16,10 +16,10 @@ CrabAgent 通过以下组件处理 Office 文档：
 
 | 组件 | 用途 | 位置 |
 |------|------|------|
-| **OfficeManager** | OfficeCLI binary 封装（检测/执行/解析） | `src/crabagent/core/office/manager.py` |
-| **5 个 Agent 工具** | office_read / create / edit / query / render | `src/crabagent/core/agent/tools/office.py` |
-| **文档管理 API** | 上传/下载/预览/保存/删除 | `src/crabagent/serve/api/documents.py` |
-| **DocumentPanel** | 前端文档面板（预览/时间线） | `frontend/src/components/DocumentPanel.tsx` |
+| **OfficeManager** | OfficeCLI binary 封装（检测/执行/解析/轻量性能统计） | `src/crabagent/core/office/manager.py` |
+| **8 个 Agent 工具** | office_read / help / batch_edit / create / edit / query / render | `src/crabagent/core/agent/tools/office.py` |
+| **文档管理 API** | 上传/下载/预览/保存/Quick Edit/结构编辑 | `src/crabagent/serve/api/documents.py` |
+| **DocumentPanel** | 前端文档面板（预览/时间线/Quick Edit） | `frontend/src/components/DocumentPanel.tsx` |
 
 ### SSE 事件（文档操作可视化）
 - `doc_op_start` — AI 开始操作文档
@@ -28,11 +28,22 @@ CrabAgent 通过以下组件处理 Office 文档：
 - `doc_op_done` — 操作完成
 
 ### 工具签名速查
-- `office_read(file_path, mode="text", sheet="", max_lines=200)` — 读取文档内容
+- `office_read(file_path, mode="text", sheet="", cols="", max_lines=200)` — 读取文档内容，xlsx 支持列范围
+- `office_help(file_format)` — 查询 docx/xlsx/pptx 的 OfficeCLI 帮助与属性说明
+- `office_batch_edit(file_path, commands)` — 单次 open/save 周期内批量执行多条 Office 操作
 - `office_create(file_path)` — 创建空白文档
 - `office_edit(file_path, command, element_path="", props={}, element_type="")` — 编辑元素
 - `office_query(file_path, path_or_selector, mode="path", depth=1)` — 查询元素
 - `office_render(file_path)` — 渲染 HTML 预览
+
+### Quick Edit API
+- `POST /api/documents/quick-edit/text` — 文本替换 / 段落拆分
+- `POST /api/documents/quick-edit/style` — 样式与布局属性修改
+- `POST /api/documents/quick-edit/table-op` — Excel 结构化表格操作
+- `POST /api/documents/quick-edit/theme` — PPT 主题配色与字体
+- `POST /api/documents/quick-edit/structure` — PPT / Word / Excel 高级结构编辑
+- `GET /api/officecli/perf` — 最近 OfficeCLI 命令性能统计
+- `python3 scripts/measure_officecli.py <file>` — 离线测量 view/set/batch 延迟，用于判断 resident mode 是否值得实现
 
 ## 命令
 

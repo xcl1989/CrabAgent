@@ -23,3 +23,14 @@ async def officecli_status():
     if mgr.version:
         status["version"] = mgr.version
     return status
+
+
+@router.get("/perf")
+async def officecli_perf():
+    """返回最近 OfficeCLI 命令的轻量性能统计。"""
+    mgr = get_office_manager()
+    return {
+        "available": mgr.available,
+        "version": mgr.version,
+        "stats": mgr.get_perf_stats(),
+    }

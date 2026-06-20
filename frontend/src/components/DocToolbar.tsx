@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import {
   Bold, Italic, Underline, Type, Palette, Sparkles,
   TableCellsMerge, TableCellsSplit, Plus, FunctionSquare, Minus,
+  Presentation, Rows3, ImagePlus,
 } from "lucide-react";
 import { cn } from "../lib/cn";
 
@@ -19,6 +20,17 @@ export interface TableOp {
   params: Record<string, unknown>;
 }
 
+export interface StructureOp {
+  label: string;
+  operations: Array<{
+    command: "set" | "add" | "remove";
+    path?: string;
+    parent?: string;
+    type?: string;
+    props?: Record<string, unknown>;
+  }>;
+}
+
 interface Props {
   active: boolean;
   style?: EditElementStyle;
@@ -31,11 +43,13 @@ interface Props {
   onTableOp?: (op: TableOp) => void;
   /** Callback for PPT theme changes */
   onThemeEdit?: (props: Record<string, string>) => void;
+  /** Callback for higher-level structure operations */
+  onStructureOp?: (op: StructureOp) => void;
 }
 
 const FONT_SIZES = [10, 12, 14, 16, 18, 20, 24, 28, 32, 40, 48];
 
-export function DocToolbar({ active, style, onStyleChange, onAIEdit, className, fileType, onTableOp, onThemeEdit }: Props) {
+export function DocToolbar({ active, style, onStyleChange, onAIEdit, className, fileType, onTableOp, onThemeEdit, onStructureOp }: Props) {
   const { t } = useTranslation();
   const [showFontMenu, setShowFontMenu] = useState(false);
   const [showColorMenu, setShowColorMenu] = useState(false);
@@ -248,6 +262,36 @@ export function DocToolbar({ active, style, onStyleChange, onAIEdit, className, 
       {isPptx && onThemeEdit && (
         <>
           <div className="w-px h-5 bg-[var(--border)] mx-1" />
+          <button
+            onClick={() => onStructureOp?.({
+              label: "新增标题页",
+              operations: [{ command: "add", parent: "/", type: "slide", props: { layout: "Title Slide", title: "New Slide", text: "Subtitle" } }],
+            })}
+            className={cn(btnBase, "hover:bg-[var(--bg-tertiary)]")}
+            title="新增标题页"
+          >
+            <Presentation size={14} />
+          </button>
+          <button
+            onClick={() => onStructureOp?.({
+              label: "新增内容占位符",
+              operations: [{ command: "add", parent: "/slide[1]", type: "placeholder", props: { phType: "body", text: "Content" } }],
+            })}
+            className={cn(btnBase, "hover:bg-[var(--bg-tertiary)]")}
+            title="新增内容占位符"
+          >
+            <Rows3 size={14} />
+          </button>
+          <button
+            onClick={() => onStructureOp?.({
+              label: "新增图片占位框",
+              operations: [{ command: "add", parent: "/slide[1]", type: "image", props: { x: 80, y: 120, width: 320, height: 180 } }],
+            })}
+            className={cn(btnBase, "hover:bg-[var(--bg-tertiary)]")}
+            title="新增图片占位框"
+          >
+            <ImagePlus size={14} />
+          </button>
           <div className="relative">
             <button
               onClick={() => setShowThemePicker((v) => !v)}

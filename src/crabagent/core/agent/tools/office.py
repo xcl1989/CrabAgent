@@ -105,6 +105,73 @@ def _check_extension(file_path: str) -> str | None:
     return None
 
 
+def _validate_batch_commands(commands: list[dict[str, Any]]) -> tuple[list[dict[str, Any]] | None, str | None]:
+    """Validate and normalize batch commands before passing them to OfficeCLI."""
+    if not isinstance(commands, list) or not commands:
+        return None, "commands 必须是非空数组"
+
+    allowed_commands = {"set", "add", "remove", "move", "swap"}
+    normalized: list[dict[str, Any]] = []
+
+    for idx, item in enumerate(commands, start=1):
+        if not isinstance(item, dict):
+            return None, f"第 {idx} 条命令必须是对象"
+
+        command = str(item.get("command", "")).strip().lower()
+        if command not in allowed_commands:
+            return None, f"第 {idx} 条命令不支持: {command or '<empty>'}"
+
+        entry: dict[str, Any] = {"command": command}
+        path = item.get("path")
+        parent = item.get("parent")
+
+        if command in {"set", "remove", "move", "swap"}:
+            if not isinstance(path, str) or not path.strip():
+                return None, f"第 {idx} 条命令缺少 path"
+            entry["path"] = path.strip()
+
+        if command == "add":
+            if not isinstance(parent, str) or not parent.strip():
+                return None, f"第 {idx} 条 add 命令缺少 parent"
+            element_type = item.get("type")
+            if not isinstance(element_type, str) or not element_type.strip():
+                return None, f"第 {idx} 条 add 命令缺少 type"
+            entry["parent"] = parent.strip()
+            entry["type"] = element_type.strip()
+
+        props = item.get("props")
+        if props is not None:
+            if not isinstance(props, dict):
+                return None, f"第 {idx} 条命令的 props 必须是对象"
+            entry["props"] = props
+
+        if command == "move":
+            to_parent = item.get("to")
+            if not isinstance(to_parent, str) or not to_parent.strip():
+                return None, f"第 {idx} 条 move 命令缺少 to"
+            entry["to"] = to_parent.strip()
+            if "index" in item:
+                try:
+                    entry["index"] = int(item["index"])
+                except (TypeError, ValueError):
+                    return None, f"第 {idx} 条 move 命令的 index 必须是整数"
+
+        if command == "swap":
+            other = item.get("with")
+            if not isinstance(other, str) or not other.strip():
+                return None, f"第 {idx} 条 swap 命令缺少 with"
+            entry["with"] = other.strip()
+
+        if command == "add":
+            for key in ("index", "after", "before"):
+                if key in item:
+                    entry[key] = item[key]
+
+        normalized.append(entry)
+
+    return normalized, None
+
+
 async def _emit(context: Any, event_type: EventType, data: dict[str, Any]) -> None:
     """发射 SSE 事件（仅在 serve 模式下有 event_bus）。"""
     if context and hasattr(context, "event_bus") and context.event_bus:
@@ -153,6 +220,10 @@ async def _render_and_emit_preview(
                 "type": "string",
                 "description": "（Excel 专用）工作表名称，如 'Sheet1'，留空则读取所有工作表",
             },
+            "cols": {
+                "type": "string",
+                "description": "（Excel text 模式专用）列范围，如 'A:D'、'B:F'。留空则读取所有列",
+            },
             "max_lines": {
                 "type": "integer",
                 "description": "最大返回行数",
@@ -171,6 +242,7 @@ async def office_read(
     file_path: str = "",
     mode: str = "text",
     sheet: str = "",
+    cols: str = "",
     max_lines: int = 200,
     offset: int = 0,
     context: Any = None,
@@ -199,7 +271,7 @@ async def office_read(
         result = await mgr.view_stats(resolved)
     else:
         result = await mgr.view_text(
-            resolved, max_lines=max_lines, sheet=sheet, start=offset
+            resolved, max_lines=max_lines, sheet=sheet, cols=cols, start=offset
         )
 
     if not result.success:
@@ -216,11 +288,125 @@ async def office_read(
         except Exception:
             logger.debug("Formula collection failed", exc_info=True)
 
-    summary = f"📄 已读取 {Path(file_path).name} ({mode} 模式, {len(str(content))} 字符)\n\n"
+    file_label = Path(resolved).name
+    extra_parts: list[str] = []
+    if sheet:
+        extra_parts.append(f"sheet={sheet}")
+    if cols and resolved.endswith(".xlsx") and mode == "text":
+        extra_parts.append(f"cols={cols}")
+    extra = f", {', '.join(extra_parts)}" if extra_parts else ""
+    summary = f"📄 已读取 {file_label} ({mode} 模式{extra}, {len(str(content))} 字符)\n\n"
     return summary + str(content)
 
 
+@registry.register(
+    name="office_help",
+    description="查询 OfficeCLI 对指定文档格式的帮助参考，返回常用元素路径、属性和能力说明。"
+    "适合在编辑前先确认 docx/xlsx/pptx 支持哪些字段。",
+    parameters={
+        "type": "object",
+        "properties": {
+            "file_format": {
+                "type": "string",
+                "enum": ["docx", "xlsx", "pptx"],
+                "description": "要查询的文档格式。",
+            },
+        },
+        "required": ["file_format"],
+    },
+)
+async def office_help(file_format: str = "", context: Any = None) -> str:
+    """查询 OfficeCLI 支持的格式帮助。"""
+    del context  # reserved for future event integration
+
+    err = await _ensure_available()
+    if err:
+        return err
+
+    fmt = (file_format or "").strip().lower().lstrip(".")
+    if fmt not in {"docx", "xlsx", "pptx"}:
+        return "请指定 file_format 为 docx、xlsx 或 pptx"
+
+    mgr = get_office_manager()
+    result = await mgr.help_for(fmt)
+    if not result.success:
+        return f"获取帮助失败: {result.error}"
+
+    content = str(result.data or "").strip()
+    if not content:
+        return f"{fmt} 没有返回帮助内容"
+
+    max_chars = 20_000
+    if len(content) > max_chars:
+        content = content[:max_chars] + "\n\n... (帮助内容已截断，请聚焦具体格式继续提问)"
+
+    return f"📚 OfficeCLI {fmt} 帮助\n\n{content}"
+
+
 # ── tool: office_create ────────────────────────────────────────────────
+
+
+@registry.register(
+    name="office_batch_edit",
+    description="批量编辑 Office 文档中的多个元素，在单次打开/保存周期内执行多条命令。"
+    "适合一次性完成多步 set/add/remove/move/swap 操作，减少反复保存。",
+    parameters={
+        "type": "object",
+        "properties": {
+            "file_path": {
+                "type": "string",
+                "description": "文档路径。留空则自动使用当前打开的文档。",
+            },
+            "commands": {
+                "type": "array",
+                "description": "批量命令列表。每条命令都是对象，支持 command=set/add/remove/move/swap。",
+                "items": {
+                    "type": "object",
+                },
+            },
+        },
+        "required": ["commands"],
+    },
+)
+async def office_batch_edit(
+    file_path: str = "",
+    commands: list[dict[str, Any]] | None = None,
+    context: Any = None,
+) -> str:
+    """批量编辑 Office 文档。"""
+    err = await _ensure_available()
+    if err:
+        return err
+
+    resolved, err_msg = _resolve_path_or_current(file_path, context)
+    if err_msg:
+        return err_msg
+
+    err_ext = _check_extension(resolved)
+    if err_ext:
+        return err_ext
+
+    if not os.path.isfile(resolved):
+        return f"File not found: {resolved}"
+
+    batch_commands, batch_err = _validate_batch_commands(commands or [])
+    if batch_err:
+        return batch_err
+
+    file_label = Path(resolved).name
+    await _emit(context, EventType.DOC_OP_DELTA, {
+        "file": file_label,
+        "message": f"📦 batch {len(batch_commands or [])} steps",
+        "commands": batch_commands,
+    })
+
+    mgr = get_office_manager()
+    result = await mgr.batch(resolved, batch_commands or [])
+    if not result.success:
+        return f"批量操作失败: {result.error}"
+
+    await _render_and_emit_preview(file_label, resolved, context)
+    return f"✅ 已批量执行 {len(batch_commands or [])} 条操作"
 
 
 @registry.register(

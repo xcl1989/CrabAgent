@@ -187,6 +187,35 @@ export function quickEditTheme(
   return api.post("/documents/quick-edit/theme", { path, props, workspace });
 }
 
+// ── Quick Edit: Structure ──────────────────────────────────────────
+
+export interface StructureOperation {
+  command: "set" | "add" | "remove";
+  path?: string;
+  parent?: string;
+  type?: string;
+  props?: Record<string, unknown>;
+}
+
+export interface StructureEditRequest {
+  path: string;
+  workspace?: string;
+  operations: StructureOperation[];
+}
+
+export interface StructureEditResponse {
+  status: string;
+  preview_html: string | null;
+  results: Array<{ index: number; command?: string; target?: string; success: boolean; error?: string }>;
+  message: string;
+}
+
+export function quickEditStructure(
+  req: StructureEditRequest,
+): Promise<StructureEditResponse> {
+  return api.post("/documents/quick-edit/structure", req);
+}
+
 export async function deleteDocument(
   path: string,
   workspace = "",

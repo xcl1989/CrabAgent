@@ -115,17 +115,11 @@ def build_agent_switch_msg(agent_def: dict, locale: str = "en") -> dict:
     agent_name = agent_def["name"]
     icon = agent_def.get("icon", "")
     _d = _translate_agent_field(agent_name, "display_name", agent_def["display_name"], locale)
-    _r = _translate_agent_field(agent_name, "role", agent_def["role"], locale)
     _g = _translate_agent_field(agent_name, "goal", agent_def["goal"], locale)
-    _b = _translate_agent_field(agent_name, "backstory", agent_def.get("backstory", ""), locale)
     lines = [
         t("agent_switch.header", locale, icon=icon, display_name=_d),
-        t("agent_switch.role", locale, role=_r),
         t("agent_switch.goal", locale, goal=_g),
     ]
-    if _b:
-        lines.append(t("agent_switch.backstory", locale, backstory=_b))
-    lines.append(t("agent_switch.footer", locale))
     return {"role": "user", "content": "\n".join(lines), "agent": agent_name}
 
 
