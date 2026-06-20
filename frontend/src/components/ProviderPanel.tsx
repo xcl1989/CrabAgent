@@ -7,6 +7,7 @@ import * as chatgptApi from "../api/chatgpt";
 import { Modal, Button, Input, PasswordInput, ConfirmDialog, EmptyState } from "./ui";
 import { toast } from "./ui/Toast";
 import { cn } from "../lib/cn";
+import { emitProvidersChanged } from "../lib/providerSync";
 
 interface Props {
   providers: Provider[];
@@ -122,6 +123,7 @@ export default function ProviderPanel({
         extra_models: [...current, modelId],
       });
       toast.success(`Added model: ${modelId}`);
+      emitProvidersChanged();
       onRefresh();
       setNewModelInput({ ...newModelInput, [providerName]: "" });
     } catch {
@@ -141,6 +143,7 @@ export default function ProviderPanel({
         extra_models: current.filter((m) => m !== modelId),
       });
       toast.success(`Removed model: ${modelId}`);
+      emitProvidersChanged();
       onRefresh();
     } catch {
       toast.error("Failed to remove model");
@@ -157,6 +160,7 @@ export default function ProviderPanel({
       await providersApi.updateProvider(providerName, {
         proxy_enabled: !provider.proxy_enabled,
       });
+      emitProvidersChanged();
       onRefresh();
     } catch {
       toast.error("Failed to toggle proxy");
@@ -175,6 +179,7 @@ export default function ProviderPanel({
     try {
       await providersApi.updateProvider(providerName, { proxy_url: url });
       toast.success("Proxy URL saved");
+      emitProvidersChanged();
       onRefresh();
     } catch {
       toast.error("Failed to save proxy URL");
@@ -204,6 +209,7 @@ export default function ProviderPanel({
         variant_id: formVariantId || undefined,
       });
       toast.success(t("provider.providerAdded"));
+      emitProvidersChanged();
       onRefresh();
       setMode("list");
       setFormName("");
@@ -220,6 +226,7 @@ export default function ProviderPanel({
     try {
       await providersApi.updateProvider(name, { is_default: true });
       toast.success(t("provider.defaultUpdated"));
+      emitProvidersChanged();
       onRefresh();
     } catch {
       toast.error(t("provider.setDefaultFailed"));
@@ -230,6 +237,7 @@ export default function ProviderPanel({
     try {
       await providersApi.deleteProvider(name);
       toast.success(t("provider.providerDeleted"));
+      emitProvidersChanged();
       onRefresh();
     } catch {
       toast.error(t("provider.deleteFailed"));

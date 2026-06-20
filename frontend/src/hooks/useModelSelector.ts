@@ -1,6 +1,7 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import * as providersApi from "../api/providers";
 import { Provider, CatalogEntry, ModelInfo } from "../api/providers";
+import { onProvidersChanged } from "../lib/providerSync";
 
 export interface ProviderModels {
   provider: Provider;
@@ -16,6 +17,16 @@ export function useModelSelector() {
   const [modelsError, setModelsError] = useState<string>("");
   const [selectedModel, setSelectedModel] = useState<string>("");
 
+  const refreshProviders = useCallback(async () => {
+    setProvidersLoading(true);
+    try {
+      const nextProviders = await providersApi.listProviders();
+      setProviders(nextProviders);
+    } finally {
+      setProvidersLoading(false);
+    }
+  }, []);
+
   // Flat list for backward compatibility
   const models = useMemo(
     () => providerModels.flatMap((pm) => pm.models),
@@ -23,12 +34,13 @@ export function useModelSelector() {
   );
 
   useEffect(() => {
-    providersApi.listProviders().then((p) => {
-      setProviders(p);
-      setProvidersLoading(false);
-    });
+    refreshProviders();
     providersApi.getCatalog().then(setCatalog);
-  }, []);
+  }, [refreshProviders]);
+
+  useEffect(() => onProvidersChanged(() => {
+    refreshProviders();
+  }), [refreshProviders]);
 
   useEffect(() => {
     if (providers.length === 0) return;
@@ -41,7 +53,8 @@ export function useModelSelector() {
         try {
           const models = await providersApi.getProviderModels(provider.name);
           return { provider, models };
-        } catch {
+        } catch (err) {
+          console.error(`Failed to load models for provider ${provider.name}`, err);
           return { provider, models: [] };
         }
       })
@@ -74,5 +87,6 @@ export function useModelSelector() {
     setSelectedModel,
     setProviders,
     setProvidersLoading,
+    refreshProviders,
   };
 }

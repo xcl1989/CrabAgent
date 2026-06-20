@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Save, FlaskConical, Search, Check, Smartphone, SlidersHorizontal, Globe, Wifi } from "lucide-react";
 import { Input, Button } from "../components/ui";
 import { toast } from "../components/ui/Toast";
@@ -9,6 +9,7 @@ import * as providersApi from "../api/providers";
 import ModelSelector from "../components/ModelSelector";
 import WeChatPanel from "../components/WeChatPanel";
 import type { Provider, ModelInfo } from "../api/providers";
+import { onProvidersChanged } from "../lib/providerSync";
 
 interface ProviderModels {
   provider: Provider;
@@ -56,13 +57,24 @@ export default function SettingsPage() {
       .catch(() => setSettingsLoaded(true));
   }, []);
 
+  const refreshProviders = useCallback(async () => {
+    setProvidersLoading(true);
+    try {
+      const nextProviders = await providersApi.listProviders();
+      setProviders(nextProviders);
+    } finally {
+      setProvidersLoading(false);
+    }
+  }, []);
+
   // Load providers & models
   useEffect(() => {
-    providersApi.listProviders().then((p) => {
-      setProviders(p);
-      setProvidersLoading(false);
-    });
-  }, []);
+    refreshProviders();
+  }, [refreshProviders]);
+
+  useEffect(() => onProvidersChanged(() => {
+    refreshProviders();
+  }), [refreshProviders]);
 
   useEffect(() => {
     if (providers.length === 0) return;
@@ -71,7 +83,8 @@ export default function SettingsPage() {
         try {
           const models = await providersApi.getProviderModels(provider.name);
           return { provider, models };
-        } catch {
+        } catch (err) {
+          console.error(`Failed to load models for provider ${provider.name}`, err);
           return { provider, models: [] };
         }
       }),

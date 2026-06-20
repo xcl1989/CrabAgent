@@ -88,6 +88,7 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
     setSelectedModel,
     setProviders,
     setProvidersLoading,
+    refreshProviders,
   } = useModelSelector();
 
   const onAutoLoadSession = useCallback((session: Session) => {
@@ -1766,7 +1767,7 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
           catalog={catalog}
           onClose={() => setShowProviders(false)}
           onRefresh={() => {
-            providersApi.listProviders().then(setProviders);
+            refreshProviders();
           }}
         />
       )}
