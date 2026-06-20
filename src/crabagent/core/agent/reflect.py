@@ -462,6 +462,12 @@ async def _resolve_llm_params(provider_name: str | None) -> dict | None:
     if provider.base_url:
         params["api_base"] = provider.base_url
         params["custom_llm_provider"] = "openai"
+    # Apply provider-level proxy
+    from crabagent.core.proxy import resolve_llm_proxy
+
+    proxy = await resolve_llm_proxy(provider)
+    if proxy:
+        params["proxy"] = proxy
     return params
 
 

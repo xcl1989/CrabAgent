@@ -438,6 +438,12 @@ async def plan_task(task: str, context=None) -> str:
         if provider.base_url:
             llm_params["api_base"] = provider.base_url
             llm_params["custom_llm_provider"] = "openai"
+        # Apply provider-level proxy
+        from crabagent.core.proxy import resolve_llm_proxy
+
+        proxy = await resolve_llm_proxy(provider)
+        if proxy:
+            llm_params["proxy"] = proxy
 
         model = context.model or "gpt-4"
 

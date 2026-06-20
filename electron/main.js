@@ -472,9 +472,24 @@ async function autoLogin() {
   }
 }
 
+// ── Clear browser cache to prevent stale assets after update ──
+function clearBrowserCache() {
+  const dataPath = app.getPath('userData');
+  const cacheDirs = ['Cache', 'Code Cache', 'GPUCache'];
+  for (const dir of cacheDirs) {
+    const p = path.join(dataPath, dir);
+    if (fs.existsSync(p)) {
+      try { fs.rmSync(p, { recursive: true, force: true }); log(`Cleared cache: ${dir}`); } catch {}
+    }
+  }
+}
+
 // ── App lifecycle ──
 app.whenReady().then(async () => {
   killExistingBackend();
+
+  // Clear browser cache on each launch (prevents stale JS/CSS after updates)
+  clearBrowserCache();
 
   // Show window immediately (blank until backend is ready)
   createAppMenu();

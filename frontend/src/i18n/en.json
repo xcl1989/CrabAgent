@@ -598,7 +598,18 @@
     "saved": "Settings saved",
     "save": "Save Settings",
     "sectionGeneral": "General",
-    "sectionSearch": "Search Engine"
+    "sectionSearch": "Search Engine",
+    "sectionNetwork": "Network",
+    "proxySectionTitle": "Proxy Settings",
+    "globalProxy": "Global Proxy",
+    "globalProxyDesc": "Default proxy for all network requests. Supports http:// and socks5:// protocols.",
+    "webProxy": "Web Tools Proxy",
+    "llmProxy": "LLM Calls Proxy",
+    "browserProxy": "Browser Proxy",
+    "categoryProxyDesc": "Category-specific proxies (leave empty to use global proxy)",
+    "proxyPlaceholder": "Leave empty to use global proxy",
+    "testProxy": "Test",
+    "proxyTestSuccess": "Proxy works ({{latency}}ms, IP: {{ip}})"
   },
   "usage": {
     "title": "Token Usage",

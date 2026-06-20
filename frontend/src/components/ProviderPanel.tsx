@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { useState } from "react";
-import { Plus, Trash2, Star, StarOff, ChevronDown, ChevronRight, X } from "lucide-react";
+import { Plus, Trash2, Star, StarOff, ChevronDown, ChevronRight, X, Check } from "lucide-react";
 import { Provider, CatalogEntry } from "../api/providers";
 import * as providersApi from "../api/providers";
 import { Modal, Button, Input, PasswordInput, ConfirmDialog, EmptyState } from "./ui";
@@ -32,6 +32,8 @@ export default function ProviderPanel({
   const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
   const [newModelInput, setNewModelInput] = useState<Record<string, string>>({});
   const [modelBusy, setModelBusy] = useState<string | null>(null);
+  const [proxyInput, setProxyInput] = useState<Record<string, string>>({});
+  const [proxyBusy, setProxyBusy] = useState<string | null>(null);
 
   const handleAddExtraModel = async (providerName: string) => {
     const modelId = (newModelInput[providerName] || "").trim();
@@ -73,6 +75,40 @@ export default function ProviderPanel({
       toast.error("Failed to remove model");
     } finally {
       setModelBusy(null);
+    }
+  };
+
+  const handleToggleProxy = async (providerName: string) => {
+    const provider = providers.find((p) => p.name === providerName);
+    if (!provider) return;
+    setProxyBusy(providerName);
+    try {
+      await providersApi.updateProvider(providerName, {
+        proxy_enabled: !provider.proxy_enabled,
+      });
+      onRefresh();
+    } catch {
+      toast.error("Failed to toggle proxy");
+    } finally {
+      setProxyBusy(null);
+    }
+  };
+
+  const handleSaveProxyUrl = async (providerName: string) => {
+    const url = (proxyInput[providerName] ?? "").trim();
+    const provider = providers.find((p) => p.name === providerName);
+    if (!provider) return;
+    // Skip if unchanged
+    if (url === (provider.proxy_url ?? "")) return;
+    setProxyBusy(`${providerName}:url`);
+    try {
+      await providersApi.updateProvider(providerName, { proxy_url: url });
+      toast.success("Proxy URL saved");
+      onRefresh();
+    } catch {
+      toast.error("Failed to save proxy URL");
+    } finally {
+      setProxyBusy(null);
     }
   };
 
@@ -229,10 +265,59 @@ export default function ProviderPanel({
                     </div>
                   </div>
                   {expandedProvider === p.name && (
-                    <div className="px-3 pb-3 pt-1 border-t border-[var(--border)] space-y-2">
-                      <div className="text-[11px] font-medium text-[var(--text-secondary)] pt-1.5">
-                        额外模型（API 未返回但可调用的模型）
+                    <div className="px-3 pb-3 pt-1 border-t border-[var(--border)] space-y-3">
+                      {/* Proxy Section */}
+                      <div className="pt-1.5">
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span className="text-[11px] font-medium text-[var(--text-secondary)]">
+                            网络代理
+                          </span>
+                          <button
+                            onClick={() => handleToggleProxy(p.name)}
+                            disabled={proxyBusy === p.name}
+                            className={cn(
+                              "relative inline-flex h-4 w-7 items-center rounded-full transition-colors",
+                              p.proxy_enabled ? "bg-[var(--brand)]" : "bg-[var(--bg-secondary)] border border-[var(--border)]",
+                            )}
+                          >
+                            <span
+                              className={cn(
+                                "inline-block h-3 w-3 transform rounded-full bg-white transition-transform",
+                                p.proxy_enabled ? "translate-x-3.5" : "translate-x-0.5",
+                              )}
+                            />
+                          </button>
+                        </div>
+                        {p.proxy_enabled && (
+                          <div className="flex items-center gap-1.5">
+                            <input
+                              type="text"
+                              value={proxyInput[p.name] ?? p.proxy_url ?? ""}
+                              onChange={(e) => setProxyInput({ ...proxyInput, [p.name]: e.target.value })}
+                              onKeyDown={(e) => { if (e.key === "Enter") handleSaveProxyUrl(p.name); }}
+                              placeholder="代理地址（留空则使用全局代理）"
+                              className="flex-1 h-8 px-2.5 text-xs rounded-lg bg-[var(--bg-secondary)] border border-[var(--border)] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--brand)] focus:ring-1 focus:ring-[var(--brand)]/30"
+                            />
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => handleSaveProxyUrl(p.name)}
+                              loading={proxyBusy === `${p.name}:url`}
+                            >
+                              <Check size={12} />
+                            </Button>
+                          </div>
+                        )}
+                        <p className="text-[10px] text-[var(--text-tertiary)] mt-1">
+                          启用后此 Provider 的请求将通过代理访问
+                        </p>
                       </div>
+
+                      {/* Extra Models Section */}
+                      <div className="border-t border-[var(--border)] pt-2">
+                        <div className="text-[11px] font-medium text-[var(--text-secondary)] mb-1.5">
+                          额外模型（API 未返回但可调用的模型）
+                        </div>
                       <div className="flex flex-wrap gap-1.5">
                         {(p.extra_models || []).map((m) => (
                           <span
@@ -270,6 +355,7 @@ export default function ProviderPanel({
                         >
                           <Plus size={12} />
                         </Button>
+                      </div>
                       </div>
                     </div>
                   )}

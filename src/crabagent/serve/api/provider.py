@@ -30,6 +30,8 @@ class ProviderResponse(BaseModel):
     base_url: str
     api_key_preview: str
     extra_models: list[str] = []
+    proxy_enabled: bool = False
+    proxy_url: str = ""
 
 
 class CatalogVariant(BaseModel):
@@ -62,6 +64,8 @@ class UpdateProviderRequest(BaseModel):
     enabled: bool | None = None
     is_default: bool | None = None
     extra_models: list[str] | None = None
+    proxy_enabled: bool | None = None
+    proxy_url: str | None = None
 
 
 def _mask_key(api_key: str) -> str:
@@ -72,11 +76,15 @@ def _mask_key(api_key: str) -> str:
 
 def _to_response(p) -> ProviderResponse:
     extra_models = []
+    proxy_enabled = False
+    proxy_url = ""
     if hasattr(p, "extra") and p.extra:
         try:
             import json
             extra = json.loads(p.extra) if isinstance(p.extra, str) else p.extra
             extra_models = extra.get("extra_models", [])
+            proxy_enabled = bool(extra.get("proxy_enabled", False))
+            proxy_url = extra.get("proxy_url", "")
         except Exception:
             pass
     return ProviderResponse(
@@ -88,6 +96,8 @@ def _to_response(p) -> ProviderResponse:
         base_url=p.base_url,
         api_key_preview=_mask_key(p.api_key),
         extra_models=extra_models,
+        proxy_enabled=proxy_enabled,
+        proxy_url=proxy_url,
     )
 
 
@@ -145,7 +155,8 @@ async def update_provider_endpoint(name: str, req: UpdateProviderRequest, user: 
         await set_default_provider(name)
 
     # Handle extra_models — store into extra JSON
-    if req.extra_models is not None:
+    # Also handle proxy_enabled / proxy_url
+    if req.extra_models is not None or req.proxy_enabled is not None or req.proxy_url is not None:
         import json as _json
         async with async_session_factory() as session:
             result = await session.execute(
@@ -157,14 +168,19 @@ async def update_provider_endpoint(name: str, req: UpdateProviderRequest, user: 
                     extra = _json.loads(row.extra) if row.extra else {}
                 except Exception:
                     extra = {}
-                extra["extra_models"] = req.extra_models
+                if req.extra_models is not None:
+                    extra["extra_models"] = req.extra_models
+                if req.proxy_enabled is not None:
+                    extra["proxy_enabled"] = req.proxy_enabled
+                if req.proxy_url is not None:
+                    extra["proxy_url"] = req.proxy_url
                 row.extra = _json.dumps(extra)
                 await session.commit()
                 await session.refresh(row)
                 from crabagent.core.provider_store import _to_info
                 return _to_response(row)
 
-    updates = {k: v for k, v in req.model_dump().items() if v is not None and k != "extra_models"}
+    updates = {k: v for k, v in req.model_dump().items() if v is not None and k not in ("extra_models", "proxy_enabled", "proxy_url")}
     if req.is_default:
         updates.pop("is_default", None)
 
@@ -173,7 +189,10 @@ async def update_provider_endpoint(name: str, req: UpdateProviderRequest, user: 
         raise HTTPException(status_code=404, detail="Provider not found")
     # _to_response expects a ProviderConfig row, but update_provider returns ProviderInfo
     # Reconstruct response manually
-    extra_models = existing.extra.get("extra_models", []) if req.extra_models is None else req.extra_models
+    extra = existing.extra or {}
+    extra_models = extra.get("extra_models", []) if req.extra_models is None else req.extra_models
+    proxy_enabled = extra.get("proxy_enabled", False) if req.proxy_enabled is None else req.proxy_enabled
+    proxy_url = extra.get("proxy_url", "") if req.proxy_url is None else req.proxy_url
     return ProviderResponse(
         name=p.name,
         display_name=p.display_name,
@@ -183,6 +202,8 @@ async def update_provider_endpoint(name: str, req: UpdateProviderRequest, user: 
         base_url=p.base_url,
         api_key_preview=_mask_key(p.api_key),
         extra_models=extra_models,
+        proxy_enabled=proxy_enabled,
+        proxy_url=proxy_url,
     )
 
 
@@ -203,7 +224,13 @@ async def get_provider_models(name: str, user: User = Depends(get_current_user))
 
     # Fetch from provider API
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        from crabagent.core.proxy import resolve_llm_proxy
+
+        proxy = await resolve_llm_proxy(p)
+        client_kwargs = {"timeout": 15.0}
+        if proxy:
+            client_kwargs["proxy"] = proxy
+        async with httpx.AsyncClient(**client_kwargs) as client:
             resp = await client.get(
                 f"{p.base_url}/models",
                 headers={"Authorization": f"Bearer {p.api_key}"},

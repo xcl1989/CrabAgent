@@ -52,10 +52,13 @@ def _format_results(query: str, results: list[dict], limit: int) -> str:
 async def _search_searxng(query: str, limit: int, searxng_url: str) -> list[dict]:
     import httpx
 
+    from crabagent.core.proxy import resolve_category_proxy
+
     url = f"{searxng_url.rstrip('/')}/search?q={quote_plus(query)}&format=json&categories=general"
     client_kwargs = {"timeout": 15.0}
-    if settings.web_proxy:
-        client_kwargs["proxy"] = settings.web_proxy
+    proxy = await resolve_category_proxy("web")
+    if proxy:
+        client_kwargs["proxy"] = proxy
     async with httpx.AsyncClient(**client_kwargs) as client:
         resp = await client.get(url)
         resp.raise_for_status()
@@ -70,14 +73,18 @@ async def _search_searxng(query: str, limit: int, searxng_url: str) -> list[dict
 async def _search_duckduckgo(query: str, limit: int) -> list[dict]:
     import asyncio
 
+    from crabagent.core.proxy import resolve_category_proxy
+
+    proxy = await resolve_category_proxy("web")
+
     def _do_search():
         from ddgs import DDGS
 
         results = []
         t0 = time.time()
         kwargs = {}
-        if settings.web_proxy:
-            kwargs["proxy"] = settings.web_proxy
+        if proxy:
+            kwargs["proxy"] = proxy
         ddgs = DDGS(**kwargs)
         try:
             it = ddgs.text(query, max_results=limit)
@@ -112,6 +119,8 @@ async def _fetch_html(url: str) -> tuple[str, str]:
     """Fetch HTML via httpx. Returns (html, error_msg)."""
     import httpx
 
+    from crabagent.core.proxy import resolve_category_proxy
+
     try:
         client_kwargs = {
             "timeout": 15.0,
@@ -123,8 +132,9 @@ async def _fetch_html(url: str) -> tuple[str, str]:
                 "Accept-Language": "en-US,en;q=0.9",
             },
         }
-        if settings.web_proxy:
-            client_kwargs["proxy"] = settings.web_proxy
+        proxy = await resolve_category_proxy("web")
+        if proxy:
+            client_kwargs["proxy"] = proxy
         async with httpx.AsyncClient(**client_kwargs) as client:
             resp = await client.get(url)
             resp.raise_for_status()

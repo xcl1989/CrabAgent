@@ -598,7 +598,18 @@
     "saved": "设置已保存",
     "save": "保存设置",
     "sectionGeneral": "通用",
-    "sectionSearch": "搜索引擎"
+    "sectionSearch": "搜索引擎",
+    "sectionNetwork": "网络代理",
+    "proxySectionTitle": "代理设置",
+    "globalProxy": "全局代理",
+    "globalProxyDesc": "所有网络请求的默认代理地址。支持 http:// 和 socks5:// 协议。",
+    "webProxy": "Web 工具代理",
+    "llmProxy": "LLM 调用代理",
+    "browserProxy": "浏览器代理",
+    "categoryProxyDesc": "分类代理（留空则使用全局代理）",
+    "proxyPlaceholder": "留空则使用全局代理",
+    "testProxy": "测试",
+    "proxyTestSuccess": "代理可用（{{latency}}ms, IP: {{ip}}）"
   },
   "usage": {
     "title": "Token 用量",

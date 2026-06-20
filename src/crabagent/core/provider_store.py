@@ -228,7 +228,13 @@ async def fetch_models(provider_name: str) -> list[str]:
     try:
         import httpx
 
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        from crabagent.core.proxy import resolve_llm_proxy
+
+        proxy = await resolve_llm_proxy(p)
+        client_kwargs = {"timeout": 15.0}
+        if proxy:
+            client_kwargs["proxy"] = proxy
+        async with httpx.AsyncClient(**client_kwargs) as client:
             resp = await client.get(
                 f"{base}/models",
                 headers={"Authorization": f"Bearer {p.api_key}"},

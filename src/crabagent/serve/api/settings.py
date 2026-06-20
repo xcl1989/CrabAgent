@@ -55,14 +55,52 @@ async def test_searxng(
 ):
     import httpx
 
+    from crabagent.core.proxy import resolve_category_proxy
+
     url = req.url.rstrip("/") + "/search?q=test&format=json&categories=general"
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        proxy = await resolve_category_proxy("web")
+        client_kwargs = {"timeout": 10.0}
+        if proxy:
+            client_kwargs["proxy"] = proxy
+        async with httpx.AsyncClient(**client_kwargs) as client:
             resp = await client.get(url)
             resp.raise_for_status()
             data = resp.json()
             count = len(data.get("results", []))
             return {"success": True, "result_count": count}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+class TestProxyRequest(BaseModel):
+    proxy: str
+
+
+@router.post("/test-proxy")
+async def test_proxy(
+    req: TestProxyRequest,
+    user=Depends(get_current_user),
+):
+    """Test proxy connectivity. Returns latency and detected IP."""
+    import time
+
+    import httpx
+
+    if not req.proxy:
+        return {"success": False, "error": "Proxy URL is empty"}
+    try:
+        t0 = time.time()
+        async with httpx.AsyncClient(proxy=req.proxy, timeout=10.0) as client:
+            resp = await client.get("https://httpbin.org/ip")
+            resp.raise_for_status()
+        latency = round((time.time() - t0) * 1000)
+        origin = ""
+        try:
+            origin = resp.json().get("origin", "")
+        except Exception:
+            pass
+        return {"success": True, "latency_ms": latency, "ip": origin}
     except Exception as e:
         return {"success": False, "error": str(e)}
 

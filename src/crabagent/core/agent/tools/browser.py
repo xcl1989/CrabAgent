@@ -155,7 +155,19 @@ class BrowserManager:
                 "Install with: pip install 'crabagent[browser]' && playwright install chromium"
             )
         self._playwright = await async_playwright().start()
-        self._browser = await self._playwright.chromium.launch(headless=self._headless)
+
+        # Resolve proxy for browser
+        launch_kwargs: dict[str, Any] = {"headless": self._headless}
+        try:
+            from crabagent.core.proxy import resolve_category_proxy
+
+            proxy = await resolve_category_proxy("browser")
+            if proxy:
+                launch_kwargs["proxy"] = {"server": proxy}
+        except Exception:
+            logger.debug("Failed to resolve browser proxy", exc_info=True)
+
+        self._browser = await self._playwright.chromium.launch(**launch_kwargs)
         self._context = await self._browser.new_context(
             viewport={"width": 1280, "height": 800},
             user_agent=(

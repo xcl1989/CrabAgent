@@ -12,6 +12,10 @@ export function testSearxng(url: string): Promise<{ success: boolean; result_cou
   return api.post("/settings/test-searxng", { url });
 }
 
+export function testProxy(proxy: string): Promise<{ success: boolean; latency_ms?: number; ip?: string; error?: string }> {
+  return api.post("/settings/test-proxy", { proxy });
+}
+
 export interface SkillInfo {
   name: string;
   description: string;

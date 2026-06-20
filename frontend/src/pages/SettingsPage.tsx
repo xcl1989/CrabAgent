@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { useState, useEffect } from "react";
-import { Save, FlaskConical, Search, Check, Smartphone, SlidersHorizontal } from "lucide-react";
+import { Save, FlaskConical, Search, Check, Smartphone, SlidersHorizontal, Globe, Wifi } from "lucide-react";
 import { Input, Button } from "../components/ui";
 import { toast } from "../components/ui/Toast";
 import { cn } from "../lib/cn";
@@ -15,7 +15,7 @@ interface ProviderModels {
   models: ModelInfo[];
 }
 
-type SettingsTab = "general" | "search" | "wechat";
+type SettingsTab = "general" | "search" | "network" | "wechat";
 
 export default function SettingsPage() {
   const { t } = useTranslation();
@@ -25,9 +25,14 @@ export default function SettingsPage() {
   const [defaultModel, setDefaultModel] = useState("");
   const [defaultModelProvider, setDefaultModelProvider] = useState<string | undefined>(undefined);
   const [searxngUrl, setSearxngUrl] = useState("");
+  const [globalProxy, setGlobalProxy] = useState("");
+  const [webProxy, setWebProxy] = useState("");
+  const [llmProxy, setLlmProxy] = useState("");
+  const [browserProxy, setBrowserProxy] = useState("");
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [testingProxy, setTestingProxy] = useState(false);
 
   // Providers / models state
   const [providers, setProviders] = useState<Provider[]>([]);
@@ -42,6 +47,10 @@ export default function SettingsPage() {
         setDefaultModel(s.default_model || "");
         setDefaultModelProvider(s.default_model_provider || undefined);
         setSearxngUrl(s.searxng_url || "");
+        setGlobalProxy(s.proxy || "");
+        setWebProxy(s.web_proxy || "");
+        setLlmProxy(s.llm_proxy || "");
+        setBrowserProxy(s.browser_proxy || "");
         setSettingsLoaded(true);
       })
       .catch(() => setSettingsLoaded(true));
@@ -103,6 +112,10 @@ export default function SettingsPage() {
         data.default_model_provider = "";
       }
       data.searxng_url = searxngUrl;
+      data.proxy = globalProxy;
+      data.web_proxy = webProxy;
+      data.llm_proxy = llmProxy;
+      data.browser_proxy = browserProxy;
       await settingsApi.updateSettings(data);
       toast.success(t("settingsPage.saved"));
     } catch (e: unknown) {
@@ -137,6 +150,31 @@ export default function SettingsPage() {
     }
   };
 
+  const handleTestProxy = async () => {
+    if (!globalProxy) return;
+    setTestingProxy(true);
+    try {
+      const result = await settingsApi.testProxy(globalProxy);
+      if (result.success) {
+        toast.success(
+          t("settingsPage.proxyTestSuccess", { latency: result.latency_ms ?? 0, ip: result.ip ?? "" }),
+        );
+      } else {
+        toast.error(
+          t("settingsPage.testFailed", { error: result.error ?? "unknown" }),
+        );
+      }
+    } catch (e: unknown) {
+      toast.error(
+        t("settingsPage.testFailed", {
+          error: e instanceof Error ? e.message : "unknown",
+        }),
+      );
+    } finally {
+      setTestingProxy(false);
+    }
+  };
+
   const allReady = settingsLoaded && !providersLoading;
 
   if (!allReady) {
@@ -152,10 +190,11 @@ export default function SettingsPage() {
   const tabs: { id: SettingsTab; label: string; icon: React.ReactNode }[] = [
     { id: "general", label: t("settingsPage.sectionGeneral"), icon: <SlidersHorizontal size={14} /> },
     { id: "search", label: t("settingsPage.sectionSearch"), icon: <Search size={14} /> },
+    { id: "network", label: t("settingsPage.sectionNetwork"), icon: <Globe size={14} /> },
     { id: "wechat", label: "微信渠道", icon: <Smartphone size={14} /> },
   ];
 
-  const showSaveButton = activeTab === "general" || activeTab === "search";
+  const showSaveButton = activeTab === "general" || activeTab === "search" || activeTab === "network";
 
   return (
     <div className="h-full flex flex-col p-6 sm:p-8 max-w-2xl mx-auto">
@@ -236,6 +275,103 @@ export default function SettingsPage() {
                   </>
                 )}
               </Button>
+            </div>
+          </div>
+        )}
+
+        {activeTab === "network" && (
+          <div className="bg-[var(--bg-secondary)] border border-[var(--border)] rounded-xl p-5 space-y-4">
+            <div className="flex items-center gap-2 mb-2">
+              <Wifi size={14} className="text-[var(--brand)]" />
+              <span className="text-xs font-medium text-[var(--text-secondary)]">
+                {t("settingsPage.proxySectionTitle")}
+              </span>
+            </div>
+
+            {/* Global Proxy */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-medium text-[var(--text-secondary)]">
+                {t("settingsPage.globalProxy")}
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={globalProxy}
+                  onChange={(e) => setGlobalProxy(e.target.value)}
+                  placeholder="http://127.0.0.1:7890"
+                  className="flex-1 h-9 px-3 text-sm rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border)] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--brand)] focus:ring-1 focus:ring-[var(--brand)]/30"
+                />
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleTestProxy}
+                  disabled={!globalProxy || testingProxy}
+                >
+                  {testingProxy ? (
+                    <>
+                      <FlaskConical size={14} className="animate-spin" />
+                      {t("settingsPage.testing")}
+                    </>
+                  ) : (
+                    <>
+                      <FlaskConical size={14} />
+                      {t("settingsPage.testProxy")}
+                    </>
+                  )}
+                </Button>
+              </div>
+              <p className="text-xs text-[var(--text-tertiary)]">
+                {t("settingsPage.globalProxyDesc")}
+              </p>
+            </div>
+
+            {/* Divider */}
+            <div className="border-t border-[var(--border)] pt-4">
+              <p className="text-[11px] font-medium text-[var(--text-tertiary)] mb-3">
+                {t("settingsPage.categoryProxyDesc")}
+              </p>
+
+              {/* Web Proxy */}
+              <div className="flex flex-col gap-1.5 mb-3">
+                <label className="text-xs font-medium text-[var(--text-secondary)]">
+                  {t("settingsPage.webProxy")}
+                </label>
+                <input
+                  type="text"
+                  value={webProxy}
+                  onChange={(e) => setWebProxy(e.target.value)}
+                  placeholder={t("settingsPage.proxyPlaceholder")}
+                  className="w-full h-9 px-3 text-sm rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border)] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--brand)] focus:ring-1 focus:ring-[var(--brand)]/30"
+                />
+              </div>
+
+              {/* LLM Proxy */}
+              <div className="flex flex-col gap-1.5 mb-3">
+                <label className="text-xs font-medium text-[var(--text-secondary)]">
+                  {t("settingsPage.llmProxy")}
+                </label>
+                <input
+                  type="text"
+                  value={llmProxy}
+                  onChange={(e) => setLlmProxy(e.target.value)}
+                  placeholder={t("settingsPage.proxyPlaceholder")}
+                  className="w-full h-9 px-3 text-sm rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border)] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--brand)] focus:ring-1 focus:ring-[var(--brand)]/30"
+                />
+              </div>
+
+              {/* Browser Proxy */}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-medium text-[var(--text-secondary)]">
+                  {t("settingsPage.browserProxy")}
+                </label>
+                <input
+                  type="text"
+                  value={browserProxy}
+                  onChange={(e) => setBrowserProxy(e.target.value)}
+                  placeholder={t("settingsPage.proxyPlaceholder")}
+                  className="w-full h-9 px-3 text-sm rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border)] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--brand)] focus:ring-1 focus:ring-[var(--brand)]/30"
+                />
+              </div>
             </div>
           </div>
         )}

@@ -28,11 +28,13 @@ async def _resolve_provider(provider_name: str | None = None) -> ProviderInfo:
     raise ValueError("No provider configured. Run 'crabagent provider add' to add one.")
 
 
-def _litellm_params(provider: ProviderInfo) -> dict:
+def _litellm_params(provider: ProviderInfo, proxy: str = "") -> dict:
     params: dict = {"api_key": provider.api_key}
     if provider.base_url:
         params["api_base"] = provider.base_url
         params["custom_llm_provider"] = "openai"
+    if proxy:
+        params["proxy"] = proxy
     return params
 
 
@@ -150,7 +152,10 @@ async def run_agent(
             logger.debug("middleware run_start failed", exc_info=True)
 
     provider = await _resolve_provider(context.provider_name)
-    llm = _litellm_params(provider)
+    from crabagent.core.proxy import resolve_llm_proxy
+
+    proxy = await resolve_llm_proxy(provider)
+    llm = _litellm_params(provider, proxy)
     model = context.model or "gpt-4"
     if "/" not in model:
         model = f"openai/{model}"
