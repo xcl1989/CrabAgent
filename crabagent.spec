@@ -253,6 +253,19 @@ _litellm_datas = collect_data_files('litellm', include_py_files=False)
 DATAS.extend(_litellm_datas)
 print(f"[spec] Collected {len(_litellm_datas)} litellm data files")
 
+# ── crabagent: write VERSION file for fallback version resolution ──
+_VERSION_FILE = PROJECT_ROOT / "src" / "crabagent" / "VERSION"
+_version = "0.0.0"
+_pyproject = PROJECT_ROOT / "pyproject.toml"
+if _pyproject.exists():
+    for line in _pyproject.read_text().splitlines():
+        if line.strip().startswith("version") and "=" in line:
+            _version = line.split("=", 1)[1].strip().strip('"').strip("'")
+            break
+_VERSION_FILE.write_text(_version)
+DATAS.append((str(_VERSION_FILE), "crabagent"))
+print(f"[spec] VERSION file: {_version}")
+
 # ── Analysis ───────────────────────────────────────────────────
 a = Analysis(
     [str(SRC / "crabagent" / "__main__.py")],
