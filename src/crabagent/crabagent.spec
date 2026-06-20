@@ -74,8 +74,8 @@ EXCLUDES = [
     "filecmp", "fileinput",
     "wave", "wave", "chunk", "aifc", "sunau",
     "nis",
-    # Cryptography backends
-    "cryptography.hazmat.backends.openssl",  # keep core but drop docs
+    # Cryptography backends (keep all — jose needs openssl for JWT signing)
+    # "cryptography.hazmat.backends.openssl",
     # MCP / dev
     "IPython", "jupyter", "notebook", "ipykernel",
     "debugpy", "pydevd",
@@ -259,6 +259,12 @@ if STATIC.exists():
         if f.is_file():
             rel = f.relative_to(SRC)
             DATAS.append((str(f), str(rel.parent)))
+
+# Also bundle VERSION file for version resolution in frozen context
+for _vp in [SRC / "crabagent" / "VERSION", SRC / "VERSION"]:
+    if _vp.exists():
+        DATAS.append((str(_vp), "crabagent"))
+        break
 
 # ── litellm: all data files via collect_data_files (JSON, YAML, etc.) ──
 _litellm_datas = collect_data_files('litellm', include_py_files=False)

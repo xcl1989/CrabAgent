@@ -184,7 +184,7 @@ function waitForServer(maxWait = 60000) {
   return new Promise((resolve, reject) => {
     const t0 = Date.now();
     function check() {
-      http.get(`${URL}/api/health`, (r) => { if (r.statusCode === 200) resolve(); else retry(); })
+      http.get(`${URL}/health`, (r) => { if (r.statusCode === 200) resolve(); else retry(); })
         .on('error', retry);
       function retry() { if (Date.now() - t0 > maxWait) reject(new Error('Timeout')); else setTimeout(check, 500); }
     }

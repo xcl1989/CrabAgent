@@ -218,6 +218,8 @@ def _mount_spa(app: FastAPI):
     from starlette.staticfiles import StaticFiles
 
     dist: Path | None = None
+
+    # 1. Try importlib.resources (works for normal pip install)
     try:
         static_ref = importlib.resources.files("crabagent").joinpath("static")
         if static_ref.is_dir():
@@ -225,6 +227,21 @@ def _mount_spa(app: FastAPI):
     except Exception:
         pass
 
+    # 2. Try PyInstaller frozen location (sys._MEIPASS/_internal/static)
+    if dist is None:
+        try:
+            import sys
+            meipass = getattr(sys, '_MEIPASS', None) or (
+                Path(sys.executable).parent / '_internal' if getattr(sys, 'frozen', False) else None
+            )
+            if meipass:
+                candidate = Path(meipass) / "static"
+                if candidate.is_dir():
+                    dist = candidate
+        except Exception:
+            pass
+
+    # 3. Fallback: development path (src/crabagent/frontend/dist)
     if dist is None:
         dist = Path(__file__).parent.parent.parent.parent / "frontend" / "dist"
     if not dist.exists():
