@@ -216,7 +216,7 @@ async def run_agent(
                 **llm,
                 messages=_build_messages(context),
                 tools=tools,
-                max_tokens=settings.max_tokens,
+                **({} if provider.provider_type == "chatgpt" else {"max_tokens": settings.max_tokens}),
                 stream=True,
                 stream_options={"include_usage": True},
                 reasoning_effort=reasoning_effort,
@@ -330,6 +330,12 @@ async def run_agent(
 
             if reasoning_text:
                 await context.event_bus.emit(AgentEvent(type=EventType.THINKING_DONE, data={"text": reasoning_text}))
+            elif reasoning_tokens > 0:
+                # ChatGPT subscription returns encrypted reasoning (no plaintext).
+                # Emit a placeholder so the user sees that thinking happened.
+                placeholder = f"🧠 模型使用了 {reasoning_tokens} tokens 进行推理（内容已加密，不公开）"
+                assistant_msg["reasoning_content"] = placeholder
+                await context.event_bus.emit(AgentEvent(type=EventType.THINKING_DONE, data={"text": placeholder}))
 
             # Context compression: check AFTER LLM returns (we now have the
             # real token count) but BEFORE appending the current response,

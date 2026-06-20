@@ -32,7 +32,8 @@ echo "  Done."
 # 4. Copy backend binary to Electron resources
 echo "[4/5] Copying backend to Electron app..."
 mkdir -p electron/resources
-cp dist/crabagent-backend electron/resources/
+rm -rf electron/resources/crabagent-backend
+cp -R dist/crabagent-backend electron/resources/
 echo "  Done."
 
 # 5. Build Electron .app
