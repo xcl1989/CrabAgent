@@ -70,6 +70,12 @@ CHATGPT_MODELS = [
     "gpt-5.1-codex-mini",
 ]
 
+CHATGPT_IMAGE_MODELS = [
+    "image-2",
+    "gpt-image-2",
+    "chatgpt-image-latest",
+]
+
 
 PROVIDER_CATALOG: dict[str, dict] = {
     "chatgpt": {

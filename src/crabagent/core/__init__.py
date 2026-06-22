@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 def configure_litellm() -> None:
     """Centralised litellm initialisation for all entry points (CLI + Serve)."""
     from crabagent.core.config import settings
-    from crabagent.core.provider_store import CHATGPT_MODELS
+    from crabagent.core.provider_store import CHATGPT_IMAGE_MODELS, CHATGPT_MODELS
 
     litellm.set_verbose = False
     litellm.num_retries = 0  # disable litellm's built-in retry — we handle retries in loop.py
@@ -31,12 +31,24 @@ def configure_litellm() -> None:
                 "litellm_provider": "chatgpt",
             }
 
+    # Register ChatGPT subscription image models in litellm's model_cost.
+    for m in CHATGPT_IMAGE_MODELS:
+        key = f"chatgpt/{m}"
+        if key not in litellm.model_cost:
+            litellm.model_cost[key] = {
+                "input_cost_per_token": 0.0,
+                "output_cost_per_token": 0.0,
+                "mode": "image_generation",
+                "litellm_provider": "chatgpt",
+            }
+
     logging.getLogger("LiteLLM").setLevel(logging.WARNING)
     logging.getLogger("primp").setLevel(logging.WARNING)
     logger.debug(
-        "litellm configured: retries=0 (handled in loop), timeout=%ds, %d chatgpt models registered",
+        "litellm configured: retries=0 (handled in loop), timeout=%ds, %d chatgpt models + %d image models registered",
         settings.llm_request_timeout,
         len(CHATGPT_MODELS),
+        len(CHATGPT_IMAGE_MODELS),
     )
 
 
@@ -44,6 +56,7 @@ import crabagent.core.agent.tools.bash  # noqa: F401
 import crabagent.core.agent.tools.edit  # noqa: F401
 import crabagent.core.agent.tools.glob  # noqa: F401
 import crabagent.core.agent.tools.grep  # noqa: F401
+import crabagent.core.agent.tools.image  # noqa: F401
 import crabagent.core.agent.tools.memory  # noqa: F401
 import crabagent.core.agent.tools.office  # noqa: F401
 import crabagent.core.agent.tools.read  # noqa: F401

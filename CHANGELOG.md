@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.11.7] — Image Generation Persistence Fix
+
+### Fixed
+- **Generated images disappear after streaming ends** — the root cause was a chain of issues:
+  - `_on_image_generated` listened to `TOOL_RESULT` events whose payload was truncated to 2k chars, causing JSON parse failures for larger results. Switched to listen on `MESSAGE_CREATED` which carries the full 20k-char result.
+  - Tool messages now include the `name` field so the image handler can identify `image_generate` calls.
+  - `/api/files/image` URL with token auth was unreliable for rendering persisted screenshots. Server now inlines base64 `image_data` directly in the message API response, eliminating the secondary authenticated fetch.
+  - Frontend merge logic in `agent_end` caused duplicate or missing screenshots when DB already had screenshot records — now properly deduplicates.
+
+### Added
+- **`ImageGenerateRender`** — dedicated `ToolResultRender` component for `image_generate` tool results. Extracts image paths from the tool result JSON and renders them inline, providing a fallback display path even if screenshot messages are missing.
+
+### Changed
+- `message_to_response` now inlines screenshot images as base64 data URLs in the `image_data` field for direct frontend rendering.
+- `Message` type updated with optional `image_data` field.
+
+---
+
 ## [0.11.6] — GPT-5.5 Codex + Hotfixes
 
 ### Added

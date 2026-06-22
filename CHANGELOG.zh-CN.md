@@ -8,6 +8,24 @@ English version: [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
+## [0.11.7] — 图片生成持久化修复
+
+### 修复
+- **生成的图片在流式输出结束后消失** — 根因是一连串问题：
+  - `_on_image_generated` 监听 `TOOL_RESULT` 事件，其 payload 被截断到 2k 字符，导致较大 JSON 解析失败。改为监听 `MESSAGE_CREATED`，携带完整的 20k 字符结果。
+  - Tool 消息现在包含 `name` 字段，图片处理器可以识别 `image_generate` 调用。
+  - 前端用 `/api/files/image` + token 认证 URL 加载持久化截图时不可靠。服务端现在直接在消息 API 响应中内联 base64 `image_data`，消除二次认证请求。
+  - `agent_end` 时前端合并逻辑在 DB 已有截图消息时导致重复或丢失——现已正确去重。
+
+### 新增
+- **`ImageGenerateRender`** — `image_generate` 工具的专用渲染组件。从工具结果 JSON 中提取图片路径并内联渲染，即使截图消息丢失也能显示。
+
+### 变更
+- `message_to_response` 现在将截图图片以 base64 data URL 内联到 `image_data` 字段中，前端可直接渲染。
+- `Message` 类型新增可选 `image_data` 字段。
+
+---
+
 ## [0.11.6] — GPT-5.5 Codex 支持 + 修复
 
 ### 新增

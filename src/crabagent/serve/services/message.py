@@ -108,6 +108,24 @@ def message_to_dict(msg: Message) -> dict:
     return d
 
 
+def _try_inline_image(path_str: str) -> str | None:
+    """Read an image file and return a base64 data URL, or None on failure."""
+    import base64
+    from pathlib import Path
+
+    try:
+        p = Path(path_str)
+        if not p.is_file():
+            return None
+        ext = p.suffix.lower().lstrip(".")
+        mime_map = {"jpg": "jpeg", "jpeg": "jpeg", "png": "png", "webp": "webp", "gif": "gif", "avif": "avif"}
+        mime = mime_map.get(ext, "png")
+        b64 = base64.b64encode(p.read_bytes()).decode()
+        return f"data:image/{mime};base64,{b64}"
+    except Exception:
+        return None
+
+
 def message_to_response(msg: Message) -> dict:
     d: dict = {
         "id": msg.id,
@@ -116,6 +134,12 @@ def message_to_response(msg: Message) -> dict:
         "content": msg.content or "",
         "created_at": msg.created_at.isoformat() if msg.created_at else None,
     }
+    # Inline screenshot images as base64 data URLs so the frontend can
+    # render them directly without a separate authenticated API call.
+    if msg.role == "screenshot" and msg.content:
+        data_url = _try_inline_image(msg.content)
+        if data_url:
+            d["image_data"] = data_url
     if msg.tool_calls:
         try:
             d["tool_calls"] = json.loads(msg.tool_calls)

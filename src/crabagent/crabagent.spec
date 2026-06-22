@@ -160,6 +160,7 @@ HIDDEN_IMPORTS = [
     "crabagent.core.agent.tools.edit",
     "crabagent.core.agent.tools.glob",
     "crabagent.core.agent.tools.grep",
+    "crabagent.core.agent.tools.image",
     "crabagent.core.agent.tools.read",
     "crabagent.core.agent.tools.web",
     "crabagent.core.agent.tools.write",
@@ -270,6 +271,16 @@ for _vp in [SRC / "crabagent" / "VERSION", SRC / "VERSION"]:
 _litellm_datas = collect_data_files('litellm', include_py_files=False)
 DATAS.extend(_litellm_datas)
 print(f"[spec] Collected {len(_litellm_datas)} litellm data files")
+
+# ── crabagent: i18n JSON files for agent switch / system prompt translations ──
+_I18N_DIR = SRC / "crabagent" / "core" / "i18n"
+_i18n_count = 0
+if _I18N_DIR.exists():
+    for _f in _I18N_DIR.glob("*.json"):
+        _rel = _f.relative_to(SRC)
+        DATAS.append((str(_f), str(_rel.parent)))
+        _i18n_count += 1
+print(f"[spec] Collected {_i18n_count} i18n translation files")
 
 # ── Analysis ───────────────────────────────────────────────────
 a = Analysis(

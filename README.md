@@ -254,7 +254,7 @@ AI agents can read, create, edit, and preview Office documents (`.docx`, `.xlsx`
 Remembers your project context across sessions. Zero extra cost.
 
 ### 🖼️ Multi-modal
-Paste/drop images into conversations. Auto-detects vision model support.
+Paste/drop images into conversations. Auto-detects vision model support. AI-generated images persist across sessions with inline rendering.
 
 ### 🌐 Browser Automation
 ```bash

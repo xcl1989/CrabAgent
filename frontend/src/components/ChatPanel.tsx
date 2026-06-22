@@ -821,9 +821,13 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(
                   <img
                     key={idx}
                     src={img}
-                    alt="Browser screenshot"
+                    alt="Generated image"
                     className="max-w-full max-h-[400px] rounded-lg object-contain cursor-pointer border border-[var(--border)] hover:border-[var(--brand-border)] transition-colors"
                     onClick={() => setPreviewImage(img)}
+                    onError={(e) => {
+                      const target = e.currentTarget;
+                      target.style.display = "none";
+                    }}
                   />
                 ))}
               </div>

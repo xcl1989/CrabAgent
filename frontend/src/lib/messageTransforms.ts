@@ -316,6 +316,29 @@ export function dbMessagesToChat(msgs: Message[]): ChatMessage[] {
       continue;
     }
 
+    // Screenshot messages persisted from image_generate tool.
+    // Prefer server-side inline base64 (image_data) over building a
+    // /files/image URL that requires token auth (which can fail).
+    if (m.role === "screenshot" && m.content) {
+      const images: string[] = [];
+      // Prefer inline base64 from API response
+      if (m.image_data) {
+        images.push(m.image_data);
+      } else {
+        // Fallback: construct /files/image URL with token
+        const token = localStorage.getItem("crab_token") || "";
+        const apiUrl = `/api/files/image?path=${encodeURIComponent(m.content)}&absolute=true&token=${encodeURIComponent(token)}`;
+        images.push(apiUrl);
+      }
+      result.push({
+        id: `db-${m.id}`,
+        role: "screenshot",
+        content: "",
+        images,
+      });
+      continue;
+    }
+
     if (m.role === "stats" && m.content) {
       try {
         const raw = JSON.parse(m.content);

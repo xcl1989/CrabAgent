@@ -68,6 +68,8 @@ export default function ToolResultRender({
     case "request_help":
     case "plan_task":
       return <DelegateRender name={name} args={args} result={result} accentVar={accentVar} />;
+    case "image_generate":
+      return <ImageGenerateRender args={args} result={result} images={images} onPreviewImage={onPreviewImage} accentVar={accentVar} />;
     default:
       return <GenericRender name={name} args={args} result={result} images={images} onPreviewImage={onPreviewImage} accentVar={accentVar} />;
   }
@@ -612,7 +614,142 @@ function DelegateRender({ name, args, result, accentVar }: { name: string; args:
 }
 
 // ---------------------------------------------------------------------------
-// 10. Generic fallback — key:value args + result text
+// 10. Image Generate — show generated images inline from result JSON
+// ---------------------------------------------------------------------------
+
+function ImageGenerateRender({ args, result, images, onPreviewImage, accentVar }: {
+  args: Record<string, unknown>; result: string; images?: string[]; onPreviewImage?: (url: string) => void; accentVar: string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const err = isError(result);
+
+  // Parse the JSON result to extract image info
+  let parsed: Record<string, unknown> = {};
+  let imageEntries: Array<Record<string, unknown>> = [];
+  let provider = "";
+  let model = "";
+  let generated = 0;
+
+  if (!err) {
+    try {
+      parsed = JSON.parse(result);
+      imageEntries = (parsed.images as Array<Record<string, unknown>>) || [];
+      provider = (parsed.provider as string) || "";
+      model = (parsed.model as string) || "";
+      generated = (parsed.generated as number) || 0;
+    } catch {
+      // fall through to generic display
+    }
+  }
+
+  // If we couldn't parse images, fall back to generic
+  if (imageEntries.length === 0) {
+    return <GenericRender name="image_generate" args={args} result={result} images={images} onPreviewImage={onPreviewImage} accentVar={accentVar} />;
+  }
+
+  const prompt = (args.prompt as string) || "";
+
+  // Convert file paths to /api/files/image URLs (same logic as dbMessagesToChat)
+  const resolvedImages = imageEntries.map((entry) => {
+    const path = (entry.path as string) || "";
+    if (!path) return "";
+    const token = (typeof localStorage !== "undefined" && localStorage.getItem("crab_token")) || "";
+    return `/api/files/image?path=${encodeURIComponent(path)}&absolute=true&token=${encodeURIComponent(token)}`;
+  }).filter(Boolean);
+
+  return (
+    <Container accentVar={accentVar}>
+      <Header
+        icon={<ImageIcon size={13} />}
+        title="Image Generated"
+        subtitle={generated > 0 ? `${generated} image${generated > 1 ? "s" : ""} · ${model}` : model}
+      />
+      {/* Prompt */}
+      {prompt && (
+        <div className="px-3 py-2 border-b border-[var(--border-subtle)]">
+          <div className="text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] mb-0.5">Prompt</div>
+          <div className="text-[12px] text-[var(--text-secondary)] leading-relaxed">{prompt}</div>
+        </div>
+      )}
+      {/* Images */}
+      <div className="p-2 flex flex-wrap gap-2">
+        {(resolvedImages.length > 0 ? resolvedImages : images || []).map((img, idx) => {
+          if (!img) return null;
+          return (
+            <img
+              key={idx}
+              src={img}
+              alt={`Generated ${idx + 1}`}
+              className="max-w-full max-h-[300px] rounded-lg object-contain cursor-pointer border border-[var(--border)] hover:border-[var(--brand-border)] transition-colors"
+              onClick={() => onPreviewImage?.(img)}
+              onError={(e) => {
+                // Hide broken image, show fallback text
+                const target = e.currentTarget;
+                target.style.display = "none";
+                const fallback = target.nextElementSibling;
+                if (fallback) (fallback as HTMLElement).style.display = "flex";
+              }}
+            />
+          );
+        })}
+      </div>
+      {/* Fallback: show file paths if images fail to load */}
+      {imageEntries.length > 0 && (
+        <div style={{ display: resolvedImages.length > 0 ? "none" : "flex" }}
+          className="px-3 py-2 flex-col gap-1 border-t border-[var(--border-subtle)]">
+          <div className="text-[10px] uppercase tracking-wider text-[var(--text-tertiary)] mb-0.5">Saved Files</div>
+          {imageEntries.map((entry, i) => {
+            const path = (entry.path as string) || (entry.filename as string) || `Image ${i + 1}`;
+            return (
+              <div key={i} className="text-[12px] font-mono text-[var(--text-secondary)] break-all">
+                {path}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {/* Details: collapsed by default */}
+      {parsed && Object.keys(parsed).length > 0 && (
+        <>
+          <button
+            onClick={() => setExpanded((v) => !v)}
+            className="w-full flex items-center justify-center gap-1 py-1.5 border-t border-[var(--border-subtle)] text-[11px] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
+          >
+            <ChevronDown size={12} className={cn(expanded && "rotate-180 transition-transform")} />
+            {expanded ? "Hide details" : "Show details"}
+          </button>
+          {expanded && (
+            <div className="px-3 py-2 space-y-0.5 border-t border-[var(--border-subtle)]">
+              <KVRow label="provider" value={provider} />
+              <KVRow label="model" value={model} />
+              <KVRow label="size" value={(parsed.size as string) || ""} />
+              <KVRow label="quality" value={(parsed.quality as string) || ""} />
+            </div>
+          )}
+        </>
+      )}
+      {err && (
+        <div className="px-3 py-2 text-[12px] text-[var(--danger)] border-t border-[var(--border-subtle)]">
+          {result}
+        </div>
+      )}
+    </Container>
+  );
+}
+
+// Simple image icon component
+function ImageIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+      <circle cx="8.5" cy="8.5" r="1.5" />
+      <polyline points="21 15 16 10 5 21" />
+    </svg>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 11. Generic fallback — key:value args + result text
 // ---------------------------------------------------------------------------
 
 function GenericRender({ name, args, result, images, onPreviewImage, accentVar }: {

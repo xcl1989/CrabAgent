@@ -106,7 +106,13 @@ def _translate_agent_field(agent_name: str, field: str, original: str, locale: s
     """Return translated agent field if available, otherwise the original."""
     from crabagent.core.i18n import t
 
-    return t(f"agents.{agent_name}.{field}", locale) or original
+    key = f"agents.{agent_name}.{field}"
+    translated = t(key, locale)
+    # t() returns the key itself when translation is not found.
+    # In that case, fall back to the original value from agent_def.
+    if translated == key:
+        return original
+    return translated or original
 
 
 def build_agent_switch_msg(agent_def: dict, locale: str = "en") -> dict:
@@ -115,11 +121,17 @@ def build_agent_switch_msg(agent_def: dict, locale: str = "en") -> dict:
     agent_name = agent_def["name"]
     icon = agent_def.get("icon", "")
     _d = _translate_agent_field(agent_name, "display_name", agent_def["display_name"], locale)
+    _r = _translate_agent_field(agent_name, "role", agent_def.get("role", ""), locale)
     _g = _translate_agent_field(agent_name, "goal", agent_def["goal"], locale)
+    _b = _translate_agent_field(agent_name, "backstory", agent_def.get("backstory", ""), locale)
     lines = [
         t("agent_switch.header", locale, icon=icon, display_name=_d),
+        t("agent_switch.role", locale, role=_r),
         t("agent_switch.goal", locale, goal=_g),
     ]
+    if _b:
+        lines.append(t("agent_switch.backstory", locale, backstory=_b))
+    lines.append(t("agent_switch.footer", locale))
     return {"role": "user", "content": "\n".join(lines), "agent": agent_name}
 
 
@@ -132,8 +144,8 @@ def _build_system_prompt(
     from crabagent.core.i18n import t
 
     agent_name = agent_def["name"]
-    _r = _translate_agent_field(agent_name, "role", agent_def["role"], locale)
-    _g = _translate_agent_field(agent_name, "goal", agent_def["goal"], locale)
+    _r = _translate_agent_field(agent_name, "role", agent_def.get("role", ""), locale)
+    _g = _translate_agent_field(agent_name, "goal", agent_def.get("goal", ""), locale)
     _b = _translate_agent_field(agent_name, "backstory", agent_def.get("backstory", ""), locale)
     parts = [
         t("agent_system.role", locale, role=_r),
@@ -189,11 +201,17 @@ async def build_team_prompt(locale: str = "en") -> str:
         if denied:
             denied_str = ", ".join(denied)
             perm_info = " " + t("team_prompt.restricted", locale, tools=denied_str)
-        # Use translated agent fields when available
+        # Use translated agent fields when available (fall back to original if no i18n entry)
         agent_name = a["name"]
-        display_name = t(f"agents.{agent_name}.display_name", locale) or a["display_name"]
-        role = t(f"agents.{agent_name}.role", locale) or a["role"]
-        goal = t(f"agents.{agent_name}.goal", locale) or a["goal"]
+        _dk = f"agents.{agent_name}.display_name"
+        _rk = f"agents.{agent_name}.role"
+        _gk = f"agents.{agent_name}.goal"
+        _dt = t(_dk, locale)
+        _rt = t(_rk, locale)
+        _gt = t(_gk, locale)
+        display_name = _dt if _dt != _dk else a["display_name"]
+        role = _rt if _rt != _rk else a["role"]
+        goal = _gt if _gt != _gk else a["goal"]
         lines.append(f"- **{display_name}** (`{agent_name}`): {role}. {goal}{perm_info}")
     lines.extend(
         [

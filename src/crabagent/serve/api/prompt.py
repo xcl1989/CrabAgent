@@ -701,6 +701,70 @@ async def prompt_async(
 
     context.event_bus.subscribe(_on_browser_screenshot)
 
+    # ── image_generate → screenshot events (show generated images inline) ──
+    # Listen for MESSAGE_CREATED (tool result) instead of TOOL_RESULT because
+    # TOOL_RESULT carries a truncated preview (2k chars) while MESSAGE_CREATED
+    # carries the full result (up to 20k chars).  The full result is needed to
+    # reliably parse the JSON with image paths.
+    async def _on_image_generated(event: AgentEvent):
+        if event.type != EventType.MESSAGE_CREATED:
+            return
+        msg = event.data.get("message", {})
+        if msg.get("role") != "tool":
+            return
+        if msg.get("name") != "image_generate":
+            return
+        result = str(msg.get("content", "") or "")
+        if not result:
+            return
+        try:
+            import json as _json
+
+            parsed = _json.loads(result)
+        except Exception:
+            logger.debug("image_generate: failed to parse tool result JSON")
+            return
+        image_entries = parsed.get("images", []) if isinstance(parsed, dict) else []
+        for entry in image_entries:
+            path = entry.get("path", "")
+            if not path:
+                continue
+            try:
+                with open(path, "rb") as f:
+                    b64 = _b64.b64encode(f.read()).decode()
+                # Guess mime from extension
+                ext = path.rsplit(".", 1)[-1].lower() if "." in path else "png"
+                mime_map = {"jpg": "jpeg", "jpeg": "jpeg", "png": "png", "webp": "webp", "gif": "gif", "avif": "avif"}
+                mime = mime_map.get(ext, "png")
+                data_url = f"data:image/{mime};base64,{b64}"
+            except Exception:
+                logger.debug("image_generate: failed to read image file %s", path, exc_info=True)
+                continue
+            # Emit SCREENSHOT for live SSE display
+            await context.event_bus.emit(
+                AgentEvent(
+                    type=EventType.SCREENSHOT,
+                    data={"image": data_url, "tool": "image_generate"},
+                )
+            )
+            # Also emit MESSAGE_CREATED so screenshot is persisted to DB.
+            # Store file path (not base64) to keep DB small; frontend loads
+            # the image via /files/image API on session reload.
+            await context.event_bus.emit(
+                AgentEvent(
+                    type=EventType.MESSAGE_CREATED,
+                    data={
+                        "message": {
+                            "role": "screenshot",
+                            "content": path,
+                            "agent": msg.get("agent", "default"),
+                        }
+                    },
+                )
+            )
+
+    context.event_bus.subscribe(_on_image_generated)
+
     if not settings.auto_approve_tools:
         from crabagent.serve.api.confirm import request_confirmation
 

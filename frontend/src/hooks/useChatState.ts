@@ -156,7 +156,20 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
             setMessages((prev) => {
               const dbTotal = dbMsgs.reduce((s, m) => s + (m.content?.length || 0), 0);
               const prevTotal = prev.reduce((s, m) => s + (m.content?.length || 0), 0);
-              return dbTotal >= prevTotal ? dbMsgs : prev;
+              // Preserve live-only SSE messages (screenshots, etc.) that
+              // don't exist in DB. But skip if DB already has screenshots
+              // (they carry inline base64, so no auth issues).
+              const dbHasScreenshots = dbMsgs.some((m) => m.role === "screenshot");
+              const liveOnly = dbHasScreenshots
+                ? []
+                : prev.filter((m) => m.role === "screenshot" && m.images?.length);
+              if (dbTotal >= prevTotal) {
+                return [...dbMsgs, ...liveOnly];
+              }
+              // Merge: keep prev + append any new DB messages
+              const dbIds = new Set(dbMsgs.map((m) => m.id));
+              const retained = prev.filter((m) => m.role === "screenshot" || !dbIds.has(m.id));
+              return [...dbMsgs, ...retained.filter((m) => !dbMsgs.some((d) => d.id === m.id))];
             });
           }, 800);
         }
@@ -245,7 +258,11 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
           setMessages((prev) => {
             const dbTotal = chatMsgs.reduce((s, m) => s + (m.content?.length || 0), 0);
             const prevTotal = prev.reduce((s, m) => s + (m.content?.length || 0), 0);
-            return dbTotal >= prevTotal ? chatMsgs : prev;
+            const dbHasScreenshots = chatMsgs.some((m) => m.role === "screenshot");
+            const liveOnly = dbHasScreenshots
+              ? []
+              : prev.filter((m) => m.role === "screenshot" && m.images?.length);
+            return dbTotal >= prevTotal ? [...chatMsgs, ...liveOnly] : prev;
           });
         }
 

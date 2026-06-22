@@ -34,6 +34,7 @@ export interface Message {
   parent_id?: number | null;
   created_at: string | null;
   compressed?: boolean;
+  image_data?: string;
 }
 
 export interface BranchInfo {

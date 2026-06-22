@@ -456,6 +456,7 @@ async def run_agent(
                     "content": result,
                     "tool_call_id": tc["id"],
                     "agent": context.current_agent,
+                    "name": meta["name"],
                 }
                 context.messages.append(tool_msg)
 

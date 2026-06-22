@@ -148,6 +148,7 @@ HIDDEN_IMPORTS = [
     "crabagent.core.agent.tools.edit",
     "crabagent.core.agent.tools.glob",
     "crabagent.core.agent.tools.grep",
+    "crabagent.core.agent.tools.image",
     "crabagent.core.agent.tools.read",
     "crabagent.core.agent.tools.web",
     "crabagent.core.agent.tools.write",
@@ -265,6 +266,16 @@ if _pyproject.exists():
 _VERSION_FILE.write_text(_version)
 DATAS.append((str(_VERSION_FILE), "crabagent"))
 print(f"[spec] VERSION file: {_version}")
+
+# ── crabagent: i18n JSON files (needed for agent switch / system prompt translations) ──
+_I18N_DIR = SRC / "crabagent" / "core" / "i18n"
+_i18n_count = 0
+if _I18N_DIR.exists():
+    for _f in _I18N_DIR.glob("*.json"):
+        _rel = _f.relative_to(SRC)
+        DATAS.append((str(_f), str(_rel.parent)))
+        _i18n_count += 1
+print(f"[spec] Collected {_i18n_count} i18n translation files")
 
 # ── Analysis ───────────────────────────────────────────────────
 a = Analysis(

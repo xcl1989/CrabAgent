@@ -76,7 +76,7 @@ def _build_tree(dir_path: Path, base: Path, depth: int, absolute: bool = False) 
     try:
         for child in sorted(dir_path.iterdir()):
             name = child.name
-            if name.startswith("."):
+            if name.startswith(".") and name != ".crabagent":
                 continue
             rel = str(child.resolve()) if absolute else str(child.relative_to(base))
             is_dir = child.is_dir()
