@@ -42,6 +42,7 @@ export default function ProviderPanel({
   const [chatgptPolling, setChatgptPolling] = useState(false);
   const [chatgptAccount, setChatgptAccount] = useState<chatgptApi.ChatGPTAccountInfo | null>(null);
   const [chatgptAccountBusy, setChatgptAccountBusy] = useState(false);
+  const [resetBusy, setResetBusy] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Check ChatGPT auth status when a chatgpt provider exists
@@ -104,6 +105,33 @@ export default function ProviderPanel({
       toast.error("获取账户信息失败");
     } finally {
       setChatgptAccountBusy(false);
+    }
+  };
+
+  const handleConsumeReset = async () => {
+    const credits = chatgptAccount?.rate_limits?.banked_resets;
+    const available = credits?.available_count ?? 0;
+    if (available <= 0) {
+      toast.error("没有可用的重置额度");
+      return;
+    }
+    const firstCredit = credits?.credits?.[0];
+    const creditId = firstCredit?.id;
+    if (!creditId) {
+      toast.error("无法获取重置额度 ID");
+      return;
+    }
+    setResetBusy(true);
+    try {
+      await chatgptApi.consumeResetCredit(creditId);
+      toast.success("额度已重置！");
+      // Refresh account info after reset
+      const info = await chatgptApi.getAccountInfo();
+      setChatgptAccount(info);
+    } catch {
+      toast.error("重置失败，请稍后重试");
+    } finally {
+      setResetBusy(false);
     }
   };
 
@@ -479,6 +507,39 @@ export default function ProviderPanel({
                                          chatgptAccount.rate_limits.credits.has_credits ? `余额: ${chatgptAccount.rate_limits.credits.balance || "—"}` :
                                          "无额外 credits"}
                                       </span>
+                                    </div>
+                                  )}
+
+                                  {/* Banked Rate-Limit Resets */}
+                                  {chatgptAccount.rate_limits.banked_resets && (
+                                    <div className="pt-2 border-t border-[var(--border)] space-y-1.5">
+                                      <div className="flex items-center justify-between">
+                                        <span className="text-[var(--text-secondary)] font-medium">手动重置额度</span>
+                                        <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${chatgptAccount.rate_limits.banked_resets.available_count && chatgptAccount.rate_limits.banked_resets.available_count > 0 ? "bg-[var(--success-bg)] text-[var(--success)]" : "bg-[var(--bg-tertiary)] text-[var(--text-tertiary)]"}`}>
+                                          {chatgptAccount.rate_limits.banked_resets.available_count ?? 0} 个可用
+                                        </span>
+                                      </div>
+                                      {chatgptAccount.rate_limits.banked_resets.credits && chatgptAccount.rate_limits.banked_resets.credits.length > 0 && (
+                                        <div className="space-y-1">
+                                          {chatgptAccount.rate_limits.banked_resets.credits.map((c, idx) => (
+                                            <div key={c.id || idx} className="flex justify-between text-[10px] text-[var(--text-tertiary)]">
+                                              <span>{c.reset_type === "codex_rate_limits" ? "Codex 限流重置" : c.reset_type || "限流重置"}</span>
+                                              {c.expires_at && <span>过期: {new Date(c.expires_at).toLocaleDateString("zh-CN")}</span>}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      )}
+                                      {(chatgptAccount.rate_limits.banked_resets.available_count ?? 0) > 0 && (
+                                        <Button
+                                          variant="brand"
+                                          size="sm"
+                                          onClick={handleConsumeReset}
+                                          loading={resetBusy}
+                                          className="w-full mt-1"
+                                        >
+                                          {resetBusy ? "重置中..." : "⚡ 立即使用重置"}
+                                        </Button>
+                                      )}
                                     </div>
                                   )}
                                 </div>

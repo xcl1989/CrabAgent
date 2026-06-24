@@ -39,9 +39,27 @@ export interface ChatGPTAccountInfo {
       balance?: string;
       unlimited?: boolean;
     };
+    banked_resets?: {
+      available_count?: number;
+      credits?: ResetCredit[];
+    };
     error?: string;
   } | null;
   raw?: Record<string, unknown> | null;
+}
+
+export interface ResetCredit {
+  id: string;
+  reset_type?: string;
+  available_count?: number;
+  expires_at?: string | null;
+  [key: string]: unknown;
+}
+
+export interface ResetCreditsResponse {
+  credits: ResetCredit[];
+  available_count: number;
+  error?: string;
 }
 
 export function getAuthStatus(): Promise<ChatGPTAuthStatus> {
@@ -69,4 +87,12 @@ export function getAccountInfo(): Promise<ChatGPTAccountInfo> {
 
 export function listModels(): Promise<{ id: string; owned_by: string }[]> {
   return api.get("/chatgpt/models");
+}
+
+export function getResetCredits(): Promise<ResetCreditsResponse> {
+  return api.get("/chatgpt/reset-credits");
+}
+
+export function consumeResetCredit(credit_id: string): Promise<{ status: string; result?: unknown }> {
+  return api.post("/chatgpt/reset-credits/consume", { credit_id });
 }

@@ -725,6 +725,13 @@ def _build_messages(context: AgentContext) -> list[dict]:
             msg = dict(msg, content="")
         elif msg.get("role") == "assistant" and not content and not msg.get("tool_calls"):
             msg = dict(msg, content="")
+        # ── Skip internal-only roles that carry no conversational value ──
+        # These contain file paths (screenshot) or usage JSON (stats) that
+        # the LLM doesn't need. Worse: converting them to "user" can break the
+        # tool_calls → tool response sequence required by OpenAI/DeepSeek APIs.
+        if msg.get("role") in ("screenshot", "stats"):
+            continue
+
         if msg.get("role") not in ("system", "user", "assistant", "tool"):
             # compress / agent_switch etc. → user for LLM
             msg = {**msg, "role": "user"}

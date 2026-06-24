@@ -13,12 +13,12 @@ into async-friendly FastAPI endpoints and adds a quota/usage query.
 
 from __future__ import annotations
 
-import asyncio
 import base64
 import json
 import logging
 import os
 import time
+import uuid
 from typing import Any
 
 import httpx
@@ -108,7 +108,7 @@ def _read_auth_file() -> dict[str, Any] | None:
     try:
         with open(CHATGPT_AUTH_FILE) as f:
             return json.load(f)
-    except (IOError, json.JSONDecodeError):
+    except (OSError, json.JSONDecodeError):
         return None
 
 
@@ -434,78 +434,134 @@ async def get_account_info(user: User = Depends(get_current_user)):
     plan_from_jwt = auth_claims.get("chatgpt_plan_type", "")
     email = profile_claims.get("email", "")
 
-    # Make a minimal API call to get real-time rate limit headers
-    headers = {
-        "Authorization": f"Bearer {access_token}",
-        "Content-Type": "application/json",
-        "accept": "text/event-stream",
-        "User-Agent": "codex_cli_rs/0.0.0 (Darwin 24.0; arm64) xterm-256color",
-        "originator": "codex_cli_rs",
-    }
-    if account_id:
-        headers["ChatGPT-Account-Id"] = account_id
-
-    # Minimal payload — gpt-5.4 is the model that actually works for Plus accounts
-    payload = {
-        "model": "gpt-5.4",
-        "input": [{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "hi"}]}],
-        "instructions": "Reply with one word.",
-        "stream": True,
-        "store": False,
-        "include": ["reasoning.encrypted_content"],
-    }
+    # ── Strategy: try /wham/usage first (single call, richer data, no token cost).
+    #    Fall back to /codex/responses stream headers if wham is unavailable. ──
+    wham_headers = _build_wham_headers(access_token, account_id)
 
     rate_limits: dict[str, Any] = {}
     plan_from_header = ""
 
     try:
         async with httpx.AsyncClient(timeout=30) as client:
-            async with client.stream(
-                "POST",
-                f"{CHATGPT_API_BASE}/responses",
-                headers=headers,
-                json=payload,
-            ) as resp:
-                # Rate limit info is in response headers — available immediately
-                resp_headers = dict(resp.headers)
-                plan_from_header = resp_headers.get("x-codex-plan-type", "")
+            resp = await client.get(
+                f"{CHATGPT_WHAM_BASE}/usage",
+                headers=wham_headers,
+            )
+            resp.raise_for_status()
+            usage = resp.json()
 
-                primary_used = _parse_float_header(resp_headers, "x-codex-primary-used-percent")
-                secondary_used = _parse_float_header(resp_headers, "x-codex-secondary-used-percent")
-                primary_window = _parse_int_header(resp_headers, "x-codex-primary-window-minutes")
-                secondary_window = _parse_int_header(resp_headers, "x-codex-secondary-window-minutes")
-                primary_reset = _parse_int_header(resp_headers, "x-codex-primary-reset-after-seconds")
-                secondary_reset = _parse_int_header(resp_headers, "x-codex-secondary-reset-after-seconds")
+            plan_from_header = usage.get("plan_type", "")
+            rl = usage.get("rate_limit", {})
 
-                rate_limits = {
-                    "active_limit": resp_headers.get("x-codex-active-limit", ""),
-                    "plan": plan_from_header or plan_from_jwt,
-                    "primary": {
-                        "used_percent": primary_used,
-                        "window_hours": round(primary_window / 60, 1) if primary_window else None,
-                        "reset_after_minutes": round(primary_reset / 60, 1) if primary_reset else None,
-                    },
-                    "secondary": {
-                        "used_percent": secondary_used,
-                        "window_days": round(secondary_window / 1440, 1) if secondary_window else None,
-                        "reset_after_hours": round(secondary_reset / 3600, 1) if secondary_reset else None,
-                    },
-                    "credits": {
-                        "has_credits": resp_headers.get("x-codex-credits-has-credits", "").lower() == "true",
-                        "balance": resp_headers.get("x-codex-credits-balance", ""),
-                        "unlimited": resp_headers.get("x-codex-credits-unlimited", "").lower() == "true",
-                    },
+            primary = rl.get("primary_window", {})
+            secondary = rl.get("secondary_window", {})
+
+            primary_reset_s = primary.get("reset_after_seconds")
+            secondary_reset_s = secondary.get("reset_after_seconds")
+            primary_window_s = primary.get("limit_window_seconds")
+            secondary_window_s = secondary.get("limit_window_seconds")
+
+            rate_limits = {
+                "active_limit": "",
+                "plan": plan_from_header or plan_from_jwt,
+                "primary": {
+                    "used_percent": primary.get("used_percent"),
+                    "window_hours": round(primary_window_s / 3600, 1) if primary_window_s else None,
+                    "reset_after_minutes": round(primary_reset_s / 60, 1) if primary_reset_s else None,
+                },
+                "secondary": {
+                    "used_percent": secondary.get("used_percent"),
+                    "window_days": round(secondary_window_s / 86400, 1) if secondary_window_s else None,
+                    "reset_after_hours": round(secondary_reset_s / 3600, 1) if secondary_reset_s else None,
+                },
+                "credits": usage.get("credits", {}),
+            }
+
+            # Include banked reset info from the same response
+            rlrc = usage.get("rate_limit_reset_credits", {})
+            if rlrc:
+                rate_limits["banked_resets"] = {
+                    "available_count": rlrc.get("available_count", 0),
+                    "credits": [],
                 }
-
-                # Close stream immediately — we only needed headers
-                resp.aclose()
     except Exception as e:
-        logger.debug("Failed to fetch rate limits from Codex API: %s", e)
-        # Fall back to JWT-only info
-        rate_limits = {
-            "plan": plan_from_jwt,
-            "error": f"Unable to fetch real-time usage: {e}",
+        logger.debug("Failed to fetch /wham/usage, falling back to /codex/responses: %s", e)
+
+        # ── Fallback: make a minimal /codex/responses call and parse x-codex-* headers ──
+        codex_headers = {
+            **wham_headers,
+            "accept": "text/event-stream",
         }
+        payload = {
+            "model": "gpt-5.4",
+            "input": [{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "hi"}]}],
+            "instructions": "Reply with one word.",
+            "stream": True,
+            "store": False,
+            "include": ["reasoning.encrypted_content"],
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                async with client.stream(
+                    "POST",
+                    f"{CHATGPT_API_BASE}/responses",
+                    headers=codex_headers,
+                    json=payload,
+                ) as resp:
+                    resp_headers = dict(resp.headers)
+                    plan_from_header = resp_headers.get("x-codex-plan-type", "")
+
+                    primary_used = _parse_float_header(resp_headers, "x-codex-primary-used-percent")
+                    secondary_used = _parse_float_header(resp_headers, "x-codex-secondary-used-percent")
+                    primary_window = _parse_int_header(resp_headers, "x-codex-primary-window-minutes")
+                    secondary_window = _parse_int_header(resp_headers, "x-codex-secondary-window-minutes")
+                    primary_reset = _parse_int_header(resp_headers, "x-codex-primary-reset-after-seconds")
+                    secondary_reset = _parse_int_header(resp_headers, "x-codex-secondary-reset-after-seconds")
+
+                    rate_limits = {
+                        "active_limit": resp_headers.get("x-codex-active-limit", ""),
+                        "plan": plan_from_header or plan_from_jwt,
+                        "primary": {
+                            "used_percent": primary_used,
+                            "window_hours": round(primary_window / 60, 1) if primary_window else None,
+                            "reset_after_minutes": round(primary_reset / 60, 1) if primary_reset else None,
+                        },
+                        "secondary": {
+                            "used_percent": secondary_used,
+                            "window_days": round(secondary_window / 1440, 1) if secondary_window else None,
+                            "reset_after_hours": round(secondary_reset / 3600, 1) if secondary_reset else None,
+                        },
+                        "credits": {
+                            "has_credits": resp_headers.get("x-codex-credits-has-credits", "").lower() == "true",
+                            "balance": resp_headers.get("x-codex-credits-balance", ""),
+                            "unlimited": resp_headers.get("x-codex-credits-unlimited", "").lower() == "true",
+                        },
+                    }
+
+                    resp.aclose()
+        except Exception as e2:
+            logger.debug("Fallback /codex/responses also failed: %s", e2)
+            rate_limits = {
+                "plan": plan_from_jwt,
+                "error": f"Unable to fetch real-time usage: {e2}",
+            }
+
+    # Try to also fetch detailed banked reset credits (best-effort, non-blocking)
+    try:
+        reset_credits = await _fetch_reset_credits(access_token, account_id)
+        if rate_limits is None:
+            rate_limits = {}
+        if "banked_resets" not in rate_limits:
+            rate_limits["banked_resets"] = {
+                "available_count": len(reset_credits),
+                "credits": reset_credits,
+            }
+        else:
+            # Enrich with credit details from the dedicated endpoint
+            rate_limits["banked_resets"]["credits"] = reset_credits
+    except Exception as e:
+        logger.debug("Failed to fetch reset credits: %s", e)
 
     return AccountInfoResponse(
         plan=plan_from_header or plan_from_jwt or None,
@@ -513,6 +569,138 @@ async def get_account_info(user: User = Depends(get_current_user)):
         account_id=account_id,
         rate_limits=rate_limits if rate_limits else None,
     )
+
+
+# ── Rate-Limit Reset (Banked Resets) ──
+
+CHATGPT_WHAM_BASE = "https://chatgpt.com/backend-api/wham"
+
+
+def _build_wham_headers(access_token: str, account_id: str | None) -> dict[str, str]:
+    """Build the headers required for /wham/* endpoints."""
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+        "accept": "application/json",
+        "User-Agent": "codex_cli_rs/0.0.0 (Darwin 24.0; arm64) xterm-256color",
+        "originator": "codex_cli_rs",
+    }
+    if account_id:
+        headers["ChatGPT-Account-Id"] = account_id
+    return headers
+
+
+async def _fetch_reset_credits(access_token: str, account_id: str | None) -> list[dict[str, Any]]:
+    """GET /wham/rate-limit-reset-credits — list banked reset credits."""
+    headers = _build_wham_headers(access_token, account_id)
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.get(f"{CHATGPT_WHAM_BASE}/rate-limit-reset-credits", headers=headers)
+        resp.raise_for_status()
+        data = resp.json()
+        # Response shape: { credits: [{ id, reset_type, available_count, expires_at, ... }], available_count: N }
+        if isinstance(data, dict):
+            return data.get("credits", [])
+        return []
+
+
+async def _consume_reset_credit(
+    access_token: str, account_id: str | None, credit_id: str
+) -> dict[str, Any]:
+    """POST /wham/rate-limit-reset-credits/consume — redeem a banked reset."""
+    headers = _build_wham_headers(access_token, account_id)
+    body = {
+        "selected_credit": credit_id,
+        "idempotency_key": str(uuid.uuid4()),
+    }
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.post(
+            f"{CHATGPT_WHAM_BASE}/rate-limit-reset-credits/consume",
+            headers=headers,
+            json=body,
+        )
+        resp.raise_for_status()
+        # Successful consume returns { "status": "reset" } or similar
+        return resp.json()
+
+
+async def _fetch_rate_limit_status(access_token: str, account_id: str | None) -> dict[str, Any]:
+    """GET /wham/rate-limit-status — fetch current rate limit status."""
+    headers = _build_wham_headers(access_token, account_id)
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.get(f"{CHATGPT_WHAM_BASE}/rate-limit-status", headers=headers)
+        resp.raise_for_status()
+        return resp.json()
+
+
+@router.get("/reset-credits")
+async def get_reset_credits(user: User = Depends(get_current_user)):
+    """List available banked rate-limit reset credits."""
+    try:
+        access_token = await get_chatgpt_access_token()
+    except HTTPException:
+        return {"credits": [], "available_count": 0, "error": "Not authenticated"}
+
+    auth_data = _read_auth_file() or {}
+    account_id = auth_data.get("account_id") or _extract_account_id(access_token)
+
+    try:
+        credits = await _fetch_reset_credits(access_token, account_id)
+        return {
+            "credits": credits,
+            "available_count": len(credits),
+        }
+    except Exception as e:
+        logger.warning("Failed to fetch reset credits: %s", e)
+        return {"credits": [], "available_count": 0, "error": str(e)}
+
+
+class ConsumeResetRequest(BaseModel):
+    credit_id: str
+
+
+@router.post("/reset-credits/consume")
+async def consume_reset_credit_endpoint(
+    req: ConsumeResetRequest, user: User = Depends(get_current_user)
+):
+    """Consume (redeem) one banked rate-limit reset credit."""
+    try:
+        access_token = await get_chatgpt_access_token()
+    except HTTPException:
+        raise HTTPException(status_code=401, detail="ChatGPT authentication required")
+
+    auth_data = _read_auth_file() or {}
+    account_id = auth_data.get("account_id") or _extract_account_id(access_token)
+
+    try:
+        result = await _consume_reset_credit(access_token, account_id, req.credit_id)
+        return {"status": "ok", "result": result}
+    except httpx.HTTPStatusError as e:
+        detail = f"Reset failed: HTTP {e.response.status_code}"
+        try:
+            detail = f"Reset failed: {e.response.json()}"
+        except Exception:
+            pass
+        raise HTTPException(status_code=e.response.status_code, detail=detail)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Reset failed: {e}")
+
+
+@router.get("/rate-limit-status")
+async def get_rate_limit_status_endpoint(user: User = Depends(get_current_user)):
+    """Fetch current rate limit status from wham API."""
+    try:
+        access_token = await get_chatgpt_access_token()
+    except HTTPException:
+        return {"error": "Not authenticated"}
+
+    auth_data = _read_auth_file() or {}
+    account_id = auth_data.get("account_id") or _extract_account_id(access_token)
+
+    try:
+        return await _fetch_rate_limit_status(access_token, account_id)
+    except Exception as e:
+        logger.warning("Failed to fetch rate limit status: %s", e)
+        return {"error": str(e)}
 
 
 @router.get("/models")
