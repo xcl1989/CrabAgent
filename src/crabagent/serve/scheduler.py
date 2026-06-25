@@ -1385,6 +1385,9 @@ async def _calendar_morning_brief():
 _task_reminded: set[int] = set()
 
 
+_calendar_reminder_running = False  # Module-level sentinel to prevent duplicate execution
+
+
 async def _calendar_event_reminder():
     """Check for events and task deadlines that need reminders (every 5 minutes).
 
@@ -1392,6 +1395,19 @@ async def _calendar_event_reminder():
       1. WeChat (if connected)
       2. Web (global SSE queue → frontend toast)
     """
+    global _calendar_reminder_running
+    if _calendar_reminder_running:
+        logger.warning("[Calendar] Reminder job already running, skipping duplicate")
+        return
+    _calendar_reminder_running = True
+    try:
+        await _calendar_event_reminder_impl()
+    finally:
+        _calendar_reminder_running = False
+
+
+async def _calendar_event_reminder_impl():
+    """Actual reminder logic, extracted for re-entrancy guard."""
     import datetime
 
     from sqlalchemy import select

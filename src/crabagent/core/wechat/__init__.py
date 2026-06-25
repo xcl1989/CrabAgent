@@ -73,6 +73,7 @@ class WeChatNotification:
         """
         # Priority 1: use the running message loop's client (has cached context_tokens)
         client = None
+        is_shared = False  # Track if client belongs to the running loop
         try:
             from crabagent.serve.scheduler import get_scheduler
 
@@ -80,6 +81,7 @@ class WeChatNotification:
             loop = getattr(sched, "_wechat_loop", None)
             if loop and loop._running and loop.client._context_store:
                 client = loop.client
+                is_shared = True
         except Exception:
             pass
 
@@ -113,17 +115,20 @@ class WeChatNotification:
                         return False
 
             success = await client.send_message(to_user=user_id, text=text)
-            if not client._http or client._http.is_closed:
-                pass  # Already closed by send_message
-            else:
-                await client.close()
+            # Only close the client if it was created by us (not the running loop's)
+            if not is_shared:
+                if not client._http or client._http.is_closed:
+                    pass  # Already closed by send_message
+                else:
+                    await client.close()
             return success
         except Exception as e:
             logger.error("[WeChatNotify] Failed: %s", e)
-            try:
-                await client.close()
-            except Exception:
-                pass
+            if not is_shared:
+                try:
+                    await client.close()
+                except Exception:
+                    pass
             return False
 
     @staticmethod
