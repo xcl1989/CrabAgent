@@ -163,9 +163,28 @@ class WeChatClient:
         # context_token cache: user_id → latest token
         self._context_store: dict[str, str] = {}
 
+        # Global per-user send counter — shared across all concurrent
+        # dispatches so that the consolidation threshold is enforced
+        # even when multiple tasks send to the same user simultaneously.
+        self._user_send_counts: dict[str, int] = {}
+
         self._http: httpx.AsyncClient | None = None
 
     # ---- HTTP helpers ----
+
+    def get_send_count(self, user_id: str) -> int:
+        """Return the global per-user send count (for consolidation logic)."""
+        return self._user_send_counts.get(user_id, 0)
+
+    def increment_send_count(self, user_id: str) -> int:
+        """Increment and return the global per-user send count."""
+        count = self._user_send_counts.get(user_id, 0) + 1
+        self._user_send_counts[user_id] = count
+        return count
+
+    def reset_send_count(self, user_id: str) -> None:
+        """Reset the per-user send count (e.g., when a new message arrives)."""
+        self._user_send_counts.pop(user_id, None)
 
     async def _get_http(self) -> httpx.AsyncClient:
         if self._http is None or self._http.is_closed:

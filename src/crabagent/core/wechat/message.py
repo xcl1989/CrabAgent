@@ -46,6 +46,11 @@ class WeChatMessageLoop:
         self._running = False
         self._task: asyncio.Task | None = None
         self._last_relogin_notify = 0.0
+        # Message deduplication: msg_key → timestamp (monotonic)
+        # Prevents the same message from being processed twice if
+        # long-poll returns it in consecutive batches.
+        self._recent_msgs: dict[str, float] = {}
+        self._dedup_ttl = 120.0  # seconds
 
     async def start(self) -> None:
         """Start the long-poll loop in a background task."""
@@ -91,6 +96,9 @@ class WeChatMessageLoop:
                     # Persist push target on first incoming message
                     if msg.from_user and msg.context_token:
                         await self._update_push_target(msg.from_user, msg.context_token)
+                    # Reset per-user send counter for the new message round
+                    if msg.from_user:
+                        self.client.reset_send_count(msg.from_user)
                     # Dispatch
                     asyncio.create_task(self._dispatch(msg))
             except SessionExpiredError:
@@ -125,12 +133,44 @@ class WeChatMessageLoop:
         except Exception as e:
             logger.warning("[WeChatLoop] Failed to update push target: %s", e)
 
+    def _is_duplicate(self, msg: IncomingMessage) -> bool:
+        """Check if a message was already processed recently.
+
+        Uses a composite key of from_user + content + msg_id (if available)
+        with a time-based TTL to handle long-poll re-delivery.
+        """
+        now = time.monotonic()
+
+        # Purge expired entries
+        expired = [k for k, ts in self._recent_msgs.items() if now - ts > self._dedup_ttl]
+        for k in expired:
+            del self._recent_msgs[k]
+
+        # Build dedup key — prefer msg_id, fall back to content hash
+        if msg.msg_id:
+            key = f"{msg.from_user}:{msg.msg_id}"
+        else:
+            # Fall back: user + content (trimmed)
+            content_key = msg.content[:200] if msg.content else ""
+            key = f"{msg.from_user}:{hash(content_key)}"
+
+        if key in self._recent_msgs:
+            logger.warning("[WeChatLoop] Duplicate message detected, skipping: %s", key[:60])
+            return True
+
+        self._recent_msgs[key] = now
+        return False
+
     async def _dispatch(self, msg: IncomingMessage) -> None:
         """Handle a single incoming message.
 
         Calls the custom handler if set, otherwise uses the default
         Agent bridge.
         """
+        # Deduplicate before processing
+        if self._is_duplicate(msg):
+            return
+
         try:
             if self._custom_handler:
                 await self._custom_handler(msg)
@@ -475,6 +515,8 @@ class WeChatProgressListener:
             # 3. Normal heartbeat — skip when degraded or in
             # consolidation mode to avoid filling the batch with noise.
             if not self._buffer and now - self._last_push >= _FALLBACK_INTERVAL:
+                # Sync with global count
+                self._send_count = self._client.get_send_count(self._to_user)
                 if self._send_count >= self._MAX_INDIVIDUAL_SENDS:
                     # In consolidation mode: user already received the
                     # "完成后统一推送" notification; heartbeat would only
@@ -510,8 +552,9 @@ class WeChatProgressListener:
     async def _send(self, text: str) -> bool:
         """Low-level send — calls client.send_message, returns success.
 
-        Increments ``_send_count`` on success so the consolidation
-        threshold in ``_push`` stays accurate.
+        Increments the **global** per-user send counter on success
+        so that the consolidation threshold is enforced across all
+        concurrent dispatches to the same user.
         """
         try:
             ok = await self._client.send_message(
@@ -520,7 +563,8 @@ class WeChatProgressListener:
             )
             if ok:
                 self._last_push = time.monotonic()
-                self._send_count += 1
+                # Use global counter from client (shared across dispatches)
+                self._send_count = self._client.increment_send_count(self._to_user)
                 self._typing_warned = False
                 return True
             return False
@@ -531,17 +575,22 @@ class WeChatProgressListener:
     async def _push(self, text: str) -> bool:
         """Send a progress message, switch to consolidation on overflow.
 
-        After ``_MAX_INDIVIDUAL_SENDS`` (7) individual sends:
+        After ``_MAX_INDIVIDUAL_SENDS`` (7) individual sends (counted
+        globally per-user across all concurrent dispatches):
         - The **8th** push sends a one-time notification to the user
           ("⏳ 任务较长，完成后统一推送") then consolidates.
         - Subsequent pushes are accumulated in ``_consolidated``
           and delivered as a single batch merged with the final reply.
         """
+        # Sync local count with global count at entry
+        self._send_count = self._client.get_send_count(self._to_user)
+
         # ── Consolidation mode ──────────────────────────────────────
         if self._send_count >= self._MAX_INDIVIDUAL_SENDS:
             # 8th push: send a one-line notification to set expectations
             if self._send_count == self._MAX_INDIVIDUAL_SENDS:
-                self._send_count += 1  # Mark notification as "sent"
+                self._client.increment_send_count(self._to_user)  # Mark notification as "sent"
+                self._send_count += 1
                 await self._client.send_message(
                     self._to_user,
                     "⏳ 任务较长，完成后统一推送后续进度和结果",

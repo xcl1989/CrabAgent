@@ -1623,7 +1623,7 @@ def _run_build_desktop():
 
         print("\n[1/4] Installing Electron dependencies...")
         npm_result = subprocess.run(["npm", "install", "--silent"], cwd=str(work_dir / "electron"),
-                                   capture_output=True, encoding='utf-8', errors='replace', timeout=120,
+                                   capture_output=True, encoding='utf-8', errors='replace', timeout=600,
                                    shell=is_windows)
         if npm_result.returncode != 0:
             print("npm install failed:", npm_result.stderr[-300:])
