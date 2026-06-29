@@ -8,6 +8,7 @@ export interface ChatMessage {
   stats?: { elapsed: number; model: string; tokens: number; iterations: number };
   confirm_id?: string;
   tool_name?: string;
+  tool_call_id?: string;
   args_summary?: string;
   confirmed?: boolean;
   options?: string[];

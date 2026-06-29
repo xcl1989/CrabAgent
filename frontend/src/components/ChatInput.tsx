@@ -27,6 +27,7 @@ export default function ChatInput({
   const { t } = useTranslation();
   const [input, setInput] = useState("");
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const isComposingRef = useRef(false);
 
   const handleSend = useCallback(() => {
     const text = input.trim();
@@ -37,10 +38,10 @@ export default function ChatInput({
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        handleSend();
-      }
+      if (e.key !== "Enter" || e.shiftKey) return;
+      if (e.nativeEvent.isComposing || isComposingRef.current) return;
+      e.preventDefault();
+      handleSend();
     },
     [handleSend],
   );
@@ -72,6 +73,12 @@ export default function ChatInput({
       <Textarea
         value={input}
         onChange={(e) => setInput(e.target.value)}
+        onCompositionStart={() => {
+          isComposingRef.current = true;
+        }}
+        onCompositionEnd={() => {
+          isComposingRef.current = false;
+        }}
         onKeyDown={handleKeyDown}
         onPaste={onFilePaste}
         placeholder={t("chat.placeholder")}

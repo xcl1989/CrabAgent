@@ -1,4 +1,5 @@
-import { forwardRef, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { forwardRef, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+
 import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -37,6 +38,7 @@ interface ChatMessage {
   stats?: { elapsed: number; model: string; tokens: number; iterations: number };
   confirm_id?: string;
   tool_name?: string;
+  tool_call_id?: string;
   args_summary?: string;
   confirmed?: boolean;
   options?: string[];
@@ -60,6 +62,7 @@ interface ChatMessage {
 }
 
 interface Props {
+  sessionId?: string | null;
   messages: ChatMessage[];
   connected: boolean;
   sending?: boolean;
@@ -116,6 +119,7 @@ function UserInputField({
 }) {
   const { t } = useTranslation();
   const [value, setValue] = useState("");
+  const isComposingRef = useRef(false);
   const submit = (answer?: string) => {
     const text = answer || value.trim();
     if (!text) return;
@@ -128,11 +132,17 @@ function UserInputField({
         type="text"
         value={value}
         onChange={(e) => setValue(e.target.value)}
+        onCompositionStart={() => {
+          isComposingRef.current = true;
+        }}
+        onCompositionEnd={() => {
+          isComposingRef.current = false;
+        }}
         onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            submit();
-          }
+          if (e.key !== "Enter" || e.shiftKey) return;
+          if (e.nativeEvent.isComposing || isComposingRef.current) return;
+          e.preventDefault();
+          submit();
         }}
         placeholder={t("chatPanel.typeAnswer")}
         autoFocus
@@ -277,6 +287,7 @@ function extractText(node: any): string {
 const ChatPanel = forwardRef<HTMLDivElement, Props>(
   (
     {
+      sessionId,
       messages,
       connected,
       sending,
@@ -298,57 +309,158 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(
     const [modalContent, setModalContent] = useState("");
     const modalContentRef = useRef("");
 
-    // ── Smart auto-scroll ──────────────────────────────────────
+    // ── Smart auto-scroll (stable, jitter-free) ───────────────
+    // Design principles:
+    //  1. Streaming token updates use behavior:"auto" (instant), NOT "smooth"
+    //     — smooth on every token creates overlapping animations → visual jumping
+    //  2. "Pinned" threshold is small (24px) so users scrolling up a few px
+    //     won't be snapped back to the bottom
+    //  3. Programmatic scroll sets a guard flag so the onScroll handler
+    //     doesn't re-evaluate pinning mid-animation
+    //  4. useLayoutEffect (before paint) + rAF to avoid flash of wrong position
+    //  5. ResizeObserver catches async height changes (images, markdown tables,
+    //     code highlighting, <details> toggle)
+    //  6. During active streaming (sending=true), onScroll does NOT unpin —
+    //     only explicit wheel-up / touch-swipe-down can unpin. This prevents
+    //     the race condition where content grows faster than scrollToBottom,
+    //     momentarily pushing distanceFromBottom > threshold and causing
+    //     a false "user left the bottom" detection.
     const scrollRef = useRef<HTMLDivElement>(null);
-    const isAtBottomRef = useRef(true);
+    const contentRef = useRef<HTMLDivElement>(null);
+    const bottomRef = useRef<HTMLDivElement>(null);
+    const isPinnedRef = useRef(true);
+    const programmaticScrollRef = useRef(false);
+    const rafRef = useRef<number | null>(null);
     const [showJumpBtn, setShowJumpBtn] = useState(false);
     const [newMsgHint, setNewMsgHint] = useState(0);
 
-    const handleScroll = useCallback(() => {
+    // Synchronous mirror of `sending` for use in scroll event handlers
+    const sendingRef = useRef(false);
+    useEffect(() => { sendingRef.current = !!sending; }, [sending]);
+
+    // Touch tracking for detecting swipe-up direction
+    const touchStartYRef = useRef(0);
+
+    const getDistanceFromBottom = useCallback(() => {
       const el = scrollRef.current;
-      if (!el) return;
-      const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-      const atBottom = distFromBottom < 120;
-      isAtBottomRef.current = atBottom;
-      setShowJumpBtn(!atBottom);
-      if (atBottom) setNewMsgHint(0);
+      if (!el) return 0;
+      return el.scrollHeight - el.scrollTop - el.clientHeight;
     }, []);
 
-    // Content signature to detect streaming text growth (not just message count)
-    const contentSig = useMemo(() => {
-      const last = messages[messages.length - 1];
-      return `${messages.length}:${last?.content?.length || 0}`;
-    }, [messages]);
-
-    // Auto-scroll on new content if user is at the bottom
-    useEffect(() => {
-      if (isAtBottomRef.current) {
-        const el = scrollRef.current;
-        if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-      } else {
-        setNewMsgHint((n) => n + 1);
-      }
-    }, [contentSig]);
-
-    const jumpToBottom = useCallback(() => {
+    /** Scroll to bottom instantly (for streaming) or smoothly (for user click). */
+    const scrollToBottom = useCallback((behavior: ScrollBehavior = "auto") => {
       const el = scrollRef.current;
-      if (el) {
-        el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-        isAtBottomRef.current = true;
+      if (!el) return;
+      programmaticScrollRef.current = true;
+      el.scrollTo({ top: el.scrollHeight, behavior });
+      // For smooth scrolls, keep the guard active until the animation settles
+      const ms = behavior === "smooth" ? 300 : 32;
+      window.setTimeout(() => { programmaticScrollRef.current = false; }, ms);
+    }, []);
+
+    /** onScroll: update pinning state. Ignores programmatic scrolls.
+     *  During streaming, does NOT unpin — only explicit user gestures can. */
+    const handleScroll = useCallback(() => {
+      if (programmaticScrollRef.current) return;
+      // During active streaming, content growth between frames can momentarily
+      // push distanceFromBottom above threshold even though the user hasn't
+      // scrolled up. Defer all unpinning to the wheel/touch handlers.
+      if (sendingRef.current) return;
+      const dist = getDistanceFromBottom();
+      const pinned = dist <= 24;
+      isPinnedRef.current = pinned;
+      setShowJumpBtn(!pinned);
+      if (pinned) setNewMsgHint(0);
+    }, [getDistanceFromBottom]);
+
+    /** Wheel handler: detect scroll DIRECTION (not distance).
+     *  deltaY < 0 → user scrolling up → unpin immediately.
+     *  deltaY > 0 → user scrolling down → re-pin if near bottom. */
+    const onWheelIntent = useCallback((e: React.WheelEvent) => {
+      if (programmaticScrollRef.current) return;
+      if (e.deltaY < 0) {
+        // User is actively scrolling away from the bottom
+        isPinnedRef.current = false;
+        setShowJumpBtn(true);
+      } else if (e.deltaY > 0) {
+        // User scrolling toward bottom — re-pin if close enough
+        if (getDistanceFromBottom() <= 24) {
+          isPinnedRef.current = true;
+          setShowJumpBtn(false);
+          setNewMsgHint(0);
+        }
+      }
+    }, [getDistanceFromBottom]);
+
+    /** Touch handlers: detect swipe direction by tracking Y delta. */
+    const onTouchStartRecord = useCallback((e: React.TouchEvent) => {
+      touchStartYRef.current = e.touches[0]?.clientY ?? 0;
+    }, []);
+
+    const onTouchMoveIntent = useCallback((e: React.TouchEvent) => {
+      if (programmaticScrollRef.current) return;
+      const currentY = e.touches[0]?.clientY ?? 0;
+      const delta = currentY - touchStartYRef.current;
+      // Finger moving down (positive delta) = content scrolling up = user reading history
+      if (delta > 5) {
+        isPinnedRef.current = false;
+        setShowJumpBtn(true);
+      }
+      // Finger moving up (negative delta) = content scrolling down = toward bottom
+      if (delta < -5 && getDistanceFromBottom() <= 24) {
+        isPinnedRef.current = true;
         setShowJumpBtn(false);
         setNewMsgHint(0);
       }
-    }, []);
+    }, [getDistanceFromBottom]);
+
+    // Auto-scroll on messages / sending changes — runs before browser paint
+    useLayoutEffect(() => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      rafRef.current = requestAnimationFrame(() => {
+        if (isPinnedRef.current) {
+          scrollToBottom("auto");
+        } else {
+          setNewMsgHint((n) => n + 1);
+        }
+      });
+      return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
+    }, [messages, sending, scrollToBottom]);
+
+    // ResizeObserver: catch async DOM height changes (image load, code
+    // highlighting, markdown table reflow, <details> expand)
+    useEffect(() => {
+      const el = contentRef.current;
+      if (!el) return;
+      const observer = new ResizeObserver(() => {
+        if (!isPinnedRef.current) return;
+        requestAnimationFrame(() => scrollToBottom("auto"));
+      });
+      observer.observe(el);
+      return () => observer.disconnect();
+    }, [scrollToBottom]);
+
+    // Reset scroll state on session change
+    useLayoutEffect(() => {
+      isPinnedRef.current = true;
+      setShowJumpBtn(false);
+      setNewMsgHint(0);
+      scrollToBottom("auto");
+    }, [sessionId, scrollToBottom]);
+
+    const jumpToBottom = useCallback(() => {
+      isPinnedRef.current = true;
+      setShowJumpBtn(false);
+      setNewMsgHint(0);
+      scrollToBottom("smooth");
+    }, [scrollToBottom]);
 
     // Helper: scroll to bottom if user is currently at bottom (for details toggle)
     const maybeScrollOnToggle = useCallback(() => {
-      if (isAtBottomRef.current) {
-        setTimeout(() => {
-          const el = scrollRef.current;
-          if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-        }, 50);
+      if (isPinnedRef.current) {
+        requestAnimationFrame(() => scrollToBottom("auto"));
       }
-    }, []);
+    }, [scrollToBottom]);
     const modalTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const resolvedSubAgentId = externalSubAgentId ?? activeSubAgentId;
@@ -385,28 +497,41 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(
     }, []);
 
     const grouped: (ChatMessage | ChatMessage[])[] = [];
-    let i = 0;
-    while (i < messages.length) {
+    const consumedToolResults = new Set<string>();
+    for (let i = 0; i < messages.length; i += 1) {
       const msg = messages[i];
-      if (
-        msg.role === "tool_call" &&
-        i + 1 < messages.length &&
-        messages[i + 1].role === "tool_result"
-      ) {
-        grouped.push([msg, messages[i + 1]]);
-        i += 2;
-      } else {
-        grouped.push(msg);
-        i += 1;
+      if (msg.role === "tool_call") {
+        const matchIdx = messages.findIndex(
+          (candidate, idx) =>
+            idx > i &&
+            candidate.role === "tool_result" &&
+            !consumedToolResults.has(candidate.id) &&
+            !!candidate.tool_call_id &&
+            candidate.tool_call_id === msg.tool_call_id,
+        );
+        if (matchIdx >= 0) {
+          const resultMsg = messages[matchIdx];
+          consumedToolResults.add(resultMsg.id);
+          grouped.push([msg, resultMsg]);
+          continue;
+        }
       }
+      if (msg.role === "tool_result" && consumedToolResults.has(msg.id)) {
+        continue;
+      }
+      grouped.push(msg);
     }
 
     return (
       <div
         ref={scrollRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto px-3 sm:px-6 py-3 sm:py-4 relative"
+        onWheel={onWheelIntent}
+        onTouchStart={onTouchStartRecord}
+        onTouchMove={onTouchMoveIntent}
+        className="chat-scroll flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 sm:px-6 py-3 sm:py-4 relative"
       >
+        <div ref={contentRef}>
         {!connected && messages.length > 0 && (
           <div className="flex items-center justify-center gap-2 mb-3 text-xs text-[var(--warning)] bg-[var(--warning-bg)] border border-[var(--warning-border)] rounded-lg px-3 py-1.5">
             <Loader2 size={12} className="animate-spin" />
@@ -904,6 +1029,10 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(
             <span className="text-[var(--brand)] animate-pulse select-none">🦀</span>
           </div>
         )}
+
+        {/* Scroll sentinel — also serves as CSS scroll-anchor target */}
+        <div ref={bottomRef} className="chat-scroll-sentinel" />
+        </div>{/* end contentRef wrapper */}
 
         {/* Jump-to-bottom floating button */}
         {showJumpBtn && (

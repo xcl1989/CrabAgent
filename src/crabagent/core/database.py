@@ -568,28 +568,16 @@ async def init_db() -> None:
             logger.warning("FTS5 setup failed (non-fatal): %s", e)
 
         # ── FTS5-CJK: jieba-based Chinese full-text search index ────────
+        # Table creation only — actual indexing runs in background to avoid
+        # blocking app startup (jieba dictionary load is ~1-2s, segmentation
+        # of 30k+ messages can take minutes).
         try:
             await conn.execute(text(
                 "CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts_cjk USING fts5("
                 "content, tokenize='unicode61')"
             ))
-            # Check if already populated
-            cjk_count = (await conn.execute(text(
-                "SELECT count(*) FROM messages_fts_cjk"
-            ))).scalar() or 0
-            msg_count = (await conn.execute(text(
-                "SELECT count(*) FROM messages WHERE compressed=0"
-            ))).scalar() or 0
-            if cjk_count < msg_count:
-                logger.info(
-                    "[FTS-CJK] Indexing %d messages (existing: %d)…",
-                    msg_count - cjk_count, cjk_count,
-                )
-                # Non-blocking: spawn background task
-                import asyncio
-                asyncio.create_task(_rebuild_cjk_index_async())
         except Exception as e:
-            logger.warning("FTS5-CJK setup failed (non-fatal): %s", e)
+            logger.warning("FTS5-CJK table creation failed (non-fatal): %s", e)
 
         result = await conn.execute(text("PRAGMA table_info(molts)"))
         columns = [row[1] for row in result.fetchall()]

@@ -7,7 +7,7 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from crabagent import __version__
@@ -40,6 +40,9 @@ async def _loop_monitor():
 async def lifespan(app: FastAPI):
     from crabagent.core.database import init_db
 
+    # Mark app as "starting" — frontend will show a loading overlay
+    app.state.ready = False
+
     await init_db()
     logger.info("Database initialized")
 
@@ -60,6 +63,10 @@ async def lifespan(app: FastAPI):
     # These don't block the app from serving requests.
     background_init = asyncio.create_task(_background_startup(app))
     app.state._background_init = background_init
+
+    # App is ready to serve API requests (init_db finished, routes mounted)
+    app.state.ready = True
+    logger.info("App ready — serving requests")
 
     yield  # ← App starts serving requests immediately
 
@@ -95,8 +102,33 @@ async def lifespan(app: FastAPI):
 
 
 async def _background_startup(app: FastAPI) -> None:
-    """Run non-critical startup tasks in background (scheduler, OfficeCLI, etc.)."""
+    """Run non-critical startup tasks in background (scheduler, OfficeCLI, FTS, etc.)."""
     import asyncio
+
+    # ── FTS-CJK index check / rebuild ──
+    # This runs AFTER init_db() so the app is already serving requests.
+    # jieba segmentation runs in thread pool (asyncio.to_thread) so it
+    # doesn't block the event loop.
+    try:
+        from sqlalchemy import text as sa_text
+        from crabagent.core.database import async_session_factory
+
+        async with async_session_factory() as db:
+            cjk_count = (await db.execute(sa_text(
+                "SELECT count(*) FROM messages_fts_cjk"
+            ))).scalar() or 0
+            msg_count = (await db.execute(sa_text(
+                "SELECT count(*) FROM messages WHERE compressed=0"
+            ))).scalar() or 0
+        if cjk_count < msg_count:
+            logger.info(
+                "[FTS-CJK] Background indexing %d messages (existing: %d)…",
+                msg_count - cjk_count, cjk_count,
+            )
+            from crabagent.core.fts import rebuild_index
+            await rebuild_index()
+    except Exception as e:
+        logger.warning("FTS-CJK background rebuild failed (non-fatal): %s", e)
 
     # ── Scheduler startup ──
     try:
@@ -205,8 +237,16 @@ def create_app() -> FastAPI:
     app.include_router(calendar_router, prefix="/api")
 
     @app.get("/health")
-    async def health():
-        return {"status": "ok", "version": __version__}
+    async def health(request: Request):
+        from crabagent.core.fts import get_rebuild_status
+
+        fts_status = get_rebuild_status()
+        return {
+            "status": "ok",
+            "version": __version__,
+            "ready": getattr(request.app.state, "ready", True),
+            "fts_rebuild": fts_status,
+        }
 
     _mount_spa(app)
 

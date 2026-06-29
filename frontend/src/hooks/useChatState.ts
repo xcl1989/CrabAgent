@@ -154,6 +154,18 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
             const dbMsgs = dbMessagesToChat(msgs);
             populateSubAgentContents(dbMsgs);
             setMessages((prev) => {
+              // Quick shape check: if DB messages have the same count, roles,
+              // and content lengths as current, skip the replacement entirely
+              // to avoid unnecessary DOM churn and scroll jumps.
+              const sameShape =
+                dbMsgs.length === prev.length &&
+                dbMsgs.every(
+                  (m, idx) =>
+                    m.role === prev[idx]?.role &&
+                    (m.content?.length || 0) === (prev[idx]?.content?.length || 0),
+                );
+              if (sameShape) return prev;
+
               const dbTotal = dbMsgs.reduce((s, m) => s + (m.content?.length || 0), 0);
               const prevTotal = prev.reduce((s, m) => s + (m.content?.length || 0), 0);
               // Preserve live-only SSE messages (screenshots, etc.) that
@@ -256,6 +268,16 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
           const chatMsgs = dbMessagesToChat(msgs);
           populateSubAgentContents(chatMsgs);
           setMessages((prev) => {
+            // Skip replacement if shape is identical to avoid unnecessary churn
+            const sameShape =
+              chatMsgs.length === prev.length &&
+              chatMsgs.every(
+                (m, idx) =>
+                  m.role === prev[idx]?.role &&
+                  (m.content?.length || 0) === (prev[idx]?.content?.length || 0),
+              );
+            if (sameShape) return prev;
+
             const dbTotal = chatMsgs.reduce((s, m) => s + (m.content?.length || 0), 0);
             const prevTotal = prev.reduce((s, m) => s + (m.content?.length || 0), 0);
             const dbHasScreenshots = chatMsgs.some((m) => m.role === "screenshot");

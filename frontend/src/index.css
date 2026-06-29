@@ -221,6 +221,32 @@ a:hover {
 }
 
 /* =========================================================================
+   Chat scroll container — stable, jitter-free scrolling
+   ========================================================================= */
+
+/*
+ * overflow-anchor: none  → disables browser's scroll anchoring on intermediate
+ *   nodes (e.g. markdown elements) so it doesn't fight with our programmatic
+ *   scroll-to-bottom logic.
+ *
+ * overscroll-behavior: contain → prevents scroll chaining to parent containers
+ *   when the chat area reaches the top/bottom of its scroll range.
+ */
+.chat-scroll {
+  overflow-anchor: none;
+  overscroll-behavior: contain;
+}
+
+/*
+ * Sentinel element at the bottom of the chat content.
+ * height:1px ensures a stable anchor point without visual clutter.
+ */
+.chat-scroll-sentinel {
+  height: 1px;
+  min-height: 1px;
+}
+
+/* =========================================================================
    Scrollbar
    ========================================================================= */
 

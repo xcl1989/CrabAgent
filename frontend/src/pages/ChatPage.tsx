@@ -864,7 +864,7 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
         /* ── WORK MODE ───────────────────────────────────────── */
         <>
           {/* AI Chat — left sidebar (350px) */}
-          <div className="w-[350px] shrink-0 border-r border-[var(--border)] bg-[var(--bg-primary)] flex flex-col">
+          <div className="w-[350px] shrink-0 min-h-0 overflow-hidden border-r border-[var(--border)] bg-[var(--bg-primary)] flex flex-col">
             <div className="flex-1 min-h-0 flex flex-col">
               {activeSession ? (
                 <>
@@ -890,6 +890,7 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
                     </div>
                   )}
                   <ChatPanel
+                    sessionId={activeSession.session_id}
                     messages={messages}
                     connected={connected}
                     sending={sending}
@@ -904,7 +905,7 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
                   <McpStatusBar status={mcpStatus} />
 
                   <div
-                    className="px-2 pt-1"
+                    className="shrink-0 px-2 pt-1"
                     style={{ paddingBottom: "max(0.5rem, env(safe-area-inset-bottom))" }}
                     onDrop={handleDrop}
                     onDragOver={handleDragOver}
@@ -1287,9 +1288,9 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
         </>
       ) : (
         <>
-        <div className="flex-1 flex flex-col min-w-0 min-h-0">
+        <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
           {/* Toolbar */}
-          <div className="flex items-center gap-1 px-3 h-11 border-b border-[var(--border)] bg-[var(--bg-secondary)]">
+          <div className="flex items-center gap-1 px-3 h-11 shrink-0 border-b border-[var(--border)] bg-[var(--bg-secondary)]">
             <Button
               size="icon"
               variant="ghost"
@@ -1367,6 +1368,7 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
             )}
 
             <ChatPanel
+              sessionId={activeSession.session_id}
               messages={messages}
               connected={connected}
               sending={sending}
@@ -1382,7 +1384,7 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
             <McpStatusBar status={mcpStatus} />
 
             <div
-              className="px-2 sm:px-4 pt-1 sm:pt-2"
+              className="shrink-0 px-2 sm:px-4 pt-1 sm:pt-2"
               style={{ paddingBottom: "max(0.5rem, env(safe-area-inset-bottom))" }}
               onDrop={handleDrop}
               onDragOver={handleDragOver}

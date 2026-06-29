@@ -40,6 +40,7 @@ export function sseEventToMessages(event: SSEEvent, messages: ChatMessage[]): Ch
     updated.push({
       id: callId ? `tc-${callId}` : `tc-${Date.now()}`,
       role: "tool_call",
+      tool_call_id: callId || undefined,
       content: JSON.stringify({ name: event.data.name, arguments: event.data.arguments }),
       source: (event.data.source as "builtin" | "mcp") || "builtin",
       server_name: (event.data.server_name as string) || undefined,
@@ -57,6 +58,7 @@ export function sseEventToMessages(event: SSEEvent, messages: ChatMessage[]): Ch
     updated.push({
       id: callId ? `tr-${callId}` : `tr-${Date.now()}`,
       role: "tool_result",
+      tool_call_id: callId || undefined,
       content: (event.data.result as string) || "",
       source: (event.data.source as "builtin" | "mcp") || "builtin",
       server_name: (event.data.server_name as string) || undefined,
@@ -367,6 +369,7 @@ export function dbMessagesToChat(msgs: Message[]): ChatMessage[] {
         result.push({
           id: `db-${m.id}-tc`,
           role: "tool_call",
+          tool_call_id: tc.id,
           content: JSON.stringify({ name: tc.name, arguments: tc.args }),
         });
       }
@@ -392,6 +395,7 @@ export function dbMessagesToChat(msgs: Message[]): ChatMessage[] {
       const toolResultMsg: ChatMessage = {
         id: `db-${m.id}`,
         role: "tool_result",
+        tool_call_id: m.tool_call_id || undefined,
         content: toolContent,
       };
       if (toolImages && toolImages.length > 0) toolResultMsg.images = toolImages;
