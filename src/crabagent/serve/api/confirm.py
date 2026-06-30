@@ -11,7 +11,8 @@ from crabagent.serve.deps import get_current_user
 
 router = APIRouter(tags=["confirm"])
 
-_pending_confirms: dict[str, asyncio.Future[bool]] = {}
+_pending_confirms: dict[str, tuple[asyncio.Future[bool], str, str, str]] = {}
+# confirm_id → (future, session_id, tool_name, args_summary)
 
 
 class ToolConfirmRequest(BaseModel):
@@ -25,13 +26,14 @@ async def request_confirmation(event_bus, session_id: str, tool_name: str, args:
     confirm_id = uuid.uuid4().hex[:12]
     loop = asyncio.get_running_loop()
     future: asyncio.Future[bool] = loop.create_future()
-    _pending_confirms[confirm_id] = future
 
     import json
 
     args_summary = json.dumps(args, ensure_ascii=False)
     if len(args_summary) > 200:
         args_summary = args_summary[:200] + "..."
+
+    _pending_confirms[confirm_id] = (future, session_id, tool_name, args_summary)
 
     await event_bus.emit(
         AgentEvent(
@@ -48,7 +50,22 @@ async def request_confirmation(event_bus, session_id: str, tool_name: str, args:
 
 
 def pop_pending(confirm_id: str) -> asyncio.Future[bool] | None:
-    return _pending_confirms.pop(confirm_id, None)
+    entry = _pending_confirms.pop(confirm_id, None)
+    return entry[0] if entry else None
+
+
+def get_pending_confirms_for_session(session_id: str) -> list[dict]:
+    """Return all pending (unanswered) tool_confirm requests for a session."""
+    result = []
+    for confirm_id, (_future, sid, tool_name, args_summary) in _pending_confirms.items():
+        if sid != session_id or _future.done():
+            continue
+        result.append({
+            "confirm_id": confirm_id,
+            "tool_name": tool_name,
+            "args_summary": args_summary,
+        })
+    return result
 
 
 @router.post("/sessions/{session_id}/tool-confirm")

@@ -13,7 +13,8 @@ from crabagent.serve.deps import get_current_user, get_owned_conversation
 
 router = APIRouter(prefix="/sessions/{session_id}", tags=["input"])
 
-_pending_inputs: dict[str, asyncio.Future[str]] = {}
+# input_id → (future, question, options, session_id)
+_pending_inputs: dict[str, tuple[asyncio.Future[str], str, list[str] | None, str]] = {}
 
 
 async def request_user_input(
@@ -24,7 +25,7 @@ async def request_user_input(
 ) -> asyncio.Future[str]:
     input_id = uuid.uuid4().hex[:12]
     future: asyncio.Future[str] = asyncio.Future()
-    _pending_inputs[input_id] = future
+    _pending_inputs[input_id] = (future, question, options, session_id)
     data: dict = {
         "input_id": input_id,
         "question": question,
@@ -42,7 +43,29 @@ async def request_user_input(
 
 
 def pop_pending(input_id: str) -> asyncio.Future[str] | None:
-    return _pending_inputs.pop(input_id, None)
+    entry = _pending_inputs.pop(input_id, None)
+    return entry[0] if entry else None
+
+
+def get_pending_for_session(session_id: str) -> list[dict]:
+    """Return all pending (unanswered) user_input requests for a session.
+
+    Used by the SSE endpoint to re-emit pending requests on reconnect,
+    so that page refresh doesn't lose the input UI.
+    """
+    result = []
+    for input_id, (future, question, options, sid) in _pending_inputs.items():
+        if sid != session_id or future.done():
+            continue
+        item: dict = {
+            "input_id": input_id,
+            "question": question,
+            "session_id": sid,
+        }
+        if options:
+            item["options"] = options
+        result.append(item)
+    return result
 
 
 class UserInputRequest(BaseModel):

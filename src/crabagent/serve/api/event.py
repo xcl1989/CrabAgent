@@ -85,6 +85,31 @@ async def event_stream(
                 },
             ).to_sse()
 
+        # Re-emit any pending user_input requests so that page refresh
+        # or SSE reconnect doesn't lose the input UI.
+        try:
+            from crabagent.serve.api.input import get_pending_for_session
+
+            for pending in get_pending_for_session(session_id):
+                yield AgentEvent(
+                    type=EventType.USER_INPUT_REQUEST,
+                    data=pending,
+                ).to_sse()
+        except Exception:
+            logger.debug("Failed to re-emit pending inputs", exc_info=True)
+
+        # Re-emit any pending tool_confirm requests (same reason).
+        try:
+            from crabagent.serve.api.confirm import get_pending_confirms_for_session
+
+            for pending in get_pending_confirms_for_session(session_id):
+                yield AgentEvent(
+                    type=EventType.TOOL_CONFIRM_REQUEST,
+                    data=pending,
+                ).to_sse()
+        except Exception:
+            logger.debug("Failed to re-emit pending confirms", exc_info=True)
+
         try:
             while True:
                 if await request.is_disconnected():
