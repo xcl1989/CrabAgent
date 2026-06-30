@@ -284,25 +284,24 @@ def _has_signal(context) -> bool:
     """
     messages = context.messages
 
-    # 1. Write / destructive tools
-    if _count_tool_calls_by_type(messages, _WRITE_TOOLS) > 0:
+    write_count = _count_tool_calls_by_type(messages, _WRITE_TOOLS)
+    delegate_count = _count_tool_calls_by_type(messages, _DELEGATE_TOOLS)
+    read_count = _count_tool_calls_by_type(messages, _READ_TOOLS)
+
+    # 1. Multiple write tools (≥2) → substantial code change
+    if write_count >= 2:
         return True
 
-    # 2. Agent delegation
-    if _count_tool_calls_by_type(messages, _DELEGATE_TOOLS) > 0:
+    # 2. Agent delegation → multi-agent orchestration
+    if delegate_count >= 1:
         return True
 
-    # 3. Dense reads
-    if _count_tool_calls_by_type(messages, _READ_TOOLS) >= 3:
+    # 3. Very dense reads (≥6) → deep research session
+    if read_count >= 6:
         return True
 
-    # 4. Length fallback
-    if context.iteration >= 5:
-        return True
-
-    # 5. Semantic hint from first user message
-    first = _first_user_message(messages) or ""
-    if any(kw in first.lower() for kw in _KEY_WORDS):
+    # 4. Long sessions only (≥8 iterations)
+    if context.iteration >= 8:
         return True
 
     return False
