@@ -46,6 +46,11 @@ DEFAULT_MODEL_TOKEN_LIMITS: dict[str, int] = {
     "qwen-max": 32_000,
     "qwen-long": 1_000_000,
     "minimax-01": 1_000_000,
+    "moonshot-v1-8k": 8_000,
+    "moonshot-v1-32k": 32_000,
+    "moonshot-v1-128k": 128_000,
+    "kimi-latest": 128_000,
+    "kimi-k2": 128_000,
 }
 
 _PREFIX_MATCH_ORDER = [
@@ -60,6 +65,8 @@ _PREFIX_MATCH_ORDER = [
     "glm-4",
     "glm-5",
     "qwen-",
+    "moonshot-",
+    "kimi-",
 ]
 
 _FALLBACK = 128_000
