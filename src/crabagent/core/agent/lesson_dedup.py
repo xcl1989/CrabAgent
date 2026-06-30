@@ -3,8 +3,6 @@ from __future__ import annotations
 import re
 from difflib import SequenceMatcher
 
-from crabagent.core.memory_embed import cosine_similarity, encode_query
-
 STRING_DEDUP_THRESHOLD = 0.85
 EMBEDDING_DEDUP_THRESHOLD = 0.92
 
@@ -49,6 +47,8 @@ def string_similarity_score(left: str, right: str) -> float:
 
 async def embedding_similarity_score(left: str, right: str) -> float:
     """Semantic similarity fallback when lexical matching is inconclusive."""
+    from crabagent.core.memory_embed import cosine_similarity, encode_query
+
     left_vec = await encode_query(left)
     if left_vec is None:
         return 0.0
