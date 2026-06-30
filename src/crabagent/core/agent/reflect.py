@@ -23,6 +23,14 @@ from typing import Any
 
 import litellm
 
+from crabagent.core.agent.lesson_dedup import (
+    EMBEDDING_DEDUP_THRESHOLD,
+    STRING_DEDUP_THRESHOLD,
+    embedding_similarity_score,
+    looks_like_meta_lesson,
+    normalize_lesson_text,
+    string_similarity_score,
+)
 from crabagent.core.provider_store import get_default_provider, get_provider
 
 logger = logging.getLogger(__name__)
@@ -396,20 +404,69 @@ async def persist_lesson(
 ) -> bool:
     if not user_id or not lesson:
         return False
-    from crabagent.core.database import agent_memory_upsert
+    from crabagent.core.database import (
+        agent_memory_get_by_agent,
+        agent_memory_upsert,
+    )
+
+    content = (lesson.get("content") or "").strip()
+    if not content:
+        return False
+
+    if looks_like_meta_lesson(content):
+        logger.info("Skipping meta lesson for %s: %s", agent_name, content[:120])
+        return False
+
+    task_category = (lesson.get("task_category") or "").strip()
+    existing_lessons = await agent_memory_get_by_agent(user_id, agent_name, limit=80)
+    same_task_lessons = [
+        item for item in existing_lessons if (item.get("task_category") or "").strip() == task_category
+    ]
+    candidate_lessons = same_task_lessons or existing_lessons
+
+    normalized = normalize_lesson_text(content)
+    best_match = None
+    best_score = 0.0
+    for item in candidate_lessons:
+        existing_content = (item.get("content") or "").strip()
+        if not existing_content or looks_like_meta_lesson(existing_content):
+            continue
+        score = string_similarity_score(normalized, normalize_lesson_text(existing_content))
+        if score > best_score:
+            best_match = item
+            best_score = score
+            if score >= 1.0:
+                break
+
+    key = lesson["key"]
+    if best_match and best_score >= STRING_DEDUP_THRESHOLD:
+        key = best_match["key"]
+    elif candidate_lessons:
+        embedding_best_match = None
+        embedding_best_score = 0.0
+        for item in candidate_lessons:
+            existing_content = (item.get("content") or "").strip()
+            if not existing_content or looks_like_meta_lesson(existing_content):
+                continue
+            score = await embedding_similarity_score(content, existing_content)
+            if score > embedding_best_score:
+                embedding_best_match = item
+                embedding_best_score = score
+        if embedding_best_match and embedding_best_score >= EMBEDDING_DEDUP_THRESHOLD:
+            key = embedding_best_match["key"]
 
     await agent_memory_upsert(
         user_id=user_id,
         memory_type=lesson.get("memory_type", "agent_lesson"),
         agent_name=agent_name,
         category=lesson.get("category", "effective_strategy"),
-        key=lesson["key"],
-        content=lesson["content"],
+        key=key,
+        content=content,
         importance=float(lesson.get("importance", 0.5)),
         confidence=float(lesson.get("confidence", 1.0)),
         source_session=source_session,
         source=lesson.get("source", ""),
-        task_category=lesson.get("task_category", ""),
+        task_category=task_category,
     )
     return True
 

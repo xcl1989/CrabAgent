@@ -140,9 +140,13 @@ class ReflectMiddleware:
                 # Load existing lessons for this agent to avoid duplicates
                 existing_lessons = []
                 try:
-                    from crabagent.core.database import agent_memory_list_all
-                    all_lessons = await agent_memory_list_all(user_id, memory_type="agent_lesson")
-                    existing_lessons = [l for l in all_lessons if l.get("agent_name", "").lower() == agent_name.lower()]
+                    from crabagent.core.database import agent_memory_get_by_agent
+
+                    existing_lessons = await agent_memory_get_by_agent(
+                        user_id,
+                        agent_name,
+                        limit=30,
+                    )
                 except Exception:
                     pass
 
