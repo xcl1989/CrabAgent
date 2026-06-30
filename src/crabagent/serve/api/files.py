@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import mimetypes
-import socket
-import sys
+import secrets
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File as FastFile, HTTPException, Query, UploadFile
@@ -17,14 +16,14 @@ from crabagent.serve.deps import get_current_user
 router = APIRouter(prefix="/files", tags=["files"])
 
 # ── Temporary HTTP servers for HTML preview ──────────────────────────
-_html_servers: dict[int, asyncio.subprocess.Process] = {}
+_html_servers: dict[str, Path] = {}
 _html_server_lock = asyncio.Lock()
 
 
-def _find_free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("", 0))
-        return s.getsockname()[1]
+def _issue_preview_token(target: Path) -> str:
+    token = secrets.token_urlsafe(24)
+    _html_servers[token] = target
+    return token
 
 _IMAGE_EXTENSIONS = frozenset(
     {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".ico", ".bmp", ".avif"}
@@ -240,65 +239,48 @@ async def serve_file(
 
 
 @router.post("/serve-dir")
-async def start_http_server(
-    path: str = Query(..., description="Absolute directory path to serve"),
+async def start_preview_session(
+    path: str = Query(..., description="Absolute directory path to preview"),
     user: User = Depends(get_current_user),
 ):
-    """Start a temporary Python http.server in the given directory for HTML preview."""
+    """Create a tokenized same-origin preview route for a directory."""
     target = Path(path).resolve()
     if not target.is_dir():
         raise HTTPException(status_code=400, detail="Not a directory or does not exist")
 
-    port = _find_free_port()
-    spawn_kwargs: dict = {
-        "stdout": asyncio.subprocess.DEVNULL,
-        "stderr": asyncio.subprocess.DEVNULL,
-    }
-    if sys.platform == "win32":
-        import subprocess as _sp
-        spawn_kwargs["creationflags"] = getattr(_sp, "CREATE_NO_WINDOW", 0)
-    proc = await asyncio.create_subprocess_exec(
-        sys.executable, "-m", "http.server", str(port),
-        "--directory", str(target),
-        **spawn_kwargs,
-    )
     async with _html_server_lock:
-        _html_servers[port] = proc
+        preview_token = _issue_preview_token(target)
 
-    # Wait for the server to actually start listening
-    for _ in range(20):
-        try:
-            _, writer = await asyncio.wait_for(
-                asyncio.open_connection("127.0.0.1", port), timeout=0.5
-            )
-            writer.close()
-            await writer.wait_closed()
-            break
-        except (OSError, asyncio.TimeoutError):
-            await asyncio.sleep(0.1)
-    else:
-        proc.terminate()
-        raise HTTPException(status_code=500, detail="Preview server failed to start")
+    return {"token": preview_token, "url": f"/api/files/preview/{preview_token}"}
 
-    return {"port": port, "url": f"http://localhost:{port}"}
+
+@router.get("/preview/{preview_token}/{file_path:path}")
+async def serve_preview_file(
+    preview_token: str,
+    file_path: str,
+):
+    """Serve files in a preview session. The preview_token is self-authenticating."""
+    async with _html_server_lock:
+        base_dir = _html_servers.get(preview_token)
+    if not base_dir:
+        raise HTTPException(status_code=404, detail="Preview session not found")
+
+    target = _resolve_path(base_dir, file_path)
+    if not target or not target.exists() or not target.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    media_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+    return FileResponse(str(target), media_type=media_type)
 
 
 @router.post("/stop-server")
-async def stop_http_server(
-    port: int = Query(..., description="Port of the server to stop"),
+async def stop_preview_session(
+    token: str = Query(..., description="Preview session token to stop"),
     user: User = Depends(get_current_user),
 ):
-    """Stop a previously started HTTP server."""
     async with _html_server_lock:
-        proc = _html_servers.pop(port, None)
-    if proc:
-        proc.terminate()
-        try:
-            await asyncio.wait_for(proc.wait(), timeout=5)
-        except asyncio.TimeoutError:
-            proc.kill()
-        return {"status": "stopped", "port": port}
-    return {"status": "not_found", "port": port}
+        removed = _html_servers.pop(token, None)
+    return {"status": "stopped" if removed else "not_found", "token": token}
 
 
 @router.get("/git-status")

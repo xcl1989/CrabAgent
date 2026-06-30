@@ -45,7 +45,7 @@ export function getImageUrl(path: string, absolute: boolean = false): string {
   return `/api/files/image?${params}`;
 }
 
-let _activePreviewServer: { filePath: string; port: number; url: string } | null = null;
+let _activePreviewServer: { filePath: string; token: string; url: string } | null = null;
 
 export function getActivePreviewUrl(): string | null {
   return _activePreviewServer?.url ?? null;
@@ -55,23 +55,23 @@ export function clearPreviewServer(): void {
   _activePreviewServer = null;
 }
 
-export async function startPreviewServer(filePath: string): Promise<{ port: number; url: string }> {
-  // Stop previous server if any
+export async function startPreviewServer(filePath: string): Promise<{ token: string; url: string }> {
   if (_activePreviewServer) {
     try {
-      await api.post(`/files/stop-server?port=${_activePreviewServer.port}`, {});
+      await api.post(`/files/stop-server?token=${encodeURIComponent(_activePreviewServer.token)}`, {});
     } catch {}
   }
   const dir = filePath.substring(0, filePath.lastIndexOf("/"));
-  const res = await api.post<{ port: number; url: string }>(`/files/serve-dir?path=${encodeURIComponent(dir)}`, {});
-  _activePreviewServer = { filePath, port: res.port, url: `${res.url}/${encodeURIComponent(filePath.split("/").pop() || "")}` };
+  const fileName = filePath.split("/").pop() || "index.html";
+  const res = await api.post<{ token: string; url: string }>(`/files/serve-dir?path=${encodeURIComponent(dir)}`, {});
+  _activePreviewServer = { filePath, token: res.token, url: `${res.url}/${encodeURIComponent(fileName)}` };
   return _activePreviewServer;
 }
 
 export async function stopPreviewServer(): Promise<void> {
   if (_activePreviewServer) {
     try {
-      await api.post(`/files/stop-server?port=${_activePreviewServer.port}`, {});
+      await api.post(`/files/stop-server?token=${encodeURIComponent(_activePreviewServer.token)}`, {});
     } catch {}
     _activePreviewServer = null;
   }
