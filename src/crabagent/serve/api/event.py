@@ -89,33 +89,35 @@ async def event_stream(
             while True:
                 if await request.is_disconnected():
                     break
+                # Check critical queue first (non-blocking)
                 try:
-                    try:
-                        event = critical_queue.get_nowait()
-                    except asyncio.QueueEmpty:
-                        event = await asyncio.wait_for(stream_queue.get(), timeout=30.0)
-                    if isinstance(event, AgentEvent):
+                    event = critical_queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    # Wait on stream queue, but periodically re-check
+                    # critical queue so urgent events (user_input_request,
+                    # tool_confirm_request) are delivered promptly.
+                    event = None
+                    while event is None:
                         try:
-                            yield event.to_sse()
-                        except (TypeError, ValueError) as exc:
-                            logger.error(
-                                "SSE serialize error session=%s event=%s: %s",
-                                session_id[:8],
-                                event.type,
-                                exc,
-                            )
-                    elif isinstance(event, dict):
-                        yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-                except TimeoutError:
-                    # Check critical queue one last time before keepalive
+                            event = await asyncio.wait_for(stream_queue.get(), timeout=3.0)
+                        except TimeoutError:
+                            # Re-check critical queue on timeout
+                            try:
+                                event = critical_queue.get_nowait()
+                            except asyncio.QueueEmpty:
+                                yield f"event: keepalive\ndata: {json.dumps({'ts': time.time()})}\n\n"
+                if isinstance(event, AgentEvent):
                     try:
-                        event = critical_queue.get_nowait()
-                        if isinstance(event, AgentEvent):
-                            yield event.to_sse()
-                        elif isinstance(event, dict):
-                            yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-                    except asyncio.QueueEmpty:
-                        yield f"event: keepalive\ndata: {json.dumps({'ts': time.time()})}\n\n"
+                        yield event.to_sse()
+                    except (TypeError, ValueError) as exc:
+                        logger.error(
+                            "SSE serialize error session=%s event=%s: %s",
+                            session_id[:8],
+                            event.type,
+                            exc,
+                        )
+                elif isinstance(event, dict):
+                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
         finally:
             queues = getattr(request.app.state, "event_queues", {})
             queues.pop(queue_id, None)
