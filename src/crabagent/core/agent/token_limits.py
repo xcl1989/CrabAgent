@@ -49,8 +49,15 @@ DEFAULT_MODEL_TOKEN_LIMITS: dict[str, int] = {
     "moonshot-v1-8k": 8_000,
     "moonshot-v1-32k": 32_000,
     "moonshot-v1-128k": 128_000,
+    "moonshot-v1-8k-vision-preview": 8_000,
+    "moonshot-v1-32k-vision-preview": 32_000,
+    "moonshot-v1-128k-vision-preview": 128_000,
     "kimi-latest": 128_000,
     "kimi-k2": 128_000,
+    "kimi-k2.5": 256_000,
+    "kimi-k2.6": 256_000,
+    "kimi-k2.7-code": 256_000,
+    "kimi-k2.7-code-highspeed": 256_000,
 }
 
 _PREFIX_MATCH_ORDER = [
