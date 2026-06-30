@@ -409,7 +409,7 @@
   },
   "compress": {
     "system_prompt": "You are a conversation summarizer.",
-    "user_prompt": "Provide a comprehensive and detailed summary of the following conversation history. You MUST preserve all key facts, decisions, file paths, code change details, and any important context needed to continue the conversation. Write in English. Use Markdown formatting (headings, lists, code blocks, etc.). Do NOT omit any important details — thoroughness over brevity. There is no length limit; ensure full coverage of all topics.\n\nConversation to summarize:\n{history}"
+    "instruction": "Review the full conversation history above and produce a comprehensive, detailed summary. You MUST preserve all key facts, decisions, file paths, code change details, and any important context needed to continue the conversation. Write in English. Use Markdown formatting (headings, lists, code blocks, etc.). Do NOT omit any important details — thoroughness over brevity. There is no length limit; ensure full coverage of all topics."
   },
   "agents_md": {
     "section_title": "## Project Rules (AGENTS.md)"

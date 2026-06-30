@@ -25,9 +25,56 @@ async def compress_context(context: AgentContext, llm_params: dict, model: str) 
 
     locale = context.metadata.get("locale", context.locale or "en")
 
-    history_text = _format_messages(early, max_chars=120_000)
-    system_prompt = t("compress.system_prompt", locale)
-    user_prompt = t("compress.user_prompt", locale, history=history_text)
+    # --- Build the compression request using original messages ---
+    # Key insight: we send the EXACT same system prompt + conversation
+    # messages as a normal LLM call (not a formatted text blob), so the
+    # provider can reuse prompt-cached tokens to the fullest extent.
+    # Only the final instruction message is "fresh" content.
+    #
+    # We do NOT replace the system prompt — doing so would bust the
+    # entire prefix cache and make compression as expensive as a full
+    # regeneration.
+
+    compress_instruction = t("compress.instruction", locale)
+
+    # Build messages: original system prompt + all early messages (as-is)
+    compress_messages: list[dict] = []
+
+    if context.system_prompt:
+        compress_messages.append({"role": "system", "content": context.system_prompt})
+
+    for msg in early:
+        # Skip internal placeholders that carry no information
+        if msg.get("_compress_ack"):
+            continue
+        if msg.get("role") in ("stats", "screenshot"):
+            continue
+        # Normalise internal roles to valid LLM roles
+        role = msg.get("role", "user")
+        if role not in ("user", "assistant", "tool"):
+            role = "user"
+        content = msg.get("content", "")
+        # Handle list content (e.g. image blocks) — strip to text
+        if isinstance(content, list):
+            text_parts = []
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    text_parts.append(block.get("text", ""))
+                elif isinstance(block, str):
+                    text_parts.append(block)
+            content = " ".join(text_parts)
+        if not content and not msg.get("tool_calls"):
+            continue
+        clean_msg: dict = {"role": role, "content": content or ""}
+        # Preserve tool_calls / tool_call_id for valid sequences
+        if msg.get("tool_calls"):
+            clean_msg["tool_calls"] = msg["tool_calls"]
+        if msg.get("tool_call_id"):
+            clean_msg["tool_call_id"] = msg["tool_call_id"]
+        compress_messages.append(clean_msg)
+
+    # Final instruction — this is the only truly "fresh" content
+    compress_messages.append({"role": "user", "content": compress_instruction})
 
     # Notify frontend that compression is starting
     await context.event_bus.emit(
@@ -43,10 +90,7 @@ async def compress_context(context: AgentContext, llm_params: dict, model: str) 
             response = await litellm.acompletion(
                 model=model,
                 **llm_params,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
+                messages=compress_messages,
                 max_tokens=8192,
                 stream=True,
                 stream_options={"include_usage": True},
@@ -56,6 +100,18 @@ async def compress_context(context: AgentContext, llm_params: dict, model: str) 
             reasoning_buf = ""
             async for chunk in response:
                 if not chunk.choices:
+                    # Capture usage for logging
+                    if hasattr(chunk, "usage") and chunk.usage:
+                        prompt_t = getattr(chunk.usage, "prompt_tokens", 0) or 0
+                        cached_t = 0
+                        if hasattr(chunk.usage, "prompt_tokens_details") and chunk.usage.prompt_tokens_details:
+                            cached_t = getattr(chunk.usage.prompt_tokens_details, "cached_tokens", 0) or 0
+                        fresh_t = prompt_t - cached_t
+                        logger.info(
+                            "Compress usage: prompt=%d (cached=%d, fresh=%d) — %s cache hit",
+                            prompt_t, cached_t, fresh_t,
+                            f"{cached_t / prompt_t * 100:.0f}%" if prompt_t else "N/A",
+                        )
                     continue
                 delta = chunk.choices[0].delta
                 piece = ""
@@ -148,61 +204,3 @@ async def compress_context(context: AgentContext, llm_params: dict, model: str) 
         len(context.messages),
         len(summary),
     )
-
-
-def _format_messages(messages: list[dict], max_chars: int = 0) -> str:
-    """Format messages into a text blob for the compression LLM call.
-
-    When ``max_chars > 0``, the total output is capped at that many
-    characters.  Older messages are dropped first (keeping the most
-    recent ones), and each message's content is progressively shortened
-    so the result always fits within the budget.
-    """
-    # First pass: collect formatted entries
-    entries: list[str] = []
-    for msg in messages:
-        role = msg.get("role", "?")
-        content = msg.get("content", "")
-
-        # Skip compress ack placeholders — they carry no information
-        if msg.get("_compress_ack"):
-            continue
-
-        if not content:
-            if msg.get("tool_calls"):
-                tool_names = [tc.get("function", {}).get("name", "?") for tc in msg["tool_calls"]]
-                content = f"[tool calls: {', '.join(tool_names)}]"
-            else:
-                continue
-
-        if role == "tool":
-            tool_name = msg.get("name", "tool")
-            entries.append(f"[{tool_name} result]: {content[:2000]}")
-        else:
-            # Normalise internal roles for display
-            display_role = "user" if role in ("agent_switch", "experience", "compress") else role
-            display = content[:3000] if len(content) > 3000 else content
-            entries.append(f"[{display_role}]: {display}")
-
-    if max_chars <= 0:
-        return "\n\n".join(entries)
-
-    # Second pass: enforce character budget
-    # Start from the most recent entries and work backwards
-    total = 0
-    kept: list[str] = []
-    per_entry_budget = max_chars
-    for entry in reversed(entries):
-        if total + len(entry) > max_chars:
-            # Truncate this entry to fit remaining budget
-            remaining = max_chars - total
-            if remaining > 200:
-                kept.append(entry[:remaining] + "\n...[truncated]")
-            break
-        kept.append(entry)
-        total += len(entry) + 2  # +2 for "\n\n"
-        if total >= max_chars:
-            break
-
-    kept.reverse()
-    return "\n\n".join(kept)
