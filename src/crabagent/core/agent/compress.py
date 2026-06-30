@@ -25,7 +25,7 @@ async def compress_context(context: AgentContext, llm_params: dict, model: str) 
 
     locale = context.metadata.get("locale", context.locale or "en")
 
-    history_text = _format_messages(early)
+    history_text = _format_messages(early, max_chars=120_000)
     system_prompt = t("compress.system_prompt", locale)
     user_prompt = t("compress.user_prompt", locale, history=history_text)
 
@@ -150,8 +150,16 @@ async def compress_context(context: AgentContext, llm_params: dict, model: str) 
     )
 
 
-def _format_messages(messages: list[dict]) -> str:
-    parts = []
+def _format_messages(messages: list[dict], max_chars: int = 0) -> str:
+    """Format messages into a text blob for the compression LLM call.
+
+    When ``max_chars > 0``, the total output is capped at that many
+    characters.  Older messages are dropped first (keeping the most
+    recent ones), and each message's content is progressively shortened
+    so the result always fits within the budget.
+    """
+    # First pass: collect formatted entries
+    entries: list[str] = []
     for msg in messages:
         role = msg.get("role", "?")
         content = msg.get("content", "")
@@ -169,11 +177,32 @@ def _format_messages(messages: list[dict]) -> str:
 
         if role == "tool":
             tool_name = msg.get("name", "tool")
-            parts.append(f"[{tool_name} result]: {content[:2000]}")
+            entries.append(f"[{tool_name} result]: {content[:2000]}")
         else:
             # Normalise internal roles for display
             display_role = "user" if role in ("agent_switch", "experience", "compress") else role
             display = content[:3000] if len(content) > 3000 else content
-            parts.append(f"[{display_role}]: {display}")
+            entries.append(f"[{display_role}]: {display}")
 
-    return "\n\n".join(parts)
+    if max_chars <= 0:
+        return "\n\n".join(entries)
+
+    # Second pass: enforce character budget
+    # Start from the most recent entries and work backwards
+    total = 0
+    kept: list[str] = []
+    per_entry_budget = max_chars
+    for entry in reversed(entries):
+        if total + len(entry) > max_chars:
+            # Truncate this entry to fit remaining budget
+            remaining = max_chars - total
+            if remaining > 200:
+                kept.append(entry[:remaining] + "\n...[truncated]")
+            break
+        kept.append(entry)
+        total += len(entry) + 2  # +2 for "\n\n"
+        if total >= max_chars:
+            break
+
+    kept.reverse()
+    return "\n\n".join(kept)
