@@ -1,3 +1,4 @@
+from crabagent.core.agent.tools.path_utils import resolve_tool_path
 from crabagent.core.agent.tools.registry import registry
 
 
@@ -9,7 +10,7 @@ from crabagent.core.agent.tools.registry import registry
         "properties": {
             "file_path": {
                 "type": "string",
-                "description": "Absolute path to the file to edit.",
+                "description": "Absolute path or workspace-relative path to the file to edit.",
             },
             "old_string": {
                 "type": "string",
@@ -24,10 +25,11 @@ from crabagent.core.agent.tools.registry import registry
     },
     requires_permission=True,
 )
-def edit_file(file_path: str, old_string: str, new_string: str) -> str:
-    from pathlib import Path
-
-    path = Path(file_path)
+def edit_file(file_path: str, old_string: str, new_string: str, context=None) -> str:
+    path, error = resolve_tool_path(file_path, context)
+    if error:
+        return error
+    assert path is not None
     if not path.exists():
         return f"Error: file does not exist: {file_path}"
 

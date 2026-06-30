@@ -4,6 +4,7 @@ import os
 import re
 from typing import Any
 
+from crabagent.core.agent.tools.path_utils import resolve_tool_path
 from crabagent.core.agent.tools.registry import registry
 
 # ── Directories always excluded from search ─────────────────────────────
@@ -148,19 +149,12 @@ def glob_files(
     ignore_dirs: list[str] | None = None,
     context: Any = None,
 ) -> str:
-    # ── Resolve root (prefer workspace context when available) ──────────
-    base = path
-    if context is not None and hasattr(context, "workspace") and context.workspace:
-        try:
-            import pathlib
+    root_path, error = resolve_tool_path(path, context)
+    if error:
+        return error
+    assert root_path is not None
 
-            p = pathlib.Path(path)
-            if not p.is_absolute():
-                base = str(pathlib.Path(context.workspace) / path)
-        except Exception:
-            pass
-
-    root = os.path.abspath(base)
+    root = os.path.abspath(str(root_path))
     if not os.path.exists(root):
         return f"Error: path does not exist: {path}"
     if os.path.isfile(root):

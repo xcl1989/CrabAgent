@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from crabagent.core.agent.tools.path_utils import resolve_tool_path
 from crabagent.core.agent.tools.registry import registry
 
 # Shared exclude set — keep in sync with glob.py and grep.py
@@ -46,7 +47,7 @@ def _is_binary(filepath: str) -> bool:
         "properties": {
             "file_path": {
                 "type": "string",
-                "description": "Absolute path to the file or directory to read.",
+                "description": "Absolute path or workspace-relative path to the file or directory to read.",
             },
             "offset": {
                 "type": "integer",
@@ -68,19 +69,10 @@ def read_file(
     limit: int = 2000,
     context: Any = None,
 ) -> str:
-    from pathlib import Path
-
-    # ── Resolve path (prefer workspace context when available) ──────────
-    base = file_path
-    if context is not None and hasattr(context, "workspace") and context.workspace:
-        try:
-            p = Path(file_path)
-            if not p.is_absolute():
-                base = str(Path(context.workspace) / file_path)
-        except Exception:
-            pass
-
-    path = Path(base)
+    path, error = resolve_tool_path(file_path, context)
+    if error:
+        return error
+    assert path is not None
     if not path.exists():
         return f"Error: path does not exist: {file_path}"
 

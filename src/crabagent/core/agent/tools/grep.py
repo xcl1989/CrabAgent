@@ -5,6 +5,7 @@ import os
 import re
 from typing import Any
 
+from crabagent.core.agent.tools.path_utils import resolve_tool_path
 from crabagent.core.agent.tools.registry import registry
 
 # ── Default directories to skip when searching ──────────────────────────
@@ -126,21 +127,13 @@ def grep_files(
     max_depth: int = 15,
     context: Any = None,
 ) -> str:
-    # ── Resolve root (prefer workspace context when available) ──────────
-    base = path
-    if context is not None and hasattr(context, "workspace") and context.workspace:
-        try:
-            # If path is relative, resolve against workspace
-            import pathlib
-
-            p = pathlib.Path(path)
-            if not p.is_absolute():
-                base = str(pathlib.Path(context.workspace) / path)
-        except Exception:
-            pass
+    resolved_path, error = resolve_tool_path(path, context)
+    if error:
+        return error
+    assert resolved_path is not None
 
     # ── Single-file mode: if *path* is a file, grep it directly ────────
-    resolved = os.path.abspath(base)
+    resolved = os.path.abspath(str(resolved_path))
     if os.path.isfile(resolved):
         try:
             regex_inner = re.compile(pattern)
@@ -163,7 +156,7 @@ def grep_files(
         return "\n".join(single_results)
 
     # ── Directory mode ──────────────────────────────────────────────────
-    root_path = os.path.abspath(base)
+    root_path = resolved
     if not os.path.isdir(root_path):
         return f"Error: path does not exist or is not a directory: {path}"
 

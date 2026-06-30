@@ -4,6 +4,7 @@ import { Plus, Trash2, Star, StarOff, ChevronDown, ChevronRight, X, Check, Exter
 import { Provider, CatalogEntry } from "../api/providers";
 import * as providersApi from "../api/providers";
 import * as chatgptApi from "../api/chatgpt";
+import * as quotaApi from "../api/quota";
 import { Modal, Button, Input, PasswordInput, ConfirmDialog, EmptyState } from "./ui";
 import { toast } from "./ui/Toast";
 import { cn } from "../lib/cn";
@@ -43,6 +44,10 @@ export default function ProviderPanel({
   const [chatgptAccount, setChatgptAccount] = useState<chatgptApi.ChatGPTAccountInfo | null>(null);
   const [chatgptAccountBusy, setChatgptAccountBusy] = useState(false);
   const [resetBusy, setResetBusy] = useState(false);
+  const [deepseekQuota, setDeepseekQuota] = useState<quotaApi.ProviderQuota | null>(null);
+  const [deepseekBusy, setDeepseekBusy] = useState(false);
+  const [zhipuQuota, setZhipuQuota] = useState<quotaApi.ProviderQuota | null>(null);
+  const [zhipuBusy, setZhipuBusy] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Check ChatGPT auth status when a chatgpt provider exists
@@ -132,6 +137,30 @@ export default function ProviderPanel({
       toast.error("重置失败，请稍后重试");
     } finally {
       setResetBusy(false);
+    }
+  };
+
+  const handleDeepSeekQuota = async (name: string) => {
+    setDeepseekBusy(true);
+    try {
+      const info = await quotaApi.getProviderQuota(name);
+      setDeepseekQuota(info);
+    } catch {
+      toast.error("获取 DeepSeek 余额失败");
+    } finally {
+      setDeepseekBusy(false);
+    }
+  };
+
+  const handleZhipuQuota = async (name: string) => {
+    setZhipuBusy(true);
+    try {
+      const info = await quotaApi.getProviderQuota(name);
+      setZhipuQuota(info);
+    } catch {
+      toast.error("获取智谱额度失败");
+    } finally {
+      setZhipuBusy(false);
     }
   };
 
@@ -559,6 +588,96 @@ export default function ProviderPanel({
                         </div>
                       )}
 
+                      {/* DeepSeek Quota Section */}
+                      {p.type === "deepseek" && (
+                        <div className="pt-1.5 space-y-2">
+                          <div className="flex items-center gap-2">
+                            <Button variant="secondary" size="sm" onClick={() => handleDeepSeekQuota(p.name)} loading={deepseekBusy}>
+                              {deepseekBusy ? "查询中..." : "查看余额"}
+                            </Button>
+                          </div>
+                          {deepseekQuota && (
+                            <div className="p-3 rounded-lg bg-[var(--bg-secondary)] border border-[var(--border)] text-[11px] space-y-2">
+                              <div className="flex justify-between">
+                                <span className="text-[var(--text-tertiary)]">可用</span>
+                                <span className={(deepseekQuota.summary as quotaApi.DeepSeekQuota).is_available ? "text-green-500" : "text-[var(--danger)]"}>
+                                  {(deepseekQuota.summary as quotaApi.DeepSeekQuota).is_available ? "是" : "否"}
+                                </span>
+                              </div>
+                              {(deepseekQuota.summary as quotaApi.DeepSeekQuota).balances.map((b, i) => (
+                                <div key={i} className="pt-1.5 border-t border-[var(--border)] space-y-1.5">
+                                  <div className="text-[var(--text-secondary)] font-medium">
+                                    {b.currency === "CNY" ? "💴 人民币" : "💵 美元"}
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-[var(--text-tertiary)]">总余额</span>
+                                    <span className="text-[var(--text-primary)] font-medium">{b.total}</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-[var(--text-tertiary)]">充值余额</span>
+                                    <span className="text-[var(--text-primary)]">{b.topped_up}</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-[var(--text-tertiary)]">赠送余额</span>
+                                    <span className="text-[var(--text-primary)]">{b.granted}</span>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Zhipu Quota Section */}
+                      {p.type === "zhipu" && (
+                        <div className="pt-1.5 space-y-2">
+                          <div className="flex items-center gap-2">
+                            <Button variant="secondary" size="sm" onClick={() => handleZhipuQuota(p.name)} loading={zhipuBusy}>
+                              {zhipuBusy ? "查询中..." : "查看额度"}
+                            </Button>
+                          </div>
+                          {zhipuQuota && (
+                            <div className="p-3 rounded-lg bg-[var(--bg-secondary)] border border-[var(--border)] text-[11px] space-y-2">
+                              <div className="flex justify-between">
+                                <span className="text-[var(--text-tertiary)]">套餐等级</span>
+                                <span className="px-1.5 py-0.5 rounded bg-[var(--brand-bg)] text-[var(--brand)] border border-[var(--brand-border)] font-medium uppercase text-[10px]">
+                                  {(zhipuQuota.summary as quotaApi.ZhipuQuota).level || "?"}
+                                </span>
+                              </div>
+                              {(zhipuQuota.summary as quotaApi.ZhipuQuota).token_limits.map((tl, i) => (
+                                <div key={i} className="pt-2 border-t border-[var(--border)]">
+                                  <UsageBar
+                                    label={tl.label === "WEEK" ? "📅 周窗口" : `⏱ ${tl.number} 小时窗口`}
+                                    usedPercent={tl.percentage}
+                                    resetText={formatResetCountdown(tl.nextResetTime)}
+                                  />
+                                </div>
+                              ))}
+                              {(zhipuQuota.summary as quotaApi.ZhipuQuota).time_limit && (
+                                <div className="pt-2 border-t border-[var(--border)] space-y-1.5">
+                                  <div className="text-[var(--text-secondary)] font-medium">📊 MCP 月度配额</div>
+                                  <UsageBar
+                                    label="已用"
+                                    usedPercent={(zhipuQuota.summary as quotaApi.ZhipuQuota).time_limit!.percentage}
+                                  />
+                                  <div className="flex justify-between text-[10px] text-[var(--text-tertiary)]">
+                                    <span>
+                                      剩余: {(zhipuQuota.summary as quotaApi.ZhipuQuota).time_limit!.remaining} /{" "}
+                                      {(zhipuQuota.summary as quotaApi.ZhipuQuota).time_limit!.usage}
+                                    </span>
+                                    {(zhipuQuota.summary as quotaApi.ZhipuQuota).time_limit!.nextResetTime && (
+                                      <span>
+                                        {formatResetCountdown((zhipuQuota.summary as quotaApi.ZhipuQuota).time_limit!.nextResetTime!)}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
                       {/* Proxy Section */}
                       <div className="pt-1.5">
                         <div className="flex items-center justify-between mb-1.5">
@@ -747,6 +866,21 @@ export default function ProviderPanel({
       />
     </>
   );
+}
+
+/** 将时间戳（ms 或 s）转换为倒计时文本，如 "3天2h后重置" 或 "15min后重置" */
+function formatResetCountdown(nextResetTime?: number): string {
+  if (!nextResetTime) return "";
+  // 兼容秒级和毫秒级时间戳
+  const ts = nextResetTime > 1e12 ? nextResetTime : nextResetTime * 1000;
+  const diff = ts - Date.now();
+  if (diff <= 0) return "已可重置";
+  const min = Math.floor(diff / 60000);
+  const hours = Math.floor(diff / 3600000);
+  const days = Math.floor(diff / 86400000);
+  if (days > 0) return `${days}天${hours % 24}h后重置`;
+  if (hours > 0) return `${hours}h${min % 60}min后重置`;
+  return `${min}min后重置`;
 }
 
 function UsageBar({

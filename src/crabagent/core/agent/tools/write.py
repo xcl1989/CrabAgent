@@ -1,5 +1,4 @@
-from pathlib import Path
-
+from crabagent.core.agent.tools.path_utils import resolve_tool_path
 from crabagent.core.agent.tools.registry import registry
 
 
@@ -15,7 +14,7 @@ from crabagent.core.agent.tools.registry import registry
         "properties": {
             "file_path": {
                 "type": "string",
-                "description": "Absolute file system path to the file to create or overwrite.",
+                "description": "Absolute file system path or workspace-relative path to the file to create or overwrite.",
             },
             "content": {
                 "type": "string",
@@ -26,13 +25,16 @@ from crabagent.core.agent.tools.registry import registry
     },
     requires_permission=True,
 )
-def write_file(file_path: str, content: str) -> str:
+def write_file(file_path: str, content: str, context=None) -> str:
     if not file_path or not file_path.strip():
-        return "Error: file_path is required and must be a non-empty absolute path"
+        return "Error: file_path is required and must be a non-empty path"
     if not content:
         return "Error: content is required and must be a non-empty string"
 
-    path = Path(file_path)
+    path, error = resolve_tool_path(file_path, context)
+    if error:
+        return error
+    assert path is not None
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
