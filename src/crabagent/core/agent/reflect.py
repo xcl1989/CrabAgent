@@ -200,9 +200,9 @@ async def llm_reflect_lesson(
 
         prompt += (
             "If there is truly nothing worth noting, respond with just the word: NONE\n"
-            "Otherwise respond with:\n"
-            "Category: {category}\n"
-            "Insight: {one sentence of actionable advice}"
+            "Otherwise respond in EXACTLY this format (no other text):\n"
+            "Category: <one of: code, research, analysis, writing, general>\n"
+            "Insight: <a single concrete, actionable sentence>"
         )
 
         llm_params = await _resolve_llm_params(provider_name)
@@ -212,7 +212,7 @@ async def llm_reflect_lesson(
         response = await litellm.acompletion(
             model=model,
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=2000,
+            max_tokens=500,
             temperature=0.3,
             **llm_params,
         )
@@ -233,21 +233,47 @@ async def llm_reflect_lesson(
                 insight = line.split(":", 1)[1].strip()
 
         if not insight:
-            insight = text[:250]
+            # Fallback: take the last non-empty line (LLMs often put the answer
+            # at the end after analysis).  Reject the whole response if it looks
+            # like meta-reflection rather than a lesson.
+            from crabagent.core.agent.lesson_dedup import looks_like_meta_lesson
+
+            lines = [l.strip() for l in text.strip().splitlines() if l.strip()]
+            candidate = lines[-1] if lines else ""
+            if candidate and not looks_like_meta_lesson(candidate):
+                insight = candidate
+
+        if not insight:
+            logger.debug("llm_reflect_lesson for %s: no insight extracted from response", agent_name)
+            return None
 
         if _is_generic_praise(insight):
             logger.debug("llm_reflect_lesson for %s: insight too generic, skipping", agent_name)
+            return None
+
+        from crabagent.core.agent.lesson_dedup import looks_like_meta_lesson
+
+        if looks_like_meta_lesson(insight):
+            logger.info("llm_reflect_lesson for %s: insight looks like meta-reflection, skipping", agent_name)
             return None
 
         if len(insight) < 10:
             logger.warning("llm_reflect_lesson for %s: insight too short (%d chars)", agent_name, len(insight))
             return None
 
+        # Importance scoring: base on signal quality, not flat 0.7
+        if error_msg:
+            importance = 0.85  # failed-task lessons are high value
+        elif stats.get("iterations", 0) >= 8:
+            importance = 0.80  # complex multi-step tasks yield richer lessons
+        else:
+            importance = 0.65  # ordinary tasks
+
         return {
             "category": "failed_approach" if error_msg else "effective_strategy",
             "key": f"lesson:{agent_name}:llm:{hashlib.md5(insight.encode()).hexdigest()[:12]}",
             "content": insight,
-            "importance": 0.8 if error_msg else 0.7,
+            "importance": importance,
             "source": "llm",
             "task_category": category,
             "memory_type": "agent_lesson",
@@ -468,7 +494,58 @@ async def persist_lesson(
         source=lesson.get("source", ""),
         task_category=task_category,
     )
+
+    # Enforce per-agent lesson cap to prevent unbounded growth
+    await _enforce_lesson_cap(user_id, agent_name, cap=30)
     return True
+
+
+async def _enforce_lesson_cap(user_id: int, agent_name: str, cap: int = 30) -> None:
+    """Delete lowest-quality lessons when an agent exceeds the cap.
+
+    Quality heuristic: importance > content length > recency (id).
+    Only deletes when the count strictly exceeds ``cap``.
+    """
+    import re as _re
+
+    from crabagent.core.database import agent_memory_get_by_agent
+
+    lessons = await agent_memory_get_by_agent(user_id, agent_name, limit=200)
+    if len(lessons) <= cap:
+        return
+
+    def quality_key(item: dict) -> tuple:
+        content = (item.get("content") or "").strip()
+        score = float(item.get("importance", 0.5))
+        score += min(len(content), 300) / 300 * 0.1
+        if _re.search(r'\d+\.\d+|`[a-z_]+`|\.py|\.ts|\(e\.g\.|（例如', content):
+            score += 0.05
+        return (score, item.get("id", 0))
+
+    # Sort by quality ascending — worst first
+    sorted_lessons = sorted(lessons, key=quality_key)
+    to_evict = sorted_lessons[: len(lessons) - cap]
+    if not to_evict:
+        return
+
+    from crabagent.core.database import async_session_factory
+    from sqlalchemy import delete as sa_delete
+
+    from crabagent.core.database import AgentMemory, MemoryEmbedding
+
+    evict_ids = [item["id"] for item in to_evict]
+    logger.info(
+        "Evicting %d low-quality lessons for agent %s (cap=%d, was=%d)",
+        len(evict_ids), agent_name, cap, len(lessons),
+    )
+    async with async_session_factory() as db:
+        await db.execute(
+            sa_delete(MemoryEmbedding).where(MemoryEmbedding.memory_id.in_(evict_ids))
+        )
+        await db.execute(
+            sa_delete(AgentMemory).where(AgentMemory.id.in_(evict_ids))
+        )
+        await db.commit()
 
 
 async def persist_preferences(

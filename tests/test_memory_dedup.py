@@ -235,3 +235,56 @@ async def test_persist_lesson_reuses_embedding_match_with_same_task_category(mon
     assert saved
     assert saved[0]["key"] == "lesson:coder:llm:existing"
     assert saved[0]["task_category"] == "code"
+
+
+@pytest.mark.asyncio
+async def test_persist_lesson_evicts_when_cap_exceeded(monkeypatch):
+    """When an agent has more than 30 lessons, the lowest-quality ones get evicted."""
+    saved = []
+
+    # Simulate 33 existing lessons
+    async def fake_get_by_agent(user_id, agent_name, limit=80):
+        return [
+            {"id": i, "key": f"lesson:coder:llm:{i}", "content": f"Tip number {i}.", "importance": 0.5, "task_category": "code"}
+            for i in range(1, 34)
+        ]
+
+    async def fake_upsert(**kwargs):
+        saved.append(kwargs)
+
+    async def fake_embedding_sim(left, right):
+        return 0.0
+
+    evicted = []
+
+    async def fake_enforce_cap(user_id, agent_name, cap=30):
+        evicted.append((agent_name, cap))
+
+    monkeypatch.setattr("crabagent.core.database.agent_memory_get_by_agent", fake_get_by_agent)
+    monkeypatch.setattr("crabagent.core.database.agent_memory_upsert", fake_upsert)
+    monkeypatch.setattr("crabagent.core.agent.reflect.embedding_similarity_score", fake_embedding_sim)
+    monkeypatch.setattr("crabagent.core.agent.reflect._enforce_lesson_cap", fake_enforce_cap)
+
+    ok = await persist_lesson(
+        user_id=1,
+        agent_name="coder",
+        lesson={
+            "key": "lesson:coder:llm:new34",
+            "content": "A genuinely new and specific lesson about handling edge cases in async code.",
+            "category": "effective_strategy",
+            "memory_type": "agent_lesson",
+            "task_category": "code",
+            "importance": 0.8,
+        },
+        source_session="sess1",
+    )
+
+    assert ok is True
+    assert evicted  # cap enforcement was called
+
+
+def test_meta_lesson_patterns_block_analyze_request_variant():
+    """Ensure '1. **Analyze the Request:**' pattern is caught."""
+    assert looks_like_meta_lesson("1. **Analyze the Request:**\n- Goal: Extract lesson") is True
+    assert looks_like_meta_lesson("We need to extract one concrete lesson from this task.") is True
+    assert looks_like_meta_lesson("我们需要从提供的\"completed task\"中提取") is True
