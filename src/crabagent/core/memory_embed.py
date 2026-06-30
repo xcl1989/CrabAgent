@@ -23,8 +23,6 @@ import asyncio
 import logging
 import os
 
-import numpy as np
-
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -105,32 +103,40 @@ async def encode(text: str) -> bytes | None:
     """
     if not await _ensure_model():
         return None
+    import numpy as np
+
     vec = await asyncio.to_thread(
         _MODEL.encode, text, normalize_embeddings=True
     )
     return np.array(vec, dtype=np.float32).tobytes()
 
 
-async def encode_query(text: str) -> np.ndarray | None:
+async def encode_query(text: str):
     """Encode a query string to a float32 numpy array (384-dim).
 
     Returns ``None`` when sentence-transformers is unavailable.
     """
     if not await _ensure_model():
         return None
+    import numpy as np
+
     vec = await asyncio.to_thread(
         _MODEL.encode, text, normalize_embeddings=True
     )
     return vec.astype(np.float32)
 
 
-def decode_embedding(blob: bytes) -> np.ndarray:
+def decode_embedding(blob: bytes):
     """Deserialize a BLOB back to a numpy float32 array."""
+    import numpy as np
+
     return np.frombuffer(blob, dtype=np.float32)
 
 
-def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
+def cosine_similarity(a, b) -> float:
     """Compute cosine similarity between two vectors (already L2-normalised → dot product)."""
+    import numpy as np
+
     return float(np.dot(a, b))
 
 
