@@ -44,6 +44,7 @@ export default function ProviderPanel({
   const [chatgptAccount, setChatgptAccount] = useState<chatgptApi.ChatGPTAccountInfo | null>(null);
   const [chatgptAccountBusy, setChatgptAccountBusy] = useState(false);
   const [resetBusy, setResetBusy] = useState(false);
+  const [resetConfirmTarget, setResetConfirmTarget] = useState(false);
   const [deepseekQuota, setDeepseekQuota] = useState<quotaApi.ProviderQuota | null>(null);
   const [deepseekBusy, setDeepseekBusy] = useState(false);
   const [zhipuQuota, setZhipuQuota] = useState<quotaApi.ProviderQuota | null>(null);
@@ -113,19 +114,25 @@ export default function ProviderPanel({
     }
   };
 
-  const handleConsumeReset = async () => {
+  const handleConsumeReset = () => {
     const credits = chatgptAccount?.rate_limits?.banked_resets;
     const available = credits?.available_count ?? 0;
     if (available <= 0) {
       toast.error("没有可用的重置额度");
       return;
     }
+    setResetConfirmTarget(true);
+  };
+
+  const handleConfirmReset = async () => {
+    const credits = chatgptAccount?.rate_limits?.banked_resets;
     const firstCredit = credits?.credits?.[0];
     const creditId = firstCredit?.id;
     if (!creditId) {
       toast.error("无法获取重置额度 ID");
       return;
     }
+    setResetConfirmTarget(false);
     setResetBusy(true);
     try {
       await chatgptApi.consumeResetCredit(creditId);
@@ -863,6 +870,17 @@ export default function ProviderPanel({
         confirmText={t("common.delete")}
         tone="danger"
         onConfirm={() => { if (deleteTarget) handleDelete(deleteTarget); }}
+      />
+
+      {/* Reset credit confirmation */}
+      <ConfirmDialog
+        open={resetConfirmTarget}
+        onOpenChange={setResetConfirmTarget}
+        title="确认重置额度"
+        description="此操作将立即消耗一张重置卡，清除当前 5 小时窗口和 7 天窗口的使用量。确定要继续吗？"
+        confirmText="确认重置"
+        tone="warning"
+        onConfirm={handleConfirmReset}
       />
     </>
   );

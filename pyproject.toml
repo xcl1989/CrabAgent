@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "crabagent"
-version = "0.12.1"
+version = "0.12.2"
 description = "CrabAgent - AI Agent Platform with dual-mode (CLI + Serve)"
 readme = "README.md"
 license = {text = "Commercial"}

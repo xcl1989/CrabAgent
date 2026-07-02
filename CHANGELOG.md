@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.12.2] — ChatGPT Reset Card Fix & Compress/SSE Improvements
+
+### Fixed
+- **ChatGPT Rate-Limit Reset Card consumption fails with 400 error** — `_consume_reset_credit` request body was missing the required `redeem_request_id` field, causing OpenAI wham API to reject the request. Added the field to the request payload.
+- **CompressMiddleware silently skipped for ChatGPT subscription** — the compression middleware would skip processing when a ChatGPT subscription model was detected, potentially exhausting context window on long sessions.
+
+### Changed
+- **Reset Card button now shows confirmation dialog** — clicking "⚡ 立即使用重置" opens a confirmation modal before consuming the reset credit, preventing accidental clicks.
+- Upgrade Kimi/Moonshot model list and context window limits.
+
+### Improved
+- **SSE reconnection reliability** — pending `user_input` / `confirm` requests are replayed on SSE reconnect, eliminating up to 30s delays.
+- **Memory system stability** — delayed imports for `numpy` and `memory_embed` prevent startup crashes in PyInstaller-bundled environments without numpy.
+- **Compression quality** — original messages are sent as-is to leverage prompt cache, compressed instructions appended separately; compression prompt character limit enforced to prevent oversized triggers.
+
+---
+
 ## [0.11.7] — Image Generation Persistence Fix
 
 ### Fixed

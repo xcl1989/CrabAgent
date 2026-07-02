@@ -611,6 +611,7 @@ async def _consume_reset_credit(
     body = {
         "selected_credit": credit_id,
         "idempotency_key": str(uuid.uuid4()),
+        "redeem_request_id": str(uuid.uuid4()),
     }
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.post(

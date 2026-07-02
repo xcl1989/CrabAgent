@@ -8,6 +8,23 @@ English version: [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
+## [0.12.2] — ChatGPT 重置卡修复 + 压缩/SSE 改进
+
+### 修复
+- **ChatGPT 速率限制重置卡消费失败（400 错误）** — `_consume_reset_credit` 请求体缺少 `redeem_request_id` 字段，导致 OpenAI wham API 拒绝请求。已补上该字段。
+- **CompressMiddleware 对 ChatGPT 订阅模型静默跳过** — 压缩中间件检测到 ChatGPT 订阅模型时会跳过处理，可能导致长会话耗尽上下文窗口。
+
+### 变更
+- **重置卡按钮增加确认弹窗** — 点击"⚡ 立即使用重置"后会弹出确认对话框，防止误触消耗。
+- 更新 Kimi/Moonshot 模型列表和上下文窗口限制。
+
+### 改进
+- **SSE 重连可靠性** — 挂起的 `user_input` / `confirm` 请求在 SSE 重连时重新发送，消除最长 30s 的延迟。
+- **记忆系统稳定性** — `numpy` 和 `memory_embed` 延迟导入，防止无 numpy 环境下 PyInstaller 打包版启动崩溃。
+- **压缩质量** — 原样发送消息以利用 prompt cache，压缩指令单独追加；限制压缩 prompt 字符量防止触发失败。
+
+---
+
 ## [0.11.7] — 图片生成持久化修复
 
 ### 修复
