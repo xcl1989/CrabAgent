@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import os
+import time as _time_module
 import traceback
 from pathlib import Path
 
@@ -33,10 +35,76 @@ class SchedulerService:
         self._processed_message_ids: set[str] = set()  # dedup across poll cycles
         self._poll_failures: dict[int, int] = {}  # user_id -> consecutive failure count
         self._wechat_loop = None  # WeChatMessageLoop instance (if running)
+        self._own_pid: int = os.getpid()
 
     def set_global_event_queues(self, queues: dict) -> None:
         """Inject reference to the app's global SSE event queues for Web notifications."""
         self._global_event_queues = queues
+
+    async def _acquire_process_lock(self, lock_name: str, ttl_seconds: int = 60) -> bool:
+        """Try to acquire a cross-process lock via the shared database.
+
+        Prevents duplicate execution when multiple CrabAgent server
+        instances (e.g. desktop app + CLI server) share the same DB.
+
+        Uses an atomic INSERT … ON CONFLICT to avoid race conditions.
+
+        Returns True if the lock was acquired (or already held by
+        this process), False if another live process holds it.
+        """
+        from sqlalchemy import text
+
+        from crabagent.core.database import async_session_factory
+
+        now = _time_module.time()
+        key = f"_lock:{lock_name}"
+        pid_prefix = f"{self._own_pid}:%"
+        expiry = now - ttl_seconds
+        value = f"{self._own_pid}:{now}"
+
+        try:
+            async with async_session_factory() as db:
+                # Atomic upsert: only overwrite if WE hold the lock
+                # or if the existing lock has expired.
+                await db.execute(
+                    text("""
+                        INSERT INTO app_settings (key, value)
+                        VALUES (:key, :value)
+                        ON CONFLICT(key) DO UPDATE SET value = :value2
+                        WHERE app_settings.value LIKE :pid_prefix
+                           OR CAST(
+                                SUBSTR(app_settings.value, INSTR(app_settings.value, ':') + 1)
+                              AS REAL) < :expiry
+                    """),
+                    {
+                        "key": key,
+                        "value": value,
+                        "value2": value,
+                        "pid_prefix": pid_prefix,
+                        "expiry": expiry,
+                    },
+                )
+                await db.commit()
+
+                # Verify we actually hold the lock
+                result = await db.execute(
+                    text("SELECT value FROM app_settings WHERE key = :key"),
+                    {"key": key},
+                )
+                row = result.fetchone()
+                if row and row[0] == value:
+                    logger.debug("[Lock] Acquired '%s' for PID %d", lock_name, self._own_pid)
+                    return True
+
+                logger.debug(
+                    "[Lock] '%s' held by another process, skipping",
+                    lock_name,
+                )
+                return False
+        except Exception as e:
+            logger.warning("[Lock] Failed to acquire '%s': %s", lock_name, e)
+            # On DB error, err on the side of allowing execution
+            return True
 
     async def start(self):
         self._scheduler.start()
@@ -606,6 +674,10 @@ class SchedulerService:
 
     async def start_wechat_loop(self):
         """Start the WeChat message long-poll loop if enabled and logged in."""
+        # Prevent duplicate WeChat loops across multiple server instances
+        if not await self._acquire_process_lock("wechat_loop", ttl_seconds=120):
+            logger.info("[WeChat] Another instance already running the loop — skipping")
+            return
         try:
             from crabagent.core.wechat import WeChatMessageLoop, get_authenticated_client
             from crabagent.core.wechat.config import load_config
@@ -639,6 +711,9 @@ class SchedulerService:
 
     async def _poll_emails(self, user_id: int):
         """Called periodically: check new emails → match project → generate reply draft → notify."""
+        # Prevent duplicate polling across multiple server instances
+        if not await self._acquire_process_lock(f"email_poll_{user_id}", ttl_seconds=120):
+            return
         from crabagent.core.mail.handler import check_new_emails
 
         logger.debug("[EmailPoll] Checking emails for user %d", user_id)
@@ -1247,6 +1322,10 @@ async def _memory_quality_decay():
 
 async def _calendar_ical_sync():
     """Sync all enabled iCal sources every 30 minutes."""
+    # Prevent duplicate sync across multiple server instances
+    sched = get_scheduler()
+    if not await sched._acquire_process_lock("ical_sync", ttl_seconds=120):
+        return
     import datetime
 
     from sqlalchemy import select
@@ -1276,6 +1355,10 @@ async def _calendar_ical_sync():
 
 async def _calendar_morning_brief():
     """Generate and push a daily morning brief (events + tasks + free time)."""
+    # Prevent duplicate execution across multiple server instances
+    sched = get_scheduler()
+    if not await sched._acquire_process_lock("morning_brief", ttl_seconds=300):
+        return
     import json
 
     from sqlalchemy import select
@@ -1408,6 +1491,10 @@ async def _calendar_event_reminder():
 
 async def _calendar_event_reminder_impl():
     """Actual reminder logic, extracted for re-entrancy guard."""
+    # Prevent duplicate execution across multiple server instances
+    sched = get_scheduler()
+    if not await sched._acquire_process_lock("event_reminder", ttl_seconds=60):
+        return
     import datetime
 
     from sqlalchemy import select

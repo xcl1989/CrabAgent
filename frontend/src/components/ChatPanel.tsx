@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { forwardRef, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
@@ -496,31 +496,34 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(
       };
     }, []);
 
-    const grouped: (ChatMessage | ChatMessage[])[] = [];
-    const consumedToolResults = new Set<string>();
-    for (let i = 0; i < messages.length; i += 1) {
-      const msg = messages[i];
-      if (msg.role === "tool_call") {
-        const matchIdx = messages.findIndex(
-          (candidate, idx) =>
-            idx > i &&
-            candidate.role === "tool_result" &&
-            !consumedToolResults.has(candidate.id) &&
-            !!candidate.tool_call_id &&
-            candidate.tool_call_id === msg.tool_call_id,
-        );
-        if (matchIdx >= 0) {
-          const resultMsg = messages[matchIdx];
-          consumedToolResults.add(resultMsg.id);
-          grouped.push([msg, resultMsg]);
+    const grouped = useMemo(() => {
+      const result: (ChatMessage | ChatMessage[])[] = [];
+      const consumedToolResults = new Set<string>();
+      for (let i = 0; i < messages.length; i += 1) {
+        const msg = messages[i];
+        if (msg.role === "tool_call") {
+          const matchIdx = messages.findIndex(
+            (candidate, idx) =>
+              idx > i &&
+              candidate.role === "tool_result" &&
+              !consumedToolResults.has(candidate.id) &&
+              !!candidate.tool_call_id &&
+              candidate.tool_call_id === msg.tool_call_id,
+          );
+          if (matchIdx >= 0) {
+            const resultMsg = messages[matchIdx];
+            consumedToolResults.add(resultMsg.id);
+            result.push([msg, resultMsg]);
+            continue;
+          }
+        }
+        if (msg.role === "tool_result" && consumedToolResults.has(msg.id)) {
           continue;
         }
+        result.push(msg);
       }
-      if (msg.role === "tool_result" && consumedToolResults.has(msg.id)) {
-        continue;
-      }
-      grouped.push(msg);
-    }
+      return result;
+    }, [messages]);
 
     return (
       <div

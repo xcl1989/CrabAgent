@@ -106,7 +106,14 @@ PROVIDER_CATALOG: dict[str, dict] = {
     },
     "volcengine": {"base_url": "https://ark.cn-beijing.volces.com/api/v3", "display_name": "火山引擎"},
     "bailian": {"base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "display_name": "阿里百炼"},
-    "kimi": {"base_url": "https://api.moonshot.cn/v1", "display_name": "Kimi (Moonshot AI)"},
+    "kimi": {
+        "base_url": "https://api.moonshot.cn/v1",
+        "display_name": "Kimi (Moonshot AI)",
+        "variants": [
+            {"id": "standard", "display_name": "Moonshot 开放平台", "base_url": "https://api.moonshot.cn/v1"},
+            {"id": "coding", "display_name": "Kimi Code Plan", "base_url": "https://api.kimi.com/coding/v1"},
+        ],
+    },
 }
 
 

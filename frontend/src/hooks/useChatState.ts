@@ -78,6 +78,10 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
 
   useEffect(() => {
     let cancelled = false;
+    // Clear immediately for responsive workspace switch
+    setActiveSession(null);
+    setMessages([]);
+    
     sessionsApi.listSessions(workspace).then((result) => {
       if (cancelled) return;
       setSessions(result);
@@ -94,13 +98,17 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
             setMessages(chatMsgs);
           }
         });
-      } else {
-        setActiveSession(null);
-        setMessages([]);
       }
     });
     return () => { cancelled = true; };
   }, [workspace, populateSubAgentContents, onAutoLoadSession]);
+
+  // Stash onEvent and workspace in refs so handleSSEEvent identity stays stable
+  // (prevents SSE reconnect churn when parent re-renders)
+  const onEventRef = useRef(onEvent);
+  onEventRef.current = onEvent;
+  const workspaceRef = useRef(workspace);
+  workspaceRef.current = workspace;
 
   const handleSSEEvent = useCallback(
     (event: SSEEvent) => {
@@ -120,7 +128,7 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
       if (event.type === "iteration_start" && event.data.replay_progress) {
         setReplayProgress({
           current: event.data.replay_progress as number,
-          total: event.data.replay_total as number,
+          total: (event.data.replay_total as number) || 0,
         });
         return;
       }
@@ -128,7 +136,7 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
         setReplaying(false);
         setReplayProgress({ current: 0, total: 0 });
         setTimeout(() => {
-          sessionsApi.listSessions(workspace).then(setSessions);
+          sessionsApi.listSessions(workspaceRef.current).then(setSessions);
         }, 500);
         return;
       }
@@ -145,7 +153,7 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
         };
         setMessages((prev) => [...prev, { id: `stats-${Date.now()}`, role: "stats", content: "", stats }]);
         setTimeout(() => {
-          sessionsApi.listSessions(workspace).then(setSessions);
+          sessionsApi.listSessions(workspaceRef.current).then(setSessions);
         }, 500);
         const sid = activeSessionRef.current?.session_id;
         if (sid) {
@@ -154,9 +162,6 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
             const dbMsgs = dbMessagesToChat(msgs);
             populateSubAgentContents(dbMsgs);
             setMessages((prev) => {
-              // Quick shape check: if DB messages have the same count, roles,
-              // and content lengths as current, skip the replacement entirely
-              // to avoid unnecessary DOM churn and scroll jumps.
               const sameShape =
                 dbMsgs.length === prev.length &&
                 dbMsgs.every(
@@ -168,9 +173,6 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
 
               const dbTotal = dbMsgs.reduce((s, m) => s + (m.content?.length || 0), 0);
               const prevTotal = prev.reduce((s, m) => s + (m.content?.length || 0), 0);
-              // Preserve live-only SSE messages (screenshots, etc.) that
-              // don't exist in DB. But skip if DB already has screenshots
-              // (they carry inline base64, so no auth issues).
               const dbHasScreenshots = dbMsgs.some((m) => m.role === "screenshot");
               const liveOnly = dbHasScreenshots
                 ? []
@@ -178,7 +180,6 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
               if (dbTotal >= prevTotal) {
                 return [...dbMsgs, ...liveOnly];
               }
-              // Merge: keep prev + append any new DB messages
               const dbIds = new Set(dbMsgs.map((m) => m.id));
               const retained = prev.filter((m) => m.role === "screenshot" || !dbIds.has(m.id));
               return [...dbMsgs, ...retained.filter((m) => !dbMsgs.some((d) => d.id === m.id))];
@@ -188,7 +189,7 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
       }
       if (event.type.startsWith("sub_agent_")) {
         if (event.type === "sub_agent_start" || event.type === "sub_agent_end" || event.type === "sub_agent_error") {
-          onEvent?.(event);
+          onEventRef.current?.(event);
         }
         pendingSubEventsRef.current.push(event);
         if (!subFlushTimerRef.current) {
@@ -197,9 +198,9 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
         return;
       }
       setMessages((prev) => sseEventToMessages(event, prev));
-      onEvent?.(event);
+      onEventRef.current?.(event);
     },
-    [onEvent, workspace]
+    [populateSubAgentContents]  // stable — no more workspace/onEvent deps
   );
 
   const { connected } = useSSE(activeSession?.session_id || null, handleSSEEvent);
@@ -207,25 +208,25 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
   const selectSession = useCallback(
     async (session: Session, selectedModel: string, models: { id: string }[]) => {
       setActiveSession(session);
-      const branch = session.active_branch || "main";
-      setActiveBranch(branch);
-      const msgs = await sessionsApi.getMessages(session.session_id);
+      setActiveBranch(session.active_branch || "main");
+      // Show empty messages immediately to avoid stale content flash
+      setMessages([]);
+
+      // Fetch messages and monitor in parallel
+      const msgsPromise = sessionsApi.getMessages(session.session_id);
+      const monitorPromise = import("../api/monitor")
+        .then(({ getAgentMonitor }) => getAgentMonitor())
+        .catch(() => []);
+
+      const [msgs, monitors] = await Promise.all([msgsPromise, monitorPromise]);
       const chatMsgs = dbMessagesToChat(msgs);
       populateSubAgentContents(chatMsgs);
       setMessages(chatMsgs);
 
-      // Check if this session has a running agent task — if so, restore "sending" state
-      try {
-        const { getAgentMonitor } = await import("../api/monitor");
-        const monitors = await getAgentMonitor();
-        const hasRunning = monitors.some(
-          (m) => m.session_id === session.session_id && m.status === "running"
-        );
-        setSending(hasRunning);
-      } catch {
-        // If monitor check fails, assume not running
-        setSending(false);
-      }
+      const hasRunning = (monitors as { session_id: string; status: string }[]).some(
+        (m) => m.session_id === session.session_id && m.status === "running"
+      );
+      setSending(hasRunning);
 
       return session.model || (models.length > 0 ? models[0].id : selectedModel);
     },
@@ -246,9 +247,15 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
   const prevRunningRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
+    let monitorApi: Promise<typeof import("../api/monitor")> | null = null;
+    const getMonitor = () => {
+      if (!monitorApi) monitorApi = import("../api/monitor");
+      return monitorApi;
+    };
+
     const interval = setInterval(async () => {
       try {
-        const { getAgentMonitor } = await import("../api/monitor");
+        const { getAgentMonitor } = await getMonitor();
         const monitors = await getAgentMonitor();
         const nowRunning = new Set(monitors.filter((m) => m.status === "running").map((m) => m.session_id));
         const prevRunning = prevRunningRef.current;

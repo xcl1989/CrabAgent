@@ -22,6 +22,13 @@ export async function getTree(path: string = "", depth: number = 5, absolute: bo
   return api.get<FileEntry[]>(`/files/tree?${params}`);
 }
 
+export async function searchFiles(query: string, absolute: boolean = false, limit: number = 200, signal?: AbortSignal): Promise<FileEntry[]> {
+  const params: Record<string, string> = { q: query, limit: String(limit) };
+  if (absolute) params.absolute = "true";
+  const res = await api.get<{ results: FileEntry[]; total: number }>(`/files/search`, params, signal);
+  return res.results;
+}
+
 export async function readFile(path: string, absolute: boolean = false): Promise<FileContent> {
   const params = new URLSearchParams();
   params.set("path", path);

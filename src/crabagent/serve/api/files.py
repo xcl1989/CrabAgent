@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import mimetypes
+import os
 import secrets
+import time as _time
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File as FastFile, HTTPException, Query, UploadFile
@@ -86,6 +88,107 @@ def _build_tree(dir_path: Path, base: Path, depth: int, absolute: bool = False) 
     except PermissionError:
         pass
     return entries
+
+
+# Directories to skip during search
+_SEARCH_SKIP_DIRS = frozenset({
+    ".git", "node_modules", "__pycache__", ".venv", "venv", "env",
+    ".mypy_cache", ".pytest_cache", ".ruff_cache", "dist", "build",
+    ".egg-info", ".next", ".nuxt", ".turbo", ".svelte-kit",
+    "target", ".gradle", ".idea", ".vscode",
+})
+
+# ── Flat file index cache ────────────────────────────────────────────
+# Build once, reuse for all searches until TTL expires.
+
+_file_index_cache: dict[str, list[dict]] = {}  # key: root path → list of {name, path, type}
+_file_index_ts: dict[str, float] = {}           # key: root path → build timestamp
+_FILE_INDEX_TTL = 15.0  # seconds
+
+
+def _build_file_index(root: Path, base: Path, absolute: bool) -> list[dict]:
+    """Build a flat list of all file/dir entries using os.scandir (fast, no stat calls)."""
+    entries: list[dict] = []
+    stack = [(root, 20)]  # (dir, depth_remaining)
+
+    while stack:
+        dir_path, depth = stack.pop()
+        if depth <= 0:
+            continue
+        try:
+            with os.scandir(dir_path) as it:
+                for entry in it:
+                    name = entry.name
+                    if name.startswith(".") and name != ".crabagent":
+                        continue
+                    is_dir = entry.is_dir(follow_symlinks=False)
+                    if is_dir and name in _SEARCH_SKIP_DIRS:
+                        continue
+                    # Compute relative path once
+                    full = os.path.join(str(dir_path), name)
+                    if absolute:
+                        rel = os.path.abspath(full)
+                    else:
+                        rel = os.path.relpath(full, str(base))
+                    entries.append({"name": name, "path": rel, "type": "directory" if is_dir else "file"})
+                    if is_dir:
+                        stack.append((Path(full), depth - 1))
+        except (PermissionError, OSError):
+            pass
+
+    return entries
+
+
+@router.get("/search")
+async def search_files(
+    q: str = Query(..., min_length=1, description="Search query (matches file/dir names)"),
+    path: str = Query("", description="Root path relative to workspace, or absolute path when absolute=true"),
+    absolute: bool = Query(False, description="Treat path as absolute filesystem path"),
+    limit: int = Query(200, ge=1, le=500, description="Max results"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Search file/dir names across the workspace (recursive, case-insensitive).
+
+    Uses a cached flat file index (rebuilt every 15s) for instant filtering.
+    """
+    from crabagent.core.config import settings
+
+    if absolute:
+        root = Path(path).resolve() if path else Path("/")
+    else:
+        workspace = settings.workspace.resolve()
+        root = _resolve_path(workspace, path.lstrip("/"))
+        if not root:
+            raise HTTPException(status_code=400, detail="Path outside workspace")
+
+    if not root.exists() or not root.is_dir():
+        raise HTTPException(status_code=404, detail="Directory not found")
+
+    cache_key = str(root)
+
+    def _ensure_index() -> list[dict]:
+        """Return cached index or rebuild if stale."""
+        now = _time.monotonic()
+        if (
+            cache_key in _file_index_cache
+            and (now - _file_index_ts.get(cache_key, 0)) < _FILE_INDEX_TTL
+        ):
+            return _file_index_cache[cache_key]
+        # Build fresh index
+        base = root if absolute else _resolve_path(settings.workspace.resolve(), "") or root
+        idx = _build_file_index(root, base, absolute)
+        _file_index_cache[cache_key] = idx
+        _file_index_ts[cache_key] = now
+        return idx
+
+    # Run index build in thread pool (only hits filesystem on cache miss)
+    index = await asyncio.to_thread(_ensure_index)
+
+    # Filter — pure in-memory, instant
+    query_lower = q.lower()
+    results = [e for e in index if query_lower in e["name"].lower()]
+    return {"results": results[:limit], "total": len(results)}
 
 
 @router.get("/read")

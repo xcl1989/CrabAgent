@@ -38,9 +38,12 @@ class CompressMiddleware:
         return None
 
     async def before_llm_call(self, context, messages: list[dict]) -> list[dict]:
-        model = context.metadata.get("_resolved_model") or context.model or "gpt-4"
+        # Use the full model name (with provider prefix, e.g. "chatgpt/gpt-5.4")
+        # stashed by run_agent. Fall back to bare model name + "openai/" prefix.
+        full_model = context.metadata.get("_resolved_model_full")
+        bare_model = context.metadata.get("_resolved_model") or context.model or "gpt-4"
         try:
-            max_context = get_model_token_limit(model)
+            max_context = get_model_token_limit(bare_model)
         except Exception:
             max_context = 8000
         threshold = settings.context_compression_threshold
@@ -52,7 +55,9 @@ class CompressMiddleware:
             logger.debug("CompressMiddleware skipped: _llm_params not yet stashed")
             return messages
 
-        normalized_model = model if "/" in model else f"openai/{model}"
+        # Prefer the full model name (with correct provider prefix);
+        # fall back to adding "openai/" for backward compatibility.
+        normalized_model = full_model or (bare_model if "/" in bare_model else f"openai/{bare_model}")
         try:
             await compress_context(context, llm_params, normalized_model)
         except Exception:

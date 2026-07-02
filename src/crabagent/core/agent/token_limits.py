@@ -58,6 +58,7 @@ DEFAULT_MODEL_TOKEN_LIMITS: dict[str, int] = {
     "kimi-k2.6": 256_000,
     "kimi-k2.7-code": 256_000,
     "kimi-k2.7-code-highspeed": 256_000,
+    "kimi-for-coding": 256_000,
 }
 
 _PREFIX_MATCH_ORDER = [

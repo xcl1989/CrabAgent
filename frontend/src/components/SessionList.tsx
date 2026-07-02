@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import {
   Plus,
   Trash2,
@@ -119,11 +119,11 @@ export default function SessionList({
     return () => { clearTimeout(timer); setSearchLoading(false); };
   }, [query]);
 
-  const filtered = query.trim()
+  const filtered = useMemo(() => query.trim()
     ? sessions.filter((s) =>
         (s.title || "").toLowerCase().includes(query.toLowerCase()),
       )
-    : sessions;
+    : sessions, [sessions, query]);
 
   const handleSelect = (s: Session) => {
     onSelect(s);

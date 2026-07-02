@@ -196,6 +196,7 @@ async def run_agent(
     _llm_retry_max = settings.llm_retry_max
     context.metadata["_llm_params"] = dict(llm)
     context.metadata["_resolved_model"] = model.split("/", 1)[-1] if "/" in model else model
+    context.metadata["_resolved_model_full"] = model  # keep provider prefix for compress
 
     while not context.budget_exhausted:
         context.iteration += 1

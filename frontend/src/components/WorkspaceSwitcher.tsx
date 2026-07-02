@@ -19,8 +19,9 @@ export default function WorkspaceSwitcher({ current, onChange }: Props) {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    // Only fetch once on mount, not on every workspace change
     listWorkspaces().then(setWorkspaces).catch(() => {});
-  }, [current]);
+  }, []);
 
   useEffect(() => {
     if (open) {
