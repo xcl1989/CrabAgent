@@ -51,7 +51,7 @@ class CompressMiddleware:
             return messages
 
         llm_params = context.metadata.get("_llm_params")
-        if not isinstance(llm_params, dict) or not llm_params:
+        if not isinstance(llm_params, dict):
             logger.debug("CompressMiddleware skipped: _llm_params not yet stashed")
             return messages
 
