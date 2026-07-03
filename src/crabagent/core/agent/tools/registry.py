@@ -107,6 +107,11 @@ class ToolRegistry:
         return result
 
     async def _take_molt_snapshot(self, name: str, arguments: dict[str, Any], context: Any) -> None:
+        """Capture file content BEFORE the tool modifies it.
+
+        Copies the pre-modification file into a staging directory so that
+        the snapshot truly reflects the 'before' state.
+        """
         if name not in ("write", "edit"):
             return
         raw = arguments.get("path") or arguments.get("file_path", "")
@@ -120,8 +125,27 @@ class ToolRegistry:
             rel = str(resolved.relative_to(ws))
         except (ValueError, Exception):
             return
-        # Collect files for batch snapshot at end of round
+
+        # Only snapshot each file once per round
         pending = context.metadata.setdefault("_pending_molt_files", set())
+        if rel in pending:
+            return  # Already captured before another tool in the same round
+
+        # Copy the file content NOW (before the tool modifies it)
+        import shutil
+
+        staging = ws / ".crabagent" / "molts" / "_staging"
+        src = ws / rel
+        if src.exists() and src.is_file():
+            try:
+                dst = staging / rel
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(str(src), str(dst))
+            except Exception:
+                logger.debug("Failed to pre-copy %s for molt staging", rel, exc_info=True)
+                return  # Can't stage — skip this file
+        # else: file doesn't exist yet (new file) — nothing to snapshot
+
         pending.add(rel)
 
     async def _flush_molt_snapshot(self, context: Any) -> None:
@@ -130,15 +154,80 @@ class ToolRegistry:
         if not pending:
             return
         from crabagent.core.database import async_session_factory
-        from crabagent.core.molt.snapshot import take_snapshot
         from crabagent.core.molt.store import create_molt, prune_molts
+        from crabagent.core.molt.snapshot import _molt_id
 
         files = sorted(pending)
         desc = f"Before: {', '.join(files[:3])}" + (f" +{len(files) - 3} more" if len(files) > 3 else "")
         ws = context.workspace.resolve()
-        snap = await take_snapshot(context, files, description=desc)
-        if not snap:
+        staging = ws / ".crabagent" / "molts" / "_staging"
+
+        # Check if any staged files exist
+        staged_files = []
+        for fp in files:
+            staged = staging / fp
+            if staged.exists() and staged.is_file():
+                staged_files.append(fp)
+
+        if not staged_files:
+            # All files were new (didn't exist before) — nothing to snapshot
+            import shutil
+            shutil.rmtree(str(staging), ignore_errors=True)
             return
+
+        # Create the molt directory and move staged files into it
+        import shutil
+
+        mid = _molt_id()
+        md = ws / ".crabagent" / "molts" / mid
+        try:
+            md.mkdir(parents=True, exist_ok=True)
+
+            method = "copy"
+            # If git repo, also save diff for context
+            is_git = (ws / ".git").exists()
+            if is_git:
+                import asyncio
+
+                diff_lines = []
+                for fp in staged_files:
+                    try:
+                        proc = await asyncio.create_subprocess_exec(
+                            "git", "diff", "--", fp,
+                            stdout=asyncio.subprocess.PIPE,
+                            stderr=asyncio.subprocess.PIPE,
+                            cwd=str(ws),
+                        )
+                        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
+                        if stdout and stdout.strip():
+                            diff_lines.append(f"--- {fp}\n{stdout.decode('utf-8', errors='replace')}")
+                    except Exception:
+                        pass
+                if diff_lines:
+                    method = "git"
+                    (md / "diff.txt").write_text("\n".join(diff_lines), encoding="utf-8")
+
+            # Move staged files into molt directory
+            for fp in staged_files:
+                src = staging / fp
+                dst = md / fp
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(src), str(dst))
+
+            # Clean up empty staging dir
+            shutil.rmtree(str(staging), ignore_errors=True)
+        except Exception:
+            logger.warning("Failed to create molt snapshot directory", exc_info=True)
+            shutil.rmtree(str(staging), ignore_errors=True)
+            shutil.rmtree(str(md), ignore_errors=True)
+            return
+
+        snap = {
+            "molt_id": mid,
+            "description": desc,
+            "method": method,
+            "files": staged_files,
+        }
         try:
             sess_id = context.metadata.get("session_id", "")
             branch_id = context.metadata.get("branch_id", "main")
@@ -155,8 +244,7 @@ class ToolRegistry:
                 await prune_molts(workspace=ws)
         except Exception:
             logger.warning("Failed to persist molt %s to DB, cleaning up orphaned files", snap.get("molt_id", ""), exc_info=True)
-            import shutil
-            shutil.rmtree(str(ws / ".crabagent" / "molts" / snap["molt_id"]), ignore_errors=True)
+            shutil.rmtree(str(md), ignore_errors=True)
 
     async def execute(self, name: str, arguments: dict[str, Any], context: Any = None) -> str:
         import time as _t

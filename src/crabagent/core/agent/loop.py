@@ -645,7 +645,7 @@ async def run_agent(
         if hasattr(registry, "_flush_molt_snapshot"):
             await registry._flush_molt_snapshot(context)
     except Exception:
-        logger.debug("molt flush failed", exc_info=True)
+        logger.warning("molt flush failed", exc_info=True)
 
     return context.messages
 
