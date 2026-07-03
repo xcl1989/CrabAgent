@@ -460,6 +460,45 @@ async def git_diff(
         return {"is_git": False, "diff": ""}
 
     try:
+        MAX_DIFF = 50_000
+
+        # Check if the file is untracked (??). git diff doesn't show untracked files,
+        # so we need to use --no-index against /dev/null.
+        if path:
+            status_proc = await asyncio.create_subprocess_exec(
+                "git", "status", "--porcelain", "--", path,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=str(ws),
+            )
+            status_stdout, _ = await asyncio.wait_for(status_proc.communicate(), timeout=10)
+            status_line = status_stdout.decode("utf-8", errors="replace").strip()
+            if status_line.startswith("??"):
+                # Untracked file: diff against /dev/null to show full content as added
+                full_path = ws / path
+                if full_path.is_file():
+                    # Limit file size to avoid huge diffs
+                    file_size = full_path.stat().st_size
+                    if file_size > 100_000:
+                        diff_text = f"diff --git a/{path} b/{path}\nnew file mode 100644\n--- /dev/null\n+++ b/{path}\n(file too large to display: {file_size} bytes)"
+                        return {"is_git": True, "diff": diff_text, "truncated": True}
+                    try:
+                        file_content = full_path.read_text("utf-8", errors="replace")
+                    except Exception:
+                        file_content = "(binary file)"
+                    diff_lines = [f"diff --git a/{path} b/{path}", "new file mode 100644",
+                                  "--- /dev/null", f"+++ b/{path}"]
+                    for i, line in enumerate(file_content.splitlines(), 1):
+                        diff_lines.append(f"+{line}")
+                    diff_text = "\n".join(diff_lines)
+                    truncated = False
+                    if len(diff_text) > MAX_DIFF:
+                        diff_text = diff_text[:MAX_DIFF]
+                        truncated = True
+                    return {"is_git": True, "diff": diff_text, "truncated": truncated}
+                else:
+                    return {"is_git": True, "diff": "", "is_untracked_dir": True}
+
         args = ["git", "diff"]
         if cached:
             args.append("--cached")
@@ -476,7 +515,6 @@ async def git_diff(
         diff_text = stdout.decode("utf-8", errors="replace")
 
         # Truncate if too large
-        MAX_DIFF = 50_000
         truncated = False
         if len(diff_text) > MAX_DIFF:
             diff_text = diff_text[:MAX_DIFF]
