@@ -427,6 +427,19 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(
       return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
     }, [messages, sending, scrollToBottom]);
 
+    // During active streaming, the rAF above can be cancelled faster than it
+    // fires (every new token triggers a re-render that cancels the pending rAF).
+    // This interval acts as a safety net to ensure scrollToBottom actually runs.
+    useEffect(() => {
+      if (!sending) return;
+      const id = window.setInterval(() => {
+        if (isPinnedRef.current) {
+          scrollToBottom("auto");
+        }
+      }, 100);
+      return () => window.clearInterval(id);
+    }, [sending, scrollToBottom]);
+
     // ResizeObserver: catch async DOM height changes (image load, code
     // highlighting, markdown table reflow, <details> expand)
     useEffect(() => {
