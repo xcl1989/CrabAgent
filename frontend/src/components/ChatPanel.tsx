@@ -415,30 +415,21 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(
     }, [getDistanceFromBottom]);
 
     // Auto-scroll on messages / sending changes — runs before browser paint
+    // Uses throttle (skip if already scheduled) instead of cancel-and-reschedule.
+    // The old approach cancelled the pending rAF on every message update, which
+    // meant during rapid streaming the rAF never fired — especially problematic
+    // when content first exceeds the viewport (first conversation).
     useLayoutEffect(() => {
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      if (rafRef.current) return; // Already scheduled — will fire next frame
       rafRef.current = requestAnimationFrame(() => {
+        rafRef.current = null;
         if (isPinnedRef.current) {
           scrollToBottom("auto");
         } else {
           setNewMsgHint((n) => n + 1);
         }
       });
-      return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
     }, [messages, sending, scrollToBottom]);
-
-    // During active streaming, the rAF above can be cancelled faster than it
-    // fires (every new token triggers a re-render that cancels the pending rAF).
-    // This interval acts as a safety net to ensure scrollToBottom actually runs.
-    useEffect(() => {
-      if (!sending) return;
-      const id = window.setInterval(() => {
-        if (isPinnedRef.current) {
-          scrollToBottom("auto");
-        }
-      }, 100);
-      return () => window.clearInterval(id);
-    }, [sending, scrollToBottom]);
 
     // ResizeObserver: catch async DOM height changes (image load, code
     // highlighting, markdown table reflow, <details> expand)

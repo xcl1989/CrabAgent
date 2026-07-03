@@ -43,18 +43,28 @@ async def compress_context(context: AgentContext, llm_params: dict, model: str) 
     if context.system_prompt:
         compress_messages.append({"role": "system", "content": context.system_prompt})
 
+    # First pass: collect all tool_call IDs that have matching tool results
+    _answered_tool_calls: set[str] = set()
+    for msg in early:
+        if msg.get("role") == "tool" and msg.get("tool_call_id"):
+            _answered_tool_calls.add(msg["tool_call_id"])
+
     for msg in early:
         # Skip internal placeholders that carry no information
         if msg.get("_compress_ack"):
             continue
         if msg.get("role") in ("stats", "screenshot"):
             continue
+        # Skip tool results whose corresponding tool_call we also skip
+        if msg.get("role") == "tool" and msg.get("tool_call_id") not in _answered_tool_calls:
+            continue
+
         # Normalise internal roles to valid LLM roles
         role = msg.get("role", "user")
         if role not in ("user", "assistant", "tool"):
             role = "user"
         content = msg.get("content", "")
-        # Handle list content (e.g. image blocks) — strip to text
+        # Handle list content (e.g. image blocks) — strip to text only
         if isinstance(content, list):
             text_parts = []
             for block in content:
@@ -63,13 +73,37 @@ async def compress_context(context: AgentContext, llm_params: dict, model: str) 
                 elif isinstance(block, str):
                     text_parts.append(block)
             content = " ".join(text_parts)
-        if not content and not msg.get("tool_calls"):
+        elif isinstance(content, str) and "data:image" in content:
+            # Strip embedded base64 image data from string content
+            import re
+            content = re.sub(
+                r'data:image/[^;]+;base64,[A-Za-z0-9+/=]{100,}',
+                '[image omitted]',
+                content,
+            )
+
+        # For assistant messages with tool_calls: only include if ALL tool_calls
+        # have matching tool results. Otherwise convert to plain text message
+        # to avoid "missing tool result" API errors.
+        raw_tool_calls = msg.get("tool_calls")
+        if raw_tool_calls and role == "assistant":
+            unanswered = [
+                tc for tc in raw_tool_calls
+                if isinstance(tc, dict) and tc.get("id") not in _answered_tool_calls
+            ]
+            if unanswered:
+                # Drop tool_calls, keep as plain assistant message
+                raw_tool_calls = None
+                if not content:
+                    continue  # nothing useful left
+
+        if not content and not raw_tool_calls:
             continue
         clean_msg: dict = {"role": role, "content": content or ""}
         # Preserve tool_calls / tool_call_id for valid sequences
-        if msg.get("tool_calls"):
-            clean_msg["tool_calls"] = msg["tool_calls"]
-        if msg.get("tool_call_id"):
+        if raw_tool_calls:
+            clean_msg["tool_calls"] = raw_tool_calls
+        if msg.get("tool_call_id") and msg.get("role") == "tool":
             clean_msg["tool_call_id"] = msg["tool_call_id"]
         compress_messages.append(clean_msg)
 
@@ -148,7 +182,7 @@ async def compress_context(context: AgentContext, llm_params: dict, model: str) 
             break  # non-retryable error
 
     if last_exc is not None:
-        logger.warning("Context compression failed after retries, keeping original: %s", last_exc)
+        logger.warning("Context compression failed after retries, keeping original: %s", last_exc, exc_info=True)
         await context.event_bus.emit(
             AgentEvent(
                 type=EventType.CONTEXT_COMPRESSED,
