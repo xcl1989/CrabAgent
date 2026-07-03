@@ -1680,7 +1680,7 @@ def _run_build_desktop():
 
         print("\n[4/4] Building Electron installer...")
         eb_target = "--win" if is_windows else "--mac"
-        eb_args = ["npx", "electron-builder", eb_target, "--dir"]
+        eb_args = ["npx", "electron-builder", eb_target]
         if is_windows:
             eb_args.append("--config.win.sign=false")
         else:
@@ -1721,30 +1721,46 @@ def _run_build_desktop():
 
         dist_dir = work_dir / "electron" / "dist-electron"
         if is_windows:
-            # Look for unpacked app dir
-            app_dirs = list(dist_dir.glob("win-unpacked"))
-            if app_dirs:
-                exe_files = list(app_dirs[0].glob("*.exe"))
-                for exe in exe_files:
+            # Look for installer exe or unpacked app dir
+            exe_installers = list(dist_dir.glob("*.exe"))
+            if exe_installers:
+                for exe in exe_installers:
                     size_mb = exe.stat().st_size // 1024 // 1024
                     print(f"\n  ✅ Build complete: {exe}")
                     print(f"     Size: {size_mb} MB")
                     print(f"     Open with: start {exe}")
             else:
-                print(f"\n  ✅ Build complete. Check: {dist_dir}")
+                app_dirs = list(dist_dir.glob("win-unpacked"))
+                if app_dirs:
+                    exe_files = list(app_dirs[0].glob("*.exe"))
+                    for exe in exe_files:
+                        size_mb = exe.stat().st_size // 1024 // 1024
+                        print(f"\n  ✅ Build complete: {exe}")
+                        print(f"     Size: {size_mb} MB")
+                        print(f"     Open with: start {exe}")
+                else:
+                    print(f"\n  ✅ Build complete. Check: {dist_dir}")
         else:
-            dist_dirs = list(dist_dir.glob("*.app"))
-            if dist_dirs:
-                size_result = subprocess.run(
-                    ["du", "-sh", str(dist_dirs[0])],
-                    capture_output=True, text=True
-                )
-                size = size_result.stdout.strip()
-                print(f"\n✅ Build complete: {dist_dirs[0]}")
-                print(f"   Size: {size}")
-                print(f"   Open with: open {dist_dirs[0]}")
+            dmg_files = list(dist_dir.glob("*.dmg"))
+            if dmg_files:
+                for dmg in dmg_files:
+                    size_mb = dmg.stat().st_size // 1024 // 1024
+                    print(f"\n✅ Build complete: {dmg}")
+                    print(f"   Size: {size_mb} MB")
+                    print(f"   Install: open {dmg}")
             else:
-                print(f"\n  ✅ Build complete. Check: {dist_dir}")
+                dist_dirs = list(dist_dir.glob("*.app"))
+                if dist_dirs:
+                    size_result = subprocess.run(
+                        ["du", "-sh", str(dist_dirs[0])],
+                        capture_output=True, text=True
+                    )
+                    size = size_result.stdout.strip()
+                    print(f"\n✅ Build complete: {dist_dirs[0]}")
+                    print(f"   Size: {size}")
+                    print(f"   Open with: open {dist_dirs[0]}")
+                else:
+                    print(f"\n  ✅ Build complete. Check: {dist_dir}")
 
     except Exception as e:
         print(f"\nBuild failed: {e}")
