@@ -79,14 +79,15 @@ async def rollback_molt(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    from crabagent.core.config import settings
     from crabagent.core.molt.rollback import rollback as _rollback
     from crabagent.core.molt.store import list_molt_files
 
-    files = await list_molt_files(molt_id)
+    conv = await get_owned_conversation(db, session_id, user)
+    workspace = Path(conv.workspace).resolve() if conv.workspace else Path.cwd().resolve()
+
+    files = await list_molt_files(molt_id, workspace=workspace)
     if not files:
         raise HTTPException(status_code=404, detail="Molt not found")
 
-    workspace = settings.workspace.resolve()
     restored = await _rollback(molt_id, workspace)
     return {"molt_id": molt_id, "restored": len(restored), "files": restored}

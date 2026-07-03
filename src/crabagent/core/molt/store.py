@@ -110,22 +110,41 @@ def get_current_content(workspace: Path, filepath: str) -> str:
 
 
 async def prune_molts(workspace: Path | None = None) -> int:
+    import shutil
+
     from crabagent.core.database import async_session_factory
 
     keep = settings.molt_keep_count
     pruned = 0
+    md_base = molt_dir(workspace)
+    db_ids: set[str] = set()
+
     async with async_session_factory() as db:
         result = await db.execute(select(Molt).order_by(Molt.created_at.desc()).offset(keep))
         old_molts = result.scalars().all()
         for m in old_molts:
-            md = molt_dir(workspace) / m.molt_id
+            md = md_base / m.molt_id
             if md.exists():
-                import shutil
-
                 shutil.rmtree(str(md))
             await db.delete(m)
             pruned += 1
         if pruned:
             await db.commit()
             logger.info("Pruned %d old molts", pruned)
+
+        # Get all remaining DB molt IDs for orphan detection
+        result2 = await db.execute(select(Molt.molt_id))
+        db_ids = {row[0] for row in result2.fetchall()}
+
+    # Clean up orphaned directories (on disk but not in DB)
+    if md_base.exists():
+        orphan_count = 0
+        for d in md_base.iterdir():
+            if d.is_dir() and d.name not in db_ids:
+                shutil.rmtree(str(d), ignore_errors=True)
+                orphan_count += 1
+        if orphan_count:
+            logger.info("Cleaned up %d orphaned molt directories", orphan_count)
+            pruned += orphan_count
+
     return pruned

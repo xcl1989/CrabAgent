@@ -154,7 +154,9 @@ class ToolRegistry:
                 )
                 await prune_molts(workspace=ws)
         except Exception:
-            pass
+            logger.warning("Failed to persist molt %s to DB, cleaning up orphaned files", snap.get("molt_id", ""), exc_info=True)
+            import shutil
+            shutil.rmtree(str(ws / ".crabagent" / "molts" / snap["molt_id"]), ignore_errors=True)
 
     async def execute(self, name: str, arguments: dict[str, Any], context: Any = None) -> str:
         import time as _t
