@@ -80,6 +80,10 @@ async def memory_save(
     session_id = context.metadata.get("session_id", "")
     from crabagent.core.database import agent_memory_upsert
 
+    workspace_path = context.metadata.get("workspace_path") or str(getattr(context, "workspace", "") or "")
+    default_scope = "global" if memory_type == "team" else "agent"
+    default_recall = "always" if memory_type == "team" else "query_only"
+
     await agent_memory_upsert(
         user_id=user_id,
         memory_type=memory_type,
@@ -92,6 +96,9 @@ async def memory_save(
         source_session=session_id,
         source="",
         task_category="",
+        scope=default_scope,
+        workspace_path="" if default_scope == "global" else workspace_path,
+        recall_policy=default_recall,
     )
     return f"Memory saved: [{memory_type}] {key}"
 

@@ -1,9 +1,10 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 from crabagent.core.agent.context import AgentContext
 from crabagent.core.agent.tools.edit import edit_file
 from crabagent.core.agent.tools.grep import grep_files
-from crabagent.core.agent.tools.path_utils import resolve_tool_path
+from crabagent.core.agent.tools.path_utils import get_workspace_root, resolve_tool_path
 from crabagent.core.agent.tools.write import write_file
 
 
@@ -24,6 +25,26 @@ def test_resolve_tool_path_allows_absolute_path_outside_workspace(tmp_path: Path
 
     assert error is None
     assert resolved == outside.resolve()
+
+
+def test_get_workspace_root_returns_none_without_workspace():
+    assert get_workspace_root() is None
+    assert get_workspace_root(SimpleNamespace()) is None
+    assert get_workspace_root(SimpleNamespace(workspace=None)) is None
+
+
+def test_get_workspace_root_returns_none_for_bad_workspace():
+    context = SimpleNamespace(workspace=object())
+
+    assert get_workspace_root(context) is None
+
+
+def test_resolve_tool_path_returns_error_for_invalid_path_string():
+    resolved, error = resolve_tool_path("bad\0path.txt")
+
+    assert resolved is None
+    assert error is not None
+    assert "invalid path" in error
 
 
 def test_write_file_uses_workspace_relative_path(tmp_path: Path):

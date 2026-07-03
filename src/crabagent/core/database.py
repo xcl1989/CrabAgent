@@ -317,6 +317,9 @@ class AgentMemory(Base):
     access_count: Mapped[int] = mapped_column(Integer, default=0)
     source: Mapped[str] = mapped_column(String(10), default="")
     task_category: Mapped[str] = mapped_column(String(50), default="")
+    scope: Mapped[str] = mapped_column(String(20), default="")
+    workspace_path: Mapped[str] = mapped_column(Text, default="")
+    recall_policy: Mapped[str] = mapped_column(String(20), default="")
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
@@ -614,6 +617,12 @@ async def init_db() -> None:
             await conn.execute(text("ALTER TABLE agent_memory ADD COLUMN source VARCHAR(10) DEFAULT ''"))
         if "task_category" not in columns:
             await conn.execute(text("ALTER TABLE agent_memory ADD COLUMN task_category VARCHAR(50) DEFAULT ''"))
+        if "scope" not in columns:
+            await conn.execute(text("ALTER TABLE agent_memory ADD COLUMN scope VARCHAR(20) DEFAULT ''"))
+        if "workspace_path" not in columns:
+            await conn.execute(text("ALTER TABLE agent_memory ADD COLUMN workspace_path TEXT DEFAULT ''"))
+        if "recall_policy" not in columns:
+            await conn.execute(text("ALTER TABLE agent_memory ADD COLUMN recall_policy VARCHAR(20) DEFAULT ''"))
 
         # --- MemoryEmbedding table (vector search) ---
         await conn.execute(text("""
@@ -937,6 +946,9 @@ async def agent_memory_upsert(
     source_session: str = "",
     source: str = "",
     task_category: str = "",
+    scope: str = "",
+    workspace_path: str = "",
+    recall_policy: str = "",
 ) -> None:
     from sqlalchemy import select
 
@@ -962,6 +974,12 @@ async def agent_memory_upsert(
                 existing.source = source
             if task_category:
                 existing.task_category = task_category
+            if scope:
+                existing.scope = scope
+            if workspace_path:
+                existing.workspace_path = workspace_path
+            if recall_policy:
+                existing.recall_policy = recall_policy
             existing.updated_at = utcnow()
             mem_id = existing.id
         else:
@@ -977,6 +995,9 @@ async def agent_memory_upsert(
                 source_session=source_session,
                 source=source,
                 task_category=task_category,
+                scope=scope,
+                workspace_path=workspace_path,
+                recall_policy=recall_policy,
             )
             db.add(new_mem)
         await db.commit()
@@ -1025,6 +1046,9 @@ async def agent_memory_get_by_type(
                 "importance": r.importance,
                 "confidence": r.confidence,
                 "access_count": r.access_count,
+                "scope": r.scope or "",
+                "workspace_path": r.workspace_path or "",
+                "recall_policy": r.recall_policy or "",
             }
             for r in result.scalars().all()
         ]
@@ -1111,6 +1135,8 @@ async def agent_memory_search(
     query: str,
     memory_type: str = "",
     limit: int = 5,
+    scope: str = "",
+    workspace_path: str = "",
 ) -> list[dict]:
     from sqlalchemy import or_, select
 
@@ -1118,6 +1144,10 @@ async def agent_memory_search(
         conditions = [AgentMemory.user_id == user_id]
         if memory_type:
             conditions.append(AgentMemory.memory_type == memory_type)
+        if scope:
+            conditions.append(AgentMemory.scope == scope)
+        if workspace_path:
+            conditions.append(AgentMemory.workspace_path == workspace_path)
         terms = [t for t in query.split() if len(t) >= 2]
         term_filters = []
         if terms:
@@ -1148,6 +1178,9 @@ async def agent_memory_search(
                 "content": r.content,
                 "importance": r.importance,
                 "confidence": r.confidence,
+                "scope": r.scope or "",
+                "workspace_path": r.workspace_path or "",
+                "recall_policy": r.recall_policy or "",
             }
             for r in rows
         ]
@@ -1164,6 +1197,8 @@ async def agent_memory_search_vector(
     memory_type: str = "",
     limit: int = 5,
     fallback: bool = True,
+    scope: str = "",
+    workspace_path: str = "",
 ) -> list[dict]:
     """Semantic vector search over AgentMemory.
 
@@ -1181,7 +1216,14 @@ async def agent_memory_search_vector(
     query_vec = await encode_query(query)
     if query_vec is None:
         if fallback:
-            return await agent_memory_search(user_id, query, memory_type=memory_type, limit=limit)
+            return await agent_memory_search(
+                user_id,
+                query,
+                memory_type=memory_type,
+                limit=limit,
+                scope=scope,
+                workspace_path=workspace_path,
+            )
         return []
 
     import base64
@@ -1196,13 +1238,24 @@ async def agent_memory_search_vector(
         )
         if memory_type:
             stmt = stmt.where(AgentMemory.memory_type == memory_type)
+        if scope:
+            stmt = stmt.where(AgentMemory.scope == scope)
+        if workspace_path:
+            stmt = stmt.where(AgentMemory.workspace_path == workspace_path)
 
         result = await db.execute(stmt)
         rows = result.all()
 
     if not rows:
         if fallback:
-            return await agent_memory_search(user_id, query, memory_type=memory_type, limit=limit)
+            return await agent_memory_search(
+                user_id,
+                query,
+                memory_type=memory_type,
+                limit=limit,
+                scope=scope,
+                workspace_path=workspace_path,
+            )
         return []
 
     # Score each memory: similarity * 0.7 + importance * 0.3
@@ -1242,6 +1295,9 @@ async def agent_memory_search_vector(
                     "importance": mem.importance,
                     "confidence": mem.confidence,
                     "access_count": mem.access_count,
+                    "scope": mem.scope or "",
+                    "workspace_path": mem.workspace_path or "",
+                    "recall_policy": mem.recall_policy or "",
                     "_similarity": round(sim, 4),
                 }
             )

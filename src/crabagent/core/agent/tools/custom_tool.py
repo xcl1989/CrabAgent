@@ -186,6 +186,9 @@ async def create_tool(
                 source_session=session_id,
                 source="auto",
                 task_category="",
+                scope="workspace",
+                workspace_path=str(getattr(context, 'workspace', '') or ''),
+                recall_policy="query_only",
             )
     except Exception:
         pass

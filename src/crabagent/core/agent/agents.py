@@ -264,7 +264,12 @@ async def _load_shared_context(session_id: str, locale: str = "en") -> str:
     return "\n".join(lines)
 
 
-async def build_memory_prompt(user_id: int, query: str = "", locale: str = "en") -> str:
+async def build_memory_prompt(
+    user_id: int,
+    query: str = "",
+    locale: str = "en",
+    workspace_path: str = "",
+) -> str:
     if not user_id:
         return ""
     from crabagent.core.config import settings
@@ -276,7 +281,24 @@ async def build_memory_prompt(user_id: int, query: str = "", locale: str = "en")
 
     parts: list[str] = []
 
-    team_memories = await agent_memory_get_by_type(user_id, "team", limit=10)
+    global_memories = await agent_memory_get_by_type(
+        user_id,
+        "team",
+        limit=6,
+        scope="global",
+        recall_policy="always",
+    )
+    workspace_memories = []
+    if workspace_path:
+        workspace_memories = await agent_memory_get_by_type(
+            user_id,
+            "team",
+            limit=8,
+            scope="workspace",
+            workspace_path=workspace_path,
+            recall_policy="always",
+        )
+    team_memories = global_memories + workspace_memories
     if team_memories:
         total_chars = sum(len(m["content"]) for m in team_memories)
         if total_chars > 3000:
@@ -302,6 +324,8 @@ async def build_memory_prompt(user_id: int, query: str = "", locale: str = "en")
                 memory_type="",
                 limit=max_inject,
                 fallback=True,
+                scope="workspace" if workspace_path else "",
+                workspace_path=workspace_path,
             )
         except Exception:
             related = []
@@ -750,6 +774,9 @@ async def spawn_sub_agent(
                         source_session=session_id,
                         source=rule_lesson["source"],
                         task_category=rule_lesson["task_category"],
+                        scope="agent",
+                        workspace_path=str(parent_context.workspace),
+                        recall_policy="query_only",
                     )
 
                 reflect_model = agent_def.get("model") or parent_context.model or ""
@@ -776,6 +803,9 @@ async def spawn_sub_agent(
                             source_session=session_id,
                             source=llm_lesson["source"],
                             task_category=llm_lesson["task_category"],
+                            scope="agent",
+                            workspace_path=str(parent_context.workspace),
+                            recall_policy="query_only",
                         )
 
                 await task_record_create(

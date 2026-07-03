@@ -1397,7 +1397,10 @@ class TuiSession:
         try:
             from crabagent.core.agent.agents import build_memory_prompt
 
-            mem_prompt = await build_memory_prompt(self._user.id if self._user else 0)
+            mem_prompt = await build_memory_prompt(
+                self._user.id if self._user else 0,
+                workspace_path=str(ws),
+            )
             if mem_prompt:
                 base_prompt += "\n\n" + mem_prompt
         except Exception:
@@ -1435,6 +1438,7 @@ class TuiSession:
             ctx.metadata["branch_id"] = "main"
         if self._user and self._user.id:
             ctx.metadata["user_id"] = self._user.id
+        ctx.metadata["workspace_path"] = str(ws)
         # Attach middleware (reflect + title) so TUI benefits from lesson/preference extraction too
         try:
             from crabagent.core.agent.middlewares import MiddlewareChain

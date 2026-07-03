@@ -9,7 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [0.12.2] — ChatGPT Reset Card Fix & Compress/SSE Improvements
+## [0.12.3] — Memory Scope & Workspace Isolation
+
+### Added
+- **Memory scope system** — AgentMemory now has `scope`, `workspace_path`, and `recall_policy` fields. Memories are classified into four scopes:
+  - `global` — cross-workspace knowledge (always injected into system prompt)
+  - `workspace` — project-specific knowledge (injected when working in that workspace)
+  - `agent` — sub-agent lessons (only recalled via semantic search, never auto-injected)
+  - Auto-classification: `team` memories default to `global`, `agent_lesson` to `agent`, `user_preference` to `global`.
+- **Workspace-scoped memory prompt injection** — `build_memory_prompt()` now fetches both global (`scope=global, recall_policy=always`) and workspace-scoped (`scope=workspace, recall_policy=always`) team memories, providing contextually relevant knowledge per project.
+- **Memory migration script** (`scripts/migrate_memory_scope.py`) — One-time migration that backfills `scope`, `workspace_path`, and `recall_policy` for existing memories using conversation JOIN + curated key lists.
+
+### Changed
+- **Memory API** (`/api/memory`) — List endpoint now supports `scope`, `recall_policy`, and `workspace_path` filters directly on the column (previously used a JOIN through conversations). Response includes the three new fields.
+- **`memory_save` tool** — Automatically sets `scope` and `recall_policy` based on `memory_type`: `team` → `global/always`, others → `agent/query_only`.
+- **Lesson persistence** (`persist_lesson`, `persist_preferences`, `spawn_sub_agent` lessons) — All lesson-saving paths now propagate `workspace_path` and set appropriate `scope`/`recall_policy`.
+- **ReflectMiddleware** — Extracts `workspace_path` from `context.metadata` and passes it through to lesson/preference persistence.
+- **CLI** — Fixed `build_memory_prompt` calls to pass `workspace_path`; removed duplicate call in `__main__.py`; `workspace_path` now stored in `context.metadata`.
+- **Vector search** (`agent_memory_search_vector`, `agent_memory_search`) — Both accept optional `scope` and `workspace_path` filters for finer-grained recall.
+- **PyInstaller spec files** — Fixed i18n JSON file collection path to use `_CRABAGENT_ROOT` instead of `SRC`, ensuring correct packaging.
+
+### Fixed
+- **`init_db()` migration** — Added ALTER TABLE for `scope`, `workspace_path`, `recall_policy` columns on `agent_memory` table, so upgrades from older versions add the columns automatically.
+- **CLI duplicate `build_memory_prompt` call** — The second call without `workspace_path` was overwriting the first result, losing workspace-scoped memories.
 
 ### Fixed
 - **ChatGPT Rate-Limit Reset Card consumption fails with 400 error** — `_consume_reset_credit` request body was missing the required `redeem_request_id` field, causing OpenAI wham API to reject the request. Added the field to the request payload.

@@ -543,7 +543,7 @@ async def _setup_agent_context(
     try:
         from crabagent.core.agent.agents import build_memory_prompt
 
-        mem_prompt = await build_memory_prompt(user_id)
+        mem_prompt = await build_memory_prompt(user_id, workspace_path=str(workspace))
         if mem_prompt:
             base_prompt += "\n\n" + mem_prompt
     except Exception:
@@ -572,6 +572,7 @@ async def _setup_agent_context(
 
     if user_id:
         context.metadata["user_id"] = user_id
+    context.metadata["workspace_path"] = str(workspace)
 
     if conversation_id and session_id_str:
         context.metadata["session_id"] = session_id_str

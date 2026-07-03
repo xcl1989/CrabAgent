@@ -481,9 +481,13 @@ async def persist_lesson(
         if embedding_best_match and embedding_best_score >= EMBEDDING_DEDUP_THRESHOLD:
             key = embedding_best_match["key"]
 
+    memory_type = lesson.get("memory_type", "agent_lesson")
+    scope = "agent" if memory_type == "agent_lesson" else "global"
+    recall_policy = "query_only" if scope == "agent" else "always"
+
     await agent_memory_upsert(
         user_id=user_id,
-        memory_type=lesson.get("memory_type", "agent_lesson"),
+        memory_type=memory_type,
         agent_name=agent_name,
         category=lesson.get("category", "effective_strategy"),
         key=key,
@@ -493,6 +497,9 @@ async def persist_lesson(
         source_session=source_session,
         source=lesson.get("source", ""),
         task_category=task_category,
+        scope=scope,
+        workspace_path=workspace_path if scope != "global" else "",
+        recall_policy=recall_policy,
     )
 
     # Enforce per-agent lesson cap to prevent unbounded growth
@@ -552,6 +559,7 @@ async def persist_preferences(
     user_id: int,
     preferences: list[dict],
     source_session: str = "",
+    workspace_path: str = "",
 ) -> int:
     if not user_id or not preferences:
         return 0
@@ -572,6 +580,9 @@ async def persist_preferences(
                 source_session=source_session,
                 source=pref.get("source", "llm"),
                 task_category="",
+                scope="global",
+                workspace_path="",
+                recall_policy="query_only",
             )
             saved += 1
         except Exception:

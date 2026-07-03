@@ -215,12 +215,11 @@ DATAS.extend(_litellm_datas)
 print(f"[spec] Collected {len(_litellm_datas)} litellm data files")
 
 # ── crabagent: i18n JSON files for agent switch / system prompt translations ──
-_I18N_DIR = SRC / "crabagent" / "core" / "i18n"
+_I18N_DIR = _CRABAGENT_ROOT / "core" / "i18n"
 _i18n_count = 0
 if _I18N_DIR.exists():
     for _f in _I18N_DIR.glob("*.json"):
-        _rel = _f.relative_to(SRC)
-        DATAS.append((str(_f), str(_rel.parent)))
+        DATAS.append((str(_f), "crabagent/core/i18n"))
         _i18n_count += 1
 print(f"[spec] Collected {_i18n_count} i18n translation files")
 

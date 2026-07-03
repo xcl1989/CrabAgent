@@ -8,7 +8,29 @@ English version: [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
-## [0.12.2] — ChatGPT 重置卡修复 + 压缩/SSE 改进
+## [0.12.3] — 记忆分层与工作区隔离
+
+### 新增
+- **记忆分层系统** — AgentMemory 新增 `scope`、`workspace_path`、`recall_policy` 三个字段。记忆分为四种作用域：
+  - `global` — 跨工作区知识（始终注入系统提示词）
+  - `workspace` — 项目专属知识（在该工作区工作时注入）
+  - `agent` — 子 Agent 经验教训（仅通过语义搜索召回，不自动注入）
+  - 自动分类：`team` 记忆默认 `global`，`agent_lesson` 默认 `agent`，`user_preference` 默认 `global`。
+- **工作区级记忆注入** — `build_memory_prompt()` 现在分别获取全局（`scope=global, recall_policy=always`）和工作区级（`scope=workspace, recall_policy=always`）的 team 记忆，为每个项目提供上下文相关的知识。
+- **记忆迁移脚本**（`scripts/migrate_memory_scope.py`）— 一次性迁移脚本，通过 conversation JOIN + 精选 key 列表，为已有记忆回填 `scope`、`workspace_path` 和 `recall_policy`。
+
+### 变更
+- **记忆 API**（`/api/memory`）— 列表端点支持 `scope`、`recall_policy`、`workspace_path` 过滤，直接查询新列（原先通过 conversation JOIN 实现）。响应包含三个新字段。
+- **`memory_save` 工具** — 根据 `memory_type` 自动设置 `scope` 和 `recall_policy`：`team` → `global/always`，其余 → `agent/query_only`。
+- **经验教训持久化**（`persist_lesson`、`persist_preferences`、`spawn_sub_agent` 经验提取）— 所有保存路径现在都会传递 `workspace_path` 并设置合适的 `scope`/`recall_policy`。
+- **ReflectMiddleware** — 从 `context.metadata` 提取 `workspace_path` 并传递到经验/偏好持久化。
+- **CLI** — 修复 `build_memory_prompt` 调用传递 `workspace_path`；移除 `__main__.py` 中的重复调用；`workspace_path` 现存入 `context.metadata`。
+- **向量搜索**（`agent_memory_search_vector`、`agent_memory_search`）— 均支持可选的 `scope` 和 `workspace_path` 过滤，实现更精细的召回。
+- **PyInstaller spec 文件** — 修复 i18n JSON 文件收集路径，使用 `_CRABAGENT_ROOT` 替代 `SRC`，确保打包正确。
+
+### 修复
+- **`init_db()` 迁移** — 为 `agent_memory` 表新增 `scope`、`workspace_path`、`recall_policy` 列的 ALTER TABLE 逻辑，旧版本升级时自动添加列。
+- **CLI 重复调用 `build_memory_prompt`** — 第二次调用缺少 `workspace_path`，覆盖了第一次结果，导致工作区记忆丢失。
 
 ### 修复
 - **ChatGPT 速率限制重置卡消费失败（400 错误）** — `_consume_reset_credit` 请求体缺少 `redeem_request_id` 字段，导致 OpenAI wham API 拒绝请求。已补上该字段。

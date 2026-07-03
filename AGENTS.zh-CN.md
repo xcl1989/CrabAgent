@@ -4,7 +4,7 @@
 > 保持简洁——最多约 8000 字符。使用 `update_agents_md` 工具来更新。
 
 ## 版本
-- 当前：**0.12.2**（ChatGPT 重置卡修复 + 压缩/SSE 改进）
+- 当前：**0.12.3**（记忆分层与工作区隔离）
 - **版本唯一源头：`pyproject.toml`**
 - Python 代码通过 `from crabagent import __version__` 动态读取，自动同步
 - Electron `package.json` 需手动运行 `python3 scripts/sync_version.py` 同步

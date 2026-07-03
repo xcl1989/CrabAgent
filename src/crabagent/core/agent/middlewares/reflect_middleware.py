@@ -67,6 +67,7 @@ class ReflectMiddleware:
         provider_name = context.provider_name
         agent_name = context.current_agent or "default"
         session_id = context.metadata.get("session_id", "")
+        workspace_path = context.metadata.get("workspace_path") or str(getattr(context, "workspace", "") or "")
         task = _first_user_message(context.messages)
         if not task:
             return
@@ -99,6 +100,7 @@ class ReflectMiddleware:
                     agent_name=agent_name,
                     lesson=rule_lesson,
                     source_session=session_id,
+                    workspace_path=workspace_path,
                 )
             except Exception:
                 logger.debug("Failed to persist rule lesson", exc_info=True)
@@ -117,6 +119,7 @@ class ReflectMiddleware:
                 model=model,
                 provider_name=provider_name,
                 conversation_text=conversation_text,
+                workspace_path=workspace_path,
             )
         )
 
@@ -132,6 +135,7 @@ class ReflectMiddleware:
         model: str,
         provider_name: str | None,
         conversation_text: str,
+        workspace_path: str,
     ):
         """Background task: LLM lesson + preference extraction run concurrently."""
 
@@ -166,6 +170,7 @@ class ReflectMiddleware:
                         agent_name=agent_name,
                         lesson=llm_lesson,
                         source_session=session_id,
+                        workspace_path=workspace_path,
                     )
             except Exception:
                 logger.debug("Background lesson extraction failed", exc_info=True)
@@ -192,6 +197,7 @@ class ReflectMiddleware:
                         user_id=user_id,
                         preferences=prefs,
                         source_session=session_id,
+                        workspace_path=workspace_path,
                     )
                     if saved:
                         logger.info(

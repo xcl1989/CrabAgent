@@ -360,7 +360,12 @@ async def prompt_async(
         try:
             from crabagent.core.agent.agents import build_memory_prompt
 
-            mem_prompt = await build_memory_prompt(user.id, query=(req.message or "")[:500], locale=locale)
+            mem_prompt = await build_memory_prompt(
+                user.id,
+                query=(req.message or "")[:500],
+                locale=locale,
+                workspace_path=str(workspace),
+            )
             if mem_prompt:
                 base_prompt += "\n\n" + mem_prompt
         except Exception:
