@@ -102,6 +102,7 @@ class Molt(Base):
     description: Mapped[str] = mapped_column(String(500), default="")
     method: Mapped[str] = mapped_column(String(10), default="git")
     file_count: Mapped[int] = mapped_column(Integer, default=0)
+    workspace: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
 
 
@@ -586,6 +587,8 @@ async def init_db() -> None:
         columns = [row[1] for row in result.fetchall()]
         if "method" not in columns:
             await conn.execute(text("ALTER TABLE molts ADD COLUMN method VARCHAR(10) DEFAULT 'git'"))
+        if "workspace" not in columns:
+            await conn.execute(text("ALTER TABLE molts ADD COLUMN workspace TEXT DEFAULT ''"))
 
         result = await conn.execute(text("PRAGMA table_info(todos)"))
         columns = [row[1] for row in result.fetchall()]

@@ -43,6 +43,7 @@ def _molt_to_dict(m: Molt) -> dict[str, Any]:
         "description": m.description,
         "method": m.method,
         "file_count": m.file_count,
+        "workspace": m.workspace or "",
         "created_at": m.created_at.isoformat() if m.created_at else None,
     }
 
@@ -55,6 +56,7 @@ async def create_molt(
     description: str,
     method: str,
     file_count: int,
+    workspace: str = "",
 ) -> dict[str, Any]:
     molt = Molt(
         molt_id=molt_id,
@@ -63,6 +65,7 @@ async def create_molt(
         description=description,
         method=method,
         file_count=file_count,
+        workspace=workspace,
     )
     db.add(molt)
     await db.commit()
@@ -119,8 +122,19 @@ async def prune_molts(workspace: Path | None = None) -> int:
     md_base = molt_dir(workspace)
     db_ids: set[str] = set()
 
+    # Clean up any stale staging directory from a previous crashed session
+    staging = md_base / "_staging"
+    if staging.exists():
+        shutil.rmtree(str(staging), ignore_errors=True)
+        pruned += 1
+
     async with async_session_factory() as db:
-        result = await db.execute(select(Molt).order_by(Molt.created_at.desc()).offset(keep))
+        # Prune old molts for THIS workspace only
+        ws_str = str(md_base.parent.parent.resolve()) if md_base.exists() else ""
+        stmt = select(Molt).order_by(Molt.created_at.desc())
+        if ws_str:
+            stmt = stmt.where(Molt.workspace == ws_str)
+        result = await db.execute(stmt.offset(keep))
         old_molts = result.scalars().all()
         for m in old_molts:
             md = md_base / m.molt_id
@@ -133,7 +147,10 @@ async def prune_molts(workspace: Path | None = None) -> int:
             logger.info("Pruned %d old molts", pruned)
 
         # Get all remaining DB molt IDs for orphan detection
-        result2 = await db.execute(select(Molt.molt_id))
+        if ws_str:
+            result2 = await db.execute(select(Molt.molt_id).where(Molt.workspace == ws_str))
+        else:
+            result2 = await db.execute(select(Molt.molt_id))
         db_ids = {row[0] for row in result2.fetchall()}
 
     # Clean up orphaned directories (on disk but not in DB)

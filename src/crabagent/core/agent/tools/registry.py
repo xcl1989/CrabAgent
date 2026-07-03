@@ -240,6 +240,7 @@ class ToolRegistry:
                     description=snap["description"],
                     method=snap["method"],
                     file_count=len(snap["files"]),
+                    workspace=str(ws),
                 )
                 await prune_molts(workspace=ws)
         except Exception:

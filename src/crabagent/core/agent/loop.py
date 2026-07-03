@@ -208,6 +208,7 @@ async def run_agent(
         try:
             full_text = ""
             reasoning_text = ""
+            reasoning_tokens = 0
             tool_calls_list: list[dict] = []
 
             _llm_t0 = time.time()
