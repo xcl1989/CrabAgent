@@ -247,6 +247,9 @@ HIDDEN_IMPORTS = [
     # the frozen binary extremely slow to start (~15s vs ~3s).
     "litellm.litellm_core_utils.tokenizers",
     "litellm.litellm_core_utils.token_counter",
+    "litellm.litellm_core_utils.exception_mapping_utils",
+    "litellm.llms.openai.openai",
+    "litellm.types.utils",
     "tiktoken_ext",
     "tiktoken_ext.openai_public",
     "pydantic",
