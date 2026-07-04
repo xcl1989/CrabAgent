@@ -54,18 +54,15 @@ def register_meeting_tools(registry):
         llm_params = {}
         if context:
             try:
-                from crabagent.core.provider_store import get_default_provider
+                from crabagent.core.provider_store import get_default_provider, resolve_litellm_params
 
                 provider = await get_default_provider()
                 if provider:
-                    model = context.metadata.get("model", model)
+                    from crabagent.core.provider_store import resolve_model_for_provider
+
+                    model = resolve_model_for_provider(provider, context.metadata.get("model", model))
                     provider_name = provider.name
-                    llm_params = {
-                        "api_key": provider.api_key,
-                    }
-                    if provider.base_url:
-                        llm_params["api_base"] = provider.base_url
-                        llm_params["custom_llm_provider"] = "openai"
+                    llm_params = await resolve_litellm_params(provider)
             except Exception:
                 pass
 

@@ -425,7 +425,12 @@ async def plan_task(task: str, context=None) -> str:
     try:
         import litellm
 
-        from crabagent.core.provider_store import get_default_provider, get_provider
+        from crabagent.core.provider_store import (
+            get_default_provider,
+            get_provider,
+            resolve_litellm_params,
+            resolve_model_for_provider,
+        )
 
         if context.provider_name:
             provider = await get_provider(context.provider_name)
@@ -434,18 +439,8 @@ async def plan_task(task: str, context=None) -> str:
         if not provider:
             return "Error: no provider configured"
 
-        llm_params = {"api_key": provider.api_key}
-        if provider.base_url:
-            llm_params["api_base"] = provider.base_url
-            llm_params["custom_llm_provider"] = "openai"
-        # Apply provider-level proxy
-        from crabagent.core.proxy import resolve_llm_proxy
-
-        proxy = await resolve_llm_proxy(provider)
-        if proxy:
-            llm_params["proxy"] = proxy
-
-        model = context.model or "gpt-4"
+        llm_params = await resolve_litellm_params(provider)
+        model = resolve_model_for_provider(provider, context.model or "gpt-4")
 
         response = await litellm.acompletion(
             model=model,

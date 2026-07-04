@@ -146,15 +146,16 @@ def register_mail_tools(registry):
 
         if context:
             try:
-                from crabagent.core.provider_store import get_default_provider
+                from crabagent.core.provider_store import (
+                    get_default_provider,
+                    resolve_litellm_params,
+                    resolve_model_for_provider,
+                )
 
                 provider = await get_default_provider()
                 if provider:
-                    model = context.metadata.get("model", model)
-                    llm_params = {"api_key": provider.api_key}
-                    if provider.base_url:
-                        llm_params["api_base"] = provider.base_url
-                        llm_params["custom_llm_provider"] = "openai"
+                    model = resolve_model_for_provider(provider, context.metadata.get("model", model))
+                    llm_params = await resolve_litellm_params(provider)
             except Exception:
                 pass
 
@@ -325,15 +326,16 @@ def register_mail_tools(registry):
                 context.metadata.get("user_id", context.metadata.get("uid", 1))
             )
             try:
-                from crabagent.core.provider_store import get_default_provider
+                from crabagent.core.provider_store import (
+                    get_default_provider,
+                    resolve_litellm_params,
+                    resolve_model_for_provider,
+                )
 
                 provider = await get_default_provider()
                 if provider:
-                    model = context.metadata.get("model", model)
-                    llm_params = {"api_key": provider.api_key}
-                    if provider.base_url:
-                        llm_params["api_base"] = provider.base_url
-                        llm_params["custom_llm_provider"] = "openai"
+                    model = resolve_model_for_provider(provider, context.metadata.get("model", model))
+                    llm_params = await resolve_litellm_params(provider)
             except Exception:
                 pass
 

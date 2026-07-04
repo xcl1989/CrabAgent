@@ -126,7 +126,42 @@ def _try_inline_image(path_str: str) -> str | None:
         return None
 
 
-def message_to_response(msg: Message) -> dict:
+def _strip_base64_images(content: str) -> tuple[str, list[str]]:
+    """Remove base64 image data from message content to keep list responses light.
+
+    Handles two patterns:
+    1. JSON array content with image_url blocks (user/tool multimodal messages)
+    2. screenshot role messages where content is a file path (image loaded separately)
+
+    Returns (stripped_content, list_of_image_data_urls).
+    """
+    if not content:
+        return content, []
+
+    images: list[str] = []
+
+    # Pattern 1: JSON array with image_url blocks containing data: URLs
+    if content.startswith("["):
+        try:
+            blocks = json.loads(content)
+            if isinstance(blocks, list):
+                modified = False
+                for block in blocks:
+                    if isinstance(block, dict) and block.get("type") == "image_url":
+                        url = block.get("image_url", {}).get("url", "")
+                        if url.startswith("data:image/"):
+                            images.append(url)
+                            block["image_url"]["url"] = ""  # strip the heavy data
+                            modified = True
+                if modified:
+                    return json.dumps(blocks, ensure_ascii=False), images
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    return content, images
+
+
+def message_to_response(msg: Message, strip_images: bool = True) -> dict:
     d: dict = {
         "id": msg.id,
         "sequence": msg.sequence,
@@ -134,12 +169,23 @@ def message_to_response(msg: Message) -> dict:
         "content": msg.content or "",
         "created_at": msg.created_at.isoformat() if msg.created_at else None,
     }
-    # Inline screenshot images as base64 data URLs so the frontend can
-    # render them directly without a separate authenticated API call.
+
+    # Strip base64 image data from content for list views (major perf win).
+    # Frontend lazily fetches images via /messages/{id}/images endpoint.
+    if strip_images and d["content"]:
+        d["content"], extracted = _strip_base64_images(d["content"])
+        if extracted:
+            d["has_images"] = True
+
+    # Screenshot messages: don't inline base64 in list view; mark has_images.
     if msg.role == "screenshot" and msg.content:
-        data_url = _try_inline_image(msg.content)
-        if data_url:
-            d["image_data"] = data_url
+        if strip_images:
+            d["has_images"] = True
+        else:
+            data_url = _try_inline_image(msg.content)
+            if data_url:
+                d["image_data"] = data_url
+
     if msg.tool_calls:
         try:
             d["tool_calls"] = json.loads(msg.tool_calls)

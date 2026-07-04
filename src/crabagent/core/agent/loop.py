@@ -274,8 +274,9 @@ async def run_agent(
                     )
 
                 if not chunk.choices:
-                    if finished:
-                        break
+                    # Some providers send a final usage-only chunk after the
+                    # finish_reason chunk. Let the async iterator end naturally
+                    # so we do not drop trailing usage metadata.
                     continue
 
                 delta = chunk.choices[0].delta
@@ -760,7 +761,12 @@ def _validate_tool_calls(messages: list[dict]) -> list[dict]:
     """Strip tool_calls from assistant messages that lack corresponding tool responses.
 
     Protects against corrupted history where assistant tool_calls were saved to DB
-    but the corresponding tool messages were not (e.g. due to a prior crash/error).
+    but the corresponding tool messages were not (e.g. due to a prior crash/error,
+    user interruption, or duplicate tool_call IDs from models like kimi-k2).
+
+    Uses **windowed matching**: tool results must appear between the assistant
+    message and the next user/assistant message. This correctly handles duplicate
+    tool_call_ids because only results in the immediate response window count.
     """
     for i, msg in enumerate(messages):
         tool_calls = msg.get("tool_calls")
@@ -769,10 +775,17 @@ def _validate_tool_calls(messages: list[dict]) -> list[dict]:
         required_ids = {tc["id"] for tc in tool_calls if tc.get("id")}
         if not required_ids:
             continue
-        found_ids = set()
+
+        # Scan forward until we hit another assistant message or user message.
+        # Only tool results in this window belong to THIS assistant message.
+        found_ids: set[str] = set()
         for later_msg in messages[i + 1 :]:
-            if later_msg.get("role") == "tool":
+            later_role = later_msg.get("role", "")
+            if later_role in ("assistant", "user"):
+                break  # Next turn — stop looking
+            if later_role == "tool":
                 found_ids.add(later_msg.get("tool_call_id", ""))
+
         missing = required_ids - found_ids
         if missing:
             logger.warning("Stripping %d orphan tool_calls from assistant (missing: %s)", len(missing), missing)

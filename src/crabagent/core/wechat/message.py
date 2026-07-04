@@ -1099,7 +1099,11 @@ async def _summarize_conversation(messages: list[dict], model: str) -> str:
     import litellm
 
     from crabagent.core.agent.compress import _format_messages
-    from crabagent.core.provider_store import get_default_provider
+    from crabagent.core.provider_store import (
+        get_default_provider,
+        resolve_litellm_params,
+        resolve_model_for_provider,
+    )
 
     history_text = _format_messages(messages)
     system_prompt = "你是一个对话摘要生成器。"
@@ -1115,10 +1119,8 @@ async def _summarize_conversation(messages: list[dict], model: str) -> str:
     provider = await get_default_provider()
     if not provider:
         raise RuntimeError("No LLM provider configured")
-    llm_params: dict = {"api_key": provider.api_key}
-    if provider.base_url:
-        llm_params["api_base"] = provider.base_url
-        llm_params["custom_llm_provider"] = "openai"
+    llm_params = await resolve_litellm_params(provider)
+    model = resolve_model_for_provider(provider, model)
 
     response = await litellm.acompletion(
         model=model,

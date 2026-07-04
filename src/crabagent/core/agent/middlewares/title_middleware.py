@@ -63,8 +63,6 @@ class TitleMiddleware:
         model = context.metadata.get("_resolved_model") or context.model or ""
         if not model:
             return
-        if "/" not in model:
-            model = f"openai/{model}"
 
         provider_name = context.provider_name
 
@@ -114,6 +112,14 @@ class TitleMiddleware:
             llm_params = await _resolve_llm_params(provider_name)
             if not llm_params:
                 return
+            try:
+                from crabagent.core.provider_store import get_default_provider, get_provider, resolve_model_for_provider
+
+                provider = await get_provider(provider_name) if provider_name else await get_default_provider()
+                if provider:
+                    model = resolve_model_for_provider(provider, model)
+            except Exception:
+                pass
 
             prompt = _TITLE_PROMPT.format(
                 user=user_msg[:400],
@@ -231,17 +237,9 @@ async def _resolve_llm_params(provider_name: str | None) -> dict | None:
         provider = None
     if not provider:
         return None
-    params: dict = {"api_key": provider.api_key}
-    if provider.base_url:
-        params["api_base"] = provider.base_url
-        params["custom_llm_provider"] = "openai"
-    # Apply provider-level proxy
-    from crabagent.core.proxy import resolve_llm_proxy
+    from crabagent.core.provider_store import resolve_litellm_params
 
-    proxy = await resolve_llm_proxy(provider)
-    if proxy:
-        params["proxy"] = proxy
-    return params
+    return await resolve_litellm_params(provider)
 
 
 __all__ = ["TitleMiddleware"]

@@ -45,6 +45,7 @@ interface ChatMessage {
   source?: "builtin" | "mcp";
   server_name?: string;
   images?: string[];
+  lazy_images?: boolean;
   sub_agent_id?: string;
   sub_agent_name?: string;
   sub_agent_display?: string;
@@ -949,6 +950,12 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(
           if (msg.role === "screenshot") {
             return (
               <div key={msg.id} className="mb-3 ml-3 flex flex-wrap gap-2">
+                {msg.lazy_images && (
+                  <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
+                    <Loader2 size={14} className="animate-spin" />
+                    <span>Loading image…</span>
+                  </div>
+                )}
                 {msg.images?.map((img, idx) => (
                   <img
                     key={idx}
@@ -978,6 +985,12 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(
             >
               {isUser ? (
                 <div className="chat-bubble-user relative">
+                  {msg.lazy_images && (
+                    <div className="flex items-center gap-2 mb-2 text-xs text-[var(--text-secondary)]">
+                      <Loader2 size={12} className="animate-spin" />
+                      <span>Loading image…</span>
+                    </div>
+                  )}
                   {msg.images && msg.images.length > 0 && (
                     <div className="flex gap-2 mb-2 flex-wrap">
                       {msg.images.map((img, idx) => (

@@ -66,6 +66,45 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
     }
   }, []);
 
+  // Lazily fetch images for messages marked with lazy_images.
+  // Called after messages are set so the UI renders text immediately.
+  const lazyLoadImages = useCallback(
+    (chatMsgs: ChatMessage[], sessionId: string) => {
+      const lazyMsgs = chatMsgs.filter((m) => m.lazy_images && m.db_message_id);
+      if (lazyMsgs.length === 0) return;
+      // Deduplicate by db_message_id
+      const seen = new Set<number>();
+      for (const msg of lazyMsgs) {
+        const dbId = msg.db_message_id!;
+        if (seen.has(dbId)) continue;
+        seen.add(dbId);
+        sessionsApi
+          .getMessageImages(sessionId, dbId)
+          .then((res) => {
+            if (!res.images || res.images.length === 0) return;
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.db_message_id === dbId && m.lazy_images
+                  ? { ...m, images: res.images, lazy_images: false }
+                  : m,
+              ),
+            );
+          })
+          .catch(() => {
+            // Mark as failed (remove lazy flag to avoid infinite retry)
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.db_message_id === dbId && m.lazy_images
+                  ? { ...m, lazy_images: false }
+                  : m,
+              ),
+            );
+          });
+      }
+    },
+    [],
+  );
+
   useEffect(() => {
     return () => {
       if (subFlushTimerRef.current) clearTimeout(subFlushTimerRef.current);
@@ -96,6 +135,7 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
             const chatMsgs = dbMessagesToChat(msgs);
             populateSubAgentContents(chatMsgs);
             setMessages(chatMsgs);
+            lazyLoadImages(chatMsgs, latest.session_id);
           }
         });
       }
@@ -177,13 +217,16 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
               const liveOnly = dbHasScreenshots
                 ? []
                 : prev.filter((m) => m.role === "screenshot" && m.images?.length);
-              if (dbTotal >= prevTotal) {
-                return [...dbMsgs, ...liveOnly];
-              }
-              const dbIds = new Set(dbMsgs.map((m) => m.id));
-              const retained = prev.filter((m) => m.role === "screenshot" || !dbIds.has(m.id));
-              return [...dbMsgs, ...retained.filter((m) => !dbMsgs.some((d) => d.id === m.id))];
+              const merged = dbTotal >= prevTotal
+                ? [...dbMsgs, ...liveOnly]
+                : (() => {
+                    const dbIds = new Set(dbMsgs.map((m) => m.id));
+                    const retained = prev.filter((m) => m.role === "screenshot" || !dbIds.has(m.id));
+                    return [...dbMsgs, ...retained.filter((m) => !dbMsgs.some((d) => d.id === m.id))];
+                  })();
+              return merged;
             });
+            lazyLoadImages(dbMsgs, sid);
           }, 800);
         }
       }
@@ -222,6 +265,7 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
       const chatMsgs = dbMessagesToChat(msgs);
       populateSubAgentContents(chatMsgs);
       setMessages(chatMsgs);
+      lazyLoadImages(chatMsgs, session.session_id);
 
       const hasRunning = (monitors as { session_id: string; status: string }[]).some(
         (m) => m.session_id === session.session_id && m.status === "running"
@@ -293,6 +337,7 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
               : prev.filter((m) => m.role === "screenshot" && m.images?.length);
             return dbTotal >= prevTotal ? [...chatMsgs, ...liveOnly] : prev;
           });
+          lazyLoadImages(chatMsgs, activeSid);
         }
 
         prevRunningRef.current = nowRunning;
@@ -357,8 +402,9 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
       const chatMsgs = dbMessagesToChat(msgs);
       populateSubAgentContents(chatMsgs);
       setMessages(chatMsgs);
+      lazyLoadImages(chatMsgs, activeSession.session_id);
     },
-    [activeSession, populateSubAgentContents]
+    [activeSession, populateSubAgentContents, lazyLoadImages]
   );
 
   const handleBranch = useCallback(
@@ -370,9 +416,11 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
       setActiveBranch(result.branch_id);
       setActiveSession({ ...activeSession, active_branch: result.branch_id });
       const msgs = await sessionsApi.getMessages(activeSession.session_id);
-      setMessages(dbMessagesToChat(msgs));
+      const chatMsgs = dbMessagesToChat(msgs);
+      setMessages(chatMsgs);
+      lazyLoadImages(chatMsgs, activeSession.session_id);
     },
-    [activeSession]
+    [activeSession, lazyLoadImages]
   );
 
   const handleAbort = useCallback(async () => {

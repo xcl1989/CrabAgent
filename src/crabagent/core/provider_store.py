@@ -259,6 +259,35 @@ async def delete_provider(name: str) -> bool:
         return True
 
 
+def build_litellm_params(provider: ProviderInfo, proxy: str = "") -> dict[str, Any]:
+    """Build litellm connection params for a provider."""
+    if provider.provider_type == "chatgpt":
+        params: dict[str, Any] = {}
+    else:
+        params = {"api_key": provider.api_key}
+        if provider.base_url:
+            params["api_base"] = provider.base_url
+            params["custom_llm_provider"] = "openai"
+    if proxy:
+        params["proxy"] = proxy
+    return params
+
+
+async def resolve_litellm_params(provider: ProviderInfo) -> dict[str, Any]:
+    from crabagent.core.proxy import resolve_llm_proxy
+
+    proxy = await resolve_llm_proxy(provider)
+    return build_litellm_params(provider, proxy)
+
+
+def resolve_model_for_provider(provider: ProviderInfo, model: str) -> str:
+    if "/" in model:
+        return model
+    if provider.provider_type == "chatgpt":
+        return f"chatgpt/{model}"
+    return f"openai/{model}"
+
+
 async def fetch_models(provider_name: str) -> list[str]:
     p = await get_provider(provider_name)
     if not p:

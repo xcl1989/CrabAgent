@@ -31,7 +31,11 @@ from crabagent.core.agent.lesson_dedup import (
     normalize_lesson_text,
     string_similarity_score,
 )
-from crabagent.core.provider_store import get_default_provider, get_provider
+from crabagent.core.provider_store import (
+    get_default_provider,
+    get_provider,
+    resolve_model_for_provider,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -209,6 +213,13 @@ async def llm_reflect_lesson(
         if not llm_params:
             return None
 
+        try:
+            provider = await get_provider(provider_name) if provider_name else await get_default_provider()
+            if provider:
+                model = resolve_model_for_provider(provider, model)
+        except Exception:
+            pass
+
         response = await litellm.acompletion(
             model=model,
             messages=[{"role": "user", "content": prompt}],
@@ -370,6 +381,13 @@ async def llm_extract_user_preferences(
         if not llm_params:
             return []
 
+        try:
+            provider = await get_provider(provider_name) if provider_name else await get_default_provider()
+            if provider:
+                model = resolve_model_for_provider(provider, model)
+        except Exception:
+            pass
+
         response = await litellm.acompletion(
             model=model,
             messages=[{"role": "user", "content": prompt}],
@@ -484,6 +502,7 @@ async def persist_lesson(
     memory_type = lesson.get("memory_type", "agent_lesson")
     scope = "agent" if memory_type == "agent_lesson" else "global"
     recall_policy = "query_only" if scope == "agent" else "always"
+    workspace_path = (lesson.get("workspace_path") or "").strip()
 
     await agent_memory_upsert(
         user_id=user_id,
@@ -603,17 +622,9 @@ async def _resolve_llm_params(provider_name: str | None) -> dict | None:
     if not provider:
         logger.debug("reflection skipped: no provider available")
         return None
-    params: dict[str, Any] = {"api_key": provider.api_key}
-    if provider.base_url:
-        params["api_base"] = provider.base_url
-        params["custom_llm_provider"] = "openai"
-    # Apply provider-level proxy
-    from crabagent.core.proxy import resolve_llm_proxy
+    from crabagent.core.provider_store import resolve_litellm_params
 
-    proxy = await resolve_llm_proxy(provider)
-    if proxy:
-        params["proxy"] = proxy
-    return params
+    return await resolve_litellm_params(provider)
 
 
 def _extract_response_text(response) -> str:

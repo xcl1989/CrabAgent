@@ -15,6 +15,8 @@ export interface ChatMessage {
   source?: "builtin" | "mcp";
   server_name?: string;
   images?: string[];
+  lazy_images?: boolean; // true when images need to be fetched separately
+  db_message_id?: number; // original DB message ID for lazy image fetching
   sub_agent_id?: string;
   sub_agent_name?: string;
   sub_agent_display?: string;

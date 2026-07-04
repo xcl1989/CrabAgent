@@ -319,25 +319,32 @@ export function dbMessagesToChat(msgs: Message[]): ChatMessage[] {
     }
 
     // Screenshot messages persisted from image_generate tool.
-    // Prefer server-side inline base64 (image_data) over building a
-    // /files/image URL that requires token auth (which can fail).
+    // Images are lazy-loaded via /messages/{id}/images endpoint.
     if (m.role === "screenshot" && m.content) {
       const images: string[] = [];
-      // Prefer inline base64 from API response
+      // Prefer inline base64 from API response (only when strip_images=false)
       if (m.image_data) {
         images.push(m.image_data);
+      }
+      const screenshotMsg: ChatMessage = {
+        id: `db-${m.id}`,
+        role: "screenshot",
+        content: "",
+      };
+      if (images.length > 0) {
+        screenshotMsg.images = images;
+      } else if (m.has_images) {
+        // Mark for lazy loading
+        screenshotMsg.lazy_images = true;
+        screenshotMsg.db_message_id = m.id;
       } else {
         // Fallback: construct /files/image URL with token
         const token = localStorage.getItem("crab_token") || "";
         const apiUrl = `/api/files/image?path=${encodeURIComponent(m.content)}&absolute=true&token=${encodeURIComponent(token)}`;
         images.push(apiUrl);
+        screenshotMsg.images = images;
       }
-      result.push({
-        id: `db-${m.id}`,
-        role: "screenshot",
-        content: "",
-        images,
-      });
+      result.push(screenshotMsg);
       continue;
     }
 
@@ -467,8 +474,20 @@ export function dbMessagesToChat(msgs: Message[]): ChatMessage[] {
           const textBlock = blocks.find((b: { type: string }) => b.type === "text");
           const imageBlocks = blocks.filter((b: { type: string }) => b.type === "image_url");
           if (textBlock) base.content = textBlock.text || "";
-          if (imageBlocks.length > 0)
-            base.images = imageBlocks.map((b: { image_url?: { url?: string } }) => b.image_url?.url || "");
+          if (imageBlocks.length > 0) {
+            const urls = imageBlocks.map((b: { image_url?: { url?: string } }) => b.image_url?.url || "");
+            // If URLs were stripped by backend (lazy loading), mark for lazy fetch
+            if (urls.every((u) => !u) && m.has_images) {
+              base.lazy_images = true;
+              base.db_message_id = m.id;
+            } else {
+              base.images = urls.filter((u) => u);
+              if (base.images.length === 0 && m.has_images) {
+                base.lazy_images = true;
+                base.db_message_id = m.id;
+              }
+            }
+          }
         }
       } catch {
         /* keep original content */

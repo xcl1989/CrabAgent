@@ -35,6 +35,7 @@ export interface Message {
   created_at: string | null;
   compressed?: boolean;
   image_data?: string;
+  has_images?: boolean;
 }
 
 export interface BranchInfo {
@@ -77,6 +78,10 @@ export function deleteSession(sessionId: string): Promise<void> {
 
 export function getMessages(sessionId: string): Promise<Message[]> {
   return api.get(`/sessions/${sessionId}/messages?limit=1000&include_compressed=true`);
+}
+
+export function getMessageImages(sessionId: string, messageId: number): Promise<{ images: string[] }> {
+  return api.get(`/sessions/${sessionId}/messages/${messageId}/images`);
 }
 
 export function sendPrompt(

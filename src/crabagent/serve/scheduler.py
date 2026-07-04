@@ -943,11 +943,10 @@ class SchedulerService:
                 if default_provider_name:
                     provider = await get_provider(default_provider_name)
                     if provider:
-                        params: dict = {"api_key": provider.api_key}
-                        if provider.base_url:
-                            params["api_base"] = provider.base_url
-                            params["custom_llm_provider"] = "openai"
-                        return default_model, params
+                        from crabagent.core.provider_store import resolve_litellm_params, resolve_model_for_provider
+
+                        params = await resolve_litellm_params(provider)
+                        return resolve_model_for_provider(provider, default_model), params
                 return default_model, {}
 
             model = row[0]
@@ -963,12 +962,10 @@ class SchedulerService:
             if not provider:
                 return model, {}
 
-            params: dict = {"api_key": provider.api_key}
-            if provider.base_url:
-                params["api_base"] = provider.base_url
-                params["custom_llm_provider"] = "openai"
+            from crabagent.core.provider_store import resolve_litellm_params, resolve_model_for_provider
 
-            return model, params
+            params = await resolve_litellm_params(provider)
+            return resolve_model_for_provider(provider, model), params
         except Exception:
             from crabagent.core.config import settings
             return settings.default_model, {}
