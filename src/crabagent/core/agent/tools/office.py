@@ -521,7 +521,12 @@ def _describe_op(
                 "enum": ["set", "add", "remove", "move", "swap"],
                 "description": "操作类型：\n"
                 "- set: 修改已有元素的属性（文本、字体、颜色、大小、公式、合并等）\n"
-                "- add: 添加新元素（幻灯片、形状、表格、行、列、单元格等）\n"
+                "- add: 添加新元素（幻灯片、形状、表格、行、列、单元格等）。\n"
+                "  ⚠️ add 命令的 element_path 应传**父容器路径**，不是要插入的具体位置。\n"
+                "  例如：在 Excel 添加行 → element_path=/Sheet1（不是 /Sheet1/row[5]）\n"
+                "       在 PPT 添加幻灯片 → element_path=/（不是 /slide[3]）\n"
+                "       在 Word 添加段落 → element_path=/body（不是 /body/p[2]）\n"
+                "  如需在特定位置插入，用 props.after 或 props.before 指定参考元素。\n"
                 "- remove: 删除元素\n"
                 "- move: 移动元素到新位置\n"
                 "- swap: 交换两个元素的位置",
@@ -541,6 +546,8 @@ def _describe_op(
                 "- /body/p[1] → Word 第1段落\n"
                 "- /body/tbl[1]/tr[2]/tc[1] → Word 表格第2行第1列单元格\n"
                 "- /slide[1]/table[1]/tr[2]/tc[1] → PPT 表格第2行第1列单元格\n\n"
+                "⚠️ add 命令：element_path 是**父容器路径**（如 /Sheet1, /body, /）。\n"
+                "   如需在特定元素后插入，在 props 中设置 after=/Sheet1/row[5]。\n\n"
                 "⚠️ Excel 注意：新建的空白工作表中没有预置的单元格。\n"
                 "   先使用 add 命令添加单元格（如 add → parent=/Sheet1, type=cell），\n"
                 "   然后再用 set 修改其内容。\n"
@@ -645,7 +652,26 @@ async def office_edit(
     elif command == "add":
         if not element_type:
             return "add 操作需要指定 element_type（如 slide、shape、table）"
-        result = await mgr.add_element(resolved, element_path, element_type, props)
+
+        # Smart path normalization: if the AI passed a specific child path
+        # like /Sheet1/row[19] instead of the parent /Sheet1, extract the
+        # parent and use --after to insert at the expected position.
+        add_parent = element_path
+        add_props = dict(props)
+        if "[" in element_path and element_path.count("/") >= 2:
+            # e.g. /Sheet1/row[19] → parent=/Sheet1, after=/Sheet1/row[19]
+            parts = element_path.rsplit("/", 1)
+            parent_candidate = parts[0]
+            child_part = parts[1]
+            if "[" in child_part:
+                # This looks like a specific element path, not a parent
+                add_parent = parent_candidate
+                if "after" not in add_props and "before" not in add_props and "index" not in add_props:
+                    add_props["after"] = element_path
+                    logger.info("add: normalized parent %s → %s, after=%s",
+                                element_path, add_parent, element_path)
+
+        result = await mgr.add_element(resolved, add_parent, element_type, add_props)
     elif command == "remove":
         result = await mgr.remove_element(resolved, element_path)
     elif command == "move":
@@ -667,7 +693,13 @@ async def office_edit(
     if result.success:
         # 渲染预览
         await _render_and_emit_preview(file_path, resolved, context)
-        return f"✅ {_describe_op(command, element_path, props)}"
+        actual_path = ""
+        if hasattr(result, "data") and result.data:
+            actual_path = str(result.data).strip()
+        detail = _describe_op(command, element_path, props)
+        if actual_path and "Added" in actual_path:
+            detail += f" → {actual_path}"
+        return f"✅ {detail}"
     else:
         return f"操作失败: {result.error}"
 

@@ -185,9 +185,10 @@ async def search_files(
     # Run index build in thread pool (only hits filesystem on cache miss)
     index = await asyncio.to_thread(_ensure_index)
 
-    # Filter — pure in-memory, instant
+    # Filter — pure in-memory, instant.
+    # Match against both file name and path for better discoverability.
     query_lower = q.lower()
-    results = [e for e in index if query_lower in e["name"].lower()]
+    results = [e for e in index if query_lower in e["name"].lower() or query_lower in e["path"].lower()]
     return {"results": results[:limit], "total": len(results)}
 
 

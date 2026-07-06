@@ -6,6 +6,8 @@ export interface AgentMonitorInfo {
   status: string;
   started_at: number;
   elapsed: number;
+  workspace?: string;
+  title?: string;
 }
 
 export async function getAgentMonitor(): Promise<AgentMonitorInfo[]> {

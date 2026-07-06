@@ -315,7 +315,7 @@ export default function FileBrowser({
 
     const timer = setTimeout(async () => {
       try {
-        const results = await searchFiles(q, isAbsolute, 200, controller.signal);
+        const results = await searchFiles(q, isAbsolute, 200, workspace || undefined, controller.signal);
         setSearchResults(results);
       } catch (err) {
         // Ignore abort errors — a newer request is in flight
@@ -333,7 +333,7 @@ export default function FileBrowser({
       controller.abort();
       clearTimeout(timer);
     };
-  }, [searchQuery, isAbsolute]);
+  }, [searchQuery, isAbsolute, workspace]);
 
   // Auto-refresh when parent triggers (e.g. AI created/modified files)
   useEffect(() => {

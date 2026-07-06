@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { FolderOpen, ChevronDown, Plus, Check, Home } from "lucide-react";
+import { FolderOpen, ChevronDown, Plus, Check, Home, Activity } from "lucide-react";
 import { listWorkspaces, getCurrentWorkspace, type WorkspaceInfo } from "../api/sessions";
+import { getAgentMonitor } from "../api/monitor";
 import { cn } from "../lib/cn";
 import DirectoryPicker from "./DirectoryPicker";
 
@@ -16,11 +17,33 @@ export default function WorkspaceSwitcher({ current, onChange }: Props) {
   const [workspaces, setWorkspaces] = useState<WorkspaceInfo[]>([]);
   const [currentWorkspacePath, setCurrentWorkspacePath] = useState<string>("");
   const [showPicker, setShowPicker] = useState(false);
+  const [activeByWorkspace, setActiveByWorkspace] = useState<Record<string, number>>({});
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     // Only fetch once on mount, not on every workspace change
     listWorkspaces().then(setWorkspaces).catch(() => {});
+  }, []);
+
+  // Poll active agents every 5s to show running session counts per workspace
+  useEffect(() => {
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const monitors = await getAgentMonitor();
+        if (cancelled) return;
+        const counts: Record<string, number> = {};
+        for (const m of monitors) {
+          if (m.workspace && m.status === "running") {
+            counts[m.workspace] = (counts[m.workspace] || 0) + 1;
+          }
+        }
+        setActiveByWorkspace(counts);
+      } catch { /* ignore */ }
+    };
+    poll();
+    const interval = setInterval(poll, 5000);
+    return () => { cancelled = true; clearInterval(interval); };
   }, []);
 
   useEffect(() => {
@@ -45,6 +68,7 @@ export default function WorkspaceSwitcher({ current, onChange }: Props) {
   const displayName = current
     ? current.split("/").pop() || current
     : (currentWorkspacePath.split("/").pop() || currentWorkspacePath || t("workspaceSwitcher.directory"));
+  const totalActive = Object.values(activeByWorkspace).reduce((a, b) => a + b, 0);
 
   const handlePickerSelect = (path: string) => {
     onChange(path);
@@ -64,6 +88,15 @@ export default function WorkspaceSwitcher({ current, onChange }: Props) {
       >
         <FolderOpen size={12} />
         <span className="truncate max-w-[120px]">{displayName}</span>
+        {totalActive > 0 && (
+          <span
+            className="inline-flex items-center justify-center min-w-[16px] h-[16px] px-1 rounded-full text-[9px] font-bold leading-none animate-pulse"
+            style={{ background: "var(--success)", color: "#fff" }}
+            title={`${totalActive} 个活跃会话`}
+          >
+            {totalActive}
+          </span>
+        )}
         <ChevronDown size={10} className={cn("transition-transform", open && "rotate-180")} />
       </button>
 
@@ -101,6 +134,7 @@ export default function WorkspaceSwitcher({ current, onChange }: Props) {
           {workspaces.map((ws) => {
             const name = ws.workspace.split("/").pop() || ws.workspace;
             const isActive = current === ws.workspace;
+            const activeCount = activeByWorkspace[ws.workspace] || 0;
             return (
               <button
                 key={ws.workspace}
@@ -119,6 +153,16 @@ export default function WorkspaceSwitcher({ current, onChange }: Props) {
                 <span className="flex-1 truncate" title={ws.workspace}>
                   {name}
                 </span>
+                {activeCount > 0 && (
+                  <span
+                    className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full"
+                    style={{ background: "var(--success)", color: "#fff" }}
+                    title={`${activeCount} 个活跃会话`}
+                  >
+                    <Activity size={8} />
+                    {activeCount}
+                  </span>
+                )}
                 <span
                   className={cn(
                     "inline-flex items-center justify-center min-w-[18px] h-[18px] px-1",

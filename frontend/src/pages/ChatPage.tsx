@@ -262,6 +262,7 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
     replaying,
     replayProgress,
     todoRefreshKey,
+    activeMonitors,
     selectSession,
     newSession,
     selectSessionById,
@@ -846,6 +847,7 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
           mobileOpen={mobileSidebarOpen}
           onMobileClose={() => setMobileSidebarOpen(false)}
           workspace={activeSession?.workspace || workspace || undefined}
+          activeMonitors={activeMonitors}
         />
       )}
       {mode === "work" && (

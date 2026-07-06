@@ -951,9 +951,11 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(
             return (
               <div key={msg.id} className="mb-3 ml-3 flex flex-wrap gap-2">
                 {msg.lazy_images && (
-                  <div className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-                    <Loader2 size={14} className="animate-spin" />
-                    <span>Loading image…</span>
+                  <div className="w-[1024px] max-w-full h-[400px] rounded-lg border border-[var(--border)] flex items-center justify-center text-xs text-[var(--text-secondary)] animate-pulse">
+                    <div className="flex items-center gap-2">
+                      <Loader2 size={14} className="animate-spin" />
+                      <span>Loading image…</span>
+                    </div>
                   </div>
                 )}
                 {msg.images?.map((img, idx) => (
@@ -986,9 +988,11 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(
               {isUser ? (
                 <div className="chat-bubble-user relative">
                   {msg.lazy_images && (
-                    <div className="flex items-center gap-2 mb-2 text-xs text-[var(--text-secondary)]">
-                      <Loader2 size={12} className="animate-spin" />
-                      <span>Loading image…</span>
+                    <div className="w-[200px] h-[200px] rounded-lg border border-[var(--border)] flex items-center justify-center text-xs text-[var(--text-secondary)] animate-pulse mb-2">
+                      <div className="flex items-center gap-1.5">
+                        <Loader2 size={12} className="animate-spin" />
+                        <span>Loading image…</span>
+                      </div>
                     </div>
                   )}
                   {msg.images && msg.images.length > 0 && (

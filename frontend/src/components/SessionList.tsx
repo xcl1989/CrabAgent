@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Session, SearchResult, searchSessions } from "../api/sessions";
+import { AgentMonitorInfo } from "../api/monitor";
 import { formatDate } from "../api/time";
 import { Button, EmptyState, ConfirmDialog } from "./ui";
 import { cn } from "../lib/cn";
@@ -41,6 +42,7 @@ interface Props {
   mobileOpen?: boolean;
   onMobileClose?: () => void;
   workspace?: string;
+  activeMonitors?: AgentMonitorInfo[];
 }
 
 export default function SessionList({
@@ -59,6 +61,7 @@ export default function SessionList({
   mobileOpen = false,
   onMobileClose,
   workspace,
+  activeMonitors = [],
 }: Props) {
   const { t } = useTranslation();
   const [collapsed, setCollapsed] = useState(false);
@@ -68,6 +71,15 @@ export default function SessionList({
   const [deleteTarget, setDeleteTarget] = useState<Session | null>(null);
   const [quickMenuOpen, setQuickMenuOpen] = useState(false);
   const quickMenuRef = useRef<HTMLDivElement>(null);
+
+  // Set of session_ids that are currently running
+  const runningIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const m of activeMonitors) {
+      if (m.status === "running") ids.add(m.session_id);
+    }
+    return ids;
+  }, [activeMonitors]);
 
   // Auto-close mobile drawer when a session is selected
   useEffect(() => {
@@ -352,6 +364,13 @@ export default function SessionList({
                           : "text-[var(--text-secondary)]",
                       )}
                     >
+                      {runningIds.has(s.session_id) && (
+                        <span
+                          className="inline-block w-1.5 h-1.5 rounded-full shrink-0 animate-pulse"
+                          style={{ background: "var(--success)" }}
+                          title="运行中"
+                        />
+                      )}
                       <span className="truncate">
                         {s.title || `(${t("session.untitled")})`}
                       </span>

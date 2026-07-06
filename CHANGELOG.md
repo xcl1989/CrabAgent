@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.12.4] — Lazy Image Loading & Multi-Workspace Awareness
+
+### Added
+- **Lazy image loading for sessions** — Messages API now strips base64 image data from list responses. Images are fetched on-demand via the new `GET /sessions/{id}/messages/{msg_id}/images` endpoint, reducing initial session load time from seconds to milliseconds for image-heavy conversations.
+- **Multi-workspace active session awareness** — The `/agents/monitor` API now returns `workspace` and `title` for each running session. The workspace switcher shows a green badge with the total count of active sessions across all workspaces, and each workspace in the dropdown shows its own active count. Session list items display a pulsing green dot for running sessions.
+- **Image placeholder with reserved space** — While images are lazy-loading, a correctly-sized skeleton placeholder is shown to prevent layout shift / scroll jumps.
+
+### Fixed
+- **Duplicate `tool_call_id` causes "no corresponding toolcall result" API error** (session 435) — When a model (e.g. kimi-k2) reuses the same `tool_call_id` across turns and the first turn was interrupted, the validation logic would incorrectly match the orphaned tool_calls with a later turn's tool result. Fixed with windowed matching: tool results are only matched within the window between the assistant message and the next user/assistant message.
+- **`UnboundLocalError: reasoning_tokens`** (affects v0.11.7 ~ v0.12.3 packaged builds) — The variable was only initialized inside the usage-chunk handler, so when a streaming response (especially ChatGPT subscription with gpt-5.4) didn't include usage data, accessing it later threw `UnboundLocalError`. Fixed by initializing `reasoning_tokens = 0` at the top of the try block.
+- **Office `add` command silently inserts at wrong position** — When the AI passed a specific child path (e.g. `/Sheet1/row[19]`) as `element_path` for `add`, OfficeCLI would ignore the index and append to the end. Now the parent path is automatically extracted and `--after` is set to insert at the expected position. Tool descriptions updated to clarify that `add` expects a parent container path.
+- **File browser search searches entire filesystem** — When using an absolute-path workspace, the search API received an empty `path` parameter and defaulted to `/`. Fixed by passing the workspace path from the frontend. Search now also matches against file paths (not just file names).
+
+### Changed
+- **`message_to_response()` API** — New `strip_images` parameter (default `True`) controls whether base64 image data is stripped from the response. The messages list endpoint always strips; the new images endpoint uses `strip_images=False`.
+- **Office tool descriptions** — Enhanced `add` command documentation with explicit warnings that `element_path` is the **parent container path**, with examples for Excel/PPT/Word.
+
+---
+
 ## [0.12.3] — Memory Scope & Workspace Isolation
 
 ### Added

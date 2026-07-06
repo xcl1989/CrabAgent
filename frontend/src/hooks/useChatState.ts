@@ -3,6 +3,7 @@ import { ChatMessage } from "../types/ChatMessage";
 import { SSEEvent } from "../api/events";
 import { Session, Message } from "../api/sessions";
 import * as sessionsApi from "../api/sessions";
+import { AgentMonitorInfo } from "../api/monitor";
 import { sseEventToMessages, dbMessagesToChat } from "../lib/messageTransforms";
 import { useSSE } from "./useSSE";
 
@@ -15,6 +16,7 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
   const [replaying, setReplaying] = useState(false);
   const [replayProgress, setReplayProgress] = useState({ current: 0, total: 0 });
   const [todoRefreshKey, setTodoRefreshKey] = useState(0);
+  const [activeMonitors, setActiveMonitors] = useState<AgentMonitorInfo[]>([]);
   const activeSessionRef = useRef<Session | null>(null);
   const pendingSubEventsRef = useRef<SSEEvent[]>([]);
   const subFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -301,6 +303,7 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
       try {
         const { getAgentMonitor } = await getMonitor();
         const monitors = await getAgentMonitor();
+        setActiveMonitors(monitors);
         const nowRunning = new Set(monitors.filter((m) => m.status === "running").map((m) => m.session_id));
         const prevRunning = prevRunningRef.current;
 
@@ -460,6 +463,7 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
     replaying,
     replayProgress,
     todoRefreshKey,
+    activeMonitors,
     selectSession,
     newSession,
     selectSessionById,

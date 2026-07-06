@@ -271,6 +271,7 @@ async def set_default_tool_permissions(
 async def monitor_agents(
     request: Request,
     user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     logger.info("monitor_agents ENTER")
     active_agents = getattr(request.app.state, "active_agents", {})
@@ -279,9 +280,22 @@ async def monitor_agents(
 
     from crabagent.core.agent.agents import get_all_session_subs
 
+    # Batch-fetch workspace + title for all active sessions (single query)
+    sids = [sid for sid, info in active_agents.items() if info.get("user_id") == user.id]
+    session_meta: dict[str, dict] = {}
+    if sids:
+        from crabagent.core.database import Conversation
+        rows = await db.execute(
+            select(Conversation.session_id, Conversation.workspace, Conversation.title)
+            .where(Conversation.session_id.in_(sids))
+        )
+        for row in rows.fetchall():
+            session_meta[row[0]] = {"workspace": row[1] or "", "title": row[2] or ""}
+
     for sid, info in active_agents.items():
         if info.get("user_id") != user.id:
             continue
+        meta = session_meta.get(sid, {})
         result.append(
             {
                 "session_id": sid,
@@ -289,6 +303,8 @@ async def monitor_agents(
                 "status": info.get("status", "unknown"),
                 "started_at": info.get("started_at", 0),
                 "elapsed": round(now - info.get("started_at", now), 1),
+                "workspace": meta.get("workspace", ""),
+                "title": meta.get("title", ""),
             }
         )
 

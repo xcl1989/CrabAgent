@@ -8,6 +8,25 @@ English version: [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
+## [0.12.4] — 图片懒加载 & 多工作空间感知
+
+### 新增
+- **会话图片懒加载** — 消息列表 API 现在会剥离 base64 图片数据，通过新增的 `GET /sessions/{id}/messages/{msg_id}/images` 端点按需加载。图片密集的会话初始加载时间从数秒降至毫秒级。
+- **多工作空间活跃会话感知** — `/agents/monitor` API 现在返回每个运行中会话的 `workspace` 和 `title`。工作空间切换器显示绿色徽章标识所有空间的活跃会话总数，下拉列表中每个工作空间显示各自的活跃数。会话列表中正在运行的会话显示绿色脉冲指示点。
+- **图片占位符预留空间** — 图片懒加载期间显示与最终图片尺寸一致的骨架占位符，避免布局抖动和滚动跳跃。
+
+### 修复
+- **重复 `tool_call_id` 导致"没有对应的 toolcall 结果"API 报错**（会话 435）— 当模型（如 kimi-k2）跨轮次复用相同 `tool_call_id`，且第一轮被中断时，验证逻辑会错误地将孤立 tool_calls 与后续轮次的 tool 结果匹配。改用窗口匹配：只在 assistant 消息到下一个 user/assistant 消息之间的窗口内查找匹配的 tool 结果。
+- **`UnboundLocalError: reasoning_tokens`**（影响 v0.11.7 ~ v0.12.3 打包版）— 该变量仅在 usage chunk 处理器内赋值，当流式响应（特别是 ChatGPT 订阅的 gpt-5.4）不含 usage 数据时，后续访问抛出 `UnboundLocalError`。已在 try 块顶部初始化 `reasoning_tokens = 0`。
+- **Office `add` 命令静默插入到错误位置** — 当 AI 将具体子路径（如 `/Sheet1/row[19]`）作为 `element_path` 传给 `add` 时，OfficeCLI 会忽略索引并追加到末尾。现在自动提取父路径并设置 `--after` 在预期位置插入。工具描述已更新，明确说明 `add` 需要父容器路径。
+- **文件浏览器搜索整个文件系统** — 使用绝对路径工作空间时，搜索 API 收到空的 `path` 参数并默认搜索 `/`。已从前端传递工作空间路径。搜索现在同时匹配文件名和文件路径。
+
+### 变更
+- **`message_to_response()` API** — 新增 `strip_images` 参数（默认 `True`），控制是否从响应中剥离 base64 图片数据。消息列表端点始终剥离；新增的图片端点使用 `strip_images=False`。
+- **Office 工具描述** — 增强 `add` 命令文档，明确标注 `element_path` 是**父容器路径**，并提供 Excel/PPT/Word 示例。
+
+---
+
 ## [0.12.3] — 记忆分层与工作区隔离
 
 ### 新增
