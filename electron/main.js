@@ -399,6 +399,28 @@ function createWindow() {
     win.show();
   });
 
+  // ── External link handling ─────────────────────────────────────
+  // Open external links (http/https) in the system default browser,
+  // not in a new Electron window. This prevents the main window from
+  // being replaced by external pages.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      require('electron').shell.openExternal(url);
+      return { action: 'deny' };
+    }
+    return { action: 'allow' };
+  });
+
+  // Prevent navigation to external URLs in the main window
+  win.webContents.on('will-navigate', (event, url) => {
+    // Allow only navigation to the local backend
+    const allowedPrefixes = ['http://localhost', 'http://127.0.0.1', 'data:text/html', 'file://'];
+    if (!allowedPrefixes.some(p => url.startsWith(p))) {
+      event.preventDefault();
+      require('electron').shell.openExternal(url);
+    }
+  });
+
   // Save window state on resize/move
   win.on('resize', saveWindowState);
   win.on('move', saveWindowState);

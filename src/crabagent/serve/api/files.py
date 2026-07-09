@@ -410,7 +410,7 @@ async def git_status(
             cwd=str(ws),
         )
         stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
-        status_lines = stdout.decode("utf-8", errors="replace").strip().splitlines()
+        status_lines = stdout.decode("utf-8", errors="replace").splitlines()
 
         changes = []
         for line in status_lines:
