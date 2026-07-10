@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { connectGlobalSSE, getAgentMonitor, type GlobalSSEEvent } from "../api/monitor";
 
 type PetMood = "idle" | "thinking" | "working" | "celebrating" | "error" | "waiting";
@@ -33,6 +33,9 @@ function stateFromEvent(event: GlobalSSEEvent): PetState | null {
     case "agent_start":
     case "iteration_start":
     case "thinking_delta":
+    case "sub_agent_start":
+    case "pipeline_start":
+    case "pipeline_step_start":
       return { mood: "thinking", label: "正在思考", detail: "我在整理思路" };
     case "tool_call":
       return {
@@ -44,8 +47,11 @@ function stateFromEvent(event: GlobalSSEEvent): PetState | null {
     case "user_input_request":
       return { mood: "waiting", label: "需要你确认", detail: "点我打开对话" };
     case "agent_end":
+    case "pipeline_end":
+    case "sub_agent_end":
       return { mood: "celebrating", label: "任务完成", detail: "做得漂亮！" };
     case "agent_error":
+    case "sub_agent_error":
       return { mood: "error", label: "遇到一点问题", detail: "点我查看详情" };
     default:
       return null;
@@ -54,10 +60,18 @@ function stateFromEvent(event: GlobalSSEEvent): PetState | null {
 
 export function DesktopPet() {
   const [state, setState] = useState<PetState>(INITIAL_STATE);
+  const currentMoodRef = useRef<PetMood>(INITIAL_STATE.mood);
   const [bubbleVisible, setBubbleVisible] = useState(true);
   const resetTimer = useRef<number | undefined>(undefined);
   const dragStart = useRef<{ x: number; y: number } | null>(null);
   const dragged = useRef(false);
+
+  // Keep a synchronous reference to the current mood so the monitor poll
+  // never overwrites states driven by live SSE events (working/waiting/etc.).
+  const setPetState = useCallback((next: PetState) => {
+    setState(next);
+    currentMoodRef.current = next.mood;
+  }, []);
 
   useEffect(() => {
     let disposed = false;
@@ -65,31 +79,37 @@ export function DesktopPet() {
       try {
         const activeAgents = await getAgentMonitor();
         if (disposed) return;
+
         if (activeAgents.length === 0) {
-          setState(INITIAL_STATE);
-        } else {
-          setState({ mood: "thinking", label: "正在思考", detail: "我在整理思路" });
+          // Nothing running → fall back to idle regardless of stale state.
+          if (currentMoodRef.current !== "idle") {
+            setPetState(INITIAL_STATE);
+          }
+        } else if (["idle", "celebrating", "error"].includes(currentMoodRef.current)) {
+          // A task is running and we are not already in an active SSE state.
+          // Switch to thinking, and clear any pending celebration/error reset.
+          if (resetTimer.current) window.clearTimeout(resetTimer.current);
+          setPetState({ mood: "thinking", label: "正在思考", detail: "我在整理思路" });
         }
       } catch {
         // SSE remains the live source of truth when the monitor is unavailable.
       }
     };
 
-    // Initial state and fallback when an SSE "agent_end" is missed.
     void syncStateFromMonitor();
     const monitorTimer = window.setInterval(() => {
       void syncStateFromMonitor();
-    }, 5000);
+    }, 2500);
 
     const es = connectGlobalSSE((event) => {
       const nextState = stateFromEvent(event);
       if (!nextState) return;
-      setState(nextState);
+      setPetState(nextState);
       setBubbleVisible(true);
 
       if (resetTimer.current) window.clearTimeout(resetTimer.current);
       if (nextState.mood === "celebrating" || nextState.mood === "error") {
-        resetTimer.current = window.setTimeout(() => setState(INITIAL_STATE), 6000);
+        resetTimer.current = window.setTimeout(() => setPetState(INITIAL_STATE), 6000);
       }
     });
     return () => {
@@ -98,7 +118,7 @@ export function DesktopPet() {
       window.clearInterval(monitorTimer);
       if (resetTimer.current) window.clearTimeout(resetTimer.current);
     };
-  }, []);
+  }, [setPetState]);
 
   const openMain = () => window.electronAPI?.petAction("open-main");
   const handlePointerDown = (event: React.PointerEvent<HTMLElement>) => {
