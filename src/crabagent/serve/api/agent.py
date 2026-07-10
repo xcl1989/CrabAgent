@@ -12,6 +12,7 @@ from crabagent.core.agent.agents import invalidate_cache
 from crabagent.core.database import (
     AgentProfile,
     AgentRun,
+    Conversation,
     User,
     agent_memory_delete,
     agent_memory_get_by_agent,
@@ -265,6 +266,119 @@ async def set_default_tool_permissions(
     await db.commit()
     invalidate_cache()
     return {"tool_permissions": req.tool_permissions}
+
+
+_SUMMARY_PRIORITY = {"waiting": 0, "error": 1, "working": 2, "thinking": 3, "completed": 4, "idle": 5}
+_SUMMARY_TRANSIENT_SECONDS = 6.0
+
+
+def _summary_message(status: str, count: int, target: dict | None) -> str:
+    if status == "waiting":
+        kind = target.get("request_type") if target else ""
+        if kind == "input":
+            return "需要你补充一点信息" if count == 1 else f"{count} 个会话等待你的输入"
+        return "需要你确认" if count == 1 else f"{count} 个会话等待你的确认"
+    if status == "error":
+        return "有 1 个任务遇到了问题" if count == 1 else f"有 {count} 个任务遇到了问题"
+    if status == "working":
+        tool_name = (target or {}).get("tool_name", "")
+        if count == 1 and tool_name:
+            return f"正在使用 {tool_name} 处理任务"
+        return "1 个会话正在执行任务" if count == 1 else f"{count} 个会话正在执行任务"
+    if status == "thinking":
+        return "正在整理思路" if count == 1 else f"{count} 个会话正在整理思路"
+    if status == "completed":
+        return "任务完成，做得漂亮！"
+    return "随时可以开始"
+
+
+@router.get("/monitor/summary")
+async def monitor_summary(
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return the highest-priority, actionable state across a user's sessions."""
+    now = time.time()
+    active_agents = getattr(request.app.state, "active_agents", {})
+    attention = getattr(request.app.state, "agent_attention", {})
+    session_ids = [sid for sid, info in active_agents.items() if info.get("user_id") == user.id]
+
+    from crabagent.serve.api.confirm import get_pending_confirms_for_session
+    from crabagent.serve.api.input import get_pending_for_session
+
+    candidates: list[dict] = []
+    for session_id in session_ids:
+        info = active_agents[session_id]
+        pending_input = get_pending_for_session(session_id)
+        pending_confirm = get_pending_confirms_for_session(session_id)
+        request_type = "input" if pending_input else "confirm" if pending_confirm else ""
+        status = "waiting" if request_type else info.get("status", "thinking")
+        if status == "waiting" and not request_type:
+            status = "thinking"
+        if status not in _SUMMARY_PRIORITY:
+            status = "thinking"
+        candidates.append(
+            {
+                "status": status,
+                "session_id": session_id,
+                "updated_at": info.get("waiting_since") or info.get("updated_at") or info.get("started_at", now),
+                "request_type": request_type or None,
+                "tool_name": info.get("tool_name", ""),
+            }
+        )
+
+    # Completed and errored sessions are intentionally short-lived feedback states.
+    for session_id, info in list(attention.items()):
+        if info.get("user_id") != user.id:
+            continue
+        if now - info.get("updated_at", 0) > _SUMMARY_TRANSIENT_SECONDS:
+            attention.pop(session_id, None)
+            continue
+        candidates.append(
+            {
+                "status": info.get("status", "completed"),
+                "session_id": session_id,
+                "updated_at": info.get("updated_at", now),
+                "request_type": None,
+                "tool_name": "",
+            }
+        )
+
+    if not candidates:
+        return {
+            "status": "idle",
+            "priority": _SUMMARY_PRIORITY["idle"],
+            "count": 0,
+            "message": _summary_message("idle", 0, None),
+            "target": None,
+            "updated_at": now,
+        }
+
+    highest_priority = min(_SUMMARY_PRIORITY[item["status"]] for item in candidates)
+    matching = [item for item in candidates if _SUMMARY_PRIORITY[item["status"]] == highest_priority]
+    # Resolve ties to the longest-waiting or most recently changed actionable session.
+    target = sorted(matching, key=lambda item: item["updated_at"])[0]
+    rows = await db.execute(
+        select(Conversation.session_id, Conversation.title).where(Conversation.session_id == target["session_id"])
+    )
+    row = rows.first()
+    target_data = {
+        "session_id": target["session_id"],
+        "title": row[1] if row and row[1] else "未命名会话",
+        "request_type": target["request_type"],
+    }
+    if target["tool_name"]:
+        target_data["tool_name"] = target["tool_name"]
+    status = target["status"]
+    return {
+        "status": status,
+        "priority": highest_priority,
+        "count": len(matching),
+        "message": _summary_message(status, len(matching), target_data),
+        "target": target_data,
+        "updated_at": max(item["updated_at"] for item in matching),
+    }
 
 
 @router.get("/monitor")

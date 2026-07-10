@@ -165,6 +165,7 @@ def create_app() -> FastAPI:
     app.state.event_queues = {}
     app.state.global_event_queues = {}  # SSE /events/global queues
     app.state.active_agents = {}
+    app.state.agent_attention = {}  # Recent completed/error states for global status consumers.
     app.state.active_sub_agents = {}
 
     from crabagent.core.event import EventBus

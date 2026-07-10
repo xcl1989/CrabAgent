@@ -275,6 +275,12 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
     getSubAgentContent,
   } = useChatState(wrappedOnEvent, workspace, onAutoLoadSession);
 
+  useEffect(() => {
+    window.electronAPI?.onOpenSession?.((sessionId) => {
+      void selectSessionById(sessionId, selectedModel, models);
+    });
+  }, [selectSessionById]);
+
   // ── Open Office document from file tree ───────────────────────
   const handleOpenDoc = useCallback(async (path: string, name: string) => {
     const ws = activeSession?.workspace || workspace || "";

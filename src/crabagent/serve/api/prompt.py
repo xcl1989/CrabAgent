@@ -577,6 +577,31 @@ async def prompt_async(
         _fwd_count += 1
         now = time.time()
 
+        # Keep the monitor summary authoritative across SSE reconnects and UI refreshes.
+        active_info = request.app.state.active_agents.get(session_id)
+        if active_info:
+            if event.type in (EventType.TOOL_CONFIRM_REQUEST, EventType.USER_INPUT_REQUEST):
+                active_info["status"] = "waiting"
+                active_info["waiting_type"] = "confirm" if event.type == EventType.TOOL_CONFIRM_REQUEST else "input"
+                active_info["waiting_since"] = now
+                active_info["tool_name"] = event.data.get("tool_name", "")
+            elif event.type in (EventType.TOOL_CALL, EventType.SUB_AGENT_TOOL_CALL):
+                active_info["status"] = "working"
+                active_info["tool_name"] = event.data.get("name", "")
+                active_info["updated_at"] = now
+            elif event.type in (EventType.AGENT_START, EventType.ITERATION_START, EventType.THINKING_DELTA):
+                if active_info.get("status") != "waiting":
+                    active_info["status"] = "thinking"
+                    active_info["updated_at"] = now
+            elif event.type == EventType.AGENT_ERROR:
+                context.metadata["_agent_error"] = True
+                active_info["has_error"] = True
+                request.app.state.agent_attention[session_id] = {
+                    "user_id": user.id,
+                    "status": "error",
+                    "updated_at": now,
+                }
+
         if event.type in _THROTTLED_EVENTS:
             if now < _throttle_until.get(event.type, 0):
                 return
@@ -866,6 +891,7 @@ async def prompt_async(
         except asyncio.CancelledError:
             logger.info("Agent task cancelled for session %s", session_id)
         except Exception:
+            context.metadata["_run_error"] = True
             logger.exception("Agent task failed for session %s", session_id)
         finally:
             elapsed = round(time.time() - t0, 1)
@@ -950,6 +976,12 @@ async def prompt_async(
             _tasks.pop(session_id, None)
             _session_locks.pop(session_id, None)
             request.app.state.active_agents.pop(session_id, None)
+            if not context.metadata.get("_run_error") and not context.metadata.get("_agent_error"):
+                request.app.state.agent_attention[session_id] = {
+                    "user_id": user.id,
+                    "status": "completed",
+                    "updated_at": time.time(),
+                }
 
             try:
                 async with async_session_factory() as update_db:

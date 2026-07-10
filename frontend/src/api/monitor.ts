@@ -14,6 +14,26 @@ export async function getAgentMonitor(): Promise<AgentMonitorInfo[]> {
   return api.get<AgentMonitorInfo[]>("/agents/monitor");
 }
 
+export type AgentSummaryStatus = "idle" | "thinking" | "working" | "waiting" | "error" | "completed";
+
+export interface AgentMonitorSummary {
+  status: AgentSummaryStatus;
+  priority: number;
+  count: number;
+  message: string;
+  target: {
+    session_id: string;
+    title: string;
+    request_type: "confirm" | "input" | null;
+    tool_name?: string;
+  } | null;
+  updated_at: number;
+}
+
+export async function getAgentMonitorSummary(): Promise<AgentMonitorSummary> {
+  return api.get<AgentMonitorSummary>("/agents/monitor/summary");
+}
+
 export interface GlobalSSEEvent {
   type: string;
   data: Record<string, unknown>;

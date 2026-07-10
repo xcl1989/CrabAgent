@@ -576,8 +576,13 @@ ipcMain.on('pet-drag-end', () => {
   petDragTimer = null;
   savePetState();
 });
-ipcMain.handle('pet-action', (_event, action) => {
-  if (action === 'open-main') showWindow();
+ipcMain.handle('pet-action', (_event, action, sessionId) => {
+  if (action === 'open-main') {
+    showWindow();
+    if (sessionId && win) {
+      win.webContents.send('open-session', sessionId);
+    }
+  }
   if (action === 'hide') petWin?.hide();
   if (action === 'toggle-always-on-top' && petWin) {
     petWin.setAlwaysOnTop(!petWin.isAlwaysOnTop(), 'floating');

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { connectGlobalSSE, getAgentMonitor, type GlobalSSEEvent } from "../api/monitor";
+import { connectGlobalSSE, getAgentMonitorSummary, type AgentMonitorSummary } from "../api/monitor";
 
 type PetMood = "idle" | "thinking" | "working" | "celebrating" | "error" | "waiting";
 
@@ -12,11 +12,12 @@ interface PetState {
 declare global {
   interface Window {
     electronAPI?: {
-      petAction: (action: "open-main" | "hide" | "toggle-always-on-top") => Promise<boolean>;
+      petAction: (action: "open-main" | "hide" | "toggle-always-on-top", sessionId?: string) => Promise<boolean>;
       showPetMenu: () => void;
       startPetDrag: (offsetX: number, offsetY: number) => void;
       movePetDrag: () => void;
       endPetDrag: () => void;
+      onOpenSession?: (callback: (sessionId: string) => void) => void;
     };
   }
 }
@@ -27,100 +28,56 @@ const INITIAL_STATE: PetState = {
   detail: "随时可以开始",
 };
 
-function stateFromEvent(event: GlobalSSEEvent): PetState | null {
-  const data = event.data;
-  switch (event.type) {
-    case "agent_start":
-    case "iteration_start":
-    case "thinking_delta":
-    case "sub_agent_start":
-    case "pipeline_start":
-    case "pipeline_step_start":
-      return { mood: "thinking", label: "正在思考", detail: "我在整理思路" };
-    case "tool_call":
-      return {
-        mood: "working",
-        label: "正在工作",
-        detail: `使用 ${String(data.name || "工具")}`,
-      };
-    case "tool_confirm_request":
-    case "user_input_request":
-      return { mood: "waiting", label: "需要你确认", detail: "点我打开对话" };
-    case "agent_end":
-    case "pipeline_end":
-    case "sub_agent_end":
-      return { mood: "celebrating", label: "任务完成", detail: "做得漂亮！" };
-    case "agent_error":
-    case "sub_agent_error":
-      return { mood: "error", label: "遇到一点问题", detail: "点我查看详情" };
+function stateFromSummary(summary: AgentMonitorSummary): PetState {
+  switch (summary.status) {
+    case "waiting":
+      return { mood: "waiting", label: "需要你处理", detail: `${summary.message} · 点我打开` };
+    case "error":
+      return { mood: "error", label: "遇到一点问题", detail: `${summary.message} · 点我查看` };
+    case "working":
+      return { mood: "working", label: "正在工作", detail: summary.message };
+    case "thinking":
+      return { mood: "thinking", label: "正在思考", detail: summary.message };
+    case "completed":
+      return { mood: "celebrating", label: "任务完成", detail: summary.message };
     default:
-      return null;
+      return INITIAL_STATE;
   }
 }
 
 export function DesktopPet() {
   const [state, setState] = useState<PetState>(INITIAL_STATE);
-  const currentMoodRef = useRef<PetMood>(INITIAL_STATE.mood);
+  const targetSessionRef = useRef<string | null>(null);
+  const lastRevisionRef = useRef(0);
   const [bubbleVisible, setBubbleVisible] = useState(true);
-  const resetTimer = useRef<number | undefined>(undefined);
   const dragStart = useRef<{ x: number; y: number } | null>(null);
   const dragged = useRef(false);
 
-  // Keep a synchronous reference to the current mood so the monitor poll
-  // never overwrites states driven by live SSE events (working/waiting/etc.).
-  const setPetState = useCallback((next: PetState) => {
-    setState(next);
-    currentMoodRef.current = next.mood;
+  const syncStateFromMonitor = useCallback(async () => {
+    try {
+      const summary = await getAgentMonitorSummary();
+      if (summary.updated_at < lastRevisionRef.current) return;
+      lastRevisionRef.current = summary.updated_at;
+      targetSessionRef.current = summary.target?.session_id || null;
+      setState(stateFromSummary(summary));
+      setBubbleVisible(true);
+    } catch {
+      // Keep the last known state while the backend is temporarily unavailable.
+    }
   }, []);
 
   useEffect(() => {
-    let disposed = false;
-    const syncStateFromMonitor = async () => {
-      try {
-        const activeAgents = await getAgentMonitor();
-        if (disposed) return;
-
-        if (activeAgents.length === 0) {
-          // Nothing running → fall back to idle regardless of stale state.
-          if (currentMoodRef.current !== "idle") {
-            setPetState(INITIAL_STATE);
-          }
-        } else if (["idle", "celebrating", "error"].includes(currentMoodRef.current)) {
-          // A task is running and we are not already in an active SSE state.
-          // Switch to thinking, and clear any pending celebration/error reset.
-          if (resetTimer.current) window.clearTimeout(resetTimer.current);
-          setPetState({ mood: "thinking", label: "正在思考", detail: "我在整理思路" });
-        }
-      } catch {
-        // SSE remains the live source of truth when the monitor is unavailable.
-      }
-    };
-
     void syncStateFromMonitor();
-    const monitorTimer = window.setInterval(() => {
-      void syncStateFromMonitor();
-    }, 2500);
-
-    const es = connectGlobalSSE((event) => {
-      const nextState = stateFromEvent(event);
-      if (!nextState) return;
-      setPetState(nextState);
-      setBubbleVisible(true);
-
-      if (resetTimer.current) window.clearTimeout(resetTimer.current);
-      if (nextState.mood === "celebrating" || nextState.mood === "error") {
-        resetTimer.current = window.setTimeout(() => setPetState(INITIAL_STATE), 6000);
-      }
-    });
+    const monitorTimer = window.setInterval(() => void syncStateFromMonitor(), 2500);
+    // SSE only reduces latency; the summary endpoint remains the state authority.
+    const es = connectGlobalSSE(() => void syncStateFromMonitor());
     return () => {
-      disposed = true;
       es.close();
       window.clearInterval(monitorTimer);
-      if (resetTimer.current) window.clearTimeout(resetTimer.current);
     };
-  }, [setPetState]);
+  }, [syncStateFromMonitor]);
 
-  const openMain = () => window.electronAPI?.petAction("open-main");
+  const openMain = () => window.electronAPI?.petAction("open-main", targetSessionRef.current || undefined);
   const handlePointerDown = (event: React.PointerEvent<HTMLElement>) => {
     if (event.button !== 0) return;
     dragStart.current = { x: event.clientX, y: event.clientY };
