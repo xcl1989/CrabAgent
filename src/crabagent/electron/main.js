@@ -11,11 +11,15 @@ const isWin = process.platform === 'win32';
 
 let python = null;
 let win = null;
+let petWin = null;
+let petDrag = null;
+let petDragTimer = null;
 let tray = null;
 let forceQuit = false;
 
 // ── Window state persistence ──
 const STATE_PATH = path.join(app.getPath('userData'), 'window-state.json');
+const PET_STATE_PATH = path.join(app.getPath('userData'), 'pet-window-state.json');
 
 function loadWindowState() {
   try { return JSON.parse(fs.readFileSync(STATE_PATH, 'utf-8')); }
@@ -29,6 +33,16 @@ function saveWindowState() {
     const state = { ...bounds, maximized: win.isMaximized() };
     fs.writeFileSync(STATE_PATH, JSON.stringify(state));
   } catch {}
+}
+
+function loadPetState() {
+  try { return JSON.parse(fs.readFileSync(PET_STATE_PATH, 'utf-8')); }
+  catch { return {}; }
+}
+
+function savePetState() {
+  if (!petWin || petWin.isDestroyed()) return;
+  try { fs.writeFileSync(PET_STATE_PATH, JSON.stringify(petWin.getBounds())); } catch {}
 }
 
 // ── Logging ──
@@ -229,6 +243,14 @@ function createTray() {
       click: () => showWindow(),
       accelerator: 'CmdOrCtrl+Shift+C',
     },
+    {
+      label: '显示桌宠',
+      click: () => showPet(),
+    },
+    {
+      label: '隐藏桌宠',
+      click: () => petWin?.hide(),
+    },
     { type: 'separator' },
     {
       label: '打开工作目录',
@@ -294,6 +316,10 @@ function createAppMenu() {
             win?.webContents.executeJavaScript(`window.location.hash = '#/settings'`);
           },
         },
+        {
+          label: '显示桌宠',
+          click: () => showPet(),
+        },
         { type: 'separator' },
         {
           label: '退出 CrabAgent',
@@ -324,6 +350,10 @@ function createAppMenu() {
           label: '显示主窗口',
           accelerator: 'CmdOrCtrl+Shift+C',
           click: () => showWindow(),
+        },
+        {
+          label: '显示桌宠',
+          click: () => showPet(),
         },
         { type: 'separator' },
         { role: 'front', label: '全部置于顶层' },
@@ -399,6 +429,28 @@ function createWindow() {
     win.show();
   });
 
+  // ── External link handling ─────────────────────────────────────
+  // Open external links (http/https) in the system default browser,
+  // not in a new Electron window. This prevents the main window from
+  // being replaced by external pages.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      require('electron').shell.openExternal(url);
+      return { action: 'deny' };
+    }
+    return { action: 'allow' };
+  });
+
+  // Prevent navigation to external URLs in the main window
+  win.webContents.on('will-navigate', (event, url) => {
+    // Allow only navigation to the local backend
+    const allowedPrefixes = ['http://localhost', 'http://127.0.0.1', 'data:text/html', 'file://'];
+    if (!allowedPrefixes.some(p => url.startsWith(p))) {
+      event.preventDefault();
+      require('electron').shell.openExternal(url);
+    }
+  });
+
   // Save window state on resize/move
   win.on('resize', saveWindowState);
   win.on('move', saveWindowState);
@@ -418,6 +470,94 @@ function createWindow() {
   win.on('closed', () => { win = null; });
 }
 
+// ── Desktop pet ──
+// It shares the main window's local origin and session, so its React surface can
+// consume the existing authenticated global SSE stream without extra credentials.
+function createPetWindow() {
+  if (petWin && !petWin.isDestroyed()) return petWin;
+
+  const saved = loadPetState();
+  const display = require('electron').screen.getPrimaryDisplay();
+  const workArea = display.workArea;
+  const width = 228;
+  const height = 276;
+  const x = Number.isFinite(saved.x) ? saved.x : workArea.x + workArea.width - width - 24;
+  const y = Number.isFinite(saved.y) ? saved.y : workArea.y + workArea.height - height - 36;
+
+  petWin = new BrowserWindow({
+    width,
+    height,
+    x,
+    y,
+    minWidth: width,
+    minHeight: height,
+    maxWidth: width,
+    maxHeight: height,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    movable: true,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    visibleOnAllWorkspaces: true,
+    hasShadow: false,
+    show: false,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload.js'),
+    },
+  });
+  petWin.setAlwaysOnTop(true, 'floating');
+  petWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: false });
+  petWin.loadURL(`${URL}/?surface=pet`);
+  petWin.once('ready-to-show', () => petWin?.showInactive());
+  petWin.on('move', savePetState);
+  petWin.on('close', (event) => {
+    if (!forceQuit) {
+      event.preventDefault();
+      petWin?.hide();
+    }
+  });
+  petWin.on('closed', () => {
+    petWin = null;
+    petDrag = null;
+    if (petDragTimer) clearInterval(petDragTimer);
+    petDragTimer = null;
+  });
+  return petWin;
+}
+
+function showPet() {
+  const pet = createPetWindow();
+  if (pet.isMinimized()) pet.restore();
+  pet.showInactive();
+}
+
+function movePetToCursor() {
+  if (!petWin || petWin.isDestroyed() || !petDrag) return;
+
+  try {
+    const { screen } = require('electron');
+    const point = screen.getCursorScreenPoint();
+    const offsetX = Number(petDrag.offsetX);
+    const offsetY = Number(petDrag.offsetY);
+    if (![point.x, point.y, offsetX, offsetY].every(Number.isFinite)) return;
+
+    const display = screen.getDisplayNearestPoint(point);
+    const bounds = display.workArea;
+    const [width, height] = petWin.getSize();
+    // Keep the whole pet on the active display and avoid invalid coordinates
+    // while macOS moves the cursor through a screen edge or a display gap.
+    const x = Math.max(bounds.x, Math.min(bounds.x + bounds.width - width, Math.trunc(point.x - offsetX)));
+    const y = Math.max(bounds.y, Math.min(bounds.y + bounds.height - height, Math.trunc(point.y - offsetY)));
+    if (!Number.isSafeInteger(x) || !Number.isSafeInteger(y)) return;
+    petWin.setPosition(x, y);
+  } catch (error) {
+    log(`Pet drag skipped: ${error.message}`);
+  }
+}
+
 // ── IPC handlers for window control ──
 ipcMain.on('window-minimize', () => win?.minimize());
 ipcMain.on('window-maximize', () => {
@@ -425,6 +565,36 @@ ipcMain.on('window-maximize', () => {
 });
 ipcMain.on('window-close', () => win?.close());
 ipcMain.handle('window-is-maximized', () => win?.isMaximized() ?? false);
+ipcMain.on('pet-drag-start', (_event, { offsetX, offsetY }) => {
+  petDrag = { offsetX, offsetY };
+  if (!petDragTimer) petDragTimer = setInterval(movePetToCursor, 16);
+});
+ipcMain.on('pet-drag-move', () => movePetToCursor());
+ipcMain.on('pet-drag-end', () => {
+  petDrag = null;
+  if (petDragTimer) clearInterval(petDragTimer);
+  petDragTimer = null;
+  savePetState();
+});
+ipcMain.handle('pet-action', (_event, action) => {
+  if (action === 'open-main') showWindow();
+  if (action === 'hide') petWin?.hide();
+  if (action === 'toggle-always-on-top' && petWin) {
+    petWin.setAlwaysOnTop(!petWin.isAlwaysOnTop(), 'floating');
+    return petWin.isAlwaysOnTop();
+  }
+  return false;
+});
+
+ipcMain.on('pet-menu', (event) => {
+  const menu = Menu.buildFromTemplate([
+    { label: '打开 CrabAgent', click: () => showWindow() },
+    { type: 'separator' },
+    { label: '隐藏桌宠', click: () => petWin?.hide() },
+    { label: '退出 CrabAgent', click: () => { forceQuit = true; app.quit(); } },
+  ]);
+  menu.popup({ window: BrowserWindow.fromWebContents(event.sender) || petWin });
+});
 
 function showWindow() {
   if (!win) return;
@@ -505,6 +675,7 @@ app.whenReady().then(async () => {
   // Auto-login, then load the real SPA (replaces loading screen)
   await autoLogin();
   if (win) win.loadURL(URL);
+  createPetWindow();
 
   // macOS: re-show window on dock click
   app.on('activate', () => {

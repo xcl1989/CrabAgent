@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.12.5] — Desktop Pet
+
+### Added
+- **Desktop pet (桌宠)** — A floating, always-on-top mascot window for the Electron desktop app. It shows the current agent state (idle, thinking, working, waiting, celebrating, error) via a global SSE stream, can be dragged around the screen, and provides quick access from the tray/menu.
+- **SVG mascot character** — A cute, wide-shell crab with animated eyes, claws, and legs. Breathing, blinking, working, and celebrating animations react to agent events in real time.
+
+### Fixed
+- **Desktop pet drag crash near screen edges** — Dragging the pet across display boundaries or through screen gaps no longer throws `TypeError: conversion failure` in the main process; coordinates are clamped to the active display work area.
+- **Pet state stuck on "thinking" after tasks finished** — The pet now polls `/api/agents/monitor` and resets to idle when no agents are running, preventing stale state when the `agent_end` SSE event is missed.
+
+### Changed
+- **Tray & app menus** — Added "Show Desktop Pet" / "Hide Desktop Pet" entries on macOS and Windows.
+
+---
+
 ## [0.12.4] — Lazy Image Loading & Multi-Workspace Awareness
 
 ### Added

@@ -15,4 +15,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onMaximizeChange: (callback) => {
     ipcRenderer.on('window-maximized-changed', (_event, maximized) => callback(maximized));
   },
+
+  // Desktop pet controls are deliberately limited to window-level actions.
+  petAction: (action) => ipcRenderer.invoke('pet-action', action),
+  showPetMenu: () => ipcRenderer.send('pet-menu'),
+  startPetDrag: (offsetX, offsetY) => ipcRenderer.send('pet-drag-start', { offsetX, offsetY }),
+  movePetDrag: () => ipcRenderer.send('pet-drag-move'),
+  endPetDrag: () => ipcRenderer.send('pet-drag-end'),
 });

@@ -236,6 +236,8 @@ crabagent --build-desktop          # macOS → .dmg | Windows → .exe 安装器
 .\scripts\build-desktop.ps1        # → CrabAgent-x.x.x-setup.exe
 ```
 
+桌面版自带一个悬浮**桌面宠物**，会根据 Agent 状态实时变化（空闲、思考中、工作中、等待确认、任务完成、报错）。可拖拽到屏幕任意位置，通过托盘或应用菜单显示/隐藏。
+
 ---
 
 ## 功能特性

@@ -12,6 +12,7 @@ import { cn } from "./lib/cn";
 import { connectGlobalSSE } from "./api/monitor";
 import { toast } from "./components/ui/Toast";
 import { FtsStatusBar } from "./components/FtsStatusBar";
+import { DesktopPet } from "./components/DesktopPet";
 
 export type PageId = "chat" | "agents" | "memory" | "usage" | "calendar" | "settings";
 
@@ -99,7 +100,7 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
   );
 }
 
-export default function App() {
+function MainApp() {
   const [isAuthenticated, setIsAuthenticated] = useState(!!api.getToken());
 
   const handleLogin = () => {
@@ -116,4 +117,10 @@ export default function App() {
   }
 
   return <AuthenticatedApp onLogout={handleLogout} />;
+}
+
+export default function App() {
+  return new URLSearchParams(window.location.search).get("surface") === "pet"
+    ? <DesktopPet />
+    : <MainApp />;
 }

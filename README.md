@@ -237,6 +237,8 @@ crabagent --build-desktop          # macOS → .dmg | Windows → .exe installer
 .\scripts\build-desktop.ps1        # → CrabAgent-x.x.x-setup.exe
 ```
 
+The desktop app includes a floating **desktop pet** that reacts to agent state (idle, thinking, working, waiting, celebrating, error). Drag it anywhere on screen; use the tray or app menu to show/hide it.
+
 ---
 
 ## Features

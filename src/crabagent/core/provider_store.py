@@ -52,7 +52,10 @@ class ProviderInfo:
 
 
 CHATGPT_MODELS = [
-    # Current generation (verified working on Plus 2026-06)
+    # Current generation (verified working on Plus 2026-07)
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
     "gpt-5.5",
     "gpt-5.4",
     "gpt-5.4-mini",
