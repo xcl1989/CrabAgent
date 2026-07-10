@@ -313,7 +313,7 @@ async def monitor_summary(
         pending_input = get_pending_for_session(session_id)
         pending_confirm = get_pending_confirms_for_session(session_id)
         request_type = "input" if pending_input else "confirm" if pending_confirm else ""
-        status = "waiting" if request_type else info.get("status", "thinking")
+        status = "waiting" if request_type else info.get("pet_status", "thinking")
         if status == "waiting" and not request_type:
             status = "thinking"
         if status not in _SUMMARY_PRIORITY:

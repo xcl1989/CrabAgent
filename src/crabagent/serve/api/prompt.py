@@ -581,17 +581,17 @@ async def prompt_async(
         active_info = request.app.state.active_agents.get(session_id)
         if active_info:
             if event.type in (EventType.TOOL_CONFIRM_REQUEST, EventType.USER_INPUT_REQUEST):
-                active_info["status"] = "waiting"
+                active_info["pet_status"] = "waiting"
                 active_info["waiting_type"] = "confirm" if event.type == EventType.TOOL_CONFIRM_REQUEST else "input"
                 active_info["waiting_since"] = now
                 active_info["tool_name"] = event.data.get("tool_name", "")
             elif event.type in (EventType.TOOL_CALL, EventType.SUB_AGENT_TOOL_CALL):
-                active_info["status"] = "working"
+                active_info["pet_status"] = "working"
                 active_info["tool_name"] = event.data.get("name", "")
                 active_info["updated_at"] = now
             elif event.type in (EventType.AGENT_START, EventType.ITERATION_START, EventType.THINKING_DELTA):
-                if active_info.get("status") != "waiting":
-                    active_info["status"] = "thinking"
+                if active_info.get("pet_status") != "waiting":
+                    active_info["pet_status"] = "thinking"
                     active_info["updated_at"] = now
             elif event.type == EventType.AGENT_ERROR:
                 context.metadata["_agent_error"] = True
