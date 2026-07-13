@@ -80,6 +80,17 @@ export function getMessages(sessionId: string): Promise<Message[]> {
   return api.get(`/sessions/${sessionId}/messages?limit=1000&include_compressed=true`);
 }
 
+export interface CompressionResult {
+  summary: string;
+  model: string;
+  provider: string;
+  original_count: number;
+}
+
+export function compressSession(sessionId: string, model: string, provider: string): Promise<CompressionResult> {
+  return api.post(`/sessions/${sessionId}/compress`, { model, provider });
+}
+
 export function getMessageImages(sessionId: string, messageId: number): Promise<{ images: string[] }> {
   return api.get(`/sessions/${sessionId}/messages/${messageId}/images`);
 }

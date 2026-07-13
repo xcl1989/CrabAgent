@@ -32,10 +32,13 @@ class ApiClient {
   }
 
   private async request<T>(path: string, options: RequestInit = {}): Promise<T> {
+    const isFormData = options.body instanceof FormData;
     const headers: Record<string, string> = {
-      "Content-Type": "application/json",
       ...(options.headers as Record<string, string>),
     };
+    if (!isFormData) {
+      headers["Content-Type"] = "application/json";
+    }
     if (this.token) {
       headers["Authorization"] = `Bearer ${this.token}`;
     }
@@ -47,7 +50,10 @@ class ApiClient {
     }
     if (res.status === 204) return undefined as T;
     const data = await res.json();
-    if (!res.ok) throw new ApiError(data.detail || `HTTP ${res.status}`, res.status, data);
+    if (!res.ok) {
+      const detail = data.detail || `HTTP ${res.status}`;
+      throw new ApiError(typeof detail === "string" ? detail : JSON.stringify(detail), res.status, data);
+    }
     return data;
   }
 
@@ -57,6 +63,9 @@ class ApiClient {
   }
 
   post<T>(path: string, body: unknown) {
+    if (body instanceof FormData) {
+      return this.request<T>(path, { method: "POST", body });
+    }
     return this.request<T>(path, { method: "POST", body: JSON.stringify(body) });
   }
 

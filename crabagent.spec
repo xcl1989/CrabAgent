@@ -34,7 +34,7 @@ EXCLUDES = [
     "playwright", "selenium",
     # Scientific computing (not used)
     "numpy", "pandas", "matplotlib", "scipy", "sklearn",
-    "PIL", "Pillow", "cv2", "opencv",
+    "cv2", "opencv",
     # ML frameworks (not used)
     "tensorflow", "torch", "torchvision", "torchaudio", "keras",
     # Cloud (not used)
@@ -125,6 +125,18 @@ HIDDEN_IMPORTS = [
     "crabagent.serve.api.session",
     "crabagent.serve.api.settings",
     "crabagent.serve.api.todo",
+    # Pets API + generation pipeline
+    "crabagent.serve.api.pets",
+    "crabagent.core.pets",
+    "crabagent.core.pets.models",
+    "crabagent.core.pets.store",
+    "crabagent.core.pets.generation",
+    # PIL/Pillow (needed for pet spritesheet generation)
+    "PIL",
+    "PIL.Image",
+    "PIL.ImageChops",
+    "PIL.ImageDraw",
+    "PIL._typing",
     # Serve services
     "crabagent.serve.services",
     "crabagent.serve.services.persistence",
@@ -255,15 +267,18 @@ DATAS.extend(_litellm_datas)
 print(f"[spec] Collected {len(_litellm_datas)} litellm data files")
 
 # ── crabagent: write VERSION file for fallback version resolution ──
-_VERSION_FILE = PROJECT_ROOT / "src" / "crabagent" / "VERSION"
+_VERSION_FILE = SRC / "crabagent" / "VERSION"
 _version = "0.0.0"
-_pyproject = PROJECT_ROOT / "pyproject.toml"
-if _pyproject.exists():
-    for line in _pyproject.read_text().splitlines():
+_PYPROJECT = PROJECT_ROOT / "pyproject.toml"
+if _PYPROJECT.exists():
+    for line in _PYPROJECT.read_text().splitlines():
         if line.strip().startswith("version") and "=" in line:
             _version = line.split("=", 1)[1].strip().strip('"').strip("'")
             break
-_VERSION_FILE.write_text(_version)
+try:
+    _VERSION_FILE.write_text(_version)
+except Exception:
+    pass
 DATAS.append((str(_VERSION_FILE), "crabagent"))
 print(f"[spec] VERSION file: {_version}")
 

@@ -10,17 +10,6 @@ from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_submodules, collect_data_files
 
-# ── Package-relative paths (works for both source and pip-installed) ──
-import crabagent as _crabagent
-_CRABAGENT_ROOT = Path(os.path.dirname(_crabagent.__file__))
-_ICON_DIR = _CRABAGENT_ROOT / "electron" / "build"
-if sys.platform == "win32":
-    _icon = str(_ICON_DIR / "icon.ico") if (_ICON_DIR / "icon.ico").exists() else None
-elif sys.platform == "darwin":
-    _icon = str(_ICON_DIR / "icon.png") if (_ICON_DIR / "icon.png").exists() else None
-else:
-    _icon = None
-
 block_cipher = None
 
 # ── Project paths ──────────────────────────────────────────────
@@ -45,7 +34,7 @@ EXCLUDES = [
     "playwright", "selenium",
     # Scientific computing (not used)
     "numpy", "pandas", "matplotlib", "scipy", "sklearn",
-    "PIL", "Pillow", "cv2", "opencv",
+    "cv2", "opencv",
     # ML frameworks (not used)
     "tensorflow", "torch", "torchvision", "torchaudio", "keras",
     # Cloud (not used)
@@ -74,8 +63,7 @@ EXCLUDES = [
     "filecmp", "fileinput",
     "wave", "wave", "chunk", "aifc", "sunau",
     "nis",
-    # Cryptography backends (keep all — jose needs openssl for JWT signing)
-    # "cryptography.hazmat.backends.openssl",
+    # Cryptography: keep openssl backend — needed by python-jose for JWT signing
     # MCP / dev
     "IPython", "jupyter", "notebook", "ipykernel",
     "debugpy", "pydevd",
@@ -137,6 +125,18 @@ HIDDEN_IMPORTS = [
     "crabagent.serve.api.session",
     "crabagent.serve.api.settings",
     "crabagent.serve.api.todo",
+    # Pets API + generation pipeline
+    "crabagent.serve.api.pets",
+    "crabagent.core.pets",
+    "crabagent.core.pets.models",
+    "crabagent.core.pets.store",
+    "crabagent.core.pets.generation",
+    # PIL/Pillow (needed for pet spritesheet generation)
+    "PIL",
+    "PIL.Image",
+    "PIL.ImageChops",
+    "PIL.ImageDraw",
+    "PIL._typing",
     # Serve services
     "crabagent.serve.services",
     "crabagent.serve.services.persistence",
@@ -247,9 +247,6 @@ HIDDEN_IMPORTS = [
     # the frozen binary extremely slow to start (~15s vs ~3s).
     "litellm.litellm_core_utils.tokenizers",
     "litellm.litellm_core_utils.token_counter",
-    "litellm.litellm_core_utils.exception_mapping_utils",
-    "litellm.llms.openai.openai",
-    "litellm.types.utils",
     "tiktoken_ext",
     "tiktoken_ext.openai_public",
     "pydantic",
@@ -264,23 +261,34 @@ if STATIC.exists():
             rel = f.relative_to(SRC)
             DATAS.append((str(f), str(rel.parent)))
 
-# Also bundle VERSION file for version resolution in frozen context
-for _vp in [SRC / "crabagent" / "VERSION", SRC / "VERSION"]:
-    if _vp.exists():
-        DATAS.append((str(_vp), "crabagent"))
-        break
-
 # ── litellm: all data files via collect_data_files (JSON, YAML, etc.) ──
 _litellm_datas = collect_data_files('litellm', include_py_files=False)
 DATAS.extend(_litellm_datas)
 print(f"[spec] Collected {len(_litellm_datas)} litellm data files")
 
-# ── crabagent: i18n JSON files for agent switch / system prompt translations ──
-_I18N_DIR = _CRABAGENT_ROOT / "core" / "i18n"
+# ── crabagent: write VERSION file for fallback version resolution ──
+_VERSION_FILE = SRC / "crabagent" / "VERSION"
+_version = "0.0.0"
+_PYPROJECT = PROJECT_ROOT / "pyproject.toml"
+if _PYPROJECT.exists():
+    for line in _PYPROJECT.read_text().splitlines():
+        if line.strip().startswith("version") and "=" in line:
+            _version = line.split("=", 1)[1].strip().strip('"').strip("'")
+            break
+try:
+    _VERSION_FILE.write_text(_version)
+except Exception:
+    pass
+DATAS.append((str(_VERSION_FILE), "crabagent"))
+print(f"[spec] VERSION file: {_version}")
+
+# ── crabagent: i18n JSON files (needed for agent switch / system prompt translations) ──
+_I18N_DIR = SRC / "crabagent" / "core" / "i18n"
 _i18n_count = 0
 if _I18N_DIR.exists():
     for _f in _I18N_DIR.glob("*.json"):
-        DATAS.append((str(_f), "crabagent/core/i18n"))
+        _rel = _f.relative_to(SRC)
+        DATAS.append((str(_f), str(_rel.parent)))
         _i18n_count += 1
 print(f"[spec] Collected {_i18n_count} i18n translation files")
 
@@ -319,7 +327,6 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=_icon,
 )
 
 # ── COLLECT (onedir: files on disk — no decompression overhead at startup) ──
@@ -331,16 +338,16 @@ coll = COLLECT(
     name="crabagent-backend",
 )
 
-# ── macOS .app bundle ────────────────────────────────────────
-app = BUNDLE(
-    coll,
-    name="CrabAgent.app",
-    icon=str(_ICON_DIR / "icon.png") if sys.platform == "darwin" and (_ICON_DIR / "icon.png").exists() else None,
-    bundle_identifier="com.crabagent.app",
-    info_plist={
-        "CFBundleShortVersionString": _crabagent.__version__,
-        "CFBundleVersion": _crabagent.__version__,
-        "CFBundleName": "CrabAgent",
-        "CFBundleDisplayName": "CrabAgent",
-    },
-)
+# ── macOS .app bundle (optional, uncomment when icon is ready) ─
+# app = BUNDLE(
+#     exe,
+#     name="CrabAgent.app",
+#     icon=str(PROJECT_ROOT / "electron" / "build" / "icon.png"),
+#     bundle_identifier="com.crabagent.app",
+#     info_plist={
+#         "CFBundleShortVersionString": "0.9.3",
+#         "CFBundleVersion": "0.9.3",
+#         "CFBundleName": "CrabAgent",
+#         "CFBundleDisplayName": "CrabAgent",
+#     },
+# )

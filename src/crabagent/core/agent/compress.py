@@ -13,17 +13,17 @@ from crabagent.core.i18n import t
 logger = logging.getLogger(__name__)
 
 
-async def compress_context(context: AgentContext, llm_params: dict, model: str) -> None:
-    keep = settings.context_keep_recent
-    messages = context.messages
-
-    if len(messages) <= keep + 2:
-        return
-
-    early = messages[:-keep]
-    recent = messages[-keep:]
-
-    locale = context.metadata.get("locale", context.locale or "en")
+async def summarize_messages(
+    messages: list[dict],
+    *,
+    system_prompt: str,
+    llm_params: dict,
+    model: str,
+    locale: str = "en",
+    on_delta=None,
+) -> str:
+    """Summarize messages using the same prompt and sanitizing as auto-compression."""
+    early = messages
 
     # --- Build the compression request using original messages ---
     # Key insight: we send the EXACT same system prompt + conversation
@@ -40,8 +40,8 @@ async def compress_context(context: AgentContext, llm_params: dict, model: str) 
     # Build messages: original system prompt + all early messages (as-is)
     compress_messages: list[dict] = []
 
-    if context.system_prompt:
-        compress_messages.append({"role": "system", "content": context.system_prompt})
+    if system_prompt:
+        compress_messages.append({"role": "system", "content": system_prompt})
 
     # First pass: collect all tool_call IDs that have matching tool results
     _answered_tool_calls: set[str] = set()
@@ -110,14 +110,6 @@ async def compress_context(context: AgentContext, llm_params: dict, model: str) 
     # Final instruction — this is the only truly "fresh" content
     compress_messages.append({"role": "user", "content": compress_instruction})
 
-    # Notify frontend that compression is starting
-    await context.event_bus.emit(
-        AgentEvent(
-            type=EventType.COMPRESS_START,
-            data={"original_count": len(early) + keep},
-        )
-    )
-
     last_exc: Exception | None = None
     for attempt in range(settings.llm_retry_max + 1):
         try:
@@ -155,13 +147,10 @@ async def compress_context(context: AgentContext, llm_params: dict, model: str) 
                 elif hasattr(delta, "reasoning_content") and delta.reasoning_content:
                     reasoning_buf += delta.reasoning_content
 
-                if piece:
-                    await context.event_bus.emit(
-                        AgentEvent(
-                            type=EventType.COMPRESS_DELTA,
-                            data={"text": piece},
-                        )
-                    )
+                if piece and on_delta:
+                    result = on_delta(piece)
+                    if hasattr(result, "__await__"):
+                        await result
 
             # Prefer actual content; fall back to reasoning only if content is empty
             summary = content_buf.strip() or reasoning_buf.strip()
@@ -182,17 +171,43 @@ async def compress_context(context: AgentContext, llm_params: dict, model: str) 
             break  # non-retryable error
 
     if last_exc is not None:
-        logger.warning("Context compression failed after retries, keeping original: %s", last_exc, exc_info=True)
+        raise RuntimeError(f"Context compression failed: {last_exc}") from last_exc
+    return summary
+
+
+async def compress_context(context: AgentContext, llm_params: dict, model: str) -> None:
+    keep = settings.context_keep_recent
+    messages = context.messages
+    if len(messages) <= keep + 2:
+        return
+
+    early = messages[:-keep]
+    recent = messages[-keep:]
+    locale = context.metadata.get("locale", context.locale or "en")
+
+    await context.event_bus.emit(
+        AgentEvent(type=EventType.COMPRESS_START, data={"original_count": len(messages)})
+    )
+
+    async def emit_delta(piece: str) -> None:
+        await context.event_bus.emit(AgentEvent(type=EventType.COMPRESS_DELTA, data={"text": piece}))
+
+    try:
+        summary = await summarize_messages(
+            early,
+            system_prompt=context.system_prompt,
+            llm_params=llm_params,
+            model=model,
+            locale=locale,
+            on_delta=emit_delta,
+        )
+    except Exception:
+        logger.warning("Context compression failed, keeping original", exc_info=True)
         await context.event_bus.emit(
-            AgentEvent(
-                type=EventType.CONTEXT_COMPRESSED,
-                data={
-                    "original_count": len(early) + keep,
-                    "compressed_count": len(messages),
-                    "summary_length": 0,
-                    "failed": True,
-                },
-            )
+            AgentEvent(type=EventType.CONTEXT_COMPRESSED, data={
+                "original_count": len(messages), "compressed_count": len(messages),
+                "summary_length": 0, "failed": True,
+            })
         )
         return
 

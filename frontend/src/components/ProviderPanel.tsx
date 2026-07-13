@@ -4,6 +4,22 @@ import { Plus, Trash2, Star, StarOff, ChevronDown, ChevronRight, X, Check, Exter
 import { Provider, CatalogEntry } from "../api/providers";
 import * as providersApi from "../api/providers";
 import * as chatgptApi from "../api/chatgpt";
+
+/** Format a duration in seconds to a human-readable window label. */
+function formatWindow(seconds: number | null | undefined): string {
+  if (!seconds) return "";
+  if (seconds >= 86400) return `${Math.round(seconds / 86400)} 天窗口`;
+  if (seconds >= 3600) return `${Math.round(seconds / 3600)} 小时窗口`;
+  return `${Math.round(seconds / 60)} 分钟窗口`;
+}
+
+/** Format remaining time before reset. */
+function formatReset(seconds: number | null | undefined): string {
+  if (!seconds) return "";
+  if (seconds >= 86400) return `${(seconds / 86400).toFixed(1)} 天后重置`;
+  if (seconds >= 3600) return `${(seconds / 3600).toFixed(1)} 小时后重置`;
+  return `${Math.round(seconds / 60)} 分钟后重置`;
+}
 import * as quotaApi from "../api/quota";
 import { Modal, Button, Input, PasswordInput, ConfirmDialog, EmptyState } from "./ui";
 import { toast } from "./ui/Toast";
@@ -514,23 +530,31 @@ export default function ProviderPanel({
                                     )}
                                   </div>
 
-                                  {/* Primary window (5h) */}
+                                  {/* Primary window — label and format are derived from raw seconds */}
                                   {chatgptAccount.rate_limits.primary && (
                                     <UsageBar
-                                      label="5 小时窗口"
+                                      label={formatWindow(chatgptAccount.rate_limits.primary.window_seconds) || "使用窗口"}
                                       usedPercent={chatgptAccount.rate_limits.primary.used_percent}
-                                      windowText={chatgptAccount.rate_limits.primary.window_hours ? `${chatgptAccount.rate_limits.primary.window_hours}h 滚动窗口` : ""}
-                                      resetText={chatgptAccount.rate_limits.primary.reset_after_minutes ? `${chatgptAccount.rate_limits.primary.reset_after_minutes}min 后重置` : ""}
+                                      windowText={
+                                        chatgptAccount.rate_limits.primary.window_seconds
+                                          ? formatWindow(chatgptAccount.rate_limits.primary.window_seconds).replace("窗口", "滚动窗口")
+                                          : ""
+                                      }
+                                      resetText={formatReset(chatgptAccount.rate_limits.primary.reset_after_seconds)}
                                     />
                                   )}
 
-                                  {/* Secondary window (7d) */}
+                                  {/* Secondary window — only rendered when API returns one */}
                                   {chatgptAccount.rate_limits.secondary && (
                                     <UsageBar
-                                      label="7 天窗口"
+                                      label={formatWindow(chatgptAccount.rate_limits.secondary.window_seconds) || "次级窗口"}
                                       usedPercent={chatgptAccount.rate_limits.secondary.used_percent}
-                                      windowText={chatgptAccount.rate_limits.secondary.window_days ? `${chatgptAccount.rate_limits.secondary.window_days}d 滚动窗口` : ""}
-                                      resetText={chatgptAccount.rate_limits.secondary.reset_after_hours ? `${chatgptAccount.rate_limits.secondary.reset_after_hours}h 后重置` : ""}
+                                      windowText={
+                                        chatgptAccount.rate_limits.secondary.window_seconds
+                                          ? formatWindow(chatgptAccount.rate_limits.secondary.window_seconds).replace("窗口", "滚动窗口")
+                                          : ""
+                                      }
+                                      resetText={formatReset(chatgptAccount.rate_limits.secondary.reset_after_seconds)}
                                     />
                                   )}
 

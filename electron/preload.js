@@ -23,4 +23,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
   movePetDrag: () => ipcRenderer.send('pet-drag-move'),
   endPetDrag: () => ipcRenderer.send('pet-drag-end'),
   onOpenSession: (callback) => ipcRenderer.on('open-session', (_event, sessionId) => callback(sessionId)),
+  onPetDragDirection: (callback) => ipcRenderer.on('pet-drag-direction', (_event, data) => callback(data)),
 });

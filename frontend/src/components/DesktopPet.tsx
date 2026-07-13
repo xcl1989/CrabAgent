@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { connectGlobalSSE, getAgentMonitorSummary, type AgentMonitorSummary } from "../api/monitor";
-
-type PetMood = "idle" | "thinking" | "working" | "celebrating" | "error" | "waiting";
-
-interface PetState {
-  mood: PetMood;
-  label: string;
-  detail: string;
-}
+import { connectGlobalSSE, type AgentMonitorSummary } from "../api/monitor";
+import { getActivePet, getPet, getSpritesheetUrl, type PetDetail } from "../api/pets";
+import { SpritePet, type SpritePetConfig } from "./pets";
+import {
+  derivePetState,
+  oneShotAnimation,
+  petStateKey,
+  type AgentStatus,
+  type PetState,
+} from "../lib/pets/petStateMachine";
 
 declare global {
   interface Window {
@@ -18,17 +19,26 @@ declare global {
       movePetDrag: () => void;
       endPetDrag: () => void;
       onOpenSession?: (callback: (sessionId: string) => void) => void;
+      onPetDragDirection?: (callback: (data: { direction: string | null }) => void) => void;
     };
   }
 }
 
-const INITIAL_STATE: PetState = {
+type PetMood = "idle" | "thinking" | "working" | "celebrating" | "error" | "waiting";
+
+interface SvgPetState {
+  mood: PetMood;
+  label: string;
+  detail: string;
+}
+
+const INITIAL_SVG_STATE: SvgPetState = {
   mood: "idle",
   label: "CrabAgent",
   detail: "随时可以开始",
 };
 
-function stateFromSummary(summary: AgentMonitorSummary): PetState {
+function stateFromSummary(summary: AgentMonitorSummary): SvgPetState {
   switch (summary.status) {
     case "waiting":
       return { mood: "waiting", label: "需要你处理", detail: `${summary.message} · 点我打开` };
@@ -41,93 +51,272 @@ function stateFromSummary(summary: AgentMonitorSummary): PetState {
     case "completed":
       return { mood: "celebrating", label: "任务完成", detail: summary.message };
     default:
-      return INITIAL_STATE;
+      return INITIAL_SVG_STATE;
   }
 }
 
+function svgStateKey(s: SvgPetState): string {
+  return `${s.mood}|${s.label}|${s.detail}`;
+}
+
+function animationToSvgMood(animation: PetState["animation"]): PetMood {
+  switch (animation) {
+    case "running":
+    case "running-right":
+    case "running-left":
+      return "working";
+    case "waiting":
+      return "waiting";
+    case "failed":
+      return "error";
+    case "review":
+      return "celebrating";
+    default:
+      return "idle";
+  }
+}
+
+interface ActivePetInfo {
+  petId: string;
+  detail: PetDetail | null;
+  spriteConfig: SpritePetConfig | null;
+  useSprite: boolean;
+}
+
 export function DesktopPet() {
-  const [state, setState] = useState<PetState>(INITIAL_STATE);
+  // ── Active pet selection ──────────────────────────────────────────
+  const [activePet, setActivePet] = useState<ActivePetInfo>({
+    petId: "builtin-crab",
+    detail: null,
+    spriteConfig: null,
+    useSprite: false,
+  });
+
+  // ── Sprite/SVG shared state machine ───────────────────────────────
+  const [petState, setPetState] = useState<PetState>({
+    animation: "idle",
+    loop: true,
+    baseAfter: "idle",
+    label: INITIAL_SVG_STATE.label,
+    detail: INITIAL_SVG_STATE.detail,
+    targetSessionId: null,
+  });
+
+  // For one-shot animations we need to know what state to restore to.
+  const baseStateRef = useRef<PetState>(petState);
+
+  // ── Legacy SVG-only state (used when sprite pet is disabled) ───────
+  const [svgState, setSvgState] = useState<SvgPetState>(INITIAL_SVG_STATE);
+
+  // ── Shared refs ───────────────────────────────────────────────────
   const targetSessionRef = useRef<string | null>(null);
-  const lastRevisionRef = useRef(0);
-  const [bubbleVisible, setBubbleVisible] = useState(true);
+  const stateKeyRef = useRef("");
+  const svgStateKeyRef = useRef("");
+  const syncInFlightRef = useRef(false);
+  const syncTimerRef = useRef<number | null>(null);
   const dragStart = useRef<{ x: number; y: number } | null>(null);
   const dragged = useRef(false);
 
-  const syncStateFromMonitor = useCallback(async () => {
+  // ── Load active pet on mount and when storage changes ──────────────
+  const loadActivePet = useCallback(async () => {
     try {
-      const summary = await getAgentMonitorSummary();
-      if (summary.updated_at < lastRevisionRef.current) return;
-      lastRevisionRef.current = summary.updated_at;
-      targetSessionRef.current = summary.target?.session_id || null;
-      setState(stateFromSummary(summary));
-      setBubbleVisible(true);
+      const petId = await getActivePet();
+      if (!petId || petId === "builtin-crab") {
+        setActivePet({ petId: "builtin-crab", detail: null, spriteConfig: null, useSprite: false });
+        return;
+      }
+      const detail = await getPet(petId);
+      if (detail.type !== "spritesheet") {
+        setActivePet({ petId, detail, spriteConfig: null, useSprite: false });
+        return;
+      }
+      const spriteConfig: SpritePetConfig = {
+        id: detail.id,
+        spritesheetUrl: getSpritesheetUrl(detail.id),
+        width: detail.width,
+        height: detail.height,
+        columns: detail.columns,
+        rows: detail.rows,
+        frameCounts: detail.frame_counts,
+        frameRates: detail.frame_rates,
+      };
+      setActivePet({ petId, detail, spriteConfig, useSprite: true });
     } catch {
-      // Keep the last known state while the backend is temporarily unavailable.
+      // Keep the built-in crab as fallback.
+      setActivePet({ petId: "builtin-crab", detail: null, spriteConfig: null, useSprite: false });
     }
   }, []);
 
   useEffect(() => {
+    void loadActivePet();
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === "active_pet_id") void loadActivePet();
+    };
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
+  }, [loadActivePet]);
+
+  // ── Sync agent monitor summary ────────────────────────────────────
+  const syncStateFromMonitor = useCallback(async () => {
+    if (syncInFlightRef.current) return;
+    syncInFlightRef.current = true;
+    try {
+      const token = localStorage.getItem("crab_token");
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      const res = await fetch("/api/agents/monitor/summary", { headers });
+      if (res.status === 401) return;
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const summary = (await res.json()) as AgentMonitorSummary;
+      const nextTarget = summary.target?.session_id || null;
+      targetSessionRef.current = nextTarget;
+
+      // Update SVG state (legacy path)
+      const nextSvg = stateFromSummary(summary);
+      const svgKey = svgStateKey(nextSvg);
+      if (svgKey !== svgStateKeyRef.current) {
+        svgStateKeyRef.current = svgKey;
+        setSvgState(nextSvg);
+      }
+
+      // Update unified state machine state.
+      const nextState = derivePetState({
+        status: (summary.status as AgentStatus) || "idle",
+        message: summary.message,
+        targetSessionId: nextTarget,
+      });
+      const key = petStateKey(nextState);
+      if (key !== stateKeyRef.current) {
+        stateKeyRef.current = key;
+        baseStateRef.current = nextState;
+        setPetState(nextState);
+      }
+    } catch {
+      // Keep the last known state while the backend is temporarily unavailable.
+    } finally {
+      syncInFlightRef.current = false;
+    }
+  }, []);
+
+  useEffect(() => {
+    const scheduleSync = () => {
+      if (syncTimerRef.current !== null) return;
+      syncTimerRef.current = window.setTimeout(() => {
+        syncTimerRef.current = null;
+        void syncStateFromMonitor();
+      }, 300);
+    };
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === "crab_token") scheduleSync();
+    };
+    window.addEventListener("storage", handleStorage);
     void syncStateFromMonitor();
-    const monitorTimer = window.setInterval(() => void syncStateFromMonitor(), 2500);
-    // SSE only reduces latency; the summary endpoint remains the state authority.
-    const es = connectGlobalSSE(() => void syncStateFromMonitor());
+    const monitorTimer = window.setInterval(() => void syncStateFromMonitor(), 5000);
+    const es = connectGlobalSSE(scheduleSync);
     return () => {
       es.close();
+      window.removeEventListener("storage", handleStorage);
       window.clearInterval(monitorTimer);
+      if (syncTimerRef.current !== null) window.clearTimeout(syncTimerRef.current);
     };
   }, [syncStateFromMonitor]);
 
+  // ── Interactions ──────────────────────────────────────────────────
   const openMain = () => window.electronAPI?.petAction("open-main", targetSessionRef.current || undefined);
+
   const handlePointerDown = (event: React.PointerEvent<HTMLElement>) => {
     if (event.button !== 0) return;
     dragStart.current = { x: event.clientX, y: event.clientY };
     dragged.current = false;
-    event.currentTarget.setPointerCapture(event.pointerId);
-    window.electronAPI?.startPetDrag(event.clientX, event.clientY);
+    // Do NOT start drag yet — wait until movement exceeds threshold.
+    // Starting the drag timer immediately causes a tiny window displacement
+    // (screen vs client coordinate mismatch) which pollutes the click/drag
+    // detection and makes clicks unreliable.
   };
+
   const handlePointerMove = (event: React.PointerEvent<HTMLElement>) => {
     const start = dragStart.current;
-    if (start && Math.hypot(event.clientX - start.x, event.clientY - start.y) > 4) dragged.current = true;
-    window.electronAPI?.movePetDrag();
+    if (start && !dragged.current) {
+      const dx = event.clientX - start.x;
+      const dy = event.clientY - start.y;
+      if (Math.hypot(dx, dy) > 4) {
+        dragged.current = true;
+        // Now it's a real drag — start the drag handler with the original
+        // pointer-down position as the grab offset.
+        window.electronAPI?.startPetDrag(start.x, start.y);
+      }
+    }
   };
+
   const handlePointerEnd = () => {
+    if (dragged.current) {
+      window.electronAPI?.endPetDrag();
+    }
     dragStart.current = null;
-    window.electronAPI?.endPetDrag();
   };
+
   const handleOpenMain = () => {
     if (!dragged.current) openMain();
   };
 
-  return (
-    <main
-      className="pet-surface"
-      onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerUp={handlePointerEnd}
-      onPointerCancel={handlePointerEnd}
-      onContextMenu={(event) => {
-        event.preventDefault();
-        window.electronAPI?.showPetMenu();
-      }}
-    >
-      <button
-        type="button"
-        className="pet-bubble"
-        data-visible={bubbleVisible}
-        onClick={handleOpenMain}
-        aria-label="打开 CrabAgent"
-      >
-        <strong>{state.label}</strong>
-        <span>{state.detail}</span>
-      </button>
-      <button
-        type="button"
-        className="pet-character"
-        data-mood={state.mood}
-        onClick={handleOpenMain}
-        onDoubleClick={() => window.electronAPI?.petAction("hide")}
-        aria-label="CrabAgent 桌面宠物，点击打开主窗口"
-      >
+  const handleClickPet = () => {
+    if (dragged.current) return;
+    // One-shot jump/wave animation, then open the main window.
+    const base = baseStateRef.current;
+    if (activePet.useSprite) {
+      setPetState(oneShotAnimation("jumping", base.animation));
+    } else {
+      setPetState(oneShotAnimation("waving", base.animation));
+    }
+    // Open main after a short delay so the animation is visible.
+    setTimeout(() => openMain(), 500);
+  };
+
+  const handleAnimationComplete = useCallback(() => {
+    setPetState(baseStateRef.current);
+  }, []);
+
+  // ── Drag direction IPC: switch to running-left/right during drag ──
+  useEffect(() => {
+    if (!window.electronAPI?.onPetDragDirection) return;
+    const handler = (data: { direction: string | null }) => {
+      if (!activePet.useSprite) return;
+      if (data.direction === "running-left" || data.direction === "running-right") {
+        const base = baseStateRef.current;
+        setPetState({
+          animation: data.direction,
+          loop: true,
+          baseAfter: base.animation,
+          label: "",
+          detail: "",
+          targetSessionId: null,
+        });
+      } else {
+        // Drag ended — restore the agent-driven base state.
+        setPetState(baseStateRef.current);
+      }
+    };
+    window.electronAPI.onPetDragDirection(handler);
+  }, [activePet.useSprite]);
+
+  // ── Render helpers ────────────────────────────────────────────────
+  const renderPetSurface = () => {
+    if (activePet.useSprite && activePet.spriteConfig) {
+      return (
+        <SpritePet
+          config={activePet.spriteConfig}
+          state={petState}
+          scale={1}
+          onAnimationComplete={handleAnimationComplete}
+        />
+      );
+    }
+
+    // Built-in SVG crab (legacy). We keep its rich mood-based styling but
+    // drive it from the state machine output.
+    const mood = animationToSvgMood(petState.animation);
+    return (
+      <>
         <span className="pet-shadow" />
         <svg className="pet-art" viewBox="0 0 260 190" role="img" aria-label="CrabAgent 小螃蟹">
           <defs>
@@ -175,6 +364,45 @@ export function DesktopPet() {
           <circle cx="157" cy="129" r="4.5" fill="#ffb08c" opacity="0.66" />
         </svg>
         <span className="pet-status-dot" />
+      </>
+    );
+  };
+
+  // Determine which label/detail to show. For sprite pets use state machine output.
+  const bubbleLabel = activePet.useSprite ? petState.label || svgState.label : svgState.label;
+  const bubbleDetail = activePet.useSprite ? petState.detail || svgState.detail : svgState.detail;
+
+  return (
+    <main
+      className="pet-surface"
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerEnd}
+      onPointerCancel={handlePointerEnd}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        window.electronAPI?.showPetMenu();
+      }}
+    >
+      <button
+        type="button"
+        className="pet-bubble"
+        data-visible="true"
+        onClick={handleOpenMain}
+        aria-label="打开 CrabAgent"
+      >
+        <strong>{bubbleLabel}</strong>
+        <span>{bubbleDetail}</span>
+      </button>
+      <button
+        type="button"
+        className="pet-character"
+        data-mood={activePet.useSprite ? animationToSvgMood(petState.animation) : svgState.mood}
+        onClick={handleClickPet}
+        onDoubleClick={() => window.electronAPI?.petAction("hide")}
+        aria-label="CrabAgent 桌面宠物，点击打开主窗口"
+      >
+        {renderPetSurface()}
       </button>
     </main>
   );

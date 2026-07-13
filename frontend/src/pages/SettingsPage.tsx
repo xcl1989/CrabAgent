@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { useState, useEffect, useCallback } from "react";
-import { Save, FlaskConical, Search, Check, Smartphone, SlidersHorizontal, Globe, Wifi } from "lucide-react";
+import { Save, FlaskConical, Search, Check, Smartphone, SlidersHorizontal, Globe, Wifi, Cat } from "lucide-react";
 import { Input, Button } from "../components/ui";
 import { toast } from "../components/ui/Toast";
 import { cn } from "../lib/cn";
@@ -8,6 +8,7 @@ import * as settingsApi from "../api/settings";
 import * as providersApi from "../api/providers";
 import ModelSelector from "../components/ModelSelector";
 import WeChatPanel from "../components/WeChatPanel";
+import { PetsSettingsPanel } from "../components/PetsSettingsPanel";
 import type { Provider, ModelInfo } from "../api/providers";
 import { onProvidersChanged } from "../lib/providerSync";
 
@@ -16,7 +17,7 @@ interface ProviderModels {
   models: ModelInfo[];
 }
 
-type SettingsTab = "general" | "search" | "network" | "wechat";
+type SettingsTab = "general" | "search" | "network" | "wechat" | "pets";
 
 export default function SettingsPage() {
   const { t } = useTranslation();
@@ -204,6 +205,7 @@ export default function SettingsPage() {
     { id: "general", label: t("settingsPage.sectionGeneral"), icon: <SlidersHorizontal size={14} /> },
     { id: "search", label: t("settingsPage.sectionSearch"), icon: <Search size={14} /> },
     { id: "network", label: t("settingsPage.sectionNetwork"), icon: <Globe size={14} /> },
+    { id: "pets", label: t("settingsPage.sectionPets"), icon: <Cat size={14} /> },
     { id: "wechat", label: "微信渠道", icon: <Smartphone size={14} /> },
   ];
 
@@ -390,6 +392,12 @@ export default function SettingsPage() {
         )}
 
         {activeTab === "wechat" && <WeChatPanel />}
+
+        {activeTab === "pets" && (
+          <div className="bg-[var(--bg-secondary)] border border-[var(--border)] rounded-xl p-5">
+            <PetsSettingsPanel />
+          </div>
+        )}
       </div>
 
       {/* Save Button — only for general/search tabs */}

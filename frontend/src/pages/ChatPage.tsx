@@ -17,6 +17,7 @@ import {
   LayoutPanelLeft,
   LayoutPanelTop,
   FileText,
+  Archive,
 } from "lucide-react";
 import * as sessionsApi from "../api/sessions";
 import * as providersApi from "../api/providers";
@@ -344,6 +345,11 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
 
   const [showProviders, setShowProviders] = useState(false);
   const [selectedProvider, setSelectedProvider] = useState<string | null>(null);
+  const [showCompression, setShowCompression] = useState(false);
+  const [compressionModel, setCompressionModel] = useState("");
+  const [compressionProvider, setCompressionProvider] = useState("");
+  const [compressing, setCompressing] = useState(false);
+  const [compressionError, setCompressionError] = useState("");
   const [showMcpServers, setShowMcpServers] = useState(false);
   const [showTasks, setShowTasks] = useState(false);
   const [showEmail, setShowEmail] = useState(false);
@@ -833,6 +839,36 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
 
   const completedTasks = taskBoardTasks.filter((t) => t.status === "done");
 
+  const openCompression = () => {
+    const matchedProvider = providerModels.find((item) =>
+      item.models.some((model) => model.id === selectedModel),
+    )?.provider.name || "";
+    setCompressionModel(selectedModel);
+    setCompressionProvider(selectedProvider || matchedProvider);
+    setCompressionError("");
+    setShowCompression(true);
+  };
+
+  const runCompression = async () => {
+    if (!activeSession || !compressionModel || !compressionProvider) return;
+    setCompressing(true);
+    setCompressionError("");
+    try {
+      await sessionsApi.compressSession(activeSession.session_id, compressionModel, compressionProvider);
+      const refreshed = await sessionsApi.getMessages(activeSession.session_id);
+      setMessages(refreshed.map((m) => ({
+        ...m,
+        id: String(m.id),
+        tool_calls: Array.isArray(m.tool_calls) ? m.tool_calls : undefined,
+      })));
+      setShowCompression(false);
+    } catch (err) {
+      setCompressionError(err instanceof Error ? err.message : t("compression.failed"));
+    } finally {
+      setCompressing(false);
+    }
+  };
+
   return (
     <div className="relative flex h-full overflow-hidden bg-[var(--bg-primary)]">
       {/* ── Session List ── */}
@@ -1311,12 +1347,25 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
             <WorkspaceSwitcher current={workspace} onChange={setWorkspace} />
             <div className="flex-1 min-w-0">
               {activeSession && (
-                <BranchSelector
-                  sessionId={activeSession.session_id}
-                  activeBranch={activeBranch}
-                  onSwitch={handleSwitchBranch}
-                  onReplay={startReplay}
-                />
+                <div className="flex items-center gap-2">
+                  <BranchSelector
+                    sessionId={activeSession.session_id}
+                    activeBranch={activeBranch}
+                    onSwitch={handleSwitchBranch}
+                    onReplay={startReplay}
+                  />
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    onClick={openCompression}
+                    disabled={sending}
+                    leftIcon={<Archive size={13} />}
+                    title={t("compression.title")}
+                    className="text-[var(--text-secondary)] hover:text-[var(--brand)]"
+                  >
+                    {t("compression.action")}
+                  </Button>
+                </div>
               )}
             </div>
             <NotificationBell onSwitchSession={onSelectSessionById} onNotificationAction={handleNotificationAction} />
@@ -1829,6 +1878,48 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
           onClose={() => setShowResultCompare(false)}
           onExport={handleExportReport}
         />
+      )}
+
+      {showCompression && (
+        <Modal
+          open={true}
+          onOpenChange={(open) => !open && !compressing && setShowCompression(false)}
+          title={t("compression.title")}
+          description={t("compression.description")}
+          size="sm"
+          footer={
+            <>
+              <Button variant="ghost" onClick={() => setShowCompression(false)} disabled={compressing}>{t("common.cancel")}</Button>
+              <Button variant="brand" onClick={runCompression} loading={compressing} disabled={!compressionModel || !compressionProvider}>
+                {t("compression.start")}
+              </Button>
+            </>
+          }
+        >
+          <div className="space-y-4">
+            <label className="block text-xs text-[var(--text-secondary)]">
+              {t("compression.model")}
+              <select
+                value={`${compressionProvider}::${compressionModel}`}
+                onChange={(event) => {
+                  const [provider, model] = event.target.value.split("::");
+                  setCompressionProvider(provider);
+                  setCompressionModel(model);
+                }}
+                className="mt-1.5 w-full h-9 rounded-lg border border-[var(--border)] bg-[var(--bg-tertiary)] px-2 text-sm text-[var(--text-primary)]"
+              >
+                <option value="">{t("compression.selectModel")}</option>
+                {providerModels.flatMap((item) => item.models.map((model) => (
+                  <option key={`${item.provider.name}-${model.id}`} value={`${item.provider.name}::${model.id}`}>
+                    {item.provider.display_name || item.provider.name} / {model.id}
+                  </option>
+                )))}
+              </select>
+            </label>
+            <p className="text-xs leading-relaxed text-[var(--text-tertiary)]">{t("compression.hint")}</p>
+            {compressionError && <p className="text-xs text-[var(--danger)]">{compressionError}</p>}
+          </div>
+        </Modal>
       )}
 
       {localeMismatch && (

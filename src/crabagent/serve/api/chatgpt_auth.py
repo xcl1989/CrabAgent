@@ -73,6 +73,25 @@ def _parse_int_header(headers: dict, key: str) -> int | None:
         return None
 
 
+def _build_window_info(
+    used_percent: float | int | None,
+    window_seconds: int | None,
+    reset_after_seconds: int | None,
+) -> dict[str, Any]:
+    """Build a unified rate-limit window dict from raw API seconds.
+
+    The frontend reads ``window_seconds`` and ``reset_after_seconds`` to
+    dynamically format labels (hours/days) without hardcoding any assumption
+    about the window duration.
+    """
+    info: dict[str, Any] = {
+        "used_percent": used_percent,
+        "window_seconds": window_seconds,
+        "reset_after_seconds": reset_after_seconds,
+    }
+    return info
+
+
 # ── Pydantic Models ──
 
 
@@ -409,11 +428,9 @@ async def logout(user: User = Depends(get_current_user)):
 async def get_account_info(user: User = Depends(get_current_user)):
     """Fetch real-time account info and usage from ChatGPT Codex backend.
 
-    Makes a lightweight API call to /codex/responses and captures the
-    x-codex-* rate limit headers, which contain real-time usage data:
+    Makes a lightweight API call to /wham/usage and extracts:
     - primary/secondary usage percentage (rolling window)
-    - window duration (5h primary, 7d secondary)
-    - reset timestamps
+    - window duration and reset time in raw seconds (frontend formats dynamically)
     - plan type, active limit tier, credits
 
     Also extracts email/plan from the JWT claims (no extra API call needed).
@@ -453,27 +470,24 @@ async def get_account_info(user: User = Depends(get_current_user)):
             plan_from_header = usage.get("plan_type", "")
             rl = usage.get("rate_limit", {})
 
-            primary = rl.get("primary_window", {})
-            secondary = rl.get("secondary_window", {})
-
-            primary_reset_s = primary.get("reset_after_seconds")
-            secondary_reset_s = secondary.get("reset_after_seconds")
-            primary_window_s = primary.get("limit_window_seconds")
-            secondary_window_s = secondary.get("limit_window_seconds")
+            primary = rl.get("primary_window") or {}
+            secondary = rl.get("secondary_window")  # May be None
 
             rate_limits = {
                 "active_limit": "",
                 "plan": plan_from_header or plan_from_jwt,
-                "primary": {
-                    "used_percent": primary.get("used_percent"),
-                    "window_hours": round(primary_window_s / 3600, 1) if primary_window_s else None,
-                    "reset_after_minutes": round(primary_reset_s / 60, 1) if primary_reset_s else None,
-                },
-                "secondary": {
-                    "used_percent": secondary.get("used_percent"),
-                    "window_days": round(secondary_window_s / 86400, 1) if secondary_window_s else None,
-                    "reset_after_hours": round(secondary_reset_s / 3600, 1) if secondary_reset_s else None,
-                },
+                "primary": _build_window_info(
+                    primary.get("used_percent"),
+                    primary.get("limit_window_seconds"),
+                    primary.get("reset_after_seconds"),
+                ),
+                "secondary": _build_window_info(
+                    secondary.get("used_percent") if secondary else None,
+                    secondary.get("limit_window_seconds") if secondary else None,
+                    secondary.get("reset_after_seconds") if secondary else None,
+                )
+                if secondary
+                else None,
                 "credits": usage.get("credits", {}),
             }
 
@@ -514,24 +528,31 @@ async def get_account_info(user: User = Depends(get_current_user)):
 
                     primary_used = _parse_float_header(resp_headers, "x-codex-primary-used-percent")
                     secondary_used = _parse_float_header(resp_headers, "x-codex-secondary-used-percent")
-                    primary_window = _parse_int_header(resp_headers, "x-codex-primary-window-minutes")
-                    secondary_window = _parse_int_header(resp_headers, "x-codex-secondary-window-minutes")
+                    primary_window_min = _parse_int_header(resp_headers, "x-codex-primary-window-minutes")
+                    secondary_window_min = _parse_int_header(resp_headers, "x-codex-secondary-window-minutes")
                     primary_reset = _parse_int_header(resp_headers, "x-codex-primary-reset-after-seconds")
                     secondary_reset = _parse_int_header(resp_headers, "x-codex-secondary-reset-after-seconds")
+
+                    primary_window_s = primary_window_min * 60 if primary_window_min else None
+                    secondary_window_s = secondary_window_min * 60 if secondary_window_min else None
+
+                    has_secondary = (
+                        secondary_used is not None
+                        or secondary_window_s is not None
+                        or secondary_reset is not None
+                    )
 
                     rate_limits = {
                         "active_limit": resp_headers.get("x-codex-active-limit", ""),
                         "plan": plan_from_header or plan_from_jwt,
-                        "primary": {
-                            "used_percent": primary_used,
-                            "window_hours": round(primary_window / 60, 1) if primary_window else None,
-                            "reset_after_minutes": round(primary_reset / 60, 1) if primary_reset else None,
-                        },
-                        "secondary": {
-                            "used_percent": secondary_used,
-                            "window_days": round(secondary_window / 1440, 1) if secondary_window else None,
-                            "reset_after_hours": round(secondary_reset / 3600, 1) if secondary_reset else None,
-                        },
+                        "primary": _build_window_info(
+                            primary_used, primary_window_s, primary_reset,
+                        ),
+                        "secondary": _build_window_info(
+                            secondary_used, secondary_window_s, secondary_reset,
+                        )
+                        if has_secondary
+                        else None,
                         "credits": {
                             "has_credits": resp_headers.get("x-codex-credits-has-credits", "").lower() == "true",
                             "balance": resp_headers.get("x-codex-credits-balance", ""),

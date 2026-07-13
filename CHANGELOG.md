@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.12.6] — Desktop Pet Improvements
+
+### Added
+- **AI pet generation with reference photo** — When uploading a reference photo, the ChatGPT Codex backend receives the image as multimodal `input_image` content with the `image_generation` tool, so generated spritesheets faithfully reproduce the reference character's identity, colors, and style. OpenAI API providers use `litellm.aimage_edit` for the same effect.
+- **ChatGPT rate limit panel overhaul** — The quota display now dynamically formats window sizes (hours/days) and reset times from raw API seconds, adapting automatically to any future window changes (5-hour, 7-day, etc.) without code updates.
+
+### Fixed
+- **Pet generation button error `[object Object]`** — The API client was JSON-serializing `FormData` objects, breaking multipart uploads. Fixed: `ApiClient` now passes `FormData` through without serialization and omits `Content-Type` (browser sets multipart boundary). Error responses with non-string `detail` are also stringified properly.
+- **Desktop pet click not opening main window** — Pointer-down immediately started the drag timer, causing a tiny window displacement (screen vs client coordinate mismatch) that polluted click/drag detection. Fixed: drag timer only starts after movement exceeds the 4px threshold. Sprite pets now also call `openMain()` on click (previously only SVG pets did).
+- **Sprite pet left-right jitter** — AI-generated spritesheet frames had inconsistent character positions across animation frames. Added cross-correlation frame alignment for stationary animation rows (idle, waving, waiting, working, review). Each frame is shifted to minimize pixel difference against frame 0, eliminating residual horizontal drift.
+- **Sprite pet image clipping** — CSS `max-width/max-height: 100%` on the canvas caused vertical squish when the container was smaller than the 192×208 frame. Fixed: removed size clamping and enlarged the sprite-mode container to 208px height.
+- **Electron pet window too small for sprite frames** — Window height increased from 276px to 320px to fully accommodate 192×208 sprite frames plus the status bubble.
+
+### Changed
+- **Pet style selector i18n** — Style labels (Pixel Art, Chibi, Plush, etc.) now support Chinese and English via the i18n system instead of hardcoded English strings.
+
+---
+
 ## [0.12.5] — Desktop Pet
 
 ### Added

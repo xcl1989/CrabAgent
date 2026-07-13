@@ -24,19 +24,20 @@ html:has(.pet-surface), body:has(.pet-surface) { background: transparent; }
   cursor: grab; filter: drop-shadow(0 12px 10px rgba(137, 55, 52, 0.18)); touch-action: none;
 }
 .pet-character:active { cursor: grabbing; }
-.pet-shadow { position: absolute; z-index: 1; left: 43px; bottom: 7px; width: 128px; height: 17px; border-radius: 50%; background: rgba(137, 55, 52, 0.18); filter: blur(6px); animation: pet-shadow 3.4s ease-in-out infinite; }
-.pet-art { position: absolute; z-index: 2; inset: 0; width: 100%; height: 100%; overflow: visible; animation: pet-breathe 3.4s ease-in-out infinite; }
+.pet-shadow { position: absolute; z-index: 1; left: 43px; bottom: 7px; width: 128px; height: 17px; border-radius: 50%; background: rgba(137, 55, 52, 0.18); filter: blur(6px); }
+.pet-art { position: absolute; z-index: 2; inset: 0; width: 100%; height: 100%; overflow: visible; }
 .pet-svg-claws { transform-origin: 130px 112px; }
-.pet-svg-legs { animation: pet-legs-idle 3.4s ease-in-out infinite; transform-origin: 130px 132px; }
-.pet-svg-eyes { animation: pet-blink 5.6s infinite; transform-origin: 130px 55px; }
+.pet-svg-legs { transform-origin: 130px 132px; }
+.pet-svg-eyes { transform-origin: 130px 55px; }
+/* Keep the idle transparent window fully static; continuous compositing can flicker on macOS. */
+.pet-character[data-mood="thinking"] .pet-art { animation: pet-breathe 1.75s ease-in-out infinite; }
+.pet-character[data-mood="thinking"] .pet-svg-legs { animation: pet-legs-idle 1.75s ease-in-out infinite; }
 .pet-status-dot { position: absolute; z-index: 3; right: 17px; top: 29px; width: 12px; height: 12px; border: 2px solid #f5fff9; border-radius: 50%; background: #7add8c; box-shadow: 0 0 0 4px rgba(122, 221, 140, 0.2); }
 .pet-character[data-mood="thinking"] .pet-status-dot, .pet-character[data-mood="working"] .pet-status-dot { background: #f6be5a; box-shadow: 0 0 0 4px rgba(246, 190, 90, 0.22); }
 .pet-character[data-mood="waiting"] .pet-status-dot { background: #73c9ec; animation: pet-pulse 1.1s infinite; }
 .pet-character[data-mood="error"] .pet-status-dot { background: #ed7770; box-shadow: 0 0 0 4px rgba(237, 119, 112, 0.2); }
-.pet-character[data-mood="thinking"] .pet-art { animation-duration: 1.75s; }
 .pet-character[data-mood="thinking"] .pet-pupil { animation: pet-look 1.75s ease-in-out infinite alternate; }
 .pet-character[data-mood="working"] .pet-svg-claws { animation: pet-claw-work 600ms ease-in-out infinite alternate; }
-.pet-character[data-mood="working"] .pet-svg-legs { animation: pet-legs-walk 600ms ease-in-out infinite alternate; }
 .pet-character[data-mood="celebrating"] .pet-art { animation: pet-celebrate 440ms ease-in-out 5; }
 .pet-character[data-mood="celebrating"] .pet-svg-claws { animation: pet-claw-cheer 440ms ease-in-out 5; }
 .pet-hint { position: absolute; z-index: 5; bottom: 1px; width: 100%; margin: 0; color: rgba(5, 100, 107, 0.62); font-size: 10px; text-align: center; pointer-events: none; }
@@ -51,3 +52,25 @@ html:has(.pet-surface), body:has(.pet-surface) { background: transparent; }
 @keyframes pet-pulse { 50% { box-shadow: 0 0 0 8px rgba(115, 201, 236, 0.03); } }
 @keyframes pet-celebrate { 50% { transform: translateY(-14px) rotate(4deg) scale(1.04); } }
 @keyframes pet-claw-cheer { 50% { transform: rotate(-13deg) translateY(-9px); } }
+
+/* Sprite-sheet pets */
+.sprite-pet {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  /* Do NOT clamp width/height — the canvas internal resolution must match
+     the CSS display size 1:1 to prevent vertical squish and subpixel jitter. */
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* When a sprite pet is active, enlarge the container to fit 192×208 frames
+   and allow overflow so the full sprite is visible without clamping. */
+.pet-character:has(.sprite-pet) {
+  height: 208px;
+  bottom: 12px;
+  overflow: visible;
+}

@@ -408,6 +408,28 @@ class TokenUsage(Base):
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
 
 
+class PetPackage(Base):
+    """A user-installed or built-in desktop pet package.
+
+    Each package maps to a folder on disk containing pet.json and
+    spritesheet.{webp,png}. Built-in packages are shipped with the app
+    and cannot be deleted by users.
+    """
+
+    __tablename__ = "pet_packages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    pet_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    display_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str] = mapped_column(Text, default="")
+    spritesheet_filename: Mapped[str] = mapped_column(String(200), nullable=False)
+    config_json: Mapped[str] = mapped_column(Text, default="{}")
+    is_builtin: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
 engine = create_async_engine(
     settings.db_url,
     echo=False,
@@ -605,6 +627,11 @@ async def init_db() -> None:
             await conn.execute(text("ALTER TABLE agent_profiles ADD COLUMN tools TEXT DEFAULT ''"))
         if "tool_permissions" not in columns:
             await conn.execute(text("ALTER TABLE agent_profiles ADD COLUMN tool_permissions TEXT DEFAULT '{}'"))
+
+        result = await conn.execute(text("PRAGMA table_info(pet_packages)"))
+        columns = [row[1] for row in result.fetchall()]
+        if "config_json" not in columns:
+            await conn.execute(text("ALTER TABLE pet_packages ADD COLUMN config_json TEXT DEFAULT '{}'"))
 
         result = await conn.execute(text("PRAGMA table_info(tasks)"))
         columns = [row[1] for row in result.fetchall()]

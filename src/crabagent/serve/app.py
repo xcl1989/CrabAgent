@@ -103,7 +103,6 @@ async def lifespan(app: FastAPI):
 
 async def _background_startup(app: FastAPI) -> None:
     """Run non-critical startup tasks in background (scheduler, OfficeCLI, FTS, etc.)."""
-    import asyncio
 
     # ── FTS-CJK index check / rebuild ──
     # This runs AFTER init_db() so the app is already serving requests.
@@ -111,6 +110,7 @@ async def _background_startup(app: FastAPI) -> None:
     # doesn't block the event loop.
     try:
         from sqlalchemy import text as sa_text
+
         from crabagent.core.database import async_session_factory
 
         async with async_session_factory() as db:
@@ -198,9 +198,10 @@ def create_app() -> FastAPI:
     from crabagent.serve.api.molt import router as molt_router
     from crabagent.serve.api.notification import router as notification_router
     from crabagent.serve.api.officecli import router as officecli_router
+    from crabagent.serve.api.pets import router as pets_router
     from crabagent.serve.api.prompt import router as prompt_router
-    from crabagent.serve.api.quota import router as quota_router
     from crabagent.serve.api.provider import router as provider_router
+    from crabagent.serve.api.quota import router as quota_router
     from crabagent.serve.api.replay import router as replay_router
     from crabagent.serve.api.scheduled_task import router as scheduled_task_router
     from crabagent.serve.api.session import router as session_router
@@ -231,6 +232,7 @@ def create_app() -> FastAPI:
     app.include_router(todo_router, prefix="/api")
     app.include_router(notification_router, prefix="/api")
     app.include_router(officecli_router, prefix="/api")
+    app.include_router(pets_router, prefix="/api")
     app.include_router(scheduled_task_router, prefix="/api")
     app.include_router(task_router, prefix="/api")
     app.include_router(email_router, prefix="/api")

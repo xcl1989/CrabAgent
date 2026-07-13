@@ -609,7 +609,8 @@
     "categoryProxyDesc": "分类代理（留空则使用全局代理）",
     "proxyPlaceholder": "留空则使用全局代理",
     "testProxy": "测试",
-    "proxyTestSuccess": "代理可用（{{latency}}ms, IP: {{ip}}）"
+    "proxyTestSuccess": "代理可用（{{latency}}ms, IP: {{ip}}）",
+    "sectionPets": "桌宠"
   },
   "usage": {
     "title": "Token 用量",
@@ -692,5 +693,50 @@
     "preview": "预览",
     "modified": "已修改",
     "empty": "暂无内容可预览。"
+  },
+  "compression": {
+    "action": "压缩",
+    "title": "压缩会话",
+    "description": "使用所选模型生成摘要，并以摘要替换当前会话的上下文。原始消息会保留。",
+    "model": "压缩模型",
+    "selectModel": "选择模型",
+    "start": "开始压缩",
+    "hint": "压缩沿用自动压缩的提示词、消息清洗和重试逻辑。完成后将刷新消息列表。",
+    "failed": "压缩失败"
+  },
+  "pets": {
+    "description": "选择或上传 Codex 兼容的宠物包（pet.json + spritesheet.webp）。",
+    "create": "新建宠物",
+    "createPromptId": "宠物文件夹 id（例如 my-wolf）：",
+    "createPromptName": "显示名称：",
+    "activate": "启用",
+    "activated": "宠物已启用",
+    "active": "已启用",
+    "builtin": "内置",
+    "custom": "自定义",
+    "uploadSpritesheet": "上传精灵图",
+    "uploaded": "精灵图已上传",
+    "delete": "删除",
+    "deleted": "宠物已删除",
+    "confirmDelete": "确定删除这个宠物？此操作不可撤销。",
+    "aiGenerate": "AI 生成桌宠",
+    "aiGenerateDesc": "描述一个角色，自动生成完整的 9 状态精灵图。需要 2-5 分钟。",
+    "promptPlaceholder": "例如：一只戴着小围巾的橘猫",
+    "generate": "生成",
+    "generating": "生成中…",
+    "generatingHint": "正在生成 9 个动画状态并合成精灵图。需要几分钟，请保持应用打开。",
+    "generateStarted": "生成已开始，几分钟后回来查看。",
+    "generateFailed": "生成失败",
+    "generated": "{{name}} 生成成功！",
+    "uploadRef": "上传照片",
+    "refHint": "上传宠物照片，生成的精灵图会尽量匹配它的外观。",
+    "refSelected": "已选择参考照片，生成的宠物将匹配此照片。",
+    "stylePixel": "像素",
+    "styleChibi": "Q版",
+    "stylePlush": "毛绒",
+    "styleClay": "黏土",
+    "styleSticker": "贴纸",
+    "styleFlatVector": "扁平矢量",
+    "styleAnime": "动漫"
   }
 }

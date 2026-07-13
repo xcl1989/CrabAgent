@@ -609,7 +609,8 @@
     "categoryProxyDesc": "Category-specific proxies (leave empty to use global proxy)",
     "proxyPlaceholder": "Leave empty to use global proxy",
     "testProxy": "Test",
-    "proxyTestSuccess": "Proxy works ({{latency}}ms, IP: {{ip}})"
+    "proxyTestSuccess": "Proxy works ({{latency}}ms, IP: {{ip}})",
+    "sectionPets": "Pets"
   },
   "usage": {
     "title": "Token Usage",
@@ -692,5 +693,50 @@
     "preview": "Preview",
     "modified": "Modified",
     "empty": "Nothing to preview yet."
+  },
+  "compression": {
+    "action": "Compress",
+    "title": "Compress conversation",
+    "description": "Create a summary with the selected model and replace the active conversation context. Original messages are kept.",
+    "model": "Compression model",
+    "selectModel": "Select a model",
+    "start": "Compress now",
+    "hint": "Uses the same prompt, message cleanup, and retry behavior as automatic compression. The message list refreshes when it finishes.",
+    "failed": "Compression failed"
+  },
+  "pets": {
+    "description": "Select or upload a Codex-compatible pet package (pet.json + spritesheet.webp).",
+    "create": "New Pet",
+    "createPromptId": "Pet folder id (e.g. my-wolf):",
+    "createPromptName": "Display name:",
+    "activate": "Activate",
+    "activated": "Pet activated",
+    "active": "Active",
+    "builtin": "Built-in",
+    "custom": "Custom",
+    "uploadSpritesheet": "Upload spritesheet",
+    "uploaded": "Spritesheet uploaded",
+    "delete": "Delete",
+    "deleted": "Pet deleted",
+    "confirmDelete": "Delete this pet? This cannot be undone.",
+    "aiGenerate": "AI Pet Generation",
+    "aiGenerateDesc": "Describe a character and generate a complete 9-state spritesheet automatically. Takes 2-5 minutes.",
+    "promptPlaceholder": "e.g. a cute orange cat wearing a tiny scarf",
+    "generate": "Generate",
+    "generating": "Generating…",
+    "generatingHint": "Generating 9 animation states and composing atlas. This takes several minutes — keep the app open.",
+    "generateStarted": "Generation started. Check back in a few minutes.",
+    "generateFailed": "Generation failed",
+    "generated": "{{name}} generated successfully!",
+    "uploadRef": "Upload photo",
+    "refHint": "Upload a photo of your pet to generate spritesheets that match its appearance.",
+    "refSelected": "Reference photo selected. Generated pet will match this photo.",
+    "stylePixel": "Pixel Art",
+    "styleChibi": "Chibi",
+    "stylePlush": "Plush",
+    "styleClay": "Clay",
+    "styleSticker": "Sticker",
+    "styleFlatVector": "Flat Vector",
+    "styleAnime": "Anime"
   }
 }

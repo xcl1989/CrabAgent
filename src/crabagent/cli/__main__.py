@@ -1587,6 +1587,16 @@ def _run_build_desktop():
             'str(SRC / "crabagent" / "runtime_hooks.py")',
             'str(SRC / "runtime_hooks.py")'
         )
+        # Fix VERSION file path (already uses SRC/crabagent/VERSION -> SRC/VERSION after SRC fix)
+        content = content.replace(
+            'SRC / "crabagent" / "VERSION"',
+            'SRC / "VERSION"'
+        )
+        # Fix pyproject.toml lookup — editable installs have it at pkg_dir/../../pyproject.toml
+        content = content.replace(
+            '_PYPROJECT = PROJECT_ROOT / "pyproject.toml"',
+            f'_PYPROJECT = Path(r"{pkg_dir}") / ".." / ".." / ".." / "pyproject.toml"'
+        )
         spec_path.write_text(content, "utf-8")
 
     is_windows = platform.system() == "Windows"

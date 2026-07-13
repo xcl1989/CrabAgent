@@ -24,16 +24,9 @@ export interface ChatGPTAccountInfo {
   rate_limits?: {
     active_limit?: string;
     plan?: string;
-    primary?: {
-      used_percent?: number | null;
-      window_hours?: number | null;
-      reset_after_minutes?: number | null;
-    };
-    secondary?: {
-      used_percent?: number | null;
-      window_days?: number | null;
-      reset_after_hours?: number | null;
-    };
+    /** Each window returns raw seconds — the UI formats dynamically. */
+    primary?: RateLimitWindow | null;
+    secondary?: RateLimitWindow | null;
     credits?: {
       has_credits?: boolean;
       balance?: string;
@@ -46,6 +39,12 @@ export interface ChatGPTAccountInfo {
     error?: string;
   } | null;
   raw?: Record<string, unknown> | null;
+}
+
+export interface RateLimitWindow {
+  used_percent?: number | null;
+  window_seconds?: number | null;
+  reset_after_seconds?: number | null;
 }
 
 export interface ResetCredit {

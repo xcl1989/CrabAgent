@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 from sqlalchemy import select, text
@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from crabagent.core.database import Conversation, Message, User, get_db
 from crabagent.serve.deps import get_current_user, get_owned_conversation
 from crabagent.serve.services import conversation as conv_svc
+from crabagent.serve.services.message import get_messages, message_to_dict
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
@@ -24,6 +25,18 @@ class CreateSessionRequest(BaseModel):
 
 class UpdateSessionRequest(BaseModel):
     title: str | None = None
+
+
+class CompressSessionRequest(BaseModel):
+    model: str = ""
+    provider: str = ""
+
+
+class CompressSessionResponse(BaseModel):
+    summary: str
+    model: str
+    provider: str
+    original_count: int
 
 
 class SessionResponse(BaseModel):
@@ -70,6 +83,55 @@ class SearchResultItem(BaseModel):
     snippet: str
     role: str
     updated_at: str | None = None
+
+
+@router.post("/{session_id}/compress", response_model=CompressSessionResponse)
+async def compress_session(
+    session_id: str,
+    req: CompressSessionRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Persist a user-triggered compression using the normal compression pipeline."""
+    conv = await get_owned_conversation(db, session_id, user)
+    branch_id = conv.active_branch or "main"
+    records = await get_messages(db, conv.id, branch_id=branch_id)
+    records = [msg for msg in records if msg.role not in ("stats",)]
+    if len(records) < 2:
+        raise HTTPException(status_code=400, detail="Not enough messages to compress")
+
+    from crabagent.core.agent.compress import summarize_messages
+    from crabagent.core.agent.loop import _litellm_params, _resolve_provider
+    from crabagent.core.config import settings
+    from crabagent.core.proxy import resolve_llm_proxy
+    from crabagent.serve.services.persistence import PersistenceListener
+
+    provider_name = req.provider or conv.provider or None
+    provider = await _resolve_provider(provider_name)
+    proxy = await resolve_llm_proxy(provider)
+    model_name = req.model or conv.model or settings.default_model
+    model = model_name
+    if "/" not in model:
+        model = f"chatgpt/{model}" if provider.provider_type == "chatgpt" else f"openai/{model}"
+
+    summary = await summarize_messages(
+        [message_to_dict(msg) for msg in records],
+        system_prompt=conv.system_prompt or "",
+        llm_params=_litellm_params(provider, proxy),
+        model=model,
+        locale=getattr(user, "locale", None) or settings.language or "en",
+    )
+    if not summary:
+        raise HTTPException(status_code=502, detail="Compression model returned an empty summary")
+
+    persistence = PersistenceListener(conversation_id=conv.id, branch_id=branch_id)
+    await persistence.persist_compression(summary)
+    return CompressSessionResponse(
+        summary=summary,
+        model=model_name,
+        provider=provider.name,
+        original_count=len(records),
+    )
 
 
 @router.get("/search", response_model=list[SearchResultItem])

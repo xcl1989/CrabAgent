@@ -14,6 +14,8 @@ let win = null;
 let petWin = null;
 let petDrag = null;
 let petDragTimer = null;
+let petLastX = null;
+let petStateSaveTimer = null;
 let tray = null;
 let forceQuit = false;
 
@@ -43,6 +45,14 @@ function loadPetState() {
 function savePetState() {
   if (!petWin || petWin.isDestroyed()) return;
   try { fs.writeFileSync(PET_STATE_PATH, JSON.stringify(petWin.getBounds())); } catch {}
+}
+
+function schedulePetStateSave() {
+  if (petStateSaveTimer) clearTimeout(petStateSaveTimer);
+  petStateSaveTimer = setTimeout(() => {
+    petStateSaveTimer = null;
+    savePetState();
+  }, 250);
 }
 
 // ── Logging ──
@@ -480,7 +490,7 @@ function createPetWindow() {
   const display = require('electron').screen.getPrimaryDisplay();
   const workArea = display.workArea;
   const width = 228;
-  const height = 276;
+  const height = 320;  // 276→320: accommodate 192×208 sprite frames (need ~18+208+18=244px for pet area + 68px bubble)
   const x = Number.isFinite(saved.x) ? saved.x : workArea.x + workArea.width - width - 24;
   const y = Number.isFinite(saved.y) ? saved.y : workArea.y + workArea.height - height - 36;
 
@@ -512,7 +522,8 @@ function createPetWindow() {
   petWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: false });
   petWin.loadURL(`${URL}/?surface=pet`);
   petWin.once('ready-to-show', () => petWin?.showInactive());
-  petWin.on('move', savePetState);
+  // Window moves can fire at frame rate while dragging; debounce disk persistence.
+  petWin.on('move', schedulePetStateSave);
   petWin.on('close', (event) => {
     if (!forceQuit) {
       event.preventDefault();
@@ -523,7 +534,9 @@ function createPetWindow() {
     petWin = null;
     petDrag = null;
     if (petDragTimer) clearInterval(petDragTimer);
+    if (petStateSaveTimer) clearTimeout(petStateSaveTimer);
     petDragTimer = null;
+    petStateSaveTimer = null;
   });
   return petWin;
 }
@@ -552,6 +565,17 @@ function movePetToCursor() {
     const x = Math.max(bounds.x, Math.min(bounds.x + bounds.width - width, Math.trunc(point.x - offsetX)));
     const y = Math.max(bounds.y, Math.min(bounds.y + bounds.height - height, Math.trunc(point.y - offsetY)));
     if (!Number.isSafeInteger(x) || !Number.isSafeInteger(y)) return;
+
+    // Detect drag direction and notify the renderer for directional animation.
+    if (petLastX !== null) {
+      const dx = x - petLastX;
+      if (Math.abs(dx) > 2) {
+        const direction = dx > 0 ? 'running-right' : 'running-left';
+        petWin.webContents.send('pet-drag-direction', { direction });
+      }
+    }
+    petLastX = x;
+
     petWin.setPosition(x, y);
   } catch (error) {
     log(`Pet drag skipped: ${error.message}`);
@@ -567,14 +591,19 @@ ipcMain.on('window-close', () => win?.close());
 ipcMain.handle('window-is-maximized', () => win?.isMaximized() ?? false);
 ipcMain.on('pet-drag-start', (_event, { offsetX, offsetY }) => {
   petDrag = { offsetX, offsetY };
-  if (!petDragTimer) petDragTimer = setInterval(movePetToCursor, 16);
+  petLastX = null;
+  if (petDragTimer) clearInterval(petDragTimer);
+  petDragTimer = setInterval(movePetToCursor, 33);
 });
 ipcMain.on('pet-drag-move', () => movePetToCursor());
 ipcMain.on('pet-drag-end', () => {
   petDrag = null;
+  petLastX = null;
   if (petDragTimer) clearInterval(petDragTimer);
   petDragTimer = null;
   savePetState();
+  // Notify renderer to restore idle/agent animation after drag.
+  petWin?.webContents.send('pet-drag-direction', { direction: null });
 });
 ipcMain.handle('pet-action', (_event, action, sessionId) => {
   if (action === 'open-main') {
