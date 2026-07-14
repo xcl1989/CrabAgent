@@ -280,6 +280,10 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
         .catch(() => []);
 
       const [msgs, monitors] = await Promise.all([msgsPromise, monitorPromise]);
+      // Ignore a late response from a session the user has already left.
+      if (activeSessionRef.current?.session_id !== session.session_id) {
+        return session.model || (models.length > 0 ? models[0].id : selectedModel);
+      }
       const chatMsgs = dbMessagesToChat(msgs);
       populateSubAgentContents(chatMsgs);
       setMessages((prev) => preserveLiveInteractions(chatMsgs, prev));

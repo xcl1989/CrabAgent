@@ -309,6 +309,29 @@ export function dbMessagesToChat(msgs: Message[]): ChatMessage[] {
   const pendingToolCalls: { id: string; name: string; args: unknown }[] = [];
 
   for (const m of msgs) {
+    if (m.role === "tool_confirm" && m.tool_call_id) {
+      let argsSummary = "";
+      let confirmed: boolean | undefined;
+      try {
+        const payload = JSON.parse(m.content || "{}");
+        argsSummary = payload.args_summary || "";
+        if (payload.status === "approved") confirmed = true;
+        if (payload.status === "denied") confirmed = false;
+      } catch {
+        argsSummary = m.content || "";
+      }
+      result.push({
+        id: `db-${m.id}`,
+        role: "tool_confirm",
+        content: "",
+        confirm_id: m.tool_call_id,
+        tool_name: m.name || "",
+        args_summary: argsSummary,
+        confirmed,
+      });
+      continue;
+    }
+
     // Compress summary — render as compress card
     if (m.role === "compress") {
       result.push({

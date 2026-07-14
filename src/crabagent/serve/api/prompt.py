@@ -432,6 +432,17 @@ async def prompt_async(
         context.metadata["work_mode"] = req.work_mode
 
     if req.images or local_images:
+        attached_images = []
+        if req.images:
+            attached_images.extend(_save_image_temp(img)["file_path"] for img in req.images)
+        attached_images.extend(block.get("file_path", "") for block in local_images)
+        context.metadata["attached_image_paths"] = [path for path in attached_images if path]
+        context.system_prompt += (
+            "\n\nWhen the user asks to generate or modify an image based on an attached image, "
+            "use the image_edit tool. It uses the most recently attached image automatically; "
+            "do not use image_generate for reference-image requests."
+        )
+
         from crabagent.core.agent.token_limits import is_vision_model
 
         resolved = req.model or conv.model or ""
@@ -742,7 +753,7 @@ async def prompt_async(
         msg = event.data.get("message", {})
         if msg.get("role") != "tool":
             return
-        if msg.get("name") != "image_generate":
+        if msg.get("name") not in {"image_generate", "image_edit"}:
             return
         result = str(msg.get("content", "") or "")
         if not result:
@@ -774,7 +785,7 @@ async def prompt_async(
             await context.event_bus.emit(
                 AgentEvent(
                     type=EventType.SCREENSHOT,
-                    data={"image": data_url, "tool": "image_generate"},
+                    data={"image": data_url, "tool": msg.get("name", "image_generate")},
                 )
             )
             # Also emit MESSAGE_CREATED so screenshot is persisted to DB.

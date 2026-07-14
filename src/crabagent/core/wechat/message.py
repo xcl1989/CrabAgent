@@ -197,11 +197,10 @@ class WeChatMessageLoop:
         await self.client.send_typing(msg.from_user, status=1)
 
         try:
-            reply_text, conv_id = await _run_agent_for_wechat(msg, self.client)
+            reply_text, _ = await _run_agent_for_wechat(msg, self.client)
         except Exception as e:
             logger.error("[WeChatLoop] Agent execution failed: %s", e)
             reply_text = f"抱歉，处理消息时出错：{str(e)[:100]}"
-            conv_id = 0
 
         # Send text reply (protected — session may have expired during long tasks)
         reply_sent = False
@@ -246,16 +245,6 @@ class WeChatMessageLoop:
             logger.warning("[WeChatLoop] Session expired before attachments could be sent")
         except Exception as e:
             logger.warning("[WeChatLoop] Send attachments failed: %s", e)
-
-        # Async post-reply archive check — zero user-perceived latency
-        if conv_id:
-            sender_label = msg.from_nickname or msg.from_user
-            asyncio.create_task(
-                _maybe_archive_after_reply(
-                    conv_id=conv_id,
-                    title=f"微信 - {sender_label} v2",
-                )
-            )
 
         # Stop typing
         await self.client.send_typing(msg.from_user, status=2)
@@ -696,6 +685,16 @@ async def _run_agent_for_wechat(msg: IncomingMessage, client: WeChatClient | Non
         model=default_model,
     )
 
+    # Roll over a prior-day conversation before building this turn's context.
+    # This lets the first message of a new day receive the compact summary.
+    if await _maybe_archive_after_reply(conv_id=conv_id, title=title):
+        session_id, conv_id, existing_messages = await _find_or_create_wechat_conversation(
+            from_user=msg.from_user,
+            title=title,
+            workspace=str(workspace),
+            model=default_model,
+        )
+
     context = AgentContext(
         workspace=workspace,
         tool_registry=registry,
@@ -1098,14 +1097,19 @@ async def _summarize_conversation(messages: list[dict], model: str) -> str:
     """
     import litellm
 
-    from crabagent.core.agent.compress import _format_messages
     from crabagent.core.provider_store import (
         get_default_provider,
         resolve_litellm_params,
         resolve_model_for_provider,
     )
 
-    history_text = _format_messages(messages)
+    # Keep this formatter local: the generic compression module exposes no
+    # private formatting helper, which broke rollover in packaged builds.
+    history_text = "\n\n".join(
+        f"### {message.get('role', 'user')}\n{message.get('content', '')}"
+        for message in messages
+        if message.get("content")
+    )
     system_prompt = "你是一个对话摘要生成器。"
     user_prompt = (
         "请全面、详细地总结以下对话历史。必须保留所有关键事实、决策、文件路径、"
@@ -1135,11 +1139,11 @@ async def _summarize_conversation(messages: list[dict], model: str) -> str:
     return response.choices[0].message.content.strip()
 
 
-async def _maybe_archive_after_reply(conv_id: int, title: str) -> None:
-    """Check if a WeChat conversation should be archived and create
-    a fresh one with a summary.
+async def _maybe_archive_after_reply(conv_id: int, title: str) -> bool:
+    """Archive a stale WeChat conversation and report whether it rolled over.
 
-    Runs asynchronously after the user has already received their reply.
+    Called before a new turn is hydrated so the first message of a new day uses
+    the previous day's summary instead of the full archived history.
 
     Triggers:
       1. **Date** — conversation was created on a previous day.
@@ -1153,8 +1157,10 @@ async def _maybe_archive_after_reply(conv_id: int, title: str) -> None:
     from crabagent.core.database import (
         AppSetting,
         Conversation,
-        Message as DBMessage,
         async_session_factory,
+    )
+    from crabagent.core.database import (
+        Message as DBMessage,
     )
     from crabagent.serve.services.message import save_message
 
@@ -1162,7 +1168,7 @@ async def _maybe_archive_after_reply(conv_id: int, title: str) -> None:
         async with async_session_factory() as db:
             conv = await db.get(Conversation, conv_id)
             if not conv:
-                return
+                return False
 
             # --- Condition 1: Date trigger ---
             created_date = conv.created_at.date()
@@ -1182,7 +1188,7 @@ async def _maybe_archive_after_reply(conv_id: int, title: str) -> None:
             volume_trigger = prior_count > _WECHAT_ARCHIVE_MSG_THRESHOLD
 
             if not date_trigger and not volume_trigger:
-                return
+                return False
 
             reason = "跨天归档" if date_trigger else f"消息超限归档({prior_count})"
             logger.info(
@@ -1226,7 +1232,7 @@ async def _maybe_archive_after_reply(conv_id: int, title: str) -> None:
                     summary = await _summarize_conversation(prior, model)
                 except Exception as e:
                     logger.warning("[WeChatLoop] Summary failed, skipping archive: %s", e)
-                    return
+                    return False
             else:
                 logger.info("[WeChatLoop] Only %d msgs, skipping summary", len(prior))
 
@@ -1274,9 +1280,11 @@ async def _maybe_archive_after_reply(conv_id: int, title: str) -> None:
                 new_conv.id,
                 len(summary),
             )
+            return True
 
     except Exception as e:
         logger.error("[WeChatLoop] Archive task failed: %s", e)
+        return False
 
 
 async def _extract_file_content(file_path, original_name: str) -> str | None:
