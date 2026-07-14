@@ -93,10 +93,12 @@ export async function generatePet(
   prompt: string,
   style: string = "pixel",
   referenceFile?: File | null,
+  preserveReferenceStyle: boolean = false,
 ): Promise<GeneratePetResponse> {
   const form = new FormData();
   form.append("prompt", prompt);
   form.append("style", style);
+  form.append("preserve_reference_style", String(preserveReferenceStyle));
   if (referenceFile) {
     form.append("reference", referenceFile);
   }

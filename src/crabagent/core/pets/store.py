@@ -41,6 +41,17 @@ class PetStore:
     def spritesheet_path(self, pet_id: str, filename: str = "spritesheet.webp") -> Path:
         return self.package_dir(pet_id) / filename
 
+    def original_path(self, pet_id: str, filename: str) -> Path:
+        """Return a path for an unprocessed image used to build a pet."""
+        return self.package_dir(pet_id) / "originals" / filename
+
+    def save_original_image(self, pet_id: str, filename: str, image: object) -> Path:
+        """Save a PIL image before background removal, cropping, or atlas packing."""
+        path = self.original_path(pet_id, filename)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        image.save(path, "PNG")
+        return path
+
     def exists(self, pet_id: str) -> bool:
         return self.config_path(pet_id).exists()
 

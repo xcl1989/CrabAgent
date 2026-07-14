@@ -131,8 +131,12 @@ export function sseEventToMessages(event: SSEEvent, messages: ChatMessage[]): Ch
   }
 
   if (event.type === "tool_confirm_request") {
+    const confirmId = event.data.confirm_id as string;
+    if (confirmId && messages.some((m) => m.confirm_id === confirmId)) {
+      return messages;
+    }
     updated.push({
-      id: `cf-${event.data.confirm_id}`,
+      id: `cf-${confirmId || Date.now()}`,
       role: "tool_confirm",
       content: "",
       confirm_id: event.data.confirm_id as string,
@@ -143,9 +147,13 @@ export function sseEventToMessages(event: SSEEvent, messages: ChatMessage[]): Ch
   }
 
   if (event.type === "user_input_request") {
+    const inputId = event.data.input_id as string;
+    if (inputId && messages.some((m) => m.confirm_id === inputId)) {
+      return messages;
+    }
     const opts = event.data.options as string[] | undefined;
     updated.push({
-      id: `in-${event.data.input_id}`,
+      id: `in-${inputId || Date.now()}`,
       role: "user_input",
       content: (event.data.question as string) || "",
       confirm_id: event.data.input_id as string,

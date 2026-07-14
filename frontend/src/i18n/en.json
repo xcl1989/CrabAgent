@@ -731,6 +731,7 @@
     "uploadRef": "Upload photo",
     "refHint": "Upload a photo of your pet to generate spritesheets that match its appearance.",
     "refSelected": "Reference photo selected. Generated pet will match this photo.",
+    "preserveReferenceStyle": "Preserve the reference style (no stylization)",
     "stylePixel": "Pixel Art",
     "styleChibi": "Chibi",
     "stylePlush": "Plush",

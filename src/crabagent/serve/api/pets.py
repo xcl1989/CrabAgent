@@ -327,6 +327,7 @@ async def upload_spritesheet(
 async def generate_pet(
     prompt: str = Form(...),
     style: str = Form("pixel"),
+    preserve_reference_style: bool = Form(False),
     reference: UploadFile | None = File(None),
     user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -359,6 +360,7 @@ async def generate_pet(
             style=style,
             user_id=user.id,
             reference_image_path=str(ref_path) if ref_path else None,
+            preserve_reference_style=preserve_reference_style,
         )
     )
     return GeneratePetResponse(

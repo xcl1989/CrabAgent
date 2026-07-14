@@ -57,6 +57,18 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
     });
   }, []);
 
+  const preserveLiveInteractions = useCallback(
+    (dbMessages: ChatMessage[], liveMessages: ChatMessage[]) => [
+      ...dbMessages,
+      ...liveMessages.filter(
+        (message) =>
+          (message.role === "tool_confirm" || message.role === "user_input") &&
+          !dbMessages.some((dbMessage) => dbMessage.confirm_id === message.confirm_id),
+      ),
+    ],
+    [],
+  );
+
   const populateSubAgentContents = useCallback((chatMsgs: ChatMessage[]) => {
     for (const m of chatMsgs) {
       if (m.role === "sub_agent" && m.content && (m.sub_agent_id || m.id)) {
@@ -120,6 +132,7 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
   useEffect(() => {
     let cancelled = false;
     // Clear immediately for responsive workspace switch
+    activeSessionRef.current = null;
     setActiveSession(null);
     setMessages([]);
     
@@ -136,7 +149,7 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
           if (!cancelled) {
             const chatMsgs = dbMessagesToChat(msgs);
             populateSubAgentContents(chatMsgs);
-            setMessages(chatMsgs);
+            setMessages((prev) => preserveLiveInteractions(chatMsgs, prev));
             lazyLoadImages(chatMsgs, latest.session_id);
           }
         });
@@ -252,6 +265,9 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
 
   const selectSession = useCallback(
     async (session: Session, selectedModel: string, models: { id: string }[]) => {
+      // Update the ref synchronously: the pending confirmation may be replayed
+      // by SSE before React has committed the new activeSession state.
+      activeSessionRef.current = session;
       setActiveSession(session);
       setActiveBranch(session.active_branch || "main");
       // Show empty messages immediately to avoid stale content flash
@@ -266,7 +282,7 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
       const [msgs, monitors] = await Promise.all([msgsPromise, monitorPromise]);
       const chatMsgs = dbMessagesToChat(msgs);
       populateSubAgentContents(chatMsgs);
-      setMessages(chatMsgs);
+      setMessages((prev) => preserveLiveInteractions(chatMsgs, prev));
       lazyLoadImages(chatMsgs, session.session_id);
 
       const hasRunning = (monitors as { session_id: string; status: string }[]).some(
@@ -276,13 +292,14 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
 
       return session.model || (models.length > 0 ? models[0].id : selectedModel);
     },
-    [populateSubAgentContents]
+    [populateSubAgentContents, preserveLiveInteractions]
   );
 
   const newSession = useCallback(async (selectedModel: string, _models: { id: string }[]) => {
     setSending(false);
     const s = await sessionsApi.createSession(undefined, workspace);
     setSessions((prev) => [s, ...prev]);
+    activeSessionRef.current = s;
     setActiveSession(s);
     setMessages([]);
     return selectedModel;
@@ -438,6 +455,7 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
       await sessionsApi.deleteSession(sessionId);
       setSessions((prev) => prev.filter((s) => s.session_id !== sessionId));
       if (activeSession?.session_id === sessionId) {
+        activeSessionRef.current = null;
         setActiveSession(null);
         setMessages([]);
       }

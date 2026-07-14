@@ -37,10 +37,9 @@ ROWS = 9
 ATLAS_W = CELL_W * COLS  # 1536
 ATLAS_H = CELL_H * ROWS  # 1872
 
-# AI image models occasionally let a prop or limb bleed into the neighbouring
-# panel. Reserve a narrow portion of every source panel as a disposable green
-# safety gutter before extracting the frame; a larger gutter visibly cuts off
-# wide poses such as a pet's ears, tail, or clothing.
+# Generated strips often bleed into adjacent panels. Keep a small inner gutter
+# when splitting, then use the row-wide bounding box to scale the complete pose
+# into each atlas cell without mixing two frames together.
 SOURCE_FRAME_GUTTER_RATIO = 0.04
 
 # Standard frame counts per row (matches Codex reference).
@@ -117,6 +116,7 @@ class PetGenerationService:
         style: str = "pixel",
         user_id: int | None = None,
         reference_image_path: str | None = None,
+        preserve_reference_style: bool = False,
     ) -> None:
         """Full generation pipeline with live progress tracking.
 
@@ -184,6 +184,7 @@ class PetGenerationService:
                 return
 
             logger.info("Pet %s: base image generated (%dx%d)", pet_id, base_image.width, base_image.height)
+            self.store.save_original_image(pet_id, "base.png", base_image)
             _set_progress(pet_id, step_label="角色参考图生成完成 ✓")
 
             # Step 2-10: Generate row strips.
@@ -209,20 +210,33 @@ class PetGenerationService:
 
                 n_frames = FRAME_COUNTS[row]
                 try:
-                    strip = await self._generate_row_strip(
-                        pet_id, prompt, style, row, n_frames, base_image, provider_info,
-                        reference_image_path=reference_image_path,
-                        ref_visual_desc=ref_visual_desc,
-                    )
-                    if strip:
-                        frames = self._extract_frames(strip, n_frames, row_name=row)
+                    if row in {
+                        PetAnimationName.RUNNING_RIGHT,
+                        PetAnimationName.RUNNING_LEFT,
+                    }:
+                        # Wide running poses overlap in eight-frame strips.
+                        # Generate two four-frame strips instead: this keeps each
+                        # panel wide enough without making eight image requests.
+                        frames = await self._generate_running_frame_batches(
+                            pet_id, prompt, style, row, n_frames, base_image, provider_info,
+                            reference_image_path=reference_image_path,
+                            ref_visual_desc=ref_visual_desc,
+                            preserve_reference_style=preserve_reference_style,
+                        )
                         strips[row] = frames
-                        logger.info("Pet %s: row %s -> %d frames", pet_id, row.value, len(frames))
                     else:
-                        # If an image edit cannot be completed, use the actual
-                        # reference image rather than an unrelated base image.
-                        fallback = Image.open(reference_image_path).convert("RGBA") if reference_image_path else base_image
-                        strips[row] = [self._fit_to_cell(fallback)]
+                        strip = await self._generate_row_strip(
+                            pet_id, prompt, style, row, n_frames, base_image, provider_info,
+                            reference_image_path=reference_image_path,
+                            ref_visual_desc=ref_visual_desc,
+                            preserve_reference_style=preserve_reference_style,
+                        )
+                        if strip:
+                            self.store.save_original_image(pet_id, f"{row.value}.png", strip)
+                            strips[row] = self._extract_frames(strip, n_frames, row_name=row)
+                        else:
+                            raise RuntimeError("Animation strip generation returned no image")
+                    logger.info("Pet %s: row %s -> %d frames", pet_id, row.value, len(strips[row]))
                 except Exception as e:
                     logger.warning("Pet %s: row %s generation failed: %s", pet_id, row.value, e)
                     fallback = Image.open(reference_image_path).convert("RGBA") if reference_image_path else base_image
@@ -432,6 +446,45 @@ class PetGenerationService:
             logger.error("Base image generation failed: %s", e)
             return None
 
+    async def _generate_running_frame_batches(
+        self,
+        pet_id: str,
+        prompt: str,
+        style: str,
+        row: PetAnimationName,
+        n_frames: int,
+        base_image: Image.Image,
+        provider_info: Any,
+        reference_image_path: str | None = None,
+        ref_visual_desc: str = "",
+        preserve_reference_style: bool = False,
+    ) -> list[Image.Image]:
+        """Generate running animation as two short strips to prevent overlap."""
+        frames: list[Image.Image] = []
+        batch_size = 4
+        for start in range(0, n_frames, batch_size):
+            count = min(batch_size, n_frames - start)
+            strip = await self._generate_row_strip(
+                pet_id,
+                prompt,
+                style,
+                row,
+                count,
+                base_image,
+                provider_info,
+                reference_image_path=reference_image_path,
+                ref_visual_desc=ref_visual_desc,
+                preserve_reference_style=preserve_reference_style,
+                frame_index=start,
+                total_frames=n_frames,
+            )
+            if not strip:
+                raise RuntimeError(f"Running frame batch {start + 1}/{n_frames} generation returned no image")
+            batch = start // batch_size + 1
+            self.store.save_original_image(pet_id, f"{row.value}-batch-{batch}.png", strip)
+            frames.extend(self._extract_frames(strip, count, row_name=row))
+        return frames
+
     async def _generate_row_strip(
         self,
         pet_id: str,
@@ -443,6 +496,9 @@ class PetGenerationService:
         provider_info: Any,
         reference_image_path: str | None = None,
         ref_visual_desc: str = "",
+        preserve_reference_style: bool = False,
+        frame_index: int | None = None,
+        total_frames: int | None = None,
     ) -> Image.Image | None:
         """Generate a strip image containing multiple animation frames.
 
@@ -455,6 +511,11 @@ class PetGenerationService:
         self._setup_litellm_provider(provider_info)
 
         style_desc = self._style_descriptor(style)
+        if reference_image_path and preserve_reference_style:
+            style_desc = (
+                "preserve the reference image's original visual medium, rendering, "
+                "texture, lighting, and color treatment; do not stylize it"
+            )
         anim_desc = ANIMATION_PROMPTS.get(row, "idle pose")
 
         # Build the prompt. If a reference photo was uploaded, add explicit
@@ -466,6 +527,11 @@ class PetGenerationService:
                 "same species, colors, markings, proportions, and accessories. "
                 "Do not change the character's identity."
             )
+            if preserve_reference_style:
+                ref_instruction += (
+                    " Preserve the reference image's original visual style exactly; "
+                    "do not apply any requested art style."
+                )
             # For providers that can't see the image (ChatGPT subscription),
             # embed the extracted visual description so the generator has
             # at least some colour/tone anchor from the reference.
@@ -475,18 +541,36 @@ class PetGenerationService:
                     " Match these colours and tones exactly."
                 )
 
+        is_single_frame = n_frames == 1 and frame_index is not None and total_frames is not None
+        layout_instruction = (
+            f"Show one full-body animation frame ({frame_index + 1}/{total_frames}) of: {anim_desc}. "
+            "Use a fixed camera viewport with the entire character, props, and ground fully visible. "
+            "Do not create a strip, panels, duplicated characters, or cropped edges. "
+            if is_single_frame
+            else (
+                f"Show exactly {n_frames} consecutive frames of: {anim_desc}. "
+                f"These are frames {frame_index + 1}-{frame_index + n_frames} of {total_frames}. "
+                f"Arrange exactly {n_frames} equal-width, fully isolated panels left to right in one horizontal row. "
+                "Leave at least 12% solid-green empty space on both sides of every panel. "
+                if frame_index is not None and total_frames is not None
+                else (
+                    f"Show exactly {n_frames} consecutive frames of: {anim_desc}. "
+                    f"Arrange exactly {n_frames} equal-width, fully isolated panels left to right in one horizontal row. "
+                )
+            )
+        )
+        asset_kind = "single animation frame" if is_single_frame else "animation sprite strip"
         full_prompt = (
-            f"{style_desc} animation sprite strip. Same character as: {prompt}."
+            f"{style_desc} {asset_kind}. Same character as: {prompt}."
             f"{ref_instruction} "
-            f"Show exactly {n_frames} consecutive frames of: {anim_desc}. "
-            f"Arrange exactly {n_frames} equal-width, fully isolated panels left to right in one horizontal row. "
+            f"{layout_instruction}"
             f"CRITICAL: every panel is a fixed camera viewport. Keep the character, "
             f"props, desk, and ground anchored at the exact same horizontal position "
             f"and scale in every panel; only body parts needed for the animation may move. "
             f"Do not pan the camera, translate the composition, make the character walk "
             f"across panels, crop any edge, or let objects cross between panels. "
-            f"Leave a narrow empty solid-green safety gutter on both sides of every panel; "
-            f"all character pixels and props must stay within the central 92% of their own panel. "
+            f"Every character pixel, prop, desk, and ground must be fully visible inside its own panel; "
+            f"leave clear solid-green space around the complete subject, especially at the left and right edges. "
             f"Consistent character design: same colors, proportions, and style across all frames. "
             f"Clean solid green background (#00FF00) for chroma key removal. "
             f"No text, no borders, no panel separators."
@@ -795,7 +879,7 @@ class PetGenerationService:
         """Extract frames from a horizontal strip and place each in a cell.
 
         Three-stage pipeline:
-        1. Split strip, discard each panel's safety gutters → remove green bg →
+        1. Split strip and discard the panel-edge bleed → remove green bg →
            compute union bbox → uniform crop+scale+center.
         2. For stationary rows (idle, working, …) cross-correlate every frame
            against frame 0 to cancel residual sub-pixel horizontal drift.
@@ -805,14 +889,21 @@ class PetGenerationService:
         frame_w = w // n_frames
         gutter = min(int(frame_w * SOURCE_FRAME_GUTTER_RATIO), max(0, (frame_w - 1) // 2))
 
-        # Stage 1 — uniform extraction
+        # Stage 1 — discard the panel edges where consecutive generated poses
+        # frequently overlap. The prompt asks for an inner margin, but the
+        # source must still be treated defensively when it is not respected.
         raw_frames: list[Image.Image] = []
         for i in range(n_frames):
             x = i * frame_w
-            # Exclude generated safety gutters so boundary bleed cannot enter
-            # either adjacent animation frame.
             crop = strip.crop((x + gutter, 0, x + frame_w - gutter, h))
             no_bg = self._remove_green_background(crop)
+            if row_name in {
+                PetAnimationName.RUNNING_RIGHT,
+                PetAnimationName.RUNNING_LEFT,
+            }:
+                # Running strips are the only rows where the model regularly
+                # leaks a detached slice of the adjacent pose into the gutter.
+                no_bg = self._keep_largest_component(no_bg)
             raw_frames.append(no_bg)
 
         union_bbox = None
@@ -884,12 +975,58 @@ class PetGenerationService:
         for y in range(h):
             for x in range(w):
                 r, g, b, a = pixels[x, y]
-                if g > 80 and g > r + 30 and g > b + 30:
+                # The generated background is intentionally green, but image
+                # compression often shifts it toward yellow or brown. The old
+                # partial-alpha branch left that contamination visible as a
+                # smeared backdrop in Electron's transparent pet window.
+                if g > 80 and g > r * 1.15 and g > b * 1.15:
                     pixels[x, y] = (0, 0, 0, 0)
-                elif g > 100 and g > r + 15 and g > b + 15:
-                    factor = min(255, int((max(r, b) / max(g, 1)) * 255))
-                    pixels[x, y] = (r, g, b, factor)
 
+        return rgba
+
+    def _keep_largest_component(self, img: Image.Image) -> Image.Image:
+        """Remove detached adjacent-frame fragments from a running pose."""
+        alpha = img.getchannel("A")
+        pixels = alpha.load()
+        width, height = img.size
+        visited = bytearray(width * height)
+        largest: list[int] = []
+
+        for y in range(height):
+            for x in range(width):
+                start = y * width + x
+                if not pixels[x, y] or visited[start]:
+                    continue
+
+                component: list[int] = []
+                stack = [start]
+                visited[start] = 1
+                while stack:
+                    index = stack.pop()
+                    component.append(index)
+                    px, py = index % width, index // width
+                    for ny in range(max(0, py - 1), min(height, py + 2)):
+                        for nx in range(max(0, px - 1), min(width, px + 2)):
+                            neighbor = ny * width + nx
+                            if pixels[nx, ny] and not visited[neighbor]:
+                                visited[neighbor] = 1
+                                stack.append(neighbor)
+
+                if len(component) > len(largest):
+                    largest = component
+
+        if not largest:
+            return img
+
+        keep = bytearray(width * height)
+        for index in largest:
+            keep[index] = 1
+        rgba = img.copy()
+        out_pixels = rgba.load()
+        for y in range(height):
+            for x in range(width):
+                if not keep[y * width + x]:
+                    out_pixels[x, y] = (0, 0, 0, 0)
         return rgba
 
     def _scale_to_fit(self, img: Image.Image, max_w: int, max_h: int) -> Image.Image:

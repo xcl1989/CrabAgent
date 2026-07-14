@@ -48,6 +48,7 @@ export function PetsSettingsPanel() {
   // Reference photo upload
   const [refPhoto, setRefPhoto] = useState<File | null>(null);
   const [refPhotoUrl, setRefPhotoUrl] = useState<string | null>(null);
+  const [preserveReferenceStyle, setPreserveReferenceStyle] = useState(false);
   const refFileRef = useRef<HTMLInputElement>(null);
 
   const refresh = async () => {
@@ -175,7 +176,12 @@ export function PetsSettingsPanel() {
     setGenerating(true);
     setGenProgress(null);
     try {
-      const resp = await generatePet(genPrompt.trim(), genStyle, refPhoto);
+      const resp = await generatePet(
+        genPrompt.trim(),
+        genStyle,
+        refPhoto,
+        preserveReferenceStyle,
+      );
       setGenJobId(resp.id);
       toast.info(t("pets.generateStarted"));
     } catch (e: unknown) {
@@ -280,6 +286,18 @@ export function PetsSettingsPanel() {
             }}
           />
         </div>
+        {refPhoto && (
+          <label className="flex items-center gap-2 text-xs text-[var(--text-secondary)] cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={preserveReferenceStyle}
+              onChange={(e) => setPreserveReferenceStyle(e.target.checked)}
+              disabled={generating}
+              className="accent-[var(--brand)]"
+            />
+            {t("pets.preserveReferenceStyle")}
+          </label>
+        )}
         <div className="flex items-center gap-2 flex-wrap">
           {PET_STYLES.map((s) => (
             <button

@@ -731,6 +731,7 @@
     "uploadRef": "上传照片",
     "refHint": "上传宠物照片，生成的精灵图会尽量匹配它的外观。",
     "refSelected": "已选择参考照片，生成的宠物将匹配此照片。",
+    "preserveReferenceStyle": "保留参考图原有风格（不风格化）",
     "stylePixel": "像素",
     "styleChibi": "Q版",
     "stylePlush": "毛绒",
