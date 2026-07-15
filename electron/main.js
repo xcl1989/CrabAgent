@@ -235,14 +235,17 @@ function killBackend() {
 
 // ── Create tray ──
 function createTray() {
-  // Try app icon, fall back to a simple 16x16 image
-  let trayIcon;
-  const iconPath = path.join(__dirname, 'build', 'icon.png');
-  if (fs.existsSync(iconPath)) {
-    trayIcon = nativeImage.createFromPath(iconPath).resize({ width: 22, height: 22 });
-  } else {
-    trayIcon = nativeImage.createEmpty();
+  // macOS menu bars require a transparent template image, not the opaque app icon.
+  const trayFile = isMac ? 'trayTemplate.png' : 'icon.png';
+  const iconPath = app.isPackaged
+    ? path.join(process.resourcesPath, trayFile)
+    : path.join(__dirname, 'build', trayFile);
+  let trayIcon = nativeImage.createFromPath(iconPath).resize({ width: 22, height: 22 });
+
+  if (trayIcon.isEmpty() && !isMac) {
+    trayIcon = nativeImage.createFromPath(path.join(__dirname, 'build', 'icon.png')).resize({ width: 22, height: 22 });
   }
+  if (isMac && !trayIcon.isEmpty()) trayIcon.setTemplateImage(true);
 
   tray = new Tray(trayIcon);
   tray.setToolTip('CrabAgent');
@@ -490,7 +493,7 @@ function createPetWindow() {
   const display = require('electron').screen.getPrimaryDisplay();
   const workArea = display.workArea;
   const width = 228;
-  const height = 320;  // 276→320: accommodate 192×208 sprite frames (need ~18+208+18=244px for pet area + 68px bubble)
+  const height = 320;
   const x = Number.isFinite(saved.x) ? saved.x : workArea.x + workArea.width - width - 24;
   const y = Number.isFinite(saved.y) ? saved.y : workArea.y + workArea.height - height - 36;
 
@@ -502,7 +505,7 @@ function createPetWindow() {
     minWidth: width,
     minHeight: height,
     maxWidth: width,
-    maxHeight: height,
+    maxHeight: 520,
     frame: false,
     transparent: true,
     resizable: false,
@@ -589,6 +592,17 @@ ipcMain.on('window-maximize', () => {
 });
 ipcMain.on('window-close', () => win?.close());
 ipcMain.handle('window-is-maximized', () => win?.isMaximized() ?? false);
+ipcMain.on('pet-resize', (_event, requestedHeight) => {
+  if (!petWin || petWin.isDestroyed() || !Number.isFinite(requestedHeight)) return;
+
+  const [width, currentHeight] = petWin.getSize();
+  const nextHeight = Math.max(320, Math.min(Math.ceil(requestedHeight), 520));
+  if (nextHeight === currentHeight) return;
+
+  // Preserve the character's screen position while the status bubble grows upward.
+  const [x, y] = petWin.getPosition();
+  petWin.setBounds({ x, y: y - (nextHeight - currentHeight), width, height: nextHeight });
+});
 ipcMain.on('pet-drag-start', (_event, { offsetX, offsetY }) => {
   petDrag = { offsetX, offsetY };
   petLastX = null;

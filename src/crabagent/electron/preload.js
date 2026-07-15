@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Desktop pet controls are deliberately limited to window-level actions.
   petAction: (action, sessionId) => ipcRenderer.invoke('pet-action', action, sessionId),
+  resizePet: (height) => ipcRenderer.send('pet-resize', height),
   showPetMenu: () => ipcRenderer.send('pet-menu'),
   startPetDrag: (offsetX, offsetY) => ipcRenderer.send('pet-drag-start', { offsetX, offsetY }),
   movePetDrag: () => ipcRenderer.send('pet-drag-move'),

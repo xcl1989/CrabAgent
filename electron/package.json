@@ -30,6 +30,7 @@
       "main.js",
       "preload.js",
       "build/icon.png",
+      "build/trayTemplate.png",
       "package.json",
       "node_modules/**/*"
     ],
@@ -40,6 +41,10 @@
         "filter": [
           "**/*"
         ]
+      },
+      {
+        "from": "build/trayTemplate.png",
+        "to": "trayTemplate.png"
       }
     ],
     "mac": {

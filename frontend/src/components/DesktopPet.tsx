@@ -14,6 +14,7 @@ declare global {
   interface Window {
     electronAPI?: {
       petAction: (action: "open-main" | "hide" | "toggle-always-on-top", sessionId?: string) => Promise<boolean>;
+      resizePet: (height: number) => void;
       showPetMenu: () => void;
       startPetDrag: (offsetX: number, offsetY: number) => void;
       movePetDrag: () => void;
@@ -114,6 +115,7 @@ export function DesktopPet() {
   const svgStateKeyRef = useRef("");
   const syncInFlightRef = useRef(false);
   const syncTimerRef = useRef<number | null>(null);
+  const bubbleRef = useRef<HTMLButtonElement>(null);
   const dragStart = useRef<{ x: number; y: number } | null>(null);
   const dragged = useRef(false);
 
@@ -372,9 +374,29 @@ export function DesktopPet() {
   const bubbleLabel = activePet.useSprite ? petState.label || svgState.label : svgState.label;
   const bubbleDetail = activePet.useSprite ? petState.detail || svgState.detail : svgState.detail;
 
+  // Resize the transparent native window to fit the current bubble.
+  useEffect(() => {
+    const bubble = bubbleRef.current;
+    if (!bubble || !window.electronAPI?.resizePet) return;
+
+    const characterHeight = activePet.useSprite ? 208 : 166;
+    const resize = () => {
+      const bubbleHeight = bubble.getBoundingClientRect().height;
+      // Include the fixed top inset, tail-to-character gap, and bottom inset.
+      window.electronAPI?.resizePet(characterHeight + bubbleHeight + 64);
+    };
+    const observer = new ResizeObserver(resize);
+    observer.observe(bubble);
+    resize();
+    return () => observer.disconnect();
+  }, [activePet.useSprite, bubbleLabel, bubbleDetail]);
+
   return (
     <main
       className="pet-surface"
+      style={{
+        "--pet-character-height": `${activePet.useSprite ? 208 : 166}px`,
+      } as React.CSSProperties}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerEnd}
@@ -385,6 +407,7 @@ export function DesktopPet() {
       }}
     >
       <button
+        ref={bubbleRef}
         type="button"
         className="pet-bubble"
         data-visible="true"
