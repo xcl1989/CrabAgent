@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.12.7] — Ghosting Fix & Image Tool Enhancements
+
+### Fixed
+- **Sprite pet ghosting (叠影) in animation** — The cross-correlation alignment in `_align_frames` used `alpha_composite` which blends, not replaces, causing residual semi-transparent pixels to accumulate and create a double-image "ghost" effect. Fixed by properly clearing the canvas before compositing each aligned frame.
+- **Pet generation with reference photo for ChatGPT provider** — The `_image_edit` method now detects ChatGPT subscription provider and routes to a dedicated `_chatgpt_image_edit` that calls the Codex responses API with multimodal `input_image` + `image_generation` tool, so the reference image is truly seen by the model.
+
+### Added
+- **Enhanced image generation tool** — Added support for reference-image editing (`image_edit` tool), multiple aspect ratios (1:1, 4:3, 3:2, 16:9, 9:16), and automatic style preservation via `ref-preset` mode. The tool can regenerate images with modified prompts while maintaining the original composition.
+- **WeChat message processing** — New `wechat_message` tool for reading, replying to, and sending WeChat work messages. Supports message polling, attachment handling, and configurable send intervals.
+- **Tool confirmation improvements** — The confirm dialog now shows tool names, execution counts, and allows batch approval. The `tool_confirm` message is persisted so the UI can re-render confirm state after reconnection.
+
+### Changed
+- **Pet generation progress bar** — Step labels now show detailed Chinese descriptions for each animation row (idle, running-right, etc.) instead of generic step numbers.
+- **Static asset cache** — All frontend builds now include a unique content-hash in filenames to prevent stale cache issues.
+
+---
+
 ## [0.12.6] — Desktop Pet Improvements
 
 ### Added

@@ -16,6 +16,13 @@ import { DesktopPet } from "./components/DesktopPet";
 
 export type PageId = "chat" | "agents" | "memory" | "usage" | "calendar" | "settings";
 
+const pageIds: readonly PageId[] = ["chat", "agents", "memory", "usage", "calendar", "settings"];
+
+function pageFromHash(): PageId | null {
+  const page = window.location.hash.replace(/^#\/?/, "");
+  return pageIds.includes(page as PageId) ? page as PageId : null;
+}
+
 interface FtsRebuild {
   in_progress: boolean;
   total: number;
@@ -23,7 +30,7 @@ interface FtsRebuild {
 }
 
 function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
-  const [page, setPage] = useState<PageId>("chat");
+  const [page, setPage] = useState<PageId>(() => pageFromHash() ?? "chat");
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [ftsStatus, setFtsStatus] = useState<FtsRebuild | null>(null);
 
@@ -47,6 +54,16 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
     const timer = setInterval(checkHealth, 3000);
     return () => clearInterval(timer);
   }, [checkHealth]);
+
+  // Native Electron menus navigate by updating the SPA hash.
+  useEffect(() => {
+    const handleHashChange = () => {
+      const targetPage = pageFromHash();
+      if (targetPage) setPage(targetPage);
+    };
+    window.addEventListener("hashchange", handleHashChange);
+    return () => window.removeEventListener("hashchange", handleHashChange);
+  }, []);
 
   // Notify when FTS completes
   const ftsInProgress = ftsStatus?.in_progress;
