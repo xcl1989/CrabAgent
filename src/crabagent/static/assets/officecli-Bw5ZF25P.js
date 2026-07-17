@@ -1,1 +1,0 @@
-import{d as t}from"./index-B3rFqSRb.js";import"./vendor-react-BEFBu0qs.js";import"./vendor-ui-CUqfPtFf.js";import"./vendor-charts-Br5QTkJr.js";import"./vendor-markdown-C0jI_Wfn.js";async function c(){return t.get("/officecli/status")}async function n(){return t.get("/officecli/perf")}export{n as getOfficeCliPerf,c as getOfficeCliStatus};
