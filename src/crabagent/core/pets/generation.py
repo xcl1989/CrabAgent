@@ -22,7 +22,7 @@ import time
 from typing import Any
 
 import httpx
-from PIL import Image
+from PIL import Image, ImageChops
 
 from crabagent.core.pets.models import PetAnimationName, PetConfig
 from crabagent.core.pets.store import PetStore
@@ -57,7 +57,10 @@ FRAME_COUNTS: dict[PetAnimationName, int] = {
 
 # Human-readable animation descriptions for image generation prompts.
 ANIMATION_PROMPTS: dict[PetAnimationName, str] = {
-    PetAnimationName.IDLE: "idle pose, calm breathing, slight body movement, facing forward",
+    PetAnimationName.IDLE: (
+        "a resting idle pose, facing forward; keep both feet and the full body locked "
+        "in exactly the same horizontal position, with no swaying or lateral motion"
+    ),
     PetAnimationName.RUNNING_RIGHT: "running to the right, body facing right, legs in motion",
     PetAnimationName.RUNNING_LEFT: "running to the left, body facing left, legs in motion",
     PetAnimationName.WAVING: "waving greeting, one arm raised, friendly gesture",
@@ -210,7 +213,17 @@ class PetGenerationService:
 
                 n_frames = FRAME_COUNTS[row]
                 try:
-                    if row in {
+                    if row == PetAnimationName.IDLE:
+                        frames = await self._generate_stable_idle_frames(
+                            pet_id,
+                            prompt,
+                            style,
+                            base_image,
+                            provider_info,
+                            preserve_reference_style=preserve_reference_style,
+                        )
+                        strips[row] = frames
+                    elif row in {
                         PetAnimationName.RUNNING_RIGHT,
                         PetAnimationName.RUNNING_LEFT,
                     }:
@@ -446,6 +459,82 @@ class PetGenerationService:
             logger.error("Base image generation failed: %s", e)
             return None
 
+    async def _generate_stable_idle_frames(
+        self,
+        pet_id: str,
+        prompt: str,
+        style: str,
+        base_image: Image.Image,
+        provider_info: Any,
+        *,
+        preserve_reference_style: bool = False,
+    ) -> list[Image.Image]:
+        """Build idle from a canonical pose plus one model-generated blink.
+
+        Generating six independent "idle" panels makes the whole character
+        drift even when the prompt asks for a locked camera. Instead, make one
+        canonical pose and a single image-to-image blink from that exact pose.
+        The rest of the loop deliberately holds the canonical frame, so the
+        pet remains planted while still feeling alive.
+        """
+        canonical_source = self.store.original_path(pet_id, "idle-base.png")
+        self.store.save_original_image(pet_id, "idle-base.png", base_image)
+        canonical = await self._generate_row_strip(
+            pet_id,
+            prompt,
+            style,
+            PetAnimationName.IDLE,
+            1,
+            base_image,
+            provider_info,
+            reference_image_path=str(canonical_source),
+            preserve_reference_style=preserve_reference_style,
+            frame_index=0,
+            total_frames=1,
+        )
+        if not canonical:
+            raise RuntimeError("Canonical idle generation returned no image")
+        self.store.save_original_image(pet_id, "idle-canonical.png", canonical)
+        canonical_frame = self._extract_frames(
+            canonical,
+            1,
+            row_name=PetAnimationName.IDLE,
+        )[0]
+
+        model, kwargs = self._resolve_model_and_kwargs(provider_info)
+        self._setup_litellm_provider(provider_info)
+        blink_prompt = (
+            "Use the supplied desktop-pet sprite as a strict visual reference. "
+            "Create one matching full-body sprite with exactly one natural, soft closed-eye blink. "
+            "Keep the pose, paws, body silhouette, head position, outfit, mouth, camera framing, "
+            "scale, lighting, and solid green (#00FF00) background unchanged. "
+            "The eyelids must use the character's own fur and rendering style; do not draw graphic "
+            "lines over the eyes. No text, panels, extra objects, duplicate character, crop, or drift."
+        )
+        blink = await self._image_edit(
+            model,
+            blink_prompt,
+            str(self.store.original_path(pet_id, "idle-canonical.png")),
+            size="1024x1024",
+            kwargs=kwargs,
+            provider_type=provider_info.provider_type,
+        )
+        if not blink:
+            raise RuntimeError("Natural blink generation returned no image")
+        self.store.save_original_image(pet_id, "idle-blink.png", blink)
+        blink_frame = self._extract_frames(blink, 1, row_name=PetAnimationName.IDLE)[0]
+
+        # One blink in a six-frame loop; the holds make it read as a calm idle.
+        frames = [
+            canonical_frame,
+            canonical_frame.copy(),
+            blink_frame,
+            canonical_frame.copy(),
+            canonical_frame.copy(),
+            canonical_frame.copy(),
+        ]
+        return self._align_frames(frames, max_shift=4)
+
     async def _generate_running_frame_batches(
         self,
         pet_id: str,
@@ -575,6 +664,13 @@ class PetGenerationService:
             f"Clean solid green background (#00FF00) for chroma key removal. "
             f"No text, no borders, no panel separators."
         )
+        if row == PetAnimationName.IDLE:
+            full_prompt += (
+                " IDLE STABILITY RULE: use a locked-off camera and a planted base pose. "
+                "The silhouette's horizontal center, feet, ground contact, scale, and framing "
+                "must be identical in every frame. Do not lean, sway side-to-side, or shift weight; "
+                "only a tiny blink or a very subtle internal facial change is allowed."
+            )
 
         try:
             # When a reference image is available, ALWAYS use the image edit API
@@ -825,52 +921,74 @@ class PetGenerationService:
             logger.warning("Failed to download image: %s", e)
             return None
 
-    # Rows where the character should remain anchored (no translational motion).
-    # For these rows we apply cross-correlation frame alignment to eliminate
-    # any residual horizontal jitter from the AI-generated source images.
+    # Rows whose scene must stay anchored. The animation may change an arm,
+    # face, or tail, but the character's planted base (and desk, when present)
+    # must never drift through the transparent window.
     _STATIONARY_ROWS = frozenset({
         PetAnimationName.IDLE,
         PetAnimationName.WAVING,
+        PetAnimationName.FAILED,
         PetAnimationName.WAITING,
         PetAnimationName.RUNNING,   # "working at desk" — character stays put
         PetAnimationName.REVIEW,
     })
 
     @staticmethod
-    def _align_frames(frames: list[Image.Image], max_dx: int = 12) -> list[Image.Image]:
-        """Align frames horizontally using alpha bounding boxes.
+    def _align_frames(frames: list[Image.Image], max_shift: int = 8) -> list[Image.Image]:
+        """Register anchored frames in both axes using alpha-mask overlap.
 
-        Aligning their opaque centres is sufficient to remove visible jitter
-        from stationary animations, and avoids requiring NumPy at runtime.
+        AI sprite strips often drift by one to several pixels vertically as
+        well as horizontally. Bounding boxes cannot distinguish that camera
+        movement from a raised paw or a wagging tail. Searching the small 2-D
+        translation space on alpha masks locks the shared silhouette/scene in
+        place while keeping the local pose change intact.
         """
         if len(frames) <= 1:
             return frames
 
-        def _opaque_center_x(frame: Image.Image) -> float | None:
-            alpha = frame.getchannel("A").point(lambda value: 255 if value > 40 else 0)
-            bbox = alpha.getbbox()
-            if not bbox:
-                return None
-            return (bbox[0] + bbox[2]) / 2
-
-        reference_center = _opaque_center_x(frames[0])
-        if reference_center is None:
+        reference = frames[0].getchannel("A").point(lambda value: 255 if value > 40 else 0)
+        if not reference.getbbox():
             return frames
+
+        def _overlap_score(mask: Image.Image, dx: int, dy: int) -> int:
+            """Return opaque-pixel overlap after moving *mask* by ``dx, dy``."""
+            width, height = mask.size
+            left = max(0, dx)
+            top = max(0, dy)
+            right = min(width, width + dx)
+            bottom = min(height, height + dy)
+            if left >= right or top >= bottom:
+                return 0
+            ref_crop = reference.crop((left, top, right, bottom))
+            mask_crop = mask.crop((left - dx, top - dy, right - dx, bottom - dy))
+            # Both masks are binary, so bin 255 is the opaque-pixel overlap.
+            return ImageChops.multiply(ref_crop, mask_crop).histogram()[255]
 
         aligned = [frames[0]]
         for frame in frames[1:]:
-            center = _opaque_center_x(frame)
-            if center is None:
+            mask = frame.getchannel("A").point(lambda value: 255 if value > 40 else 0)
+            if not mask.getbbox():
                 aligned.append(frame)
                 continue
 
-            shift = round(max(-max_dx, min(max_dx, reference_center - center)))
-            if shift == 0:
+            # Prefer the smallest correction when multiple placements match.
+            dx, dy = max(
+                (
+                    (candidate_x, candidate_y)
+                    for candidate_y in range(-max_shift, max_shift + 1)
+                    for candidate_x in range(-max_shift, max_shift + 1)
+                ),
+                key=lambda candidate: (
+                    _overlap_score(mask, candidate[0], candidate[1]),
+                    -(abs(candidate[0]) + abs(candidate[1])),
+                ),
+            )
+            if dx == 0 and dy == 0:
                 aligned.append(frame)
                 continue
 
             canvas = Image.new("RGBA", frame.size, (0, 0, 0, 0))
-            canvas.alpha_composite(frame, (shift, 0))
+            canvas.alpha_composite(frame, (dx, dy))
             aligned.append(canvas)
 
         return aligned
@@ -881,8 +999,8 @@ class PetGenerationService:
         Three-stage pipeline:
         1. Split strip and discard the panel-edge bleed → remove green bg →
            compute union bbox → uniform crop+scale+center.
-        2. For stationary rows (idle, working, …) cross-correlate every frame
-           against frame 0 to cancel residual sub-pixel horizontal drift.
+        2. For stationary rows (idle, working, …) register every frame against
+           frame 0 in both axes to cancel residual camera/composition drift.
         3. Paste aligned frames into 192×208 cells.
         """
         w, h = strip.size

@@ -17,6 +17,26 @@ from crabagent.core.provider_store import ProviderInfo, get_default_provider, ge
 logger = logging.getLogger(__name__)
 
 
+async def _get_default_model_settings() -> tuple[str | None, str | None]:
+    """Read the optional model/provider pair saved from the Settings page."""
+    try:
+        from sqlalchemy import select
+
+        from crabagent.core.database import AppSetting, async_session_factory
+
+        async with async_session_factory() as db:
+            result = await db.execute(
+                select(AppSetting).where(
+                    AppSetting.key.in_(("default_model", "default_model_provider"))
+                )
+            )
+            values = {row.key: row.value for row in result.scalars() if row.value}
+        return values.get("default_model"), values.get("default_model_provider")
+    except Exception:
+        logger.warning("Failed to load saved default model settings", exc_info=True)
+        return None, None
+
+
 async def _resolve_provider(provider_name: str | None = None) -> ProviderInfo:
     if provider_name:
         info = await get_provider(provider_name)
@@ -155,12 +175,14 @@ async def run_agent(
         except Exception:
             logger.debug("middleware run_start failed", exc_info=True)
 
-    provider = await _resolve_provider(context.provider_name)
+    saved_model, saved_provider_name = await _get_default_model_settings()
+    provider = await _resolve_provider(context.provider_name or saved_provider_name)
     from crabagent.core.proxy import resolve_llm_proxy
 
     proxy = await resolve_llm_proxy(provider)
     llm = _litellm_params(provider, proxy)
-    model = context.model or "gpt-4"
+    # CLI/API overrides win; otherwise use the Settings page pair before env defaults.
+    model = context.model or saved_model or settings.default_model
     if "/" not in model:
         # ChatGPT subscription provider uses litellm's built-in chatgpt/ prefix
         if provider.provider_type == "chatgpt":
@@ -315,9 +337,14 @@ async def run_agent(
                 if chunk.choices[0].finish_reason:
                     finished = True
 
+            # Some providers stream a user-facing reply only as reasoning_content.
+            # Preserve it as the response instead of leaving the CLI with no answer.
+            if not full_text and reasoning_text:
+                full_text = reasoning_text
+
             assistant_msg: dict = {
                 "role": "assistant",
-                "content": full_text or "",
+                "content": full_text,
             }
 
             _llm_elapsed = time.time() - _llm_t0

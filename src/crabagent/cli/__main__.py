@@ -60,7 +60,9 @@ def main():
     parser.add_argument("--serve", action="store_true", help="Start in serve mode")
     parser.add_argument("--host", default=settings.serve_host, help="Serve host")
     parser.add_argument("--port", type=int, default=settings.serve_port, help="Serve port")
-    parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
+    parser.add_argument("--verbose", "-v", action="store_true", help="Show diagnostic logs")
+    parser.add_argument("--show-thinking", action="store_true", help="Show streamed model reasoning")
+    parser.add_argument("--mcp", action="store_true", help="Enable MCP tools for this one-off request")
     parser.add_argument("--no-persist", action="store_true", help="Disable conversation persistence")
     parser.add_argument("--old", action="store_true", help="Use legacy single-panel TUI")
     parser.add_argument("--build-desktop", action="store_true", help="Build desktop app (.dmg on macOS, .exe on Windows)")
@@ -69,7 +71,7 @@ def main():
     subcmd_words = {"init", "provider", "skill", "models"}
 
     logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.INFO,
+        level=logging.DEBUG if args.verbose else logging.WARNING,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
     logging.getLogger("LiteLLM").setLevel(logging.WARNING)
@@ -236,7 +238,7 @@ async def _load_conversation(session_id: str, user_id: int):
         return conv, history, max_seq
 
 
-def _make_cli_event_handler(console):
+def _make_cli_event_handler(console, show_thinking: bool = False):
     thinking_started = [False]
     text_buffer = []
     live = [None]
@@ -333,6 +335,9 @@ def _make_cli_event_handler(console):
 
     def on_event(event: AgentEvent):
         if event.type == EventType.THINKING_DELTA:
+            if not show_thinking:
+                return
+            text = event.data.get("text", "")
             if not thinking_started[0]:
                 thinking_started[0] = True
                 if console:
@@ -340,10 +345,12 @@ def _make_cli_event_handler(console):
                 else:
                     print("Thinking: ", end="", flush=True)
             if console:
-                console.print(event.data.get("text", ""), end="", style="dim", highlight=False)
+                console.print(text, end="", style="dim", highlight=False)
             else:
-                print(event.data.get("text", ""), end="", flush=True)
+                print(text, end="", flush=True)
         elif event.type == EventType.THINKING_DONE:
+            if not show_thinking:
+                return
             thinking_started[0] = False
             if console:
                 console.print()
@@ -364,7 +371,8 @@ def _make_cli_event_handler(console):
             else:
                 print(event.data.get("text", ""), end="", flush=True)
         elif event.type == EventType.TEXT_DONE:
-            full = "".join(text_buffer)
+            # Reasoning-only providers may not emit TEXT_DELTA; use the final event text.
+            full = "".join(text_buffer) or event.data.get("text", "")
             text_buffer.clear()
             if not full.strip():
                 print()
@@ -372,8 +380,13 @@ def _make_cli_event_handler(console):
             if not console:
                 print()
                 return
-            _update_live(full)
-            _stop_live()
+            if live[0]:
+                _update_live(full)
+                _stop_live()
+            elif not show_thinking:
+                from rich.markdown import Markdown
+
+                console.print(Markdown(full))
         elif event.type == EventType.TOOL_CALL:
             name = event.data.get("name", "")
             call_args = event.data.get("arguments", {})
@@ -614,13 +627,16 @@ async def _setup_agent_context(
 
     discover_and_register_tools(context.tool_registry, workspace)
 
-    from crabagent.core.mcp.client import MCPClientManager
-    from crabagent.core.mcp.tools import register_mcp_tools
+    # MCP stdio servers can take several seconds to boot. Keep one-off requests
+    # fast by loading them only when the caller explicitly asks for MCP tools.
+    if getattr(args, "mcp", False):
+        from crabagent.core.mcp.client import MCPClientManager
+        from crabagent.core.mcp.tools import register_mcp_tools
 
-    mcp_manager = MCPClientManager()
-    await mcp_manager.start_all()
-    register_mcp_tools(context.tool_registry, mcp_manager)
-    context.metadata["_mcp_manager"] = mcp_manager
+        mcp_manager = MCPClientManager(quiet=not getattr(args, "verbose", False))
+        await mcp_manager.start_all()
+        register_mcp_tools(context.tool_registry, mcp_manager)
+        context.metadata["_mcp_manager"] = mcp_manager
 
     if conversation_id and not getattr(args, "no_persist", False):
         from crabagent.serve.services.persistence import PersistenceListener
@@ -637,7 +653,9 @@ async def _setup_agent_context(
     except ImportError:
         console = None
 
-    context.event_bus.subscribe(_make_cli_event_handler(console))
+    context.event_bus.subscribe(
+        _make_cli_event_handler(console, show_thinking=getattr(args, "show_thinking", False))
+    )
 
     if not settings.auto_approve_tools:
         context.confirm_callback = _make_cli_confirm_callback(console)

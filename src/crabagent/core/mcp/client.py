@@ -5,7 +5,7 @@ import logging
 import time
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, TextIO
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -76,8 +76,10 @@ class McpToolInfo:
 
 
 class McpConnection:
-    def __init__(self, config: McpServerConfig):
+    def __init__(self, config: McpServerConfig, quiet: bool = False):
         self.config = config
+        self.quiet = quiet
+        self._stderr_log: TextIO | None = None
         self._session: ClientSession | None = None
         self._exit_stack: AsyncExitStack | None = None
         self._tools: list[McpToolInfo] = []
@@ -125,7 +127,13 @@ class McpConnection:
             args=self.config.args,
             env=full_env,
         )
-        read_stream, write_stream = await self._exit_stack.enter_async_context(stdio_client(params))
+        if self.quiet:
+            import os
+
+            self._stderr_log = open(os.devnull, "w")
+        read_stream, write_stream = await self._exit_stack.enter_async_context(
+            stdio_client(params, errlog=self._stderr_log) if self._stderr_log else stdio_client(params)
+        )
         self._session = await self._exit_stack.enter_async_context(ClientSession(read_stream, write_stream))
         await self._session.initialize()
         return await self._discover_tools()
@@ -197,6 +205,9 @@ class McpConnection:
         self._session = None
         self._exit_stack = None
         self._tools = []
+        if self._stderr_log:
+            self._stderr_log.close()
+            self._stderr_log = None
 
     def get_status_dict(self) -> dict[str, Any]:
         return {
@@ -213,13 +224,14 @@ class McpConnection:
 
 
 class MCPClientManager:
-    def __init__(self):
+    def __init__(self, quiet: bool = False):
+        self.quiet = quiet
         self._connections: dict[str, McpConnection] = {}
 
     async def start_server(self, config: McpServerConfig) -> list[McpToolInfo]:
         if config.name in self._connections:
             await self.stop_server(config.name)
-        conn = McpConnection(config)
+        conn = McpConnection(config, quiet=self.quiet)
         try:
             tools = await conn.connect()
         except Exception:

@@ -11,6 +11,43 @@ from crabagent.core.agent.tools.registry import ToolRegistry
 from crabagent.core.event import EventType
 
 
+@pytest.mark.asyncio
+async def test_run_agent_uses_saved_default_model_and_provider(monkeypatch: pytest.MonkeyPatch):
+    context = AgentContext(workspace=Path.cwd(), max_iterations=1)
+    received = {}
+
+    async def fake_settings():
+        return "configured-model", "configured-provider"
+
+    async def fake_provider(provider_name=None):
+        received["provider_name"] = provider_name
+        return SimpleNamespace(
+            name="configured-provider",
+            provider_type="openai",
+            api_key="k",
+            base_url="",
+            enabled=True,
+        )
+
+    async def fake_acompletion(**kwargs):
+        received["model"] = kwargs["model"]
+        return _stream([_chunk(delta=_delta(content="done"), finish_reason="stop", usage=_usage())])
+
+    monkeypatch.setattr(loop, "_get_default_model_settings", fake_settings)
+    monkeypatch.setattr(loop, "_resolve_provider", fake_provider)
+    monkeypatch.setattr(
+        loop,
+        "litellm",
+        SimpleNamespace(acompletion=fake_acompletion, exceptions=loop.litellm.exceptions),
+    )
+    monkeypatch.setattr("crabagent.core.proxy.resolve_llm_proxy", _async_return(""))
+
+    await loop.run_agent(context, "hello")
+
+    assert received["provider_name"] == "configured-provider"
+    assert received["model"] == "openai/configured-model"
+
+
 def test_preview_result_handles_text_lists_and_images():
     result = loop._preview_result(
         [
