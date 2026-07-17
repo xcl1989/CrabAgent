@@ -59,10 +59,11 @@ async def lifespan(app: FastAPI):
     app.state._mcp_task = mcp_task
     logger.info("MCP servers initializing in background")
 
-    # Non-critical init runs in background — scheduler, OfficeCLI detection, etc.
-    # These don't block the app from serving requests.
+    # Non-critical services and the low-priority search catch-up are independent.
     background_init = asyncio.create_task(_background_startup(app))
     app.state._background_init = background_init
+    fts_task = asyncio.create_task(_background_fts_sync(app))
+    app.state._fts_task = fts_task
 
     # App is ready to serve API requests (init_db finished, routes mounted)
     app.state.ready = True
@@ -83,6 +84,14 @@ async def lifespan(app: FastAPI):
         except (asyncio.CancelledError, Exception):
             pass
 
+    fts_task = getattr(app.state, "_fts_task", None)
+    if fts_task and not fts_task.done():
+        fts_task.cancel()
+        try:
+            await fts_task
+        except (asyncio.CancelledError, Exception):
+            pass
+
     # Wait for background MCP init to finish (if still running) before cleanup
     mcp_task = getattr(app.state, "_mcp_task", None)
     if mcp_task and not mcp_task.done():
@@ -96,39 +105,28 @@ async def lifespan(app: FastAPI):
     logger.info("MCP servers stopped")
 
     try:
+        from crabagent.serve.scheduler import get_scheduler
+
         await get_scheduler().shutdown()
     except Exception:
         pass
 
 
-async def _background_startup(app: FastAPI) -> None:
-    """Run non-critical startup tasks in background (scheduler, OfficeCLI, FTS, etc.)."""
-
-    # ── FTS-CJK index check / rebuild ──
-    # This runs AFTER init_db() so the app is already serving requests.
-    # jieba segmentation runs in thread pool (asyncio.to_thread) so it
-    # doesn't block the event loop.
+async def _background_fts_sync(app: FastAPI) -> None:
+    """Start resumable search indexing after the UI and services are available."""
     try:
-        from sqlalchemy import text as sa_text
+        await asyncio.sleep(5)
+        from crabagent.core.fts import sync_index
 
-        from crabagent.core.database import async_session_factory
-
-        async with async_session_factory() as db:
-            cjk_count = (await db.execute(sa_text(
-                "SELECT count(*) FROM messages_fts_cjk"
-            ))).scalar() or 0
-            msg_count = (await db.execute(sa_text(
-                "SELECT count(*) FROM messages WHERE compressed=0"
-            ))).scalar() or 0
-        if cjk_count < msg_count:
-            logger.info(
-                "[FTS-CJK] Background indexing %d messages (existing: %d)…",
-                msg_count - cjk_count, cjk_count,
-            )
-            from crabagent.core.fts import rebuild_index
-            await rebuild_index()
+        await sync_index(is_busy=lambda: bool(app.state.active_agents))
+    except asyncio.CancelledError:
+        raise
     except Exception as e:
-        logger.warning("FTS-CJK background rebuild failed (non-fatal): %s", e)
+        logger.warning("FTS-CJK background sync failed (non-fatal): %s", e)
+
+
+async def _background_startup(app: FastAPI) -> None:
+    """Run non-critical services without waiting for search indexing."""
 
     # ── Scheduler startup ──
     try:
@@ -276,8 +274,9 @@ def _mount_spa(app: FastAPI):
     if dist is None:
         try:
             import sys
-            meipass = getattr(sys, '_MEIPASS', None) or (
-                Path(sys.executable).parent / '_internal' if getattr(sys, 'frozen', False) else None
+
+            meipass = getattr(sys, "_MEIPASS", None) or (
+                Path(sys.executable).parent / "_internal" if getattr(sys, "frozen", False) else None
             )
             if meipass:
                 candidate = Path(meipass) / "static"

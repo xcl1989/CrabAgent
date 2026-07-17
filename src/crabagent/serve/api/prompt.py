@@ -298,10 +298,11 @@ async def prompt_async(
     )
     _pending_fts_id = saved_msg.id
 
-    # Index user message for FTS5-CJK (after db session operations are done)
+    # Index outside the request path; search catch-up will retry it after a restart.
     try:
         from crabagent.core.fts import index_message
-        await index_message(_pending_fts_id, db_content)
+
+        asyncio.create_task(index_message(_pending_fts_id, db_content))
     except Exception:
         pass
 

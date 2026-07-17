@@ -18,14 +18,18 @@ function languageOf(node: any): string {
   return /language-([\w-]+)/.exec(className)?.[1]?.toLowerCase() || "";
 }
 
-function MarkdownPre({ children }: { children?: ReactNode }) {
+function MarkdownPre({ children, isStreaming = false }: { children?: ReactNode; isStreaming?: boolean }) {
   const code = Array.isArray(children) ? children[0] : children;
   const language = languageOf(code);
   const source = extractText(code).replace(/\n$/, "");
   if (language === "mermaid") return <MermaidDiagram source={source} />;
-  if (language === "crab-chart") return <ChartBlock source={source} />;
-  if (language === "crab-kpi") return <KpiBlock source={source} />;
+  if (language === "crab-chart") return <ChartBlock source={source} isStreaming={isStreaming} />;
+  if (language === "crab-kpi") return <KpiBlock source={source} isStreaming={isStreaming} />;
   return <CodeBlock language={language} code={source}>{code}</CodeBlock>;
+}
+
+function StreamingMarkdownPre({ children }: { children?: ReactNode }) {
+  return <MarkdownPre isStreaming>{children}</MarkdownPre>;
 }
 
 const components = {
@@ -33,6 +37,13 @@ const components = {
   pre: MarkdownPre,
 };
 
-export function RichMarkdown({ children }: { children: string }) {
-  return <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]} components={components}>{children}</ReactMarkdown>;
+const streamingComponents = {
+  ...components,
+  pre: StreamingMarkdownPre,
+};
+
+export function RichMarkdown({ children, isStreaming = false }: { children: string; isStreaming?: boolean }) {
+  // Keep component identities stable while text deltas arrive. Recreating the
+  // renderer remounts Recharts repeatedly and can trigger React 19 update loops.
+  return <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]} components={isStreaming ? streamingComponents : components}>{children}</ReactMarkdown>;
 }

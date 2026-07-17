@@ -999,7 +999,7 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(
               ) : (
                 <div className="max-w-[min(720px,85%)] flex-1">
                   <div className="markdown-body">
-                    <RichMarkdown>{msg.content || ""}</RichMarkdown>
+                    <RichMarkdown isStreaming={msg.isStreaming}>{msg.content || ""}</RichMarkdown>
                   </div>
                 </div>
               )}

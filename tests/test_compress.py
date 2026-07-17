@@ -3,12 +3,13 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
 import litellm
+import pytest
 
 from crabagent.core.agent import compress
 from crabagent.core.agent.context import AgentContext
 from crabagent.core.event import EventType
+from crabagent.core.fts import extract_indexable_text
 
 
 class FakeChunk:
@@ -131,3 +132,11 @@ async def test_compress_context_retries_on_rate_limit(monkeypatch: pytest.Monkey
 
 async def _async_noop(*args, **kwargs):
     return None
+
+
+def test_extract_indexable_text_skips_images_and_large_payloads():
+    content = (
+        '[{"type":"text","text":"keep this"},{"type":"image_url","image_url":{"url":"data:image/png;base64,AAAA"}}]'
+    )
+    assert extract_indexable_text(content) == "keep this"
+    assert extract_indexable_text("x" * 256_001) == ""

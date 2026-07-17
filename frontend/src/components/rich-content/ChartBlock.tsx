@@ -2,7 +2,7 @@ import {
   Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart, Pie, PieChart,
   ResponsiveContainer, Scatter, ScatterChart, Tooltip, XAxis, YAxis,
 } from "recharts";
-import { AlertTriangle, TrendingDown, TrendingUp } from "lucide-react";
+import { AlertTriangle, Loader2, TrendingDown, TrendingUp } from "lucide-react";
 import { parseChartSpec, parseKpiSpec } from "./chartSchema";
 import { VisualizationFrame } from "./VisualizationFrame";
 
@@ -12,7 +12,14 @@ function InvalidVisualization({ label, error, source }: { label: string; error: 
   return <VisualizationFrame title={label} source={source}><div className="visualization-error"><AlertTriangle size={17} /><span>{error}，已保留源内容。</span></div></VisualizationFrame>;
 }
 
-export function ChartBlock({ source }: { source: string }) {
+function VisualizationLoading() {
+  return <div className="visualization-loading"><Loader2 size={16} className="animate-spin" />正在生成图表…</div>;
+}
+
+export function ChartBlock({ source, isStreaming = false }: { source: string; isStreaming?: boolean }) {
+  // A streamed fenced block is valid Markdown before its JSON payload is complete.
+  // Keep the visualization in a pending state until the assistant finishes it.
+  if (isStreaming) return <VisualizationFrame title="数据图表" source={source}><VisualizationLoading /></VisualizationFrame>;
   try {
     const spec = parseChartSpec(source);
     const chart = spec.type === "bar" ? <BarChart data={spec.data}>{axes(spec)}{spec.series.map((item, index) => <Bar key={item.field} dataKey={item.field} name={item.name || item.field} fill={item.color || COLORS[index % COLORS.length]} radius={[4, 4, 0, 0]} />)}</BarChart>
@@ -31,7 +38,8 @@ function axes(spec: ReturnType<typeof parseChartSpec>) {
   return <><CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} /><XAxis dataKey={spec.x?.field} name={spec.x?.label} tick={{ fill: "var(--text-tertiary)", fontSize: 11 }} axisLine={false} tickLine={false} /><YAxis name={spec.y?.label} tick={{ fill: "var(--text-tertiary)", fontSize: 11 }} axisLine={false} tickLine={false} /><Tooltip contentStyle={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 8, fontSize: 12 }} labelStyle={{ color: "var(--text-secondary)" }} itemStyle={{ color: "var(--text-primary)" }} /><Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} /></>;
 }
 
-export function KpiBlock({ source }: { source: string }) {
+export function KpiBlock({ source, isStreaming = false }: { source: string; isStreaming?: boolean }) {
+  if (isStreaming) return <VisualizationFrame title="数据摘要" source={source}><VisualizationLoading /></VisualizationFrame>;
   try {
     const spec = parseKpiSpec(source);
     const Trend = spec.trend === "up" ? TrendingUp : spec.trend === "down" ? TrendingDown : null;
