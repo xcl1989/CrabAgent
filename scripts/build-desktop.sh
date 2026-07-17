@@ -7,6 +7,19 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 echo "=== Building CrabAgent Desktop App ==="
 echo ""
 
+# Some bundled environments only expose Node under /usr/local/bin. Keep the
+# build script usable there while preserving the caller's PATH precedence.
+if ! command -v node >/dev/null 2>&1 && [ -x /usr/local/bin/node ]; then
+  export PATH="/usr/local/bin:$PATH"
+fi
+if ! command -v npm >/dev/null 2>&1 && [ -f /usr/local/lib/node_modules/npm/bin/npm-cli.js ]; then
+  npm() { node /usr/local/lib/node_modules/npm/bin/npm-cli.js "$@"; }
+fi
+if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
+  echo "Error: Node.js and npm are required to build the desktop app."
+  exit 127
+fi
+
 # 1. Build frontend
 echo "[1/5] Building frontend..."
 cd "$PROJECT_ROOT/frontend"
@@ -18,7 +31,8 @@ echo "  Done."
 echo "[2/5] Copying static assets..."
 cd "$PROJECT_ROOT"
 mkdir -p src/crabagent/static
-cp -R frontend/dist/index.html frontend/dist/assets/* src/crabagent/static/
+rm -rf src/crabagent/static/assets
+cp -R frontend/dist/index.html frontend/dist/assets src/crabagent/static/
 echo "  Done."
 
 # 3. PyInstaller build

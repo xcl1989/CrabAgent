@@ -499,3 +499,19 @@ pre code {
 .kpi-block__change { display: inline-flex; align-items: center; gap: 0.2rem; padding-bottom: 0.2rem; font-size: 12px; font-weight: 600; }
 .kpi-block__change--up { color: var(--success); }.kpi-block__change--down { color: var(--danger); }.kpi-block__change--neutral { color: var(--text-secondary); }
 .kpi-block small { grid-column: 1 / -1; }
+.visualization-frame--expanded {
+  position: fixed;
+  z-index: 70;
+  inset: 5vh 5vw;
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  background: var(--bg-secondary);
+  box-shadow: 0 24px 80px color-mix(in srgb, var(--text-primary) 25%, transparent);
+}
+.visualization-frame--expanded .visualization-frame__content { flex: 1; min-height: 0; }
+.visualization-frame--expanded .chart-block, .visualization-frame--expanded .chart-block > div { height: 100% !important; }
+.visualization-frame--expanded .mermaid-diagram { height: 100%; display: grid; place-items: center; }
+@media (max-width: 640px) {
+  .visualization-frame--expanded { inset: 1rem; }
+}

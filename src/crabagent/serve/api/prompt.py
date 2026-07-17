@@ -431,6 +431,7 @@ When a visualization would improve the answer, use a fenced Markdown code block 
 - Use ```mermaid for flowcharts, sequence diagrams, state diagrams, ER diagrams, and architecture relationships.
 - Use ```crab-chart for data charts with JSON: version must be 1; type is bar, line, area, pie, or scatter; include x.field (the category field), data, and series. Example: {"version":1,"type":"bar","title":"Monthly revenue","x":{"field":"month","label":"Month"},"series":[{"field":"revenue","name":"Revenue"}],"data":[{"month":"Jan","revenue":120}]}. All values must be JSON primitives.
 - Use ```crab-kpi for a single metric with JSON: version must be 1; title and value are required; trend may be up, down, or neutral.
+Use the object series format for new charts, for example: "series":[{"field":"revenue","name":"Revenue"}] and "x":{"field":"month"}. Do not use the legacy string-array series format.
 Never put HTML, SVG, JavaScript, event handlers, URLs, or executable code in visualization blocks. Do not fabricate data; explain when data is insufficient. Use ordinary Markdown when a visualization is not helpful.
 """
     if req.file_context:

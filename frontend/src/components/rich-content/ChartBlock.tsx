@@ -28,7 +28,7 @@ export function ChartBlock({ source }: { source: string }) {
 }
 
 function axes(spec: ReturnType<typeof parseChartSpec>) {
-  return <><CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} /><XAxis dataKey={spec.x?.field} name={spec.x?.label} tick={{ fill: "var(--text-tertiary)", fontSize: 11 }} axisLine={false} tickLine={false} /><YAxis name={spec.y?.label} tick={{ fill: "var(--text-tertiary)", fontSize: 11 }} axisLine={false} tickLine={false} /><Tooltip /><Legend /></>;
+  return <><CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} /><XAxis dataKey={spec.x?.field} name={spec.x?.label} tick={{ fill: "var(--text-tertiary)", fontSize: 11 }} axisLine={false} tickLine={false} /><YAxis name={spec.y?.label} tick={{ fill: "var(--text-tertiary)", fontSize: 11 }} axisLine={false} tickLine={false} /><Tooltip contentStyle={{ background: "var(--bg-secondary)", border: "1px solid var(--border)", borderRadius: 8, fontSize: 12 }} labelStyle={{ color: "var(--text-secondary)" }} itemStyle={{ color: "var(--text-primary)" }} /><Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} /></>;
 }
 
 export function KpiBlock({ source }: { source: string }) {

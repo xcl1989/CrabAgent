@@ -62,12 +62,18 @@ export function parseChartSpec(source: string): CrabChartSpec {
   if (!Array.isArray(raw.data) || raw.data.length === 0 || raw.data.length > MAX_DATA_ROWS) {
     throw new Error(`data 必须包含 1-${MAX_DATA_ROWS} 行数据`);
   }
+  const rawSeries = raw.series.map((item, index) => {
+    // Accept the initial concise format ("series": ["revenue"]) so that
+    // messages already saved in history remain renderable after schema upgrades.
+    if (typeof item === "string") return { field: item, name: item };
+    if (!isRecord(item)) throw new Error(`series[${index}] 无效`);
+    return item;
+  });
   const x = raw.x;
-  const seriesFields = raw.series
-    .filter(isRecord)
+  const seriesFields = rawSeries
     .map((item) => item.field)
     .filter((field): field is string => typeof field === "string");
-  const explicitXField = isRecord(x) ? text(x.field, "x.field") : undefined;
+  const explicitXField = isRecord(x) ? text(x.field, "x.field") : text(raw.xField, "xField");
   // Older or less precise model replies may omit x.field. Infer a text category
   // column from the data instead of rejecting an otherwise safe chart payload.
   const inferredXField = raw.type === "pie" ? undefined : raw.data
@@ -83,8 +89,7 @@ export function parseChartSpec(source: string): CrabChartSpec {
     description: text(raw.description, "description"),
     x: xField ? { field: xField, label: isRecord(x) ? text(x.label, "x.label") : undefined } : undefined,
     y: isRecord(raw.y) ? { label: text(raw.y.label, "y.label") } : undefined,
-    series: raw.series.map((item, index) => {
-      if (!isRecord(item)) throw new Error(`series[${index}] 无效`);
+    series: rawSeries.map((item, index) => {
       const color = text(item.color, `series[${index}].color`);
       if (color && !SAFE_COLOR.test(color)) throw new Error("颜色仅支持 #hex、rgb() 或 hsl()");
       return { field: text(item.field, `series[${index}].field`, true)!, name: text(item.name, `series[${index}].name`), color };

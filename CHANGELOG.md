@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.12.8] — Rich Conversation Visualizations
+
+### Added
+- **Rich chat visualizations** — Assistant replies can now render Mermaid diagrams for flowcharts, sequence diagrams, state diagrams, ER diagrams, and architecture relationships. Mermaid loads only when a diagram is present to keep initial chat loading fast.
+- **Data charts and KPI cards** — New fenced Markdown blocks render bar, line, area, pie, and scatter charts, plus KPI summary cards. Charts support zooming, copying as PNG, and downloading a high-resolution PNG for easy sharing.
+- **Visualization validation tests** — Frontend schema tests cover current chart payloads, legacy saved messages, inferred category fields, invalid data rejection, and KPI parsing.
+
+### Fixed
+- **Historical chart compatibility** — Previously saved chart messages using `series: ["field"]` and `xField` are normalized and rendered alongside the current object-based schema.
+
 ## [0.12.7] — Ghosting Fix & Image Tool Enhancements
 
 ### Fixed
