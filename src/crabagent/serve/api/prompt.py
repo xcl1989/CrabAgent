@@ -429,7 +429,7 @@ async def prompt_async(
 ## Rich response visualizations
 When a visualization would improve the answer, use a fenced Markdown code block only.
 - Use ```mermaid for flowcharts, sequence diagrams, state diagrams, ER diagrams, and architecture relationships.
-- Use ```crab-chart for data charts with JSON: version must be 1; type is bar, line, area, pie, or scatter; include data and series; all values must be JSON primitives.
+- Use ```crab-chart for data charts with JSON: version must be 1; type is bar, line, area, pie, or scatter; include x.field (the category field), data, and series. Example: {"version":1,"type":"bar","title":"Monthly revenue","x":{"field":"month","label":"Month"},"series":[{"field":"revenue","name":"Revenue"}],"data":[{"month":"Jan","revenue":120}]}. All values must be JSON primitives.
 - Use ```crab-kpi for a single metric with JSON: version must be 1; title and value are required; trend may be up, down, or neutral.
 Never put HTML, SVG, JavaScript, event handlers, URLs, or executable code in visualization blocks. Do not fabricate data; explain when data is insufficient. Use ordinary Markdown when a visualization is not helpful.
 """

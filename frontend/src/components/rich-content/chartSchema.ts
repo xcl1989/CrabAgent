@@ -63,16 +63,25 @@ export function parseChartSpec(source: string): CrabChartSpec {
     throw new Error(`data 必须包含 1-${MAX_DATA_ROWS} 行数据`);
   }
   const x = raw.x;
-  if ((raw.type !== "pie") && (!isRecord(x) || !text(x.field, "x.field", true))) {
-    throw new Error("除饼图外必须提供 x.field");
-  }
+  const seriesFields = raw.series
+    .filter(isRecord)
+    .map((item) => item.field)
+    .filter((field): field is string => typeof field === "string");
+  const explicitXField = isRecord(x) ? text(x.field, "x.field") : undefined;
+  // Older or less precise model replies may omit x.field. Infer a text category
+  // column from the data instead of rejecting an otherwise safe chart payload.
+  const inferredXField = raw.type === "pie" ? undefined : raw.data
+    .flatMap((row) => isRecord(row) ? Object.entries(row) : [])
+    .find(([key, value]) => !seriesFields.includes(key) && typeof value === "string")?.[0];
+  const xField = explicitXField || inferredXField;
+  if (raw.type !== "pie" && !xField) throw new Error("除饼图外必须提供 x.field，或在数据中包含文本分类字段");
 
   return {
     version: 1,
     type: raw.type as ChartType,
     title: text(raw.title, "title"),
     description: text(raw.description, "description"),
-    x: isRecord(x) ? { field: text(x.field, "x.field", true)!, label: text(x.label, "x.label") } : undefined,
+    x: xField ? { field: xField, label: isRecord(x) ? text(x.label, "x.label") : undefined } : undefined,
     y: isRecord(raw.y) ? { label: text(raw.y.label, "y.label") } : undefined,
     series: raw.series.map((item, index) => {
       if (!isRecord(item)) throw new Error(`series[${index}] 无效`);
