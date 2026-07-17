@@ -424,6 +424,15 @@ async def prompt_async(
         locale=locale,
     )
     context.metadata["locale"] = locale
+    context.system_prompt += """
+
+## Rich response visualizations
+When a visualization would improve the answer, use a fenced Markdown code block only.
+- Use ```mermaid for flowcharts, sequence diagrams, state diagrams, ER diagrams, and architecture relationships.
+- Use ```crab-chart for data charts with JSON: version must be 1; type is bar, line, area, pie, or scatter; include data and series; all values must be JSON primitives.
+- Use ```crab-kpi for a single metric with JSON: version must be 1; title and value are required; trend may be up, down, or neutral.
+Never put HTML, SVG, JavaScript, event handlers, URLs, or executable code in visualization blocks. Do not fabricate data; explain when data is insufficient. Use ordinary Markdown when a visualization is not helpful.
+"""
     if req.file_context:
         context.metadata["current_doc"] = req.file_context
     if req.workspace_type:

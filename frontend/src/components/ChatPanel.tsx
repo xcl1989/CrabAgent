@@ -1,9 +1,6 @@
 import { forwardRef, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { useTranslation } from "react-i18next";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import rehypeHighlight from "rehype-highlight";
 import {
   Terminal,
   FileText,
@@ -24,7 +21,8 @@ import {
   X,
   ArrowDown,
 } from "lucide-react";
-import { Modal, CodeBlock } from "./ui";
+import { Modal } from "./ui";
+import { RichMarkdown } from "./rich-content/RichMarkdown";
 import ToolResultRender from "./ToolResultRender";
 import { cn } from "../lib/cn";
 
@@ -248,39 +246,6 @@ function parseSubAgentContent(raw: string): SubAgentSegment[] {
     remaining = blockEnd === Infinity ? "" : remaining.slice(blockEnd);
   }
   return segments;
-}
-
-/* ---------- Markdown code block override (uses CodeBlock) ---------- */
-
-const markdownComponents = {
-  a({ children, ...props }: any) {
-    return (
-      <a {...props} target="_blank" rel="noopener noreferrer">
-        {children}
-      </a>
-    );
-  },
-  pre({ children, ...props }: any) {
-    // children is <code class="hljs language-xxx">...</code>
-    const codeEl = Array.isArray(children) ? children[0] : children;
-    const className: string = codeEl?.props?.className || "";
-    const langMatch = /language-(\w+)/.exec(className);
-    const language = langMatch ? langMatch[1] : "";
-    const codeText = extractText(codeEl);
-    return (
-      <CodeBlock language={language} code={codeText}>
-        {codeEl}
-      </CodeBlock>
-    );
-  },
-};
-
-function extractText(node: any): string {
-  if (node == null) return "";
-  if (typeof node === "string") return node;
-  if (Array.isArray(node)) return node.map(extractText).join("");
-  if (node.props && node.props.children) return extractText(node.props.children);
-  return "";
 }
 
 /* ---------- Main component ---------- */
@@ -1034,13 +999,7 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(
               ) : (
                 <div className="max-w-[min(720px,85%)] flex-1">
                   <div className="markdown-body">
-                    <ReactMarkdown
-                      remarkPlugins={[remarkGfm]}
-                      rehypePlugins={[rehypeHighlight]}
-                      components={markdownComponents}
-                    >
-                      {msg.content || ""}
-                    </ReactMarkdown>
+                    <RichMarkdown>{msg.content || ""}</RichMarkdown>
                   </div>
                 </div>
               )}

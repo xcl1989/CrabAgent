@@ -460,3 +460,42 @@ pre code {
 [data-theme="light"] .chat-bubble-user {
   background: linear-gradient(135deg, var(--brand) 0%, var(--brand-active) 100%);
 }
+
+/* Rich blocks embedded in assistant Markdown responses. */
+.visualization-frame {
+  margin: 1rem 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--bg-secondary) 96%, #ccfbf1), var(--bg-secondary));
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--text-primary) 5%, transparent);
+}
+.visualization-frame__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.55rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.visualization-frame__actions { display: flex; gap: 0.25rem; }
+.visualization-frame__actions button { display: grid; place-items: center; padding: 0.25rem; border-radius: 4px; color: var(--text-tertiary); }
+.visualization-frame__actions button:hover { color: var(--text-primary); background: var(--bg-tertiary); }
+.visualization-frame__content { padding: 0.75rem; }
+.visualization-frame__source { max-height: 14rem; margin: 0; padding: 0.75rem; overflow: auto; border-top: 1px solid var(--border); background: var(--code-bg); color: var(--text-secondary); font-size: 11px; line-height: 1.5; }
+.visualization-description { margin: 0 0 0.5rem; color: var(--text-secondary); font-size: 12px; }
+.chart-block { width: 100%; min-width: 0; }
+.mermaid-diagram { min-width: max-content; overflow-x: auto; text-align: center; }
+.mermaid-diagram svg { max-width: 100%; height: auto; }
+.visualization-loading, .visualization-error { display: flex; align-items: center; gap: 0.5rem; min-height: 72px; color: var(--text-secondary); font-size: 13px; }
+.visualization-error { color: var(--warning); }
+.kpi-block { display: grid; grid-template-columns: 1fr auto; align-items: end; gap: 0.25rem 1rem; padding: 0.35rem; }
+.kpi-block__title, .kpi-block small { color: var(--text-secondary); font-size: 12px; }
+.kpi-block strong { grid-column: 1; font-family: Georgia, serif; font-size: 2rem; line-height: 1; letter-spacing: -0.04em; }
+.kpi-block__change { display: inline-flex; align-items: center; gap: 0.2rem; padding-bottom: 0.2rem; font-size: 12px; font-weight: 600; }
+.kpi-block__change--up { color: var(--success); }.kpi-block__change--down { color: var(--danger); }.kpi-block__change--neutral { color: var(--text-secondary); }
+.kpi-block small { grid-column: 1 / -1; }
