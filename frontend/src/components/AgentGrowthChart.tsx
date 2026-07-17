@@ -7,7 +7,6 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
-  ResponsiveContainer,
   LineChart,
   Line,
   ComposedChart,
@@ -15,6 +14,7 @@ import {
 } from "recharts";
 import { getAgentGrowth, GrowthPoint } from "../api/agents";
 import { useThemeColors } from "../lib/theme-colors";
+import { MeasuredChartContainer } from "./charts/MeasuredChartContainer";
 
 interface AgentGrowthChartProps {
   agentName: string;
@@ -108,8 +108,7 @@ export default function AgentGrowthChart({
 
       <div style={{ width: "100%", height: 200 }}>
         {mode === "overview" ? (
-          <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart
+          <MeasuredChartContainer height={200}>{({ width, height }) => <ComposedChart width={width} height={height}
               data={data}
               margin={{ top: 5, right: 5, bottom: 5, left: 5 }}
             >
@@ -150,11 +149,9 @@ export default function AgentGrowthChart({
                 strokeWidth={2}
                 dot={{ r: 2, fill: colors.success }}
               />
-            </ComposedChart>
-          </ResponsiveContainer>
+            </ComposedChart>}</MeasuredChartContainer>
         ) : mode === "elapsed" ? (
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart
+          <MeasuredChartContainer height={200}>{({ width, height }) => <LineChart width={width} height={height}
               data={data}
               margin={{ top: 5, right: 5, bottom: 5, left: 5 }}
             >
@@ -177,11 +174,9 @@ export default function AgentGrowthChart({
                 strokeWidth={2}
                 dot={{ r: 2, fill: colors.warning }}
               />
-            </LineChart>
-          </ResponsiveContainer>
+            </LineChart>}</MeasuredChartContainer>
         ) : (
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart
+          <MeasuredChartContainer height={200}>{({ width, height }) => <LineChart width={width} height={height}
               data={data}
               margin={{ top: 5, right: 5, bottom: 5, left: 5 }}
             >
@@ -201,8 +196,7 @@ export default function AgentGrowthChart({
                 strokeWidth={2}
                 dot={{ r: 2, fill: colors.accent2 }}
               />
-            </LineChart>
-          </ResponsiveContainer>
+            </LineChart>}</MeasuredChartContainer>
         )}
       </div>
     </div>

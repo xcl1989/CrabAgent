@@ -92,21 +92,11 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
         <div className={cn("absolute inset-0", page !== "chat" && "hidden")}>
           <ChatPage onActiveSessionChange={setActiveSessionId} />
         </div>
-        <div className={cn("absolute inset-0", page !== "agents" && "hidden")}>
-          <AgentsPage />
-        </div>
-        <div className={cn("absolute inset-0", page !== "memory" && "hidden")}>
-          <MemoryPage />
-        </div>
-        <div className={cn("absolute inset-0", page !== "usage" && "hidden")}>
-          <UsagePage />
-        </div>
-        <div className={cn("absolute inset-0", page !== "calendar" && "hidden")}>
-          <CalendarPage />
-        </div>
-        <div className={cn("absolute inset-0", page !== "settings" && "hidden")}>
-          <SettingsPage />
-        </div>
+        {page === "agents" && <div className="absolute inset-0"><AgentsPage /></div>}
+        {page === "memory" && <div className="absolute inset-0"><MemoryPage /></div>}
+        {page === "usage" && <div className="absolute inset-0"><UsagePage /></div>}
+        {page === "calendar" && <div className="absolute inset-0"><CalendarPage /></div>}
+        {page === "settings" && <div className="absolute inset-0"><SettingsPage /></div>}
       </div>
 
       {/* Non-blocking FTS indexing progress — bottom-right floating pill */}

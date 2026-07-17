@@ -1,10 +1,12 @@
+import { cloneElement } from "react";
 import {
   Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart, Pie, PieChart,
-  ResponsiveContainer, Scatter, ScatterChart, Tooltip, XAxis, YAxis,
+  Scatter, ScatterChart, Tooltip, XAxis, YAxis,
 } from "recharts";
 import { AlertTriangle, Loader2, TrendingDown, TrendingUp } from "lucide-react";
 import { parseChartSpec, parseKpiSpec } from "./chartSchema";
 import { VisualizationFrame } from "./VisualizationFrame";
+import { MeasuredChartContainer } from "../charts/MeasuredChartContainer";
 
 const COLORS = ["#0f766e", "#d97706", "#2563eb", "#db2777", "#7c3aed", "#65a30d"];
 
@@ -29,7 +31,7 @@ export function ChartBlock({ source, isStreaming = false }: { source: string; is
       : <PieChart><Tooltip /><Legend />{spec.series.map((item, seriesIndex) => <Pie key={item.field} data={spec.data} dataKey={item.field} nameKey={spec.x?.field || "name"} name={item.name || item.field} outerRadius={82} cx={seriesIndex ? "68%" : "32%"}>{spec.data.map((_, index) => <Cell key={index} fill={COLORS[index % COLORS.length]} />)}</Pie>)}</PieChart>;
     return <VisualizationFrame title={spec.title || "数据图表"} source={source}>
       {spec.description && <p className="visualization-description">{spec.description}</p>}
-      <div className="chart-block"><ResponsiveContainer width="100%" height={280}>{chart}</ResponsiveContainer></div>
+      <div className="chart-block"><MeasuredChartContainer height={280}>{({ width, height }) => cloneElement(chart, { width, height })}</MeasuredChartContainer></div>
     </VisualizationFrame>;
   } catch (error) { return <InvalidVisualization label="数据图表" error={error instanceof Error ? error.message : "图表配置无效"} source={source} />; }
 }

@@ -9,11 +9,11 @@ import {
   Line,
   Pie,
   PieChart,
-  ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from "recharts";
+import { MeasuredChartContainer } from "../components/charts/MeasuredChartContainer";
 import { ChevronDown, ChevronRight, Coins, TrendingUp, Zap, Database, BarChart3, PieChart as PieIcon, RefreshCw } from "lucide-react";
 import { cn } from "../lib/cn";
 import {
@@ -202,8 +202,7 @@ export default function UsagePage() {
             {/* Trend Chart (daily or hourly) */}
             {overview.trend.length > 0 && (
               <ChartCard title={overview.hourly ? t("usage.hourlyTrend") : t("usage.dailyTrend")}>
-                <ResponsiveContainer width="100%" height={260}>
-                  <ComposedChart data={overview.trend} margin={{ top: 8, right: 12, bottom: 0, left: 0 }}>
+                <MeasuredChartContainer height={260}>{({ width, height }) => <ComposedChart width={width} height={height} data={overview.trend} margin={{ top: 8, right: 12, bottom: 0, left: 0 }}>
                     <XAxis
                       dataKey={overview.hourly ? "hour" : "date"}
                       tick={{ fontSize: 10, fill: "var(--text-tertiary)" }}
@@ -263,8 +262,7 @@ export default function UsagePage() {
                       dot={false}
                       legendType="plainline"
                     />
-                  </ComposedChart>
-                </ResponsiveContainer>
+                  </ComposedChart>}</MeasuredChartContainer>
               </ChartCard>
             )}
 
@@ -397,8 +395,7 @@ function DistributionCard({
   return (
     <ChartCard title={title} action={toggleBtn}>
       {chartType === "bar" ? (
-        <ResponsiveContainer width="100%" height={200}>
-          <BarChart data={data} layout="vertical" margin={{ left: 10 }}>
+        <MeasuredChartContainer height={200}>{({ width, height }) => <BarChart width={width} height={height} data={data} layout="vertical" margin={{ left: 10 }}>
             <XAxis type="number" tick={{ fontSize: 10, fill: "var(--text-tertiary)" }} tickFormatter={formatTokens} />
             <YAxis type="category" dataKey={nameKey} tick={{ fontSize: 11, fill: "var(--text-secondary)" }} width={80} />
             <Tooltip
@@ -415,11 +412,9 @@ function DistributionCard({
                 <Cell key={idx} fill={PIE_COLORS[idx % PIE_COLORS.length]} />
               ))}
             </Bar>
-          </BarChart>
-        </ResponsiveContainer>
+          </BarChart>}</MeasuredChartContainer>
       ) : (
-        <ResponsiveContainer width="100%" height={200}>
-          <PieChart>
+        <MeasuredChartContainer height={200}>{({ width, height }) => <PieChart width={width} height={height}>
             <Pie
               data={data}
               dataKey="total_tokens"
@@ -444,8 +439,7 @@ function DistributionCard({
               }}
               formatter={(value: unknown) => formatTokens(Number(value))}
             />
-          </PieChart>
-        </ResponsiveContainer>
+          </PieChart>}</MeasuredChartContainer>
       )}
     </ChartCard>
   );

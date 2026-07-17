@@ -6,11 +6,14 @@ import "./i18n";
 import App from "./App";
 import { ThemeProvider } from "./lib/theme";
 import { Toaster } from "./components/ui/Toast";
+import { AppErrorBoundary } from "./components/AppErrorBoundary";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <ThemeProvider>
-      <App />
+      <AppErrorBoundary>
+        <App />
+      </AppErrorBoundary>
       <Toaster />
     </ThemeProvider>
   </StrictMode>,
