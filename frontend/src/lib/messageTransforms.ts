@@ -233,6 +233,10 @@ export function sseEventToMessages(event: SSEEvent, messages: ChatMessage[]): Ch
         sub_agent_id: subId,
         sub_agent_name: name,
         sub_agent_display: (event.data.display_name as string) || name,
+        sub_agent_task: (event.data.task as string) || "",
+        sub_agent_model: (event.data.model as string) || "",
+        sub_agent_pipeline_run_id: (event.data.pipeline_run_id as number | null) ?? null,
+        sub_agent_pipeline_step_id: (event.data.pipeline_step_id as string | null) ?? null,
       },
     ];
   }
@@ -260,6 +264,8 @@ export function sseEventToMessages(event: SSEEvent, messages: ChatMessage[]): Ch
         sub_agent_elapsed: event.data.elapsed as number,
         sub_agent_tokens: event.data.tokens as number,
         sub_agent_iterations: event.data.iterations as number,
+        sub_agent_task: (event.data.task as string) || updated[idx].sub_agent_task || "",
+        sub_agent_model: (event.data.model as string) || updated[idx].sub_agent_model || "",
       };
       return updated;
     }
@@ -297,6 +303,8 @@ export function sseEventToMessages(event: SSEEvent, messages: ChatMessage[]): Ch
       sub_agent_elapsed: event.data.elapsed as number,
       sub_agent_tokens: event.data.tokens as number,
       sub_agent_iterations: event.data.iterations as number,
+      sub_agent_task: (event.data.task as string) || updated[idx].sub_agent_task || "",
+      sub_agent_model: (event.data.model as string) || updated[idx].sub_agent_model || "",
     };
     return updated;
   }
@@ -479,6 +487,8 @@ export function dbMessagesToChat(msgs: Message[]): ChatMessage[] {
             sub_agent_elapsed: data.elapsed,
             sub_agent_tokens: data.tokens,
             sub_agent_iterations: data.iterations,
+            sub_agent_task: data.task || "",
+            sub_agent_model: data.model || "",
           });
         }
       } catch {

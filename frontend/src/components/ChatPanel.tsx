@@ -14,7 +14,6 @@ import {
   XCircle,
   AlertTriangle,
   MessageSquare,
-  Bot,
   Loader2,
   Wrench,
   Zap,
@@ -24,6 +23,7 @@ import {
 import { Modal } from "./ui";
 import { RichMarkdown } from "./rich-content/RichMarkdown";
 import ToolResultRender from "./ToolResultRender";
+import { SubAgentCard, DelegateGroup } from "./SubAgentCard";
 import { cn } from "../lib/cn";
 
 interface ChatMessage {
@@ -50,6 +50,10 @@ interface ChatMessage {
   sub_agent_elapsed?: number;
   sub_agent_tokens?: number;
   sub_agent_iterations?: number;
+  sub_agent_task?: string;
+  sub_agent_model?: string;
+  sub_agent_pipeline_run_id?: number | null;
+  sub_agent_pipeline_step_id?: string | null;
   retry_info?: {
     phase: "retrying" | "countdown" | "exhausted";
     message: string;
@@ -182,72 +186,6 @@ function UserInputOptions({
   );
 }
 
-const AGENT_ICONS: Record<string, ReactNode> = {
-  researcher: <Search size={13} />,
-  analyst: <Sparkles size={13} />,
-  coder: <Terminal size={13} />,
-  writer: <FileText size={13} />,
-};
-
-interface SubAgentSegment {
-  type: "text" | "tool_call" | "tool_result";
-  content: string;
-  name?: string;
-}
-
-function parseSubAgentContent(raw: string): SubAgentSegment[] {
-  const segments: SubAgentSegment[] = [];
-  let remaining = raw;
-  while (remaining.length > 0) {
-    const callIdx = remaining.indexOf("\n→ ");
-    const resultIdx = remaining.indexOf("\n← ");
-    const nextSpecial = Math.min(
-      callIdx >= 0 ? callIdx : Infinity,
-      resultIdx >= 0 ? resultIdx : Infinity,
-    );
-    if (nextSpecial === Infinity) {
-      if (remaining.trim()) {
-        segments.push({ type: "text", content: remaining.trim() });
-      }
-      break;
-    }
-    if (nextSpecial > 0) {
-      const textPart = remaining.slice(0, nextSpecial).trim();
-      if (textPart) segments.push({ type: "text", content: textPart });
-    }
-    const isCall = callIdx >= 0 && (resultIdx < 0 || callIdx <= resultIdx);
-    const marker = isCall ? "\n→ " : "\n← ";
-    const start = remaining.indexOf(marker);
-    const end = remaining.indexOf("\n→ ", start + 1);
-    const end2 = remaining.indexOf("\n← ", start + 1);
-    const blockEnd = Math.min(
-      end >= 0 ? end : Infinity,
-      end2 >= 0 ? end2 : Infinity,
-    );
-    const block =
-      blockEnd === Infinity
-        ? remaining.slice(start + marker.length)
-        : remaining.slice(start + marker.length, blockEnd);
-    if (isCall) {
-      const colonIdx = block.indexOf("(");
-      const name = colonIdx >= 0 ? block.slice(0, colonIdx) : block;
-      const args = colonIdx >= 0 ? block.slice(colonIdx) : "()";
-      segments.push({ type: "tool_call", content: args, name: name.trim() });
-    } else {
-      const colonIdx = block.indexOf(":");
-      const name = colonIdx >= 0 ? block.slice(0, colonIdx) : "";
-      const result = colonIdx >= 0 ? block.slice(colonIdx + 1) : block;
-      segments.push({
-        type: "tool_result",
-        content: result.trim(),
-        name: name.trim(),
-      });
-    }
-    remaining = blockEnd === Infinity ? "" : remaining.slice(blockEnd);
-  }
-  return segments;
-}
-
 /* ---------- Main component ---------- */
 
 const ChatPanel = forwardRef<HTMLDivElement, Props>(
@@ -272,8 +210,9 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(
     const [activeSubAgentId, setActiveSubAgentId] = useState<string | null>(
       null,
     );
-    const [modalContent, setModalContent] = useState("");
-    const modalContentRef = useRef("");
+    // Tick state to force re-render of the active sub-agent card while the
+    // live content stream (stored in a ref outside React) keeps growing.
+    const [liveTick, setLiveTick] = useState(0);
 
     // ── Smart auto-scroll (stable, jitter-free) ───────────────
     // Design principles:
@@ -436,35 +375,27 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(
     const resolvedSubAgentId = externalSubAgentId ?? activeSubAgentId;
     const closeSubAgent = () => {
       setActiveSubAgentId(null);
-      setModalContent("");
-      modalContentRef.current = "";
       onSubAgentModalClose?.();
     };
 
+    // Poll the live content ref for the active sub-agent to force a re-render
+    // (the content map is a ref, so updates don't trigger React re-render).
     useEffect(() => {
       if (!resolvedSubAgentId || !getSubAgentContent) return;
-      const newContent = getSubAgentContent(resolvedSubAgentId);
-      if (!newContent || newContent === modalContentRef.current) return;
-      modalContentRef.current = newContent;
-      if (!modalTimerRef.current) {
-        setModalContent(newContent);
-        modalTimerRef.current = setTimeout(() => {
+      modalTimerRef.current = setInterval(() => {
+        setLiveTick((t) => t + 1);
+      }, 300);
+      return () => {
+        if (modalTimerRef.current) {
+          clearInterval(modalTimerRef.current);
           modalTimerRef.current = null;
-          if (!resolvedSubAgentId || !getSubAgentContent) return;
-          const c = getSubAgentContent(resolvedSubAgentId);
-          if (c && c !== modalContentRef.current) {
-            modalContentRef.current = c;
-            setModalContent(c);
-          }
-        }, 500);
-      }
+        }
+      };
     }, [resolvedSubAgentId, getSubAgentContent]);
 
-    useEffect(() => {
-      return () => {
-        if (modalTimerRef.current) clearTimeout(modalTimerRef.current);
-      };
-    }, []);
+    // Reference liveTick so the linter doesn't complain; the interval
+    // bumps this counter to trigger re-renders during streaming.
+    void liveTick;
 
     const grouped = useMemo(() => {
       const result: (ChatMessage | ChatMessage[])[] = [];
@@ -815,50 +746,30 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(
           if (msg.role === "sub_agent") {
             const completed = msg.sub_agent_elapsed !== undefined;
             const isActive = resolvedSubAgentId === msg.sub_agent_id;
-            const agentIcon =
-              AGENT_ICONS[msg.sub_agent_name || ""] || <Bot size={13} />;
+            // The live-stream content is maintained outside React state (ref map),
+            // so fetch it on each render to show the latest tool calls.
+            const liveContent = msg.sub_agent_id && getSubAgentContent
+              ? getSubAgentContent(msg.sub_agent_id)
+              : msg.content;
             return (
-              <button
+              <SubAgentCard
                 key={msg.id}
+                agentName={msg.sub_agent_name}
+                agentDisplay={msg.sub_agent_display || msg.sub_agent_name}
+                task={msg.sub_agent_task}
+                model={msg.sub_agent_model}
+                status={completed ? "completed" : "running"}
+                iterations={msg.sub_agent_iterations}
+                elapsed={msg.sub_agent_elapsed}
+                tokens={msg.sub_agent_tokens}
+                content={liveContent || msg.content}
+                isActive={isActive}
+                expanded={isActive ? true : undefined}
                 onClick={() => {
                   if (isActive) closeSubAgent();
                   else setActiveSubAgentId(msg.sub_agent_id ?? msg.id);
                 }}
-                className={cn(
-                  "mb-3 ml-3 flex items-center gap-2 cursor-pointer py-1.5 px-3 rounded-lg text-xs select-none transition-all",
-                  isActive
-                    ? "bg-[var(--accent-2-bg)] border-[var(--accent-2)] text-[var(--accent-2)]"
-                    : "bg-[var(--bg-secondary)] border-[var(--border)] text-[var(--text-secondary)] hover:border-[var(--border-strong)]",
-                  "border",
-                )}
-              >
-                <span className="shrink-0">{agentIcon}</span>
-                <span className="font-medium text-[var(--text-primary)] truncate">
-                  {msg.sub_agent_display || msg.sub_agent_name}
-                </span>
-                {completed ? (
-                  <CheckCircle2
-                    size={12}
-                    className="text-[var(--success)] shrink-0"
-                  />
-                ) : (
-                  <Loader2
-                    size={11}
-                    className="animate-spin text-[var(--accent-2)] shrink-0"
-                  />
-                )}
-                {completed && (
-                  <span className="text-[10px] text-[var(--text-tertiary)] font-mono">
-                    {msg.sub_agent_iterations} steps · {msg.sub_agent_elapsed}s ·{" "}
-                    {msg.sub_agent_tokens} tok
-                  </span>
-                )}
-                {!completed && (
-                  <span className="text-[10px] text-[var(--accent-2)] animate-pulse">
-                    running…
-                  </span>
-                )}
-              </button>
+              />
             );
           }
 
@@ -1057,109 +968,10 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(
           </div>
         </Modal>
 
-        {/* Sub-agent live stream modal */}
-        {resolvedSubAgentId &&
-          (() => {
-            const agent = messages.find(
-              (m) =>
-                m.sub_agent_id === resolvedSubAgentId ||
-                m.id === resolvedSubAgentId,
-            );
-            if (!agent) return null;
-            const completed = agent.sub_agent_elapsed !== undefined;
-            const agentIcon =
-              AGENT_ICONS[agent.sub_agent_name || ""] || <Bot size={16} />;
-            return (
-              <Modal
-                open={true}
-                onOpenChange={(o) => !o && closeSubAgent()}
-                size="lg"
-                title={
-                  <div className="flex items-center gap-2">
-                    <span className="text-[var(--accent-2)]">{agentIcon}</span>
-                    <span>{agent.sub_agent_display || agent.sub_agent_name}</span>
-                    {!completed && (
-                      <span className="flex items-center gap-1 ml-1 text-xs text-[var(--accent-2)]">
-                        <Loader2 size={12} className="animate-spin" />
-                        running…
-                      </span>
-                    )}
-                  </div>
-                }
-                description={
-                  completed
-                    ? `${agent.sub_agent_iterations} steps · ${agent.sub_agent_elapsed}s · ${agent.sub_agent_tokens} tokens`
-                    : undefined
-                }
-              >
-                <SubAgentBody content={modalContent} />
-              </Modal>
-            );
-          })()}
       </div>
     );
   },
 );
-
-function SubAgentBody({ content }: { content: string }) {
-  const segments = parseSubAgentContent(content);
-  if (segments.length === 0) {
-    return (
-      <div className="flex items-center justify-center gap-2 py-8 text-sm text-[var(--text-tertiary)]">
-        <Loader2 size={14} className="animate-spin" />
-        <span>working…</span>
-      </div>
-    );
-  }
-  return (
-    <div className="flex flex-col gap-3">
-      {segments.map((seg, i) => {
-        if (seg.type === "text") {
-          return (
-            <div
-              key={i}
-              className="text-sm whitespace-pre-wrap leading-relaxed text-[var(--text-primary)]"
-            >
-              {seg.content}
-            </div>
-          );
-        }
-        if (seg.type === "tool_call") {
-          return (
-            <div
-              key={i}
-              className="flex items-center gap-2 py-1.5 px-3 rounded-md text-xs bg-[var(--bg-tertiary)] border border-[var(--border)]"
-            >
-              <Zap size={12} className="text-[var(--accent-2)] shrink-0" />
-              <span className="font-medium text-[var(--accent-2)] shrink-0">
-                {seg.name}
-              </span>
-              <span className="text-[var(--text-tertiary)] font-mono truncate">
-                {seg.content}
-              </span>
-            </div>
-          );
-        }
-        if (seg.type === "tool_result") {
-          return (
-            <div
-              key={i}
-              className="rounded-md overflow-hidden bg-[var(--bg-tertiary)] border-l-[3px] border-l-[var(--success)]"
-            >
-              <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--success)] flex items-center gap-1.5">
-                <CheckCircle2 size={11} /> {seg.name}
-              </div>
-              <pre className="px-3 py-2 text-[12px] whitespace-pre-wrap break-all leading-relaxed font-mono text-[var(--text-secondary)] m-0 max-h-48 overflow-auto bg-transparent! border-0!">
-                {seg.content}
-              </pre>
-            </div>
-          );
-        }
-        return null;
-      })}
-    </div>
-  );
-}
 
 ChatPanel.displayName = "ChatPanel";
 export default ChatPanel;

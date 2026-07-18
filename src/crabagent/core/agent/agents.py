@@ -906,6 +906,8 @@ async def spawn_sub_agent(
                     "tokens": sub_context.total_tokens,
                     "iterations": sub_context.iteration,
                     "result": last_text,
+                    "task": task[:200],
+                    "model": sub_context.model or parent_context.model or "",
                 },
             )
         )
@@ -933,6 +935,8 @@ async def spawn_sub_agent(
                 "elapsed": elapsed,
                 "tokens": sub_context.total_tokens,
                 "iterations": sub_context.iteration,
+                "task": task[:200],
+                "model": sub_context.model or parent_context.model or "",
             },
             ensure_ascii=False,
         )

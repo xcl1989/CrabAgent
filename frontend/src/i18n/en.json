@@ -357,6 +357,17 @@
     "markAll": "Mark all",
     "emailAction": "Please help me handle this email:"
   },
+  "subAgent": {
+    "running": "running",
+    "completed": "completed",
+    "failed": "failed",
+    "delegation": "Delegation",
+    "pipeline": "Pipeline",
+    "parallel": "Parallel",
+    "viewFull": "View full process",
+    "steps": "steps",
+    "noTask": "Working…"
+  },
   "chatPanel": {
     "toolRequiresPermission": "{{tool}} requires permission",
     "typeAnswer": "Type your answer…",

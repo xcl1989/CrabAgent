@@ -46,3 +46,12 @@ def test_extract_local_images_handles_parenthesized_paths(tmp_path: Path):
     assert len(blocks) == 1
     assert blocks[0]["file_path"] == str(image_file)
     assert blocks[0]["mime"] == "image/jpeg"
+
+
+def test_mermaid_generation_instructions_require_conservative_flowchart_syntax():
+    instructions = prompt_api.MERMAID_GENERATION_INSTRUCTIONS
+
+    assert '`flowchart LR` or `flowchart TD`' in instructions
+    assert '`Q -->|Yes| A`' in instructions
+    assert 'Never use the ambiguous `-- label -->` form.' in instructions
+    assert 'Do not use HTML (including `<br/>`)' in instructions

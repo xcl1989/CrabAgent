@@ -66,6 +66,8 @@
   --agent-coder-bg: rgba(110, 192, 122, 0.12);
   --agent-writer: #fbbf24;
   --agent-writer-bg: rgba(251, 191, 36, 0.12);
+  --agent-plan_creater: #22d3ee;
+  --agent-plan_creater-bg: rgba(34, 211, 238, 0.12);
 
   /* Code block */
   --code-bg: #14120f;
@@ -135,6 +137,8 @@
   --agent-coder-bg: rgba(77, 150, 89, 0.08);
   --agent-writer: #d97706;
   --agent-writer-bg: rgba(217, 119, 6, 0.08);
+  --agent-plan_creater: #0891b2;
+  --agent-plan_creater-bg: rgba(8, 145, 178, 0.08);
 
   --code-bg: #f5f0e5;
   --code-border: #e0d8c8;
@@ -516,3 +520,58 @@ pre code {
   .visualization-frame--expanded { inset: 1rem; }
 }
 .visualization-frame__export-error { margin-left: 0.5rem; color: var(--danger); font-size: 10px; font-style: normal; letter-spacing: 0; text-transform: none; }
+
+/* ── Sub-agent timeline cards ─────────────────────────────────────────── */
+.subagent-card {
+  border-left: 3px solid var(--agent-default, var(--text-tertiary));
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.subagent-card--active {
+  box-shadow: 0 0 0 1px var(--agent-color, var(--accent)), 0 0 20px var(--agent-color-bg, transparent);
+}
+.subagent-card__connector {
+  width: 2px;
+  background: linear-gradient(to bottom, var(--border), transparent);
+  margin-left: 14px;
+  min-height: 12px;
+}
+.subagent-stat-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-family: var(--font-mono, monospace);
+  background: var(--bg-tertiary);
+  color: var(--text-tertiary);
+  border: 1px solid var(--border-subtle, var(--border));
+}
+.subagent-stat-badge--model {
+  color: var(--accent-2);
+  border-color: var(--accent-2-bg);
+}
+.subagent-timeline-entry {
+  position: relative;
+  padding-left: 16px;
+}
+.subagent-timeline-entry::before {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 8px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--agent-color, var(--text-tertiary));
+  opacity: 0.6;
+}
+.subagent-timeline-entry::after {
+  content: '';
+  position: absolute;
+  left: 6px;
+  top: 14px;
+  bottom: -4px;
+  width: 2px;
+  background: var(--border-subtle, var(--border));
+}

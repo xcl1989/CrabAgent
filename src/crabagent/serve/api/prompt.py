@@ -59,6 +59,33 @@ _tasks: dict[str, asyncio.Task] = {}
 _session_locks: dict[str, asyncio.Lock] = {}
 
 
+MERMAID_GENERATION_INSTRUCTIONS = """\
+Mermaid reliability rules:
+- Generate Mermaid only when it materially improves the response; otherwise use ordinary Markdown.
+- For flowcharts, use the conservative syntax `flowchart LR` or `flowchart TD`.
+  Give every node a simple ASCII identifier and quote every label:
+  `A["Label"]` and `Q{"Question?"}`.
+- Label every branch only with the pipe form: `Q -->|Yes| A`. Never use the ambiguous `-- label -->` form.
+- Keep node and edge labels as plain text. Do not use HTML (including `<br/>`),
+  Markdown, URLs, HTML entities, unescaped quotes, or Mermaid styling/directive
+  syntax in labels. Prefer a semicolon or separate node instead of a line break.
+- Avoid parser-sensitive punctuation in labels where possible, especially brackets,
+  braces, parentheses, colons, and quotation marks. If exact wording needs it,
+  simplify the wording rather than using unquoted labels.
+- Before sending the answer, visually inspect every Mermaid block for balanced
+  brackets/quotes and ensure all edges use a supported diagram-specific form.
+
+Safe flowchart example:
+```mermaid
+flowchart LR
+  A["Start"] --> B["Check version"]
+  B --> C{"Update available?"}
+  C -->|No| D["Stay current"]
+  C -->|Yes| E["Show update notice"]
+```
+"""
+
+
 def _save_image_temp(data_url: str) -> dict:
     import base64
     import hashlib
@@ -429,11 +456,25 @@ async def prompt_async(
 
 ## Rich response visualizations
 When a visualization would improve the answer, use a fenced Markdown code block only.
-- Use ```mermaid for flowcharts, sequence diagrams, state diagrams, ER diagrams, and architecture relationships.
-- Use ```crab-chart for data charts with JSON: version must be 1; type is bar, line, area, pie, or scatter; include x.field (the category field), data, and series. Example: {"version":1,"type":"bar","title":"Monthly revenue","x":{"field":"month","label":"Month"},"series":[{"field":"revenue","name":"Revenue"}],"data":[{"month":"Jan","revenue":120}]}. All values must be JSON primitives.
-- Use ```crab-kpi for a single metric with JSON: version must be 1; title and value are required; trend may be up, down, or neutral.
-Use the object series format for new charts, for example: "series":[{"field":"revenue","name":"Revenue"}] and "x":{"field":"month"}. Do not use the legacy string-array series format.
-Never put HTML, SVG, JavaScript, event handlers, URLs, or executable code in visualization blocks. Do not fabricate data; explain when data is insufficient. Use ordinary Markdown when a visualization is not helpful.
+- Use ```mermaid for flowcharts, sequence diagrams, state diagrams, ER diagrams,
+  and architecture relationships. Follow the Mermaid reliability rules below exactly.
+- Use ```crab-chart for data charts with JSON: version must be 1; type is bar, line,
+  area, pie, or scatter; include x.field, data, and series. Example:
+  {"version":1,"type":"bar","title":"Monthly revenue",
+  "x":{"field":"month","label":"Month"},
+  "series":[{"field":"revenue","name":"Revenue"}],
+  "data":[{"month":"Jan","revenue":120}]}.
+  All values must be JSON primitives.
+- Use ```crab-kpi for a single metric with JSON: version must be 1; title and value
+  are required; trend may be up, down, or neutral.
+Use the object series format for new charts, for example:
+"series":[{"field":"revenue","name":"Revenue"}] and "x":{"field":"month"}.
+Do not use the legacy string-array series format.
+Never put HTML, SVG, JavaScript, event handlers, URLs, or executable code in
+visualization blocks. Do not fabricate data; explain when data is insufficient.
+Use ordinary Markdown when a visualization is not helpful.
+
+""" + MERMAID_GENERATION_INSTRUCTIONS + """
 """
     if req.file_context:
         context.metadata["current_doc"] = req.file_context
