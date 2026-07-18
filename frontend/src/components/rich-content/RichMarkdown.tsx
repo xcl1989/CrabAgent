@@ -22,7 +22,7 @@ function MarkdownPre({ children, isStreaming = false }: { children?: ReactNode; 
   const code = Array.isArray(children) ? children[0] : children;
   const language = languageOf(code);
   const source = extractText(code).replace(/\n$/, "");
-  if (language === "mermaid") return <MermaidDiagram source={source} />;
+  if (language === "mermaid") return <MermaidDiagram source={source} isStreaming={isStreaming} />;
   if (language === "crab-chart") return <ChartBlock source={source} isStreaming={isStreaming} />;
   if (language === "crab-kpi") return <KpiBlock source={source} isStreaming={isStreaming} />;
   return <CodeBlock language={language} code={source}>{code}</CodeBlock>;

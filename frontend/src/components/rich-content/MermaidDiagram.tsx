@@ -31,21 +31,30 @@ async function getMermaid() {
   return mermaid;
 }
 
-export function MermaidDiagram({ source }: { source: string }) {
+export function MermaidDiagram({ source, isStreaming = false }: { source: string; isStreaming?: boolean }) {
   const id = useId().replace(/:/g, "-");
   const [state, setState] = useState<{ svg?: string; error?: string }>({});
 
   useEffect(() => {
     let active = true;
+    if (isStreaming) return () => { active = false; };
+
     setState({});
     getMermaid()
-      .then((mermaid) => mermaid.render(`mermaid-${id}`, source))
-      .then(({ svg }) => active && setState({ svg }))
+      // Parse first: Mermaid can otherwise return an error SVG as a successful render.
+      .then(async (mermaid) => {
+        await mermaid.parse(source);
+        return mermaid.render(`mermaid-${id}`, source);
+      })
+      .then(({ svg }) => {
+        if (/Syntax error in text/i.test(svg)) throw new Error("Mermaid syntax error");
+        if (active) setState({ svg });
+      })
       .catch(() => active && setState({ error: "无法解析 Mermaid 图，请检查语法。" }));
     return () => { active = false; };
-  }, [id, source]);
+  }, [id, isStreaming, source]);
 
   return <VisualizationFrame title="流程图" source={source}>
-    {state.svg ? <div className="mermaid-diagram" dangerouslySetInnerHTML={{ __html: state.svg }} /> : state.error ? <div className="visualization-error"><AlertTriangle size={17} /><span>{state.error}</span></div> : <div className="visualization-loading"><Loader2 size={16} className="animate-spin" />正在生成图表…</div>}
+    {state.svg ? <div className="mermaid-diagram" dangerouslySetInnerHTML={{ __html: state.svg }} /> : state.error ? <div className="visualization-error"><AlertTriangle size={17} /><span>{state.error}</span></div> : <div className="visualization-loading"><Loader2 size={16} className="animate-spin" />{isStreaming ? "等待图表内容完成…" : "正在生成图表…"}</div>}
   </VisualizationFrame>;
 }
