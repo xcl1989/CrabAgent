@@ -8,6 +8,21 @@ English version: [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
+## [0.12.9] — 子 Agent 模型映射与设置缓存
+
+### 新增
+- **子 Agent 模型映射** — 新增成本控制机制（设置 → 通用）：当主 Agent 使用模型 M（来自 Provider P）委派子任务时，子 Agent 自动切换为映射的模型 M'（Provider P'），支持跨 Provider。数据以 `{"P|M": "P'|M'"}` JSON 存于 app_settings。解析优先级：映射命中 → 子 Agent 自身默认 → 父模型兜底。
+- **子 Agent 模型映射编辑器** — 新增 `SubAgentModelMapEditor` 组件，每行两个 `ModelSelector` 下拉（父→子），支持增删。
+
+### 修复
+- **设置页切换标签的加载闪烁** — `SettingsPage` 为条件渲染，每次切换标签都会重新请求 `/settings`、`/providers` 及每个 Provider 的 `/providers/:name/models`。新增模块级 `useSettingsData()` 缓存：再次挂载时立即渲染，仅在显式的 Provider 变更或保存后才重新拉取。
+- **流式过程中图表/KPI 卡在加载态** — 将 `isStreaming` 判断移到 `ChartBlock`/`KpiBlock` 的 `catch` 块中，图表在 JSON 一旦解析成功就立即渲染，无需等待整段 AI 回复结束。
+
+### 变更
+- **委派使用解析后的模型** — 子 Agent 的事件上报与经验反思现在使用子 Agent 实际解析出的模型/Provider，而非父 Agent 的。
+
+---
+
 ## [0.12.8] — 对话富可视化
 
 ### 新增

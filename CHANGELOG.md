@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.12.9] — Sub-Agent Model Mapping & Settings Cache
+
+### Added
+- **Sub-agent model mapping** — New cost-control mechanism in Settings → General: when a parent agent using model M (from provider P) delegates a sub-task, the sub-agent automatically switches to a mapped model M' (on provider P'), possibly cross-provider. Stored as `{"P|M": "P'|M'"}` JSON in app_settings. Resolution priority: map hit → sub-agent profile default → parent model fallback.
+- **Sub-Agent Model Mapping editor** — New `SubAgentModelMapEditor` component with two `ModelSelector` dropdowns per row (parent → child) plus add/remove controls.
+
+### Fixed
+- **Settings page reload flash on tab switch** — `SettingsPage` is conditionally rendered, so every tab switch re-fetched `/settings`, `/providers`, and one `/providers/:name/models` per provider. Added a module-level `useSettingsData()` cache that renders instantly on re-mount and only refetches on explicit provider changes or after a save.
+- **Charts/KPI stay in pending state during streaming** — Moved the `isStreaming` guard into the `catch` block of `ChartBlock`/`KpiBlock` so a visualization renders as soon as its JSON payload parses, instead of waiting for the entire assistant response to finish.
+
+### Changed
+- **Delegation uses resolved model** — Sub-agent event reporting and lesson reflection now use the sub-agent's actual resolved model/provider rather than the parent's.
+
+---
+
 ## [0.12.8] — Rich Conversation Visualizations
 
 ### Added

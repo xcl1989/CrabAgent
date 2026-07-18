@@ -118,6 +118,8 @@ Pipeline      → research → analyze → write (with data flow)
 Handoff       → Pass context from one agent to another
 ```
 
+**Cost control:** In Settings → General, map the parent agent's `provider|model` to a (usually cheaper) `provider|model` for sub-agents — applied automatically on every delegation, across providers.
+
 ---
 
 ## 📬 Email Intelligence — Tasks from Inbox
