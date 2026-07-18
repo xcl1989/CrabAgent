@@ -370,6 +370,15 @@ async def generate_pet(
     )
 
 
+@router.get("/generate/active")
+async def list_active_generations(user=Depends(get_current_user)):
+    """List all in-progress generation jobs (for reconnecting after tab switch)."""
+    from crabagent.core.pets.generation import get_all_active_jobs
+
+    jobs = get_all_active_jobs()
+    return {"jobs": jobs}
+
+
 @router.get("/generate/{pet_id}/status", response_model=GenerationStatusResponse)
 async def get_generation_status(
     pet_id: str,

@@ -109,6 +109,23 @@ export async function getGenerationStatus(petId: string): Promise<GenerationStat
   return api.get<GenerationStatusResponse>(`/pets/generate/${petId}/status`);
 }
 
+export interface ActiveJob {
+  pet_id: string;
+  step: number;
+  total_steps: number;
+  step_name: string;
+  step_label: string;
+  status: string;
+  prompt: string;
+  style: string;
+  updated_at: number;
+}
+
+export async function getActiveGenerations(): Promise<ActiveJob[]> {
+  const resp = await api.get<{ jobs: ActiveJob[] }>("/pets/generate/active");
+  return resp.jobs || [];
+}
+
 export interface GenerationProgress {
   status: "running" | "done" | "error" | "idle";
   step: number;

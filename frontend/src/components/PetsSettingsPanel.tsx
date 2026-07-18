@@ -8,6 +8,7 @@ import {
   createPet,
   deletePet,
   generatePet,
+  getActiveGenerations,
   getActivePet,
   getGenerationStatus,
   getPet,
@@ -15,6 +16,7 @@ import {
   setActivePet,
   subscribeGenerationProgress,
   uploadSpritesheet,
+  type ActiveJob,
   type GenerationProgress,
   type PetListItem,
 } from "../api/pets";
@@ -70,6 +72,33 @@ export function PetsSettingsPanel() {
 
   useEffect(() => {
     void refresh();
+  }, []);
+
+  // On mount, check for in-progress generation jobs (the component may have
+  // been unmounted by a tab switch while a job was running in the background).
+  useEffect(() => {
+    void (async () => {
+      try {
+        const jobs = await getActiveGenerations();
+        if (jobs.length > 0) {
+          // Pick the most recently updated job.
+          const job = jobs.reduce((a, b) => (a.updated_at > b.updated_at ? a : b));
+          setGenJobId(job.pet_id);
+          setGenerating(true);
+          setGenProgress({
+            status: job.status as GenerationProgress["status"],
+            step: job.step,
+            total_steps: job.total_steps,
+            step_name: job.step_name,
+            step_label: job.step_label,
+            prompt: job.prompt,
+            style: job.style,
+          });
+        }
+      } catch {
+        // Non-critical — just no auto-reconnect.
+      }
+    })();
   }, []);
 
   // Subscribe to SSE progress when a job is active.

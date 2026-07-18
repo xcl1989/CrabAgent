@@ -94,6 +94,27 @@ def get_generation_progress(pet_id: str) -> dict[str, Any] | None:
     return _generation_jobs.get(pet_id)
 
 
+def get_all_active_jobs() -> list[dict[str, Any]]:
+    """Return all in-progress generation jobs (for reconnecting SSE clients)."""
+    import copy
+
+    return [
+        {
+            "pet_id": pet_id,
+            "step": job.get("step", 0),
+            "total_steps": job.get("total_steps", 0),
+            "step_name": job.get("step_name", ""),
+            "step_label": job.get("step_label", ""),
+            "status": job.get("status", "running"),
+            "prompt": job.get("prompt", ""),
+            "style": job.get("style", ""),
+            "updated_at": job.get("updated_at", 0),
+        }
+        for pet_id, job in _generation_jobs.items()
+        if job.get("status") not in ("done", "error")
+    ]
+
+
 def _set_progress(pet_id: str, **kwargs: Any) -> None:
     job = _generation_jobs.setdefault(pet_id, {})
     job.update(kwargs)
