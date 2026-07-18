@@ -1,21 +1,14 @@
 import { useTranslation } from "react-i18next";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { Save, FlaskConical, Search, Check, Smartphone, SlidersHorizontal, Globe, Wifi, Cat } from "lucide-react";
 import { Input, Button } from "../components/ui";
 import { toast } from "../components/ui/Toast";
 import { cn } from "../lib/cn";
 import * as settingsApi from "../api/settings";
-import * as providersApi from "../api/providers";
 import ModelSelector from "../components/ModelSelector";
 import WeChatPanel from "../components/WeChatPanel";
 import { PetsSettingsPanel } from "../components/PetsSettingsPanel";
-import type { Provider, ModelInfo } from "../api/providers";
-import { onProvidersChanged } from "../lib/providerSync";
-
-interface ProviderModels {
-  provider: Provider;
-  models: ModelInfo[];
-}
+import { useSettingsData } from "../hooks/useSettingsData";
 
 type SettingsTab = "general" | "search" | "network" | "wechat" | "pets";
 
@@ -23,7 +16,10 @@ export default function SettingsPage() {
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<SettingsTab>("general");
 
-  // Settings state
+  // Cached store — survives tab switches (no reload flash on re-mount).
+  const { data, loading, updateSettings } = useSettingsData();
+
+  // Local edit state — seeded from cache, updated as the user types.
   const [defaultModel, setDefaultModel] = useState("");
   const [defaultModelProvider, setDefaultModelProvider] = useState<string | undefined>(undefined);
   const [searxngUrl, setSearxngUrl] = useState("");
@@ -31,81 +27,28 @@ export default function SettingsPage() {
   const [webProxy, setWebProxy] = useState("");
   const [llmProxy, setLlmProxy] = useState("");
   const [browserProxy, setBrowserProxy] = useState("");
-  const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const [seeded, setSeeded] = useState(false);
+
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testingProxy, setTestingProxy] = useState(false);
 
-  // Providers / models state
-  const [providers, setProviders] = useState<Provider[]>([]);
-  const [providerModels, setProviderModels] = useState<ProviderModels[]>([]);
-  const [providersLoading, setProvidersLoading] = useState(true);
-
-  // Load settings
+  // Seed local form state from cached data exactly once it's available,
+  // and re-seed when the cache changes identity (e.g. provider invalidation).
   useEffect(() => {
-    settingsApi
-      .getSettings()
-      .then((s) => {
-        setDefaultModel(s.default_model || "");
-        setDefaultModelProvider(s.default_model_provider || undefined);
-        setSearxngUrl(s.searxng_url || "");
-        setGlobalProxy(s.proxy || "");
-        setWebProxy(s.web_proxy || "");
-        setLlmProxy(s.llm_proxy || "");
-        setBrowserProxy(s.browser_proxy || "");
-        setSettingsLoaded(true);
-      })
-      .catch(() => setSettingsLoaded(true));
-  }, []);
-
-  const refreshProviders = useCallback(async () => {
-    setProvidersLoading(true);
-    try {
-      const nextProviders = await providersApi.listProviders();
-      setProviders(nextProviders);
-    } finally {
-      setProvidersLoading(false);
-    }
-  }, []);
-
-  // Load providers & models
-  useEffect(() => {
-    refreshProviders();
-  }, [refreshProviders]);
-
-  useEffect(() => onProvidersChanged(() => {
-    refreshProviders();
-  }), [refreshProviders]);
-
-  useEffect(() => {
-    if (providers.length === 0) return;
-    Promise.all(
-      providers.map(async (provider) => {
-        try {
-          const models = await providersApi.getProviderModels(provider.name);
-          return { provider, models };
-        } catch (err) {
-          console.error(`Failed to load models for provider ${provider.name}`, err);
-          return { provider, models: [] };
-        }
-      }),
-    ).then((results) => {
-      setProviderModels(results.filter((r) => r.models.length > 0));
-    });
-  }, [providers]);
-
-  // After both settings and models are loaded, resolve provider if not already set
-  useEffect(() => {
-    if (!settingsLoaded || providerModels.length === 0) return;
-    if (defaultModel && !defaultModelProvider) {
-      for (const pm of providerModels) {
-        if (pm.models.some((m) => m.id === defaultModel)) {
-          setDefaultModelProvider(pm.provider.name);
-          break;
-        }
-      }
-    }
-  }, [settingsLoaded, providerModels, defaultModel, defaultModelProvider]);
+    if (!data) return;
+    const s = data.settings;
+    setDefaultModel(s.default_model);
+    setDefaultModelProvider(
+      s.default_model_provider || resolveProviderForModel(data.providerModels, s.default_model),
+    );
+    setSearxngUrl(s.searxng_url);
+    setGlobalProxy(s.proxy);
+    setWebProxy(s.web_proxy);
+    setLlmProxy(s.llm_proxy);
+    setBrowserProxy(s.browser_proxy);
+    setSeeded(true);
+  }, [data]);
 
   const handleModelChange = (modelId: string, providerName: string) => {
     setDefaultModel(modelId);
@@ -131,6 +74,16 @@ export default function SettingsPage() {
       data.llm_proxy = llmProxy;
       data.browser_proxy = browserProxy;
       await settingsApi.updateSettings(data);
+      // Sync cache so the next visit shows saved values without refetch.
+      updateSettings({
+        default_model: defaultModel,
+        default_model_provider: defaultModelProvider,
+        searxng_url: searxngUrl,
+        proxy: globalProxy,
+        web_proxy: webProxy,
+        llm_proxy: llmProxy,
+        browser_proxy: browserProxy,
+      });
       toast.success(t("settingsPage.saved"));
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Failed to save");
@@ -189,9 +142,9 @@ export default function SettingsPage() {
     }
   };
 
-  const allReady = settingsLoaded && !providersLoading;
-
-  if (!allReady) {
+  // Show the loading overlay only on the very first load (no cache yet).
+  // Subsequent tab switches render immediately from the cached store.
+  if (loading || !seeded || !data) {
     return (
       <div className="flex items-center justify-center h-full">
         <div className="text-sm text-[var(--text-tertiary)]">
@@ -247,7 +200,7 @@ export default function SettingsPage() {
               </label>
               <div className="flex items-center gap-2">
                 <ModelSelector
-                  providerModels={providerModels}
+                  providerModels={data.providerModels}
                   selectedModel={defaultModel || ""}
                   selectedProvider={defaultModelProvider}
                   onChange={handleModelChange}
@@ -425,4 +378,18 @@ export default function SettingsPage() {
       )}
     </div>
   );
+}
+
+/** Find the provider name that owns a given model id, if any. */
+function resolveProviderForModel(
+  providerModels: { provider: { name: string }; models: { id: string }[] }[],
+  modelId: string,
+): string | undefined {
+  if (!modelId) return undefined;
+  for (const pm of providerModels) {
+    if (pm.models.some((m) => m.id === modelId)) {
+      return pm.provider.name;
+    }
+  }
+  return undefined;
 }
