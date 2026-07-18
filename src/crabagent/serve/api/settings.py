@@ -40,6 +40,12 @@ async def update_settings(
             db.add(AppSetting(key=key, value=value))
     await db.commit()
 
+    # Invalidate the sub-agent model map cache if it was touched.
+    if "sub_agent_model_map" in req.settings:
+        from crabagent.core.agent.agents import invalidate_sub_agent_model_map
+
+        invalidate_sub_agent_model_map()
+
     result = await db.execute(select(AppSetting))
     return {row.key: row.value for row in result.scalars().all()}
 

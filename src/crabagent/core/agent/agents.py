@@ -70,6 +70,68 @@ def invalidate_cache():
     _registry_loaded = False
 
 
+# ── Sub-agent model map (cost control: parent provider|model → child provider|model)
+# Loaded once from app_settings and cached; invalidated when settings change.
+_sub_agent_model_map_cache: dict[str, str] | None = None
+
+
+async def load_sub_agent_model_map() -> dict[str, str]:
+    """Load the ``sub_agent_model_map`` JSON from app_settings (cached).
+
+    Format: ``{"openai|gpt-4o": "openai|gpt-4o-mini", ...}``.
+    Key   = parent agent's ``provider|model``.
+    Value = the child agent's ``provider|model`` to switch to.
+    """
+    global _sub_agent_model_map_cache
+    if _sub_agent_model_map_cache is not None:
+        return _sub_agent_model_map_cache
+    from crabagent.core.database import AppSetting
+
+    try:
+        async with async_session_factory() as db:
+            result = await db.execute(
+                select(AppSetting).where(AppSetting.key == "sub_agent_model_map")
+            )
+            row = result.scalar_one_or_none()
+            raw = row.value if row else ""
+        data = _json.loads(raw) if raw else {}
+        _sub_agent_model_map_cache = data if isinstance(data, dict) else {}
+    except Exception:
+        logger.debug("Failed to load sub_agent_model_map", exc_info=True)
+        _sub_agent_model_map_cache = {}
+    return _sub_agent_model_map_cache
+
+
+def invalidate_sub_agent_model_map() -> None:
+    """Drop the cached map so the next delegation reloads it from DB."""
+    global _sub_agent_model_map_cache
+    _sub_agent_model_map_cache = None
+
+
+def _resolve_sub_model_provider(
+    model_map: dict[str, str],
+    parent_model: str,
+    parent_provider: str,
+    agent_def_model: str,
+) -> tuple[str, str]:
+    """Resolve the (model, provider) a sub-agent should use.
+
+    Priority:
+      1. ``map[parent_provider|parent_model]`` → split into (provider, model).
+      2. ``agent_def.model`` (sub-agent's own profile) → provider stays the parent's.
+      3. Fallback to the parent's (model, provider).
+    """
+    parent_key = f"{parent_provider}|{parent_model}"
+    mapped = model_map.get(parent_key)
+    if mapped and "|" in mapped:
+        child_provider, child_model = mapped.split("|", 1)
+        if child_provider and child_model:
+            return child_model, child_provider
+    if agent_def_model:
+        return agent_def_model, parent_provider
+    return parent_model, parent_provider
+
+
 async def get_agent(name: str) -> dict | None:
     agents = await load_agent_registry()
     for a in agents:
@@ -524,12 +586,25 @@ async def spawn_sub_agent(
             can_request_help = True
 
     sub_locale = parent_context.metadata.get("locale", parent_context.locale or "en")
+    # Resolve sub-agent model+provider via the cost-control map
+    # (parent provider|model → child provider|model), then fall back to the
+    # sub-agent's own profile, then to the parent.
+    try:
+        _model_map = await load_sub_agent_model_map()
+    except Exception:
+        _model_map = {}
+    _sub_model, _sub_provider = _resolve_sub_model_provider(
+        _model_map,
+        parent_model=parent_context.model or "",
+        parent_provider=parent_context.provider_name or "",
+        agent_def_model=agent_def.get("model") or "",
+    )
     sub_context = AgentContext(
         workspace=parent_context.workspace,
         tool_registry=sub_registry,
         max_iterations=min(parent_context.max_iterations, 50),
-        model=agent_def["model"] or parent_context.model,
-        provider_name=parent_context.provider_name,
+        model=_sub_model,
+        provider_name=_sub_provider,
         system_prompt=_build_system_prompt(
             agent_def,
             has_shared=has_shared,
@@ -599,7 +674,7 @@ async def spawn_sub_agent(
                 "agent_name": agent_name,
                 "display_name": agent_def["display_name"],
                 "task": task[:200],
-                "model": agent_def.get("model") or parent_context.model,
+                "model": sub_context.model or parent_context.model,
                 "session_id": session_id,
                 "pipeline_run_id": pipeline_run_id,
                 "pipeline_step_id": pipeline_step_id,
@@ -779,8 +854,8 @@ async def spawn_sub_agent(
                         recall_policy="query_only",
                     )
 
-                reflect_model = agent_def.get("model") or parent_context.model or ""
-                reflect_provider = parent_context.provider_name
+                reflect_model = sub_context.model or agent_def.get("model") or parent_context.model or ""
+                reflect_provider = sub_context.provider_name or parent_context.provider_name
                 if reflect_model:
                     llm_lesson = await _llm_reflect_lesson(
                         agent_name=agent_name,
@@ -896,8 +971,8 @@ async def spawn_sub_agent(
             try:
                 from crabagent.core.database import agent_memory_upsert
 
-                reflect_model = agent_def.get("model") or parent_context.model or ""
-                reflect_provider = parent_context.provider_name
+                reflect_model = sub_context.model or agent_def.get("model") or parent_context.model or ""
+                reflect_provider = sub_context.provider_name or parent_context.provider_name
                 error_stats = {
                     "iterations": sub_context.iteration,
                     "tokens": sub_context.total_tokens,

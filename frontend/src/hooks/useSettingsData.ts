@@ -18,11 +18,9 @@ import * as settingsApi from "../api/settings";
 import * as providersApi from "../api/providers";
 import type { Provider, ModelInfo } from "../api/providers";
 import { onProvidersChanged } from "../lib/providerSync";
+import type { ProviderModels } from "./useModelSelector";
 
-export interface ProviderModels {
-  provider: Provider;
-  models: ModelInfo[];
-}
+export type { ProviderModels };
 
 export interface SettingsValues {
   default_model: string;
@@ -32,6 +30,7 @@ export interface SettingsValues {
   web_proxy: string;
   llm_proxy: string;
   browser_proxy: string;
+  sub_agent_model_map: string;
 }
 
 export interface SettingsData {
@@ -68,6 +67,7 @@ async function fetchAll(): Promise<SettingsData> {
       web_proxy: raw.web_proxy || "",
       llm_proxy: raw.llm_proxy || "",
       browser_proxy: raw.browser_proxy || "",
+      sub_agent_model_map: raw.sub_agent_model_map || "",
     },
     providers,
     providerModels: pmResults.filter((r) => r.models.length > 0),

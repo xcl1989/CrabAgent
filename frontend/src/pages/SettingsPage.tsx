@@ -6,6 +6,7 @@ import { toast } from "../components/ui/Toast";
 import { cn } from "../lib/cn";
 import * as settingsApi from "../api/settings";
 import ModelSelector from "../components/ModelSelector";
+import { SubAgentModelMapEditor, parseModelMap, serializeModelMap, type ModelMapRow } from "../components/SubAgentModelMapEditor";
 import WeChatPanel from "../components/WeChatPanel";
 import { PetsSettingsPanel } from "../components/PetsSettingsPanel";
 import { useSettingsData } from "../hooks/useSettingsData";
@@ -27,6 +28,7 @@ export default function SettingsPage() {
   const [webProxy, setWebProxy] = useState("");
   const [llmProxy, setLlmProxy] = useState("");
   const [browserProxy, setBrowserProxy] = useState("");
+  const [subAgentMapRows, setSubAgentMapRows] = useState<ModelMapRow[]>([]);
   const [seeded, setSeeded] = useState(false);
 
   const [saving, setSaving] = useState(false);
@@ -47,6 +49,7 @@ export default function SettingsPage() {
     setWebProxy(s.web_proxy);
     setLlmProxy(s.llm_proxy);
     setBrowserProxy(s.browser_proxy);
+    setSubAgentMapRows(parseModelMap(s.sub_agent_model_map));
     setSeeded(true);
   }, [data]);
 
@@ -73,6 +76,7 @@ export default function SettingsPage() {
       data.web_proxy = webProxy;
       data.llm_proxy = llmProxy;
       data.browser_proxy = browserProxy;
+      data.sub_agent_model_map = serializeModelMap(subAgentMapRows);
       await settingsApi.updateSettings(data);
       // Sync cache so the next visit shows saved values without refetch.
       updateSettings({
@@ -83,6 +87,7 @@ export default function SettingsPage() {
         web_proxy: webProxy,
         llm_proxy: llmProxy,
         browser_proxy: browserProxy,
+        sub_agent_model_map: data.sub_agent_model_map,
       });
       toast.success(t("settingsPage.saved"));
     } catch (e: unknown) {
@@ -210,6 +215,21 @@ export default function SettingsPage() {
               <p className="text-xs text-[var(--text-tertiary)]">
                 {t("settingsPage.defaultModelDesc")}
               </p>
+            </div>
+
+            {/* Sub-Agent Model Map */}
+            <div className="flex flex-col gap-1.5 pt-2 border-t border-[var(--border)]">
+              <label className="text-xs font-medium text-[var(--text-secondary)]">
+                {t("settingsPage.subAgentMapTitle")}
+              </label>
+              <p className="text-xs text-[var(--text-tertiary)] mb-1">
+                {t("settingsPage.subAgentMapDesc")}
+              </p>
+              <SubAgentModelMapEditor
+                rows={subAgentMapRows}
+                onChange={setSubAgentMapRows}
+                providerModels={data.providerModels}
+              />
             </div>
           </div>
         )}
