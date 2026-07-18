@@ -19,9 +19,6 @@ function VisualizationLoading() {
 }
 
 export function ChartBlock({ source, isStreaming = false }: { source: string; isStreaming?: boolean }) {
-  // A streamed fenced block is valid Markdown before its JSON payload is complete.
-  // Keep the visualization in a pending state until the assistant finishes it.
-  if (isStreaming) return <VisualizationFrame title="数据图表" source={source}><VisualizationLoading /></VisualizationFrame>;
   try {
     const spec = parseChartSpec(source);
     const chart = spec.type === "bar" ? <BarChart data={spec.data}>{axes(spec)}{spec.series.map((item, index) => <Bar key={item.field} dataKey={item.field} name={item.name || item.field} fill={item.color || COLORS[index % COLORS.length]} radius={[4, 4, 0, 0]} />)}</BarChart>
@@ -33,7 +30,12 @@ export function ChartBlock({ source, isStreaming = false }: { source: string; is
       {spec.description && <p className="visualization-description">{spec.description}</p>}
       <div className="chart-block"><MeasuredChartContainer height={280}>{({ width, height }) => cloneElement(chart, { width, height })}</MeasuredChartContainer></div>
     </VisualizationFrame>;
-  } catch (error) { return <InvalidVisualization label="数据图表" error={error instanceof Error ? error.message : "图表配置无效"} source={source} />; }
+  } catch (error) {
+    // JSON is complete as soon as the closing fence arrives, even if later
+    // prose is still streaming. Only keep the card pending while it is invalid.
+    if (isStreaming) return <VisualizationFrame title="数据图表" source={source}><VisualizationLoading /></VisualizationFrame>;
+    return <InvalidVisualization label="数据图表" error={error instanceof Error ? error.message : "图表配置无效"} source={source} />;
+  }
 }
 
 function axes(spec: ReturnType<typeof parseChartSpec>) {
@@ -41,10 +43,12 @@ function axes(spec: ReturnType<typeof parseChartSpec>) {
 }
 
 export function KpiBlock({ source, isStreaming = false }: { source: string; isStreaming?: boolean }) {
-  if (isStreaming) return <VisualizationFrame title="数据摘要" source={source}><VisualizationLoading /></VisualizationFrame>;
   try {
     const spec = parseKpiSpec(source);
     const Trend = spec.trend === "up" ? TrendingUp : spec.trend === "down" ? TrendingDown : null;
     return <VisualizationFrame title="数据摘要" source={source}><div className="kpi-block"><span className="kpi-block__title">{spec.title}</span><strong>{spec.value}</strong>{spec.change && <span className={`kpi-block__change kpi-block__change--${spec.trend || "neutral"}`}>{Trend && <Trend size={14} />}{spec.change}</span>}{spec.description && <small>{spec.description}</small>}</div></VisualizationFrame>;
-  } catch (error) { return <InvalidVisualization label="数据摘要" error={error instanceof Error ? error.message : "指标卡配置无效"} source={source} />; }
+  } catch (error) {
+    if (isStreaming) return <VisualizationFrame title="数据摘要" source={source}><VisualizationLoading /></VisualizationFrame>;
+    return <InvalidVisualization label="数据摘要" error={error instanceof Error ? error.message : "指标卡配置无效"} source={source} />;
+  }
 }
