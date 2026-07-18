@@ -5,6 +5,10 @@
  * every tab switch). Without caching, each visit re-fetches `/settings`,
  * `/providers`, and one `/providers/:name/models` per provider — visibly slow.
  *
+ * Two independent loading tracks (so model selectors don't block the form):
+ *   - settings  (fast)  → fills SearXNG / proxy / default-model-id fields.
+ *   - providers (slow)  → fills ModelSelector dropdown lists.
+ *
  * Strategy (cache-first, no silent overwrite of unsaved edits):
  *   - First load:  fetch from backend, populate module cache.
  *   - Re-mount:    reuse cache instantly (no loading flash, no background
@@ -16,7 +20,7 @@
 import { useState, useEffect, useCallback } from "react";
 import * as settingsApi from "../api/settings";
 import * as providersApi from "../api/providers";
-import type { Provider, ModelInfo } from "../api/providers";
+import type { Provider } from "../api/providers";
 import { onProvidersChanged } from "../lib/providerSync";
 import type { ProviderModels } from "./useModelSelector";
 
@@ -33,20 +37,49 @@ export interface SettingsValues {
   sub_agent_model_map: string;
 }
 
-export interface SettingsData {
-  settings: SettingsValues;
-  providers: Provider[];
-  providerModels: ProviderModels[];
+// ── Settings cache (fast track) ──────────────────────────────────────────
+
+let _settingsCache: SettingsValues | null = null;
+let _settingsInflight: Promise<SettingsValues> | null = null;
+
+function normalizeSettings(raw: Record<string, string>): SettingsValues {
+  return {
+    default_model: raw.default_model || "",
+    default_model_provider: raw.default_model_provider || undefined,
+    searxng_url: raw.searxng_url || "",
+    proxy: raw.proxy || "",
+    web_proxy: raw.web_proxy || "",
+    llm_proxy: raw.llm_proxy || "",
+    browser_proxy: raw.browser_proxy || "",
+    sub_agent_model_map: raw.sub_agent_model_map || "",
+  };
 }
 
-let _cache: SettingsData | null = null;
-let _inflight: Promise<SettingsData> | null = null;
+function fetchSettings(): Promise<SettingsValues> {
+  return settingsApi.getSettings().then(normalizeSettings);
+}
 
-async function fetchAll(): Promise<SettingsData> {
-  const [raw, providers] = await Promise.all([
-    settingsApi.getSettings(),
-    providersApi.listProviders(),
-  ]);
+function getOrStartSettingsFetch(): Promise<SettingsValues> {
+  if (!_settingsInflight) {
+    _settingsInflight = fetchSettings()
+      .then((s) => {
+        _settingsCache = s;
+        return s;
+      })
+      .finally(() => {
+        _settingsInflight = null;
+      });
+  }
+  return _settingsInflight;
+}
+
+// ── Providers cache (slow track) ─────────────────────────────────────────
+
+let _providersCache: ProviderModels[] | null = null;
+let _providersInflight: Promise<ProviderModels[]> | null = null;
+
+async function fetchProviderModels(): Promise<ProviderModels[]> {
+  const providers = await providersApi.listProviders();
   const pmResults = await Promise.all(
     providers.map(async (provider) => {
       try {
@@ -58,105 +91,111 @@ async function fetchAll(): Promise<SettingsData> {
       }
     }),
   );
-  return {
-    settings: {
-      default_model: raw.default_model || "",
-      default_model_provider: raw.default_model_provider || undefined,
-      searxng_url: raw.searxng_url || "",
-      proxy: raw.proxy || "",
-      web_proxy: raw.web_proxy || "",
-      llm_proxy: raw.llm_proxy || "",
-      browser_proxy: raw.browser_proxy || "",
-      sub_agent_model_map: raw.sub_agent_model_map || "",
-    },
-    providers,
-    providerModels: pmResults.filter((r) => r.models.length > 0),
-  };
+  return pmResults.filter((r) => r.models.length > 0);
 }
 
-function getOrStartFetch(): Promise<SettingsData> {
-  if (!_inflight) {
-    _inflight = fetchAll()
-      .then((d) => {
-        _cache = d;
-        return d;
+function getOrStartProvidersFetch(): Promise<ProviderModels[]> {
+  if (!_providersInflight) {
+    _providersInflight = fetchProviderModels()
+      .then((pm) => {
+        _providersCache = pm;
+        return pm;
       })
       .finally(() => {
-        _inflight = null;
+        _providersInflight = null;
       });
   }
-  return _inflight;
+  return _providersInflight;
 }
 
-function invalidate() {
-  _cache = null;
-}
+// ── Hook ─────────────────────────────────────────────────────────────────
 
 export function useSettingsData() {
-  const [data, setData] = useState<SettingsData | null>(() => _cache);
-  // loading only when we have nothing to show yet
-  const [loading, setLoading] = useState<boolean>(() => !_cache);
+  const [settings, setSettings] = useState<SettingsValues | null>(() => _settingsCache);
+  const [providerModels, setProviderModels] = useState<ProviderModels[]>(() => _providersCache ?? []);
+  const [settingsLoading, setSettingsLoading] = useState<boolean>(() => !_settingsCache);
+  const [providersLoading, setProvidersLoading] = useState<boolean>(() => !_providersCache);
+  const [providersError, setProvidersError] = useState(false);
 
+  // Load settings (fast).
   useEffect(() => {
     let mounted = true;
-    // Cache hit: show immediately, no background refetch (protects unsaved edits).
-    if (_cache) {
-      setData(_cache);
-      setLoading(false);
+    if (_settingsCache) {
+      setSettings(_settingsCache);
+      setSettingsLoading(false);
       return;
     }
-    setLoading(true);
-    getOrStartFetch()
-      .then((d) => {
+    setSettingsLoading(true);
+    getOrStartSettingsFetch()
+      .then((s) => {
         if (mounted) {
-          setData(d);
-          setLoading(false);
+          setSettings(s);
+          setSettingsLoading(false);
         }
       })
       .catch(() => {
-        if (mounted) setLoading(false);
+        if (mounted) setSettingsLoading(false);
       });
     return () => {
       mounted = false;
     };
   }, []);
 
-  // Provider changes elsewhere (e.g. Agents page) → refresh.
+  // Load providers (slow, independent).
+  useEffect(() => {
+    let mounted = true;
+    if (_providersCache) {
+      setProviderModels(_providersCache);
+      setProvidersLoading(false);
+      return;
+    }
+    setProvidersLoading(true);
+    getOrStartProvidersFetch()
+      .then((pm) => {
+        if (mounted) {
+          setProviderModels(pm);
+          setProvidersLoading(false);
+        }
+      })
+      .catch(() => {
+        if (mounted) {
+          setProvidersLoading(false);
+          setProvidersError(true);
+        }
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  // Provider changes elsewhere (e.g. Agents page) → reload the slow track.
   useEffect(() => {
     const off = onProvidersChanged(() => {
-      invalidate();
-      setLoading(true);
-      getOrStartFetch()
-        .then((d) => {
-          setData(d);
-          setLoading(false);
+      _providersCache = null;
+      setProvidersLoading(true);
+      getOrStartProvidersFetch()
+        .then((pm) => {
+          setProviderModels(pm);
+          setProvidersLoading(false);
         })
-        .catch(() => setLoading(false));
+        .catch(() => setProvidersLoading(false));
     });
     return off;
   }, []);
 
   /** Patch cached settings values (call after a successful save). */
   const updateSettings = useCallback((patch: Partial<SettingsValues>) => {
-    if (!_cache) return;
-    _cache = {
-      ..._cache,
-      settings: { ..._cache.settings, ...patch },
-    };
-    setData(_cache);
+    if (!_settingsCache) return;
+    _settingsCache = { ..._settingsCache, ...patch };
+    setSettings(_settingsCache);
   }, []);
 
-  /** Force a fresh fetch from the backend. */
-  const reload = useCallback(() => {
-    invalidate();
-    setLoading(true);
-    getOrStartFetch()
-      .then((d) => {
-        setData(d);
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
-  }, []);
-
-  return { data, loading, updateSettings, reload };
+  return {
+    settings,
+    providerModels,
+    settingsLoading,
+    providersLoading,
+    providersError,
+    updateSettings,
+  };
 }

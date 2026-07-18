@@ -18,7 +18,10 @@ export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState<SettingsTab>("general");
 
   // Cached store — survives tab switches (no reload flash on re-mount).
-  const { data, loading, updateSettings } = useSettingsData();
+  // settings (fast) and providerModels (slow) load independently so the
+  // SearXNG / proxy fields render immediately; only the ModelSelector
+  // dropdowns wait for providers.
+  const { settings, providerModels, settingsLoading, providersLoading, updateSettings } = useSettingsData();
 
   // Local edit state — seeded from cache, updated as the user types.
   const [defaultModel, setDefaultModel] = useState("");
@@ -35,23 +38,27 @@ export default function SettingsPage() {
   const [testing, setTesting] = useState(false);
   const [testingProxy, setTestingProxy] = useState(false);
 
-  // Seed local form state from cached data exactly once it's available,
-  // and re-seed when the cache changes identity (e.g. provider invalidation).
+  // Seed local form state as soon as the fast settings track arrives.
   useEffect(() => {
-    if (!data) return;
-    const s = data.settings;
-    setDefaultModel(s.default_model);
-    setDefaultModelProvider(
-      s.default_model_provider || resolveProviderForModel(data.providerModels, s.default_model),
-    );
-    setSearxngUrl(s.searxng_url);
-    setGlobalProxy(s.proxy);
-    setWebProxy(s.web_proxy);
-    setLlmProxy(s.llm_proxy);
-    setBrowserProxy(s.browser_proxy);
-    setSubAgentMapRows(parseModelMap(s.sub_agent_model_map));
+    if (!settings) return;
+    setDefaultModel(settings.default_model);
+    setDefaultModelProvider(settings.default_model_provider || undefined);
+    setSearxngUrl(settings.searxng_url);
+    setGlobalProxy(settings.proxy);
+    setWebProxy(settings.web_proxy);
+    setLlmProxy(settings.llm_proxy);
+    setBrowserProxy(settings.browser_proxy);
+    setSubAgentMapRows(parseModelMap(settings.sub_agent_model_map));
     setSeeded(true);
-  }, [data]);
+  }, [settings]);
+
+  // Once providers arrive, resolve the default-model provider if the
+  // settings payload didn't carry one.
+  useEffect(() => {
+    if (providerModels.length === 0 || !defaultModel || defaultModelProvider) return;
+    const resolved = resolveProviderForModel(providerModels, defaultModel);
+    if (resolved) setDefaultModelProvider(resolved);
+  }, [providerModels, defaultModel, defaultModelProvider]);
 
   const handleModelChange = (modelId: string, providerName: string) => {
     setDefaultModel(modelId);
@@ -147,9 +154,9 @@ export default function SettingsPage() {
     }
   };
 
-  // Show the loading overlay only on the very first load (no cache yet).
-  // Subsequent tab switches render immediately from the cached store.
-  if (loading || !seeded || !data) {
+  // Only block on the fast settings track. Providers (model lists) load in
+  // the background; the ModelSelector shows an inline placeholder until then.
+  if (settingsLoading || !seeded || !settings) {
     return (
       <div className="flex items-center justify-center h-full">
         <div className="text-sm text-[var(--text-tertiary)]">
@@ -204,13 +211,19 @@ export default function SettingsPage() {
                 {t("settingsPage.defaultModel")}
               </label>
               <div className="flex items-center gap-2">
-                <ModelSelector
-                  providerModels={data.providerModels}
-                  selectedModel={defaultModel || ""}
-                  selectedProvider={defaultModelProvider}
-                  onChange={handleModelChange}
-                  dropdownUpward={false}
-                />
+                {providersLoading ? (
+                  <div className="h-9 flex items-center text-xs text-[var(--text-tertiary)]">
+                    {t("common.loading")}
+                  </div>
+                ) : (
+                  <ModelSelector
+                    providerModels={providerModels}
+                    selectedModel={defaultModel || ""}
+                    selectedProvider={defaultModelProvider}
+                    onChange={handleModelChange}
+                    dropdownUpward={false}
+                  />
+                )}
               </div>
               <p className="text-xs text-[var(--text-tertiary)]">
                 {t("settingsPage.defaultModelDesc")}
@@ -225,11 +238,17 @@ export default function SettingsPage() {
               <p className="text-xs text-[var(--text-tertiary)] mb-1">
                 {t("settingsPage.subAgentMapDesc")}
               </p>
-              <SubAgentModelMapEditor
-                rows={subAgentMapRows}
-                onChange={setSubAgentMapRows}
-                providerModels={data.providerModels}
-              />
+              {providersLoading ? (
+                <div className="h-9 flex items-center text-xs text-[var(--text-tertiary)]">
+                  {t("common.loading")}
+                </div>
+              ) : (
+                <SubAgentModelMapEditor
+                  rows={subAgentMapRows}
+                  onChange={setSubAgentMapRows}
+                  providerModels={providerModels}
+                />
+              )}
             </div>
           </div>
         )}
