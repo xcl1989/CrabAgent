@@ -77,6 +77,7 @@ export function deleteSession(sessionId: string): Promise<void> {
 }
 
 export function getMessages(sessionId: string): Promise<Message[]> {
+  // The UI keeps compressed history visible; the backend excludes it when rebuilding LLM context.
   return api.get(`/sessions/${sessionId}/messages?limit=1000&include_compressed=true`);
 }
 

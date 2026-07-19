@@ -408,7 +408,7 @@
     "title": "## Shared Team Knowledge"
   },
   "compress": {
-    "instruction": "Review the full conversation history above and produce a comprehensive, detailed summary. You MUST preserve all key facts, decisions, file paths, code change details, and any important context needed to continue the conversation. Write in English. Use Markdown formatting (headings, lists, code blocks, etc.). Do NOT omit any important details — thoroughness over brevity. There is no length limit; ensure full coverage of all topics."
+    "instruction": "Compress the conversation above into a Markdown summary for continuing the work. Preserve goals, key facts, decisions, file paths, code changes, tool outcomes, open tasks, and necessary context; merge repetition rather than reproducing the conversation. Never output or reproduce tool-call protocol, parameters, DSML/XML markers, tool_calls, invoke tags, or raw JSON. Describe only the purpose and outcome of tool use. Keep the summary detailed but materially shorter than the original conversation."
   },
   "agents_md": {
     "section_title": "## Project Rules (AGENTS.md)"

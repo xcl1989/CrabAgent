@@ -251,6 +251,8 @@ Split-pane workspace with live document preview, code editor, prototype builder,
 ### 📊 Rich Conversation Visualizations
 Assistant responses can turn Markdown into shareable visuals: Mermaid flowcharts, sequence/state/ER diagrams, architecture diagrams, and bar, line, area, pie, or scatter charts. KPI cards summarize a key metric. Open any visualization in a larger view, then copy it as a PNG or download a high-resolution PNG to share.
 
+Mermaid diagrams render after a streamed response is complete and are syntax-validated before display, so incomplete diagram text never replaces the conversation with raw parser-error graphics.
+
 ### 📝 Markdown Editor
 Split-pane editor for `.md` files — source on the left, live rendered preview on the right. Bidirectional scroll sync, GFM tables, syntax-highlighted code blocks. Switch between Source / Split / Preview views.
 

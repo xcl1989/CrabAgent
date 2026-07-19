@@ -12,6 +12,8 @@ from crabagent.core.i18n import t
 
 logger = logging.getLogger(__name__)
 
+_MAX_SUMMARY_TOOL_RESULT_CHARS = 12_000
+
 
 async def summarize_messages(
     messages: list[dict],
@@ -43,28 +45,28 @@ async def summarize_messages(
     if system_prompt:
         compress_messages.append({"role": "system", "content": system_prompt})
 
-    # First pass: collect all tool_call IDs that have matching tool results
-    _answered_tool_calls: set[str] = set()
+    # Tool-call objects are provider wire protocol, not conversation content.
+    # Passing them without the original `tools` definitions causes some providers
+    # to echo them as DSML/XML instead of producing a useful summary.
+    tool_names: dict[str, str] = {}
     for msg in early:
-        if msg.get("role") == "tool" and msg.get("tool_call_id"):
-            _answered_tool_calls.add(msg["tool_call_id"])
+        if msg.get("role") != "assistant":
+            continue
+        for tool_call in msg.get("tool_calls") or []:
+            if not isinstance(tool_call, dict):
+                continue
+            tool_id = tool_call.get("id")
+            function = tool_call.get("function") or {}
+            if tool_id:
+                tool_names[tool_id] = function.get("name") or "unknown"
 
     for msg in early:
-        # Skip internal placeholders that carry no information
-        if msg.get("_compress_ack"):
-            continue
-        if msg.get("role") in ("stats", "screenshot"):
-            continue
-        # Skip tool results whose corresponding tool_call we also skip
-        if msg.get("role") == "tool" and msg.get("tool_call_id") not in _answered_tool_calls:
+        # Skip internal placeholders that carry no information.
+        if msg.get("_compress_ack") or msg.get("role") in ("stats", "screenshot"):
             continue
 
-        # Normalise internal roles to valid LLM roles
-        role = msg.get("role", "user")
-        if role not in ("user", "assistant", "tool"):
-            role = "user"
         content = msg.get("content", "")
-        # Handle list content (e.g. image blocks) — strip to text only
+        # Handle list content (e.g. image blocks) — strip to text only.
         if isinstance(content, list):
             text_parts = []
             for block in content:
@@ -74,7 +76,7 @@ async def summarize_messages(
                     text_parts.append(block)
             content = " ".join(text_parts)
         elif isinstance(content, str) and "data:image" in content:
-            # Strip embedded base64 image data from string content
+            # Strip embedded base64 image data from string content.
             import re
             content = re.sub(
                 r'data:image/[^;]+;base64,[A-Za-z0-9+/=]{100,}',
@@ -82,30 +84,29 @@ async def summarize_messages(
                 content,
             )
 
-        # For assistant messages with tool_calls: only include if ALL tool_calls
-        # have matching tool results. Otherwise convert to plain text message
-        # to avoid "missing tool result" API errors.
-        raw_tool_calls = msg.get("tool_calls")
-        if raw_tool_calls and role == "assistant":
-            unanswered = [
-                tc for tc in raw_tool_calls
-                if isinstance(tc, dict) and tc.get("id") not in _answered_tool_calls
+        role = msg.get("role", "user")
+        if role == "assistant" and msg.get("tool_calls"):
+            names = [
+                (tool_call.get("function") or {}).get("name", "unknown")
+                for tool_call in msg["tool_calls"]
+                if isinstance(tool_call, dict)
             ]
-            if unanswered:
-                # Drop tool_calls, keep as plain assistant message
-                raw_tool_calls = None
-                if not content:
-                    continue  # nothing useful left
+            call_note = f"[Tool call: {', '.join(names)}]"
+            content = f"{content}\n{call_note}".strip()
+        elif role == "tool":
+            # Convert the result into ordinary text. This preserves the useful
+            # outcome while removing the strict tool-call/result API sequence.
+            name = tool_names.get(msg.get("tool_call_id"), msg.get("name") or "unknown")
+            if len(content) > _MAX_SUMMARY_TOOL_RESULT_CHARS:
+                omitted = len(content) - _MAX_SUMMARY_TOOL_RESULT_CHARS
+                content = f"{content[:_MAX_SUMMARY_TOOL_RESULT_CHARS]}\n[... {omitted} characters omitted]"
+            content = f"[Tool result: {name}]\n{content}".strip()
+            role = "user"
+        elif role not in ("user", "assistant"):
+            role = "user"
 
-        if not content and not raw_tool_calls:
-            continue
-        clean_msg: dict = {"role": role, "content": content or ""}
-        # Preserve tool_calls / tool_call_id for valid sequences
-        if raw_tool_calls:
-            clean_msg["tool_calls"] = raw_tool_calls
-        if msg.get("tool_call_id") and msg.get("role") == "tool":
-            clean_msg["tool_call_id"] = msg["tool_call_id"]
-        compress_messages.append(clean_msg)
+        if content:
+            compress_messages.append({"role": role, "content": content})
 
     # Final instruction — this is the only truly "fresh" content
     compress_messages.append({"role": "user", "content": compress_instruction})
@@ -233,7 +234,7 @@ async def compress_context(context: AgentContext, llm_params: dict, model: str) 
     persistence = context.metadata.get("_persistence")
     if persistence:
         try:
-            await persistence.persist_compression(summary)
+            await persistence.persist_compression(summary, preserve_recent=len(recent))
         except Exception:
             logger.exception("Failed to persist compression to DB")
 

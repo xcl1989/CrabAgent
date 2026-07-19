@@ -98,42 +98,71 @@ class PersistenceListener:
         if self._buffer:
             await self._flush()
 
-    async def persist_compression(self, summary: str) -> None:
-        """Mark all existing messages as compressed and insert the summary.
+    async def persist_compression(self, summary: str, preserve_recent: int = 0) -> None:
+        """Replace old context with a summary while retaining recent turns.
 
-        Called inline when context compression occurs (from compress.py).
-        After this, new messages saved by PersistenceListener (the current
-        iteration's assistant/tool responses) will have higher ids,
-        naturally appearing after the summary in the database.
-
-        Flow:
-          1. Flush pending buffered saves (previous iterations' messages)
-          2. Mark ALL existing non-compressed messages as compressed=True
-          3. Insert the summary as the sole non-compressed message
+        Recent messages remain available to the next model call. Their sequence
+        numbers are shifted to make the newly inserted summary sort immediately
+        before them, even though its database id is newer.
         """
-        # 1. Flush pending buffered saves first
         await self.finalize()
 
+        from sqlalchemy import func
+        from sqlalchemy import select as sa_select
         from sqlalchemy import update as sa_update
 
         from crabagent.core.database import Message
 
-        # 2. Mark ALL existing messages as compressed
         async with async_session_factory() as db:
-            await db.execute(
+            preserved_ids: list[int] = []
+            summary_sequence: int
+            if preserve_recent:
+                preserved = await db.execute(
+                    sa_select(Message)
+                    .where(
+                        Message.conversation_id == self.conversation_id,
+                        Message.branch_id == self.branch_id,
+                        Message.compressed == False,  # noqa: E712
+                    )
+                    .order_by(Message.sequence.desc(), Message.id.desc())
+                    .limit(preserve_recent)
+                )
+                recent_messages = list(preserved.scalars().all())
+                preserved_ids = [message.id for message in recent_messages]
+                if recent_messages:
+                    summary_sequence = min(message.sequence for message in recent_messages)
+                    # Move retained turns after the summary without changing their order.
+                    await db.execute(
+                        sa_update(Message)
+                        .where(Message.id.in_(preserved_ids))
+                        .values(sequence=Message.sequence + 1)
+                    )
+                else:
+                    summary_sequence = 1
+            else:
+                max_sequence = await db.scalar(
+                    sa_select(func.max(Message.sequence)).where(
+                        Message.conversation_id == self.conversation_id,
+                        Message.branch_id == self.branch_id,
+                    )
+                )
+                summary_sequence = (max_sequence or 0) + 1
+
+            mark_old = (
                 sa_update(Message)
                 .where(
                     Message.conversation_id == self.conversation_id,
                     Message.branch_id == self.branch_id,
                     Message.compressed == False,  # noqa: E712
                 )
-                .values(compressed=True)
             )
-            # 3. Insert summary as the only non-compressed message
+            if preserved_ids:
+                mark_old = mark_old.where(Message.id.not_in(preserved_ids))
+            await db.execute(mark_old.values(compressed=True))
             db.add(
                 Message(
                     conversation_id=self.conversation_id,
-                    sequence=0,
+                    sequence=summary_sequence,
                     role="compress",
                     content=summary,
                     branch_id=self.branch_id,
@@ -141,6 +170,9 @@ class PersistenceListener:
                 )
             )
             await db.commit()
+
+        # Subsequent event-persisted messages must remain after retained turns.
+        self.sequence = max(self.sequence, summary_sequence + preserve_recent)
         logger.info(
             "Persisted compression summary (%d chars) for conv=%s",
             len(summary), self.conversation_id,

@@ -83,6 +83,42 @@ async def test_compress_context_replaces_messages_with_summary(monkeypatch: pyte
 
 
 @pytest.mark.asyncio
+async def test_compression_converts_tool_protocol_to_plain_text(monkeypatch: pytest.MonkeyPatch):
+    captured: dict = {}
+    messages = [
+        {"role": "user", "content": "Inspect the project"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"id": "call-1", "function": {"name": "bash", "arguments": "{\"command\":\"pwd\"}"}}
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call-1", "content": "/workspace"},
+    ]
+
+    async def fake_acompletion(**kwargs):
+        captured["messages"] = kwargs["messages"]
+        return FakeStream([FakeChunk(content="SUMMARY")])
+
+    monkeypatch.setattr(litellm, "acompletion", fake_acompletion)
+
+    summary = await compress.summarize_messages(
+        messages,
+        system_prompt="sys",
+        llm_params={},
+        model="gpt-4o",
+    )
+
+    assert summary == "SUMMARY"
+    request_messages = captured["messages"]
+    assert all("tool_calls" not in message for message in request_messages)
+    assert all(message["role"] != "tool" for message in request_messages)
+    assert any(message["content"] == "[Tool call: bash]" for message in request_messages)
+    assert any("[Tool result: bash]" in message["content"] for message in request_messages)
+
+
+@pytest.mark.asyncio
 async def test_compress_context_emits_failed_event_on_error(monkeypatch: pytest.MonkeyPatch):
     context = AgentContext(
         workspace=Path.cwd(),

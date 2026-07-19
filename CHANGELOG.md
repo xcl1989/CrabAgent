@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.13.1] — Reliable Context Compression & Mermaid Streaming
+
+### Added
+- **Safe context compression** — Tool calls and tool results are converted to plain-language context before summarization, avoiding provider protocol artifacts while retaining each tool's purpose and outcome. Large tool results are bounded to keep summaries practical.
+- **Recent-turn preservation** — Persisted conversation compression now retains the newest context turns and places the generated summary immediately before them, so the visible chat history remains coherent.
+
+### Fixed
+- **Mermaid syntax-error SVGs during streaming** — Mermaid diagrams are deferred until streaming completes, validated before rendering, and handled as a normal parse error instead of displaying Mermaid's raw `Syntax error in text` SVG.
+- **Compression concurrency and ordering** — Manual compression is rejected while the same session is processing a prompt, and message retrieval consistently uses conversation sequence order.
+
+---
+
 ## [0.12.9] — Sub-Agent Model Mapping & Settings Cache
 
 ### Added

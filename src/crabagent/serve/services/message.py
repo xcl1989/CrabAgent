@@ -54,7 +54,7 @@ async def get_messages(
         stmt = stmt.where(Message.branch_id == branch_id)
     if not include_compressed:
         stmt = stmt.where(Message.compressed == False)  # noqa: E712
-    stmt = stmt.order_by(Message.id.desc())
+    stmt = stmt.order_by(Message.sequence.desc(), Message.id.desc())
     if offset:
         stmt = stmt.offset(offset)
     if limit:

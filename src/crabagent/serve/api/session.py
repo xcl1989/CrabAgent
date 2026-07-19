@@ -10,6 +10,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from crabagent.core.database import Conversation, Message, User, get_db
+from crabagent.serve.api.prompt import _tasks
 from crabagent.serve.deps import get_current_user, get_owned_conversation
 from crabagent.serve.services import conversation as conv_svc
 from crabagent.serve.services.message import get_messages, message_to_dict
@@ -93,6 +94,9 @@ async def compress_session(
     db: AsyncSession = Depends(get_db),
 ):
     """Persist a user-triggered compression using the normal compression pipeline."""
+    if session_id in _tasks and not _tasks[session_id].done():
+        raise HTTPException(status_code=409, detail="Session is already processing a prompt")
+
     conv = await get_owned_conversation(db, session_id, user)
     branch_id = conv.active_branch or "main"
     records = await get_messages(db, conv.id, branch_id=branch_id)

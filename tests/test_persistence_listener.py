@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import asyncio
 import json
 from types import SimpleNamespace
 
 import pytest
 
-from crabagent.core.event import AgentEvent, EventBus, EventType
+from crabagent.core.event import AgentEvent, EventType
 from crabagent.serve.services import persistence
 
 
@@ -143,6 +142,10 @@ async def test_persist_compression_inserts_summary(monkeypatch: pytest.MonkeyPat
             self.executed.append(statement)
             return FakeExecuteResult()
 
+        async def scalar(self, statement):
+            self.executed.append(statement)
+            return 4
+
         def add(self, obj):
             self.added.append(obj)
 
@@ -158,6 +161,8 @@ async def test_persist_compression_inserts_summary(monkeypatch: pytest.MonkeyPat
     assert session.committed is True
     assert session.added[0].content == "summary text"
     assert session.added[0].role == "compress"
+    assert session.added[0].sequence == 5
+    assert listener.sequence == 5
 
 
 async def _async_noop(*args, **kwargs):
