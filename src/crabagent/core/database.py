@@ -92,6 +92,56 @@ class Message(Base):
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
 
 
+class Goal(Base):
+    __tablename__ = "goals"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    objective: Mapped[str] = mapped_column(Text, nullable=False)
+    execution_model: Mapped[str] = mapped_column(String(200), default="")
+    execution_provider: Mapped[str] = mapped_column(String(100), default="")
+    execution_agent: Mapped[str] = mapped_column(String(100), default="")
+    reasoning_effort: Mapped[str] = mapped_column(String(50), default="")
+    success_criteria: Mapped[list] = mapped_column(JSON, default=list)
+    constraints: Mapped[list] = mapped_column(JSON, default=list)
+    status: Mapped[str] = mapped_column(String(32), default="active", index=True)
+    auto_continue: Mapped[bool] = mapped_column(Boolean, default=False)
+    token_budget: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    tokens_used: Mapped[int] = mapped_column(Integer, default=0)
+    max_auto_turns: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    auto_turns: Mapped[int] = mapped_column(Integer, default=0)
+    completion_evidence: Mapped[str] = mapped_column(Text, default="")
+    blocker: Mapped[str] = mapped_column(Text, default="")
+    latest_checkpoint: Mapped[str] = mapped_column(Text, default="")
+    next_step: Mapped[str] = mapped_column(Text, default="")
+    stop_reason: Mapped[str] = mapped_column(String(200), default="")
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+    closed_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class GoalEvent(Base):
+    __tablename__ = "goal_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    goal_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    event_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    detail: Mapped[str] = mapped_column(Text, default="")
+    data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class GoalCheckpoint(Base):
+    __tablename__ = "goal_checkpoints"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    goal_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    next_step: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
+
+
 class Molt(Base):
     __tablename__ = "molts"
 
@@ -544,6 +594,45 @@ async def init_db() -> None:
             await conn.execute(text("ALTER TABLE conversations ADD COLUMN current_file TEXT DEFAULT ''"))
         if "workspace_type" not in columns:
             await conn.execute(text("ALTER TABLE conversations ADD COLUMN workspace_type TEXT DEFAULT ''"))
+
+        # Goals are created by metadata for new databases. The tables below are
+        # intentionally independent so existing user databases only gain data.
+        await conn.execute(text(
+            "CREATE TABLE IF NOT EXISTS goals ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, session_id VARCHAR(32) NOT NULL, "
+            "user_id INTEGER NOT NULL, objective TEXT NOT NULL, execution_model VARCHAR(200) DEFAULT '', "
+            "execution_provider VARCHAR(100) DEFAULT '', execution_agent VARCHAR(100) DEFAULT '', "
+            "reasoning_effort VARCHAR(50) DEFAULT '', success_criteria JSON, "
+            "constraints JSON, status VARCHAR(32) DEFAULT 'active', auto_continue BOOLEAN DEFAULT 0, "
+            "token_budget INTEGER, tokens_used INTEGER DEFAULT 0, max_auto_turns INTEGER, "
+            "auto_turns INTEGER DEFAULT 0, completion_evidence TEXT DEFAULT '', blocker TEXT DEFAULT '', "
+            "latest_checkpoint TEXT DEFAULT '', next_step TEXT DEFAULT '', stop_reason VARCHAR(200) DEFAULT '', "
+            "created_at DATETIME, updated_at DATETIME, closed_at DATETIME)"
+        ))
+        result = await conn.execute(text("PRAGMA table_info(goals)"))
+        goal_columns = [row[1] for row in result.fetchall()]
+        for column, definition in (
+            ("execution_model", "VARCHAR(200) DEFAULT ''"),
+            ("execution_provider", "VARCHAR(100) DEFAULT ''"),
+            ("execution_agent", "VARCHAR(100) DEFAULT ''"),
+            ("reasoning_effort", "VARCHAR(50) DEFAULT ''"),
+        ):
+            if column not in goal_columns:
+                await conn.execute(text(f"ALTER TABLE goals ADD COLUMN {column} {definition}"))
+
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_goals_session_id ON goals(session_id)"))
+        await conn.execute(text(
+            "CREATE TABLE IF NOT EXISTS goal_events ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, goal_id INTEGER NOT NULL, event_type VARCHAR(32) NOT NULL, "
+            "detail TEXT DEFAULT '', data JSON, created_at DATETIME)"
+        ))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_goal_events_goal_id ON goal_events(goal_id)"))
+        await conn.execute(text(
+            "CREATE TABLE IF NOT EXISTS goal_checkpoints ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, goal_id INTEGER NOT NULL, summary TEXT NOT NULL, "
+            "next_step TEXT DEFAULT '', created_at DATETIME)"
+        ))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_goal_checkpoints_goal_id ON goal_checkpoints(goal_id)"))
 
         result = await conn.execute(text("PRAGMA table_info(email_configs)"))
         columns = [row[1] for row in result.fetchall()]

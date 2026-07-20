@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.13.2] — Goal Mode & Autonomous Session Progress
+
+### Added
+- **Goal Mode** — Create a persistent, session-scoped objective from the target button or `/goal <objective>`. Goals record the objective, success criteria, constraints, checkpoints, status history, completion evidence, and concrete blockers while normal chat output remains in the same conversation.
+- **Goal controls and timeline** — The chat UI now shows an active-goal card with pause, resume, edit, and progress actions. The progress view lists checkpoints, lifecycle events, completion evidence, and blockers.
+- **Goal-aware agent tools** — Active goals are injected into agent context. Agents can inspect the goal, record meaningful checkpoints, and only mark completion with verification evidence or mark a goal unmet with a concrete blocker.
+- **Controlled auto-continue** — Goals can continue in a separate session turn after a response completes. Each automatic goal gets safe defaults of 10 turns and an 80,000-token budget unless configured otherwise.
+
+### Changed
+- **Goal lifecycle events in chat** — Goal creation, checkpoints, status changes, and scheduled continuations are delivered over SSE and appear as visible conversation notices.
+
+### Fixed
+- **Stopping an agent preserves the goal** — Aborting a running goal task now pauses the goal and cancels a pending continuation instead of silently losing the objective.
+
+---
+
 ## [0.13.1] — Reliable Context Compression & Mermaid Streaming
 
 ### Added

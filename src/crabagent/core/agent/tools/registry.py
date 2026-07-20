@@ -50,6 +50,12 @@ class ToolRegistry:
 
         return decorator
 
+    def clone(self) -> ToolRegistry:
+        """Create an isolated registry while retaining all globally registered tools."""
+        cloned = ToolRegistry()
+        cloned._tools = self._tools.copy()
+        return cloned
+
     def get(self, name: str) -> ToolInfo | None:
         return self._tools.get(name)
 

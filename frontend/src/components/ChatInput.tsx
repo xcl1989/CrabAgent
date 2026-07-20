@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback } from "react";
-import { ArrowUp, Square, Paperclip, Bot } from "lucide-react";
+import { ArrowUp, Square, Paperclip, Bot, Target } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button, Textarea } from "./ui";
 
@@ -12,6 +12,8 @@ interface Props {
   onFilePaste: (e: React.ClipboardEvent) => void;
   onDelegateOpen: () => void;
   showDelegate?: boolean;
+  onGoalOpen?: () => void;
+  hasGoal?: boolean;
 }
 
 export default function ChatInput({
@@ -23,6 +25,8 @@ export default function ChatInput({
   onFilePaste,
   onDelegateOpen,
   showDelegate,
+  onGoalOpen,
+  hasGoal,
 }: Props) {
   const { t } = useTranslation();
   const [input, setInput] = useState("");
@@ -58,6 +62,18 @@ export default function ChatInput({
       >
         <Paperclip size={15} />
       </Button>
+      {onGoalOpen && (
+        <Button
+          size="icon"
+          variant="outline"
+          onClick={onGoalOpen}
+          disabled={sending || replaying}
+          title={hasGoal ? "管理目标" : "创建目标"}
+          className={`h-9 w-9 sm:h-10 sm:w-10 ${hasGoal ? "text-[var(--brand)] border-[var(--brand)]/40" : ""}`}
+        >
+          <Target size={15} />
+        </Button>
+      )}
       {showDelegate && (
         <Button
           size="icon"

@@ -245,6 +245,11 @@ The desktop app includes a floating **desktop pet** that reacts to agent state (
 
 ## Features
 
+### 🎯 Goal Mode
+Create a durable goal for the current conversation with the target button or `/goal <objective>`. A goal keeps its objective, success criteria, constraints, checkpoints, and evidence visible while all planning, tool calls, tests, and results remain in the normal chat stream.
+
+Pause, resume, edit, or inspect the goal timeline at any time. With **Auto Continue** enabled, CrabAgent starts the next focused session turn after the current response, stopping safely when the goal is completed, paused, blocked, or reaches its configured token or turn budget.
+
 ### 🛠️ Work Mode
 Split-pane workspace with live document preview, code editor, prototype builder, meeting notes, and Markdown editor. AI chat sidebar stays interactive while you work.
 

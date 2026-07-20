@@ -59,6 +59,34 @@ _tasks: dict[str, asyncio.Task] = {}
 _session_locks: dict[str, asyncio.Lock] = {}
 
 
+def _should_continue_goal(snapshot: dict | None, metadata: dict) -> bool:
+    """Only continue healthy goal turns; failures require user intervention."""
+    return bool(
+        snapshot
+        and snapshot.get("status") == "active"
+        and snapshot.get("auto_continue")
+        and not metadata.get("_run_error")
+        and not metadata.get("_agent_error")
+    )
+
+
+def _goal_continuation_request(request: PromptRequest) -> PromptRequest:
+    """Keep the selected execution settings for an automatic Goal turn."""
+    return PromptRequest(
+        message=(
+            "Continue the active goal from the latest checkpoint. Work on the next "
+            "concrete unfinished step, then record progress or verified completion."
+        ),
+        model=request.model,
+        provider=request.provider,
+        agent=request.agent,
+        reasoning_effort=request.reasoning_effort,
+        file_context=request.file_context,
+        workspace_type=request.workspace_type,
+        work_mode=request.work_mode,
+    )
+
+
 MERMAID_GENERATION_INSTRUCTIONS = """\
 Mermaid reliability rules:
 - Generate Mermaid only when it materially improves the response; otherwise use ordinary Markdown.
@@ -111,7 +139,7 @@ def _save_image_temp(data_url: str) -> dict:
 
 _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
 _IMAGE_PATH_RE = re.compile(
-    r'(?:^|[\s(])((?:/[^\s)]+)\.(?:png|jpe?g|gif|webp|bmp))(?:[\s)]|$)',
+    r"(?:^|[\s(])((?:/[^\s)]+)\.(?:png|jpe?g|gif|webp|bmp))(?:[\s)]|$)",
     re.IGNORECASE,
 )
 
@@ -190,7 +218,7 @@ async def prompt_async(
             last_agent = agent
             break
 
-    agent_changed = (last_agent != effective_agent)
+    agent_changed = last_agent != effective_agent
 
     # If agent changed, persist agent_switch BEFORE the user message
     if agent_changed and effective_agent != "default":
@@ -239,10 +267,7 @@ async def prompt_async(
     _work_changed = (
         req.work_mode
         and req.file_context
-        and (
-            req.file_context != (conv.current_file or "")
-            or req.workspace_type != (conv.workspace_type or "")
-        )
+        and (req.file_context != (conv.current_file or "") or req.workspace_type != (conv.workspace_type or ""))
     )
     if _work_changed:
         file_name = req.file_context.split("/")[-1]
@@ -263,10 +288,7 @@ async def prompt_async(
             "markdown": "用户正在编辑此 Markdown 文档。",
         }
         _hint = _hints.get(req.workspace_type, "用户正在编辑此文件。")
-        ws_content = (
-            f"📎 [工作区切换] {_type_label}: {file_name}\n"
-            f"路径: {req.file_context}\n{_hint}"
-        )
+        ws_content = f"📎 [工作区切换] {_type_label}: {file_name}\n路径: {req.file_context}\n{_hint}"
         ws_seq = user_msg_seq
         await save_message(
             db,
@@ -280,7 +302,8 @@ async def prompt_async(
         # Persist current file for next-change detection
         try:
             await conv_svc.update_conversation(
-                db, session_id,
+                db,
+                session_id,
                 current_file=req.file_context,
                 workspace_type=req.workspace_type,
             )
@@ -343,19 +366,32 @@ async def prompt_async(
         _use_cache = True
         if locale != "en":
             from crabagent.core.i18n import get_locale_instruction
+
             lang_inst = get_locale_instruction(locale)
             if lang_inst and lang_inst not in conv.system_prompt:
                 _use_cache = False
-                logger.info("[CACHE] Session %s: MISS (old cache without locale instruction, current locale='%s')",
-                            session_id, locale)
+                logger.info(
+                    "[CACHE] Session %s: MISS (old cache without locale instruction, current locale='%s')",
+                    session_id,
+                    locale,
+                )
         if _use_cache:
             base_prompt = conv.system_prompt
-            logger.info("[CACHE] Session %s: HIT (prompt_len=%d, prompt_locale='%s', current locale='%s')",
-                        session_id, len(conv.system_prompt), getattr(conv, 'prompt_locale', ''), locale)
+            logger.info(
+                "[CACHE] Session %s: HIT (prompt_len=%d, prompt_locale='%s', current locale='%s')",
+                session_id,
+                len(conv.system_prompt),
+                getattr(conv, "prompt_locale", ""),
+                locale,
+            )
 
     if not _use_cache:
-        logger.info("[CACHE] Session %s: MISS (prompt_locale='%s', current locale='%s')",
-                    session_id, getattr(conv, 'prompt_locale', ''), locale)
+        logger.info(
+            "[CACHE] Session %s: MISS (prompt_locale='%s', current locale='%s')",
+            session_id,
+            getattr(conv, "prompt_locale", ""),
+            locale,
+        )
         from crabagent.core.i18n import get_system_prompt_template
 
         template = get_system_prompt_template(locale)
@@ -426,6 +462,7 @@ async def prompt_async(
         # Append locale instruction to the cached prompt (single system message)
         try:
             from crabagent.core.i18n import get_locale_instruction
+
             lang_inst = get_locale_instruction(locale)
             if lang_inst:
                 base_prompt += "\n\n" + lang_inst
@@ -435,24 +472,45 @@ async def prompt_async(
         # Persist for subsequent messages in the same session
         try:
             from crabagent.serve.services.conversation import update_conversation
+
             async with async_session_factory() as save_db:
                 await update_conversation(save_db, session_id, system_prompt=base_prompt, prompt_locale=locale)
-            logger.info("[CACHE] Session %s: SAVED (prompt_len=%d, prompt_locale='%s')",
-                        session_id, len(base_prompt), locale)
+            logger.info(
+                "[CACHE] Session %s: SAVED (prompt_len=%d, prompt_locale='%s')", session_id, len(base_prompt), locale
+            )
         except Exception as e:
             logger.warning("[CACHE] Session %s: SAVE FAILED: %s", session_id, e)
 
     context = AgentContext(
         workspace=workspace,
-        tool_registry=registry,
+        tool_registry=registry.clone(),
         max_iterations=settings.max_iterations,
         model=req.model or conv.model or None,
-        provider_name=req.provider,
+        # Preserve the conversation provider if a Goal request omits it.
+        provider_name=req.provider or conv.provider or None,
         system_prompt=base_prompt,
         locale=locale,
     )
     context.metadata["locale"] = locale
-    context.system_prompt += """
+    try:
+        from crabagent.core.goals.service import get_current_goal, goal_prompt
+        from crabagent.core.goals.tools import register_goal_tools
+
+        active_goal = await get_current_goal(db, session_id)
+        if active_goal:
+            context.metadata["goal_id"] = active_goal.id
+            context.system_prompt += goal_prompt(active_goal)
+            register_goal_tools(context, session_id, user.id)
+            if active_goal.execution_model:
+                context.model = active_goal.execution_model
+            if active_goal.execution_provider:
+                context.provider_name = active_goal.execution_provider
+            if active_goal.reasoning_effort:
+                context.metadata["reasoning_effort"] = active_goal.reasoning_effort
+    except Exception:
+        logger.exception("Failed to attach active goal for session %s", session_id)
+    context.system_prompt += (
+        """
 
 ## Rich response visualizations
 When a visualization would improve the answer, use a fenced Markdown code block only.
@@ -474,8 +532,11 @@ Never put HTML, SVG, JavaScript, event handlers, URLs, or executable code in
 visualization blocks. Do not fabricate data; explain when data is insufficient.
 Use ordinary Markdown when a visualization is not helpful.
 
-""" + MERMAID_GENERATION_INSTRUCTIONS + """
 """
+        + MERMAID_GENERATION_INSTRUCTIONS
+        + """
+"""
+    )
     if req.file_context:
         context.metadata["current_doc"] = req.file_context
     if req.workspace_type:
@@ -607,7 +668,9 @@ Use ordinary Markdown when a visualization is not helpful.
                 task_hint=(req.message or "")[:120],
             )
             if lessons_block.strip():
-                context.messages.append({"role": "experience", "content": lessons_block.strip(), "agent": effective_agent})
+                context.messages.append(
+                    {"role": "experience", "content": lessons_block.strip(), "agent": effective_agent}
+                )
         except Exception:
             pass
 
@@ -664,9 +727,8 @@ Use ordinary Markdown when a visualization is not helpful.
                     active_info["pet_status"] = "thinking"
                     active_info["updated_at"] = now
             elif event.type in (EventType.AGENT_START, EventType.ITERATION_START, EventType.THINKING_DELTA):
-                tool_visible = (
-                    active_info.get("pet_status") == "working"
-                    and now < active_info.get("pet_tool_min_until", 0)
+                tool_visible = active_info.get("pet_status") == "working" and now < active_info.get(
+                    "pet_tool_min_until", 0
                 )
                 if active_info.get("pet_status") != "waiting" and not tool_visible:
                     active_info["pet_status"] = "thinking"
@@ -1053,6 +1115,59 @@ Use ordinary Markdown when a visualization is not helpful.
 
             _tasks.pop(session_id, None)
             _session_locks.pop(session_id, None)
+            try:
+                from crabagent.core.goals.scheduler import schedule_goal_continuation
+                from crabagent.core.goals.service import account_goal_usage, get_current_goal, goal_to_dict
+
+                async with async_session_factory() as goal_db:
+                    goal = await get_current_goal(goal_db, session_id)
+                    if goal:
+                        limited = await account_goal_usage(goal_db, goal, context.accumulated_total_consumed)
+                        await goal_db.commit()
+                        snapshot = goal_to_dict(goal)
+                    else:
+                        limited = False
+                        snapshot = None
+
+                if snapshot:
+                    event_type = EventType.GOAL_STATUS_CHANGED if limited else EventType.GOAL_UPDATED
+                    await context.event_bus.emit(AgentEvent(type=event_type, data={"goal": snapshot}))
+
+                # The next turn is a separate prompt task so cancellation, SSE,
+                # and normal session locking continue to work as usual.
+                # A failed turn must be terminal for automatic continuation. In
+                # particular, an authentication failure cannot be fixed by retrying
+                # the same prompt and would otherwise repeat the error indefinitely.
+                if _should_continue_goal(snapshot, context.metadata):
+
+                    async def _continue_goal() -> None:
+                        try:
+                            async with async_session_factory() as goal_check_db:
+                                current_goal = await get_current_goal(goal_check_db, session_id)
+                                if (
+                                    not current_goal
+                                    or current_goal.status != "active"
+                                    or not current_goal.auto_continue
+                                ):
+                                    return
+                                latest_snapshot = goal_to_dict(current_goal)
+                            follow_up = _goal_continuation_request(req)
+                            await context.event_bus.emit(
+                                AgentEvent(type=EventType.GOAL_CONTINUATION_STARTED, data={"goal": latest_snapshot})
+                            )
+                            async with async_session_factory() as continue_db:
+                                await prompt_async(session_id, follow_up, request, user, continue_db)
+                        except Exception:
+                            logger.exception("Failed to start goal continuation for session %s", session_id)
+
+                    if schedule_goal_continuation(session_id, _continue_goal):
+                        await context.event_bus.emit(
+                            AgentEvent(
+                                type=EventType.GOAL_CONTINUATION_SCHEDULED, data={"goal": snapshot, "delay_seconds": 2}
+                            )
+                        )
+            except Exception:
+                logger.exception("Failed to update goal usage for session %s", session_id)
             request.app.state.active_agents.pop(session_id, None)
             if not context.metadata.get("_run_error") and not context.metadata.get("_agent_error"):
                 request.app.state.agent_attention[session_id] = {
@@ -1064,8 +1179,10 @@ Use ordinary Markdown when a visualization is not helpful.
             try:
                 async with async_session_factory() as update_db:
                     await conv_svc.update_conversation(
-                        update_db, session_id,
-                        model=resolved_model, provider=resolved_provider,
+                        update_db,
+                        session_id,
+                        model=resolved_model,
+                        provider=resolved_provider,
                         tokens=context.total_tokens,
                     )
             except Exception:
@@ -1101,4 +1218,19 @@ async def abort_session(
         raise HTTPException(status_code=404, detail="No running task for this session")
 
     task.cancel()
+    try:
+        from crabagent.core.goals.scheduler import cancel_goal_continuation
+
+        cancel_goal_continuation(session_id)
+    except Exception:
+        pass
+    try:
+        from crabagent.core.goals.service import get_current_goal, update_goal
+
+        goal = await get_current_goal(db, session_id)
+        if goal:
+            await update_goal(db, goal, status="paused", stop_reason="Paused by user")
+            await db.commit()
+    except Exception:
+        logger.warning("Failed to pause goal after abort for session %s", session_id, exc_info=True)
     return {"status": "aborted", "session_id": session_id}

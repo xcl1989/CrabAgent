@@ -85,6 +85,25 @@ export function sseEventToMessages(event: SSEEvent, messages: ChatMessage[]): Ch
     return updated;
   }
 
+  if (event.type === "goal_continuation_scheduled" || event.type === "goal_continuation_started") {
+    const content = event.type === "goal_continuation_started"
+      ? "目标模式正在继续下一轮执行。"
+      : "目标模式将在几秒后自动继续。";
+    updated.push({ id: `goal-continue-${Date.now()}`, role: "notice", content });
+    return updated;
+  }
+
+  if (event.type === "goal_created" || event.type === "goal_status_changed" || event.type === "goal_checkpoint") {
+    const goal = event.data.goal as { objective?: string; status?: string; latest_checkpoint?: string } | undefined;
+    const content = event.type === "goal_created"
+      ? `目标已创建：${goal?.objective || ""}`
+      : event.type === "goal_checkpoint"
+        ? `目标检查点：${(event.data.checkpoint as { summary?: string } | undefined)?.summary || goal?.latest_checkpoint || ""}`
+        : `目标状态已更新：${goal?.status || ""}`;
+    updated.push({ id: `goal-${Date.now()}`, role: "notice", content });
+    return updated;
+  }
+
   if (event.type === "agent_error") {
     updated.push({ id: `e-${Date.now()}`, role: "error", content: (event.data.error as string) || "Unknown error" });
     return updated;

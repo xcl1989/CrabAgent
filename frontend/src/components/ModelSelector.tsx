@@ -24,15 +24,12 @@ export default function ModelSelector({
   dropdownUpward = true,
 }: Props) {
   const { t } = useTranslation();
-  const selectedProviderRef = useRef<string | null>(null);
   const [open, setOpen] = useState(false);
-
-  // Sync ref when selectedProvider changes from outside (e.g. session load)
-  if (selectedProvider !== undefined && selectedProvider !== selectedProviderRef.current) {
-    selectedProviderRef.current = selectedProvider;
-  }
+  const resolvedProvider = selectedProvider ?? providerModels.find((item) =>
+    item.models.some((model) => model.id === selectedModel),
+  )?.provider.name ?? null;
   const [highlighted, setHighlighted] = useState<string>(
-    selectedProviderRef.current ? `${selectedProviderRef.current}/${selectedModel}` : selectedModel
+    resolvedProvider ? `${resolvedProvider}/${selectedModel}` : selectedModel,
   );
   const [searchQuery, setSearchQuery] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
@@ -113,7 +110,6 @@ export default function ModelSelector({
 
   const handleSelect = useCallback(
     (modelId: string, providerName: string) => {
-      selectedProviderRef.current = providerName;
       onChange(modelId, providerName);
       setOpen(false);
     },
@@ -121,7 +117,7 @@ export default function ModelSelector({
   );
 
   const selectedLabel = (() => {
-    const provider = selectedProviderRef.current;
+    const provider = resolvedProvider;
     if (provider) {
       const pm = providerModels.find((p) => p.provider.name === provider);
       if (pm) return `${pm.provider.display_name || provider}/${selectedModel}`;
@@ -132,15 +128,6 @@ export default function ModelSelector({
     }
     return selectedModel;
   })();
-
-  if (!selectedProviderRef.current && selectedModel) {
-    for (const pm of providerModels) {
-      if (pm.models.some((m) => m.id === selectedModel)) {
-        selectedProviderRef.current = pm.provider.name;
-        break;
-      }
-    }
-  }
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -195,8 +182,8 @@ export default function ModelSelector({
           if (!disabled) {
             setOpen((v) => !v);
             highlightSource.current = "keyboard";
-            const key = selectedProviderRef.current
-              ? `${selectedProviderRef.current}/${selectedModel}`
+            const key = resolvedProvider
+              ? `${resolvedProvider}/${selectedModel}`
               : selectedModel;
             setHighlighted(key);
           }
@@ -262,7 +249,7 @@ export default function ModelSelector({
                     {pm.provider.display_name || pm.provider.name}
                   </div>
                   {pm.models.map((m) => {
-                    const isSelected = m.id === selectedModel && pm.provider.name === selectedProviderRef.current;
+                    const isSelected = m.id === selectedModel && pm.provider.name === resolvedProvider;
                     const isHighlighted = `${pm.provider.name}/${m.id}` === highlighted;
                     return (
                       <button

@@ -43,6 +43,14 @@ class EventType(StrEnum):
     # Bash streaming output
     BASH_OUTPUT = "bash_output"
 
+    # Session goal lifecycle
+    GOAL_CREATED = "goal_created"
+    GOAL_UPDATED = "goal_updated"
+    GOAL_CHECKPOINT = "goal_checkpoint"
+    GOAL_STATUS_CHANGED = "goal_status_changed"
+    GOAL_CONTINUATION_SCHEDULED = "goal_continuation_scheduled"
+    GOAL_CONTINUATION_STARTED = "goal_continuation_started"
+
     # Office document operations
     DOC_OP_START = "doc_op_start"
     DOC_OP_DELTA = "doc_op_delta"

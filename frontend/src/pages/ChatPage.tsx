@@ -19,6 +19,11 @@ import {
   FileText,
   Archive,
 } from "lucide-react";
+import * as goalsApi from "../api/goals";
+import { Goal as GoalData, GoalDraft } from "../types/Goal";
+import { GoalCard } from "../components/GoalCard";
+import { GoalComposer } from "../components/GoalComposer";
+import { GoalTimeline } from "../components/GoalTimeline";
 import * as sessionsApi from "../api/sessions";
 import * as providersApi from "../api/providers";
 import * as mcpServersApi from "../api/mcpServers";
@@ -75,6 +80,13 @@ const STARTER_PROMPTS = [
 export default function ChatPage({ onActiveSessionChange }: { onActiveSessionChange?: (sessionId: string | null) => void }) {
   const { t, i18n } = useTranslation();
   const [workspace, setWorkspace] = useState<string>("");
+  const [goal, setGoal] = useState<GoalData | null>(null);
+  const [goalComposerOpen, setGoalComposerOpen] = useState(false);
+  const [goalTimelineOpen, setGoalTimelineOpen] = useState(false);
+  const [goalSaving, setGoalSaving] = useState(false);
+  const [selectedProvider, setSelectedProvider] = useState<string | null>(null);
+  const [reasoningEffort, setReasoningEffort] = useState("medium");
+  const [selectedAgent, setSelectedAgent] = useState("default");
   const { taskBoardTasks, handleTaskBoardEvent, clearTaskBoard } =
     useTaskBoard();
 
@@ -243,6 +255,10 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
   }, []);
 
   const wrappedOnEvent = useCallback((event: SSEEvent) => {
+    if (event.type.startsWith("goal_")) {
+      const snapshot = event.data.goal as GoalData | undefined;
+      if (snapshot) setGoal(snapshot);
+    }
     if (event.type.startsWith("doc_op_")) {
       handleDocEvent(event);
     } else {
@@ -344,8 +360,77 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
     onActiveSessionChange?.(activeSession?.session_id || null);
   }, [activeSession?.session_id, onActiveSessionChange]);
 
+  useEffect(() => {
+    let cancelled = false;
+    if (!activeSession) {
+      setGoal(null);
+      return;
+    }
+    goalsApi.getGoal(activeSession.session_id).then(({ goal }) => {
+      if (!cancelled) setGoal(goal);
+    }).catch(() => {
+      if (!cancelled) setGoal(null);
+    });
+    return () => { cancelled = true; };
+  }, [activeSession?.session_id]);
+
+  const saveGoal = useCallback(async (draft: GoalDraft) => {
+    if (!activeSession) return;
+    setGoalSaving(true);
+    try {
+      const selectedEntry = providerModels.find((item) =>
+        item.provider.name === selectedProvider
+        && item.models.some((model) => model.id === selectedModel),
+      );
+      const provider = selectedEntry?.provider.name ?? providerModels.find((item) =>
+        item.models.some((model) => model.id === selectedModel),
+      )?.provider.name;
+      const execution = {
+        execution_model: selectedModel,
+        execution_provider: provider ?? "",
+        execution_agent: selectedAgent,
+        reasoning_effort: reasoningEffort,
+      };
+      const result = goal
+        ? await goalsApi.updateGoal(activeSession.session_id, draft)
+        : await goalsApi.createGoal(activeSession.session_id, { ...draft, ...execution });
+      setGoal(result.goal);
+      if (!goal) {
+        await sessionsApi.sendPrompt(
+          activeSession.session_id,
+          `我已创建当前会话目标：${result.goal.objective}\n请先检查现状，说明执行计划，然后开始推进。`,
+          execution.execution_model,
+          undefined,
+          execution.execution_agent,
+          execution.reasoning_effort,
+          execution.execution_provider || undefined,
+        );
+      }
+    } finally {
+      setGoalSaving(false);
+    }
+  }, [
+    activeSession,
+    goal,
+    selectedModel,
+    selectedProvider,
+    providerModels,
+    selectedAgent,
+    reasoningEffort,
+  ]);
+
+  const setGoalStatus = useCallback(async (status: "active" | "paused") => {
+    if (!activeSession) return;
+    setGoalSaving(true);
+    try {
+      const { goal } = await goalsApi.updateGoal(activeSession.session_id, { status, stop_reason: status === "paused" ? "Paused by user" : "" });
+      setGoal(goal);
+    } finally {
+      setGoalSaving(false);
+    }
+  }, [activeSession]);
+
   const [showProviders, setShowProviders] = useState(false);
-  const [selectedProvider, setSelectedProvider] = useState<string | null>(null);
   const [showCompression, setShowCompression] = useState(false);
   const [compressionModel, setCompressionModel] = useState("");
   const [compressionProvider, setCompressionProvider] = useState("");
@@ -356,14 +441,17 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
   const [showEmail, setShowEmail] = useState(false);
 
   useEffect(() => {
-    if (!selectedProvider && selectedModel && providerModels.length > 0) {
-      for (const pm of providerModels) {
-        if (pm.models.some((m) => m.id === selectedModel)) {
-          setSelectedProvider(pm.provider.name);
-          break;
-        }
-      }
-    }
+    if (!selectedModel || providerModels.length === 0) return;
+    const providerMatchesModel = providerModels.some((item) =>
+      item.provider.name === selectedProvider
+      && item.models.some((model) => model.id === selectedModel),
+    );
+    if (providerMatchesModel) return;
+
+    const matchingProvider = providerModels.find((item) =>
+      item.models.some((model) => model.id === selectedModel),
+    );
+    setSelectedProvider(matchingProvider?.provider.name ?? null);
   }, [selectedModel, providerModels, selectedProvider]);
   const [showScheduledTasks, setShowScheduledTasks] = useState(false);
   const [showSkills, setShowSkills] = useState(false);
@@ -374,13 +462,11 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
   const [showWorkFiles, setShowWorkFiles] = useState(false);
   const [pendingImages, setPendingImages] = useState<string[]>([]);
   const [pendingFiles, setPendingFiles] = useState<{ name: string; path: string; size: number }[]>([]);
-  const [reasoningEffort, setReasoningEffort] = useState("medium");
   const [agentProfiles, setAgentProfiles] = useState<AgentProfileType[]>([]);
   const [agentOpen, setAgentOpen] = useState(false);
   const [effortOpen, setEffortOpen] = useState(false);
   const agentDropdownRef = useRef<HTMLDivElement>(null);
   const effortDropdownRef = useRef<HTMLDivElement>(null);
-  const [selectedAgent, setSelectedAgent] = useState("default");
   const [localeMismatch, setLocaleMismatch] = useState<{ pendingText: string; pendingImages: string[]; pendingFiles: { name: string; path: string; size: number }[] } | null>(null);
   const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
   const [mcpStatus, setMcpStatus] = useState<McpServerStatus[]>([]);
@@ -624,6 +710,21 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
   const handleSend = async (text: string) => {
     if ((!text.trim() && pendingImages.length === 0 && pendingFiles.length === 0) || !activeSession || sending)
       return;
+
+    const goalCommand = text.trim().match(/^\/goal(?:\s+([\s\S]+))?$/);
+    if (goalCommand) {
+      if (goalCommand[1]) {
+        await saveGoal({
+          objective: goalCommand[1].trim(),
+          success_criteria: [],
+          constraints: [],
+          auto_continue: false,
+        });
+      } else {
+        setGoalComposerOpen(true);
+      }
+      return;
+    }
 
     // Check locale mismatch
     const currentLocale = i18n.language;
@@ -930,6 +1031,7 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
                       </div>
                     </div>
                   )}
+                  {goal && <GoalCard goal={goal} busy={goalSaving || sending} onPause={() => setGoalStatus("paused")} onResume={() => setGoalStatus("active")} onEdit={() => setGoalComposerOpen(true)} onHistory={() => setGoalTimelineOpen(true)} />}
                   <ChatPanel
                     sessionId={activeSession.session_id}
                     messages={messages}
@@ -1149,6 +1251,8 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
                         onFilePaste={handleFilePaste}
                         onDelegateOpen={() => setShowDelegate(true)}
                         showDelegate={true}
+                        onGoalOpen={() => setGoalComposerOpen(true)}
+                        hasGoal={!!goal}
                       />
                     </div>
                   </div>
@@ -1421,6 +1525,7 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
               </div>
             )}
 
+            {goal && <GoalCard goal={goal} busy={goalSaving || sending} onPause={() => setGoalStatus("paused")} onResume={() => setGoalStatus("active")} onEdit={() => setGoalComposerOpen(true)} onHistory={() => setGoalTimelineOpen(true)} />}
             <ChatPanel
               sessionId={activeSession.session_id}
               messages={messages}
@@ -1641,6 +1746,8 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
                   onFilePaste={handleFilePaste}
                   onDelegateOpen={() => setShowDelegate(true)}
                   showDelegate={true}
+                  onGoalOpen={() => setGoalComposerOpen(true)}
+                  hasGoal={!!goal}
                 />
               </div>
             </div>
@@ -1861,6 +1968,9 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
       )}
 
       {showSkills && <SkillsPanel onClose={() => setShowSkills(false)} />}
+
+      {activeSession && <GoalComposer open={goalComposerOpen} goal={goal} onOpenChange={setGoalComposerOpen} onSubmit={saveGoal} />}
+      {activeSession && <GoalTimeline open={goalTimelineOpen} sessionId={activeSession.session_id} goal={goal} onOpenChange={setGoalTimelineOpen} />}
 
       {showDelegate && activeSession && (
         <DelegateModal

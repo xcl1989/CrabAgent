@@ -42,6 +42,7 @@ async def _resolve_provider(provider_name: str | None = None) -> ProviderInfo:
         info = await get_provider(provider_name)
         if info and info.enabled:
             return info
+        raise ValueError(f"Configured provider '{provider_name}' is unavailable or disabled.")
     info = await get_default_provider()
     if info:
         return info
