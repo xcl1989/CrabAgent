@@ -735,7 +735,14 @@
     "deleted": "Pet deleted",
     "confirmDelete": "Delete this pet? This cannot be undone.",
     "aiGenerate": "AI Pet Generation",
-    "aiGenerateDesc": "Describe a character and generate a complete 9-state spritesheet automatically. Takes 2-5 minutes.",
+    "aiGenerateDesc": "Describe a character and generate a spritesheet with a selectable action pack. The basic pack takes 2-5 minutes.",
+    "actionPack": "Action pack",
+    "actionPackBasic": "Basic",
+    "actionPackBasicDesc": "9 compatible actions; faster generation",
+    "actionPackOffice": "Work",
+    "actionPackOfficeDesc": "Adds work actions for thinking, reading, typing, and search",
+    "actionPackInteractive": "Interactive",
+    "actionPackInteractiveDesc": "Full office actions plus interactive moods",
     "promptPlaceholder": "e.g. a cute orange cat wearing a tiny scarf",
     "generate": "Generate",
     "generating": "Generating…",
@@ -753,6 +760,8 @@
     "styleClay": "Clay",
     "styleSticker": "Sticker",
     "styleFlatVector": "Flat Vector",
-    "styleAnime": "Anime"
+    "styleAnime": "Anime",
+    "expandOffice": "Add work actions",
+    "expandStarted": "Adding the missing actions. Keep the app open."
   }
 }

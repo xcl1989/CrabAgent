@@ -1,5 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import type { PetAnimationName, PetState } from "../../lib/pets/petStateMachine";
+import { resolveAnimation, type PetAnimationName, type PetState } from "../../lib/pets/petStateMachine";
+
+export interface SpriteAnimationConfig {
+  row: number;
+  frames: number;
+  frameDuration: number;
+  loop: boolean;
+}
 
 export interface SpritePetConfig {
   id: string;
@@ -10,6 +17,7 @@ export interface SpritePetConfig {
   rows: number;
   frameCounts: Record<string, number>;
   frameRates: Record<string, number>;
+  animations?: Record<string, SpriteAnimationConfig>;
 }
 
 interface SpritePetProps {
@@ -58,13 +66,16 @@ export function SpritePet({ config, state, scale = 1, onAnimationComplete }: Spr
     canvas.width = config.width * scale;
     canvas.height = config.height * scale;
 
-    const animation = state.animation;
-    const row = Math.max(
-      0,
-      Math.min(config.rows - 1, ROW_INDEX[animation] ?? 0),
-    );
-    const frameCount = getFrameCount(config.frameCounts, animation);
-    const frameRate = getFrameRate(config.frameRates, animation);
+    // An empty manifest is how legacy 9-row packages are returned by the API.
+    // Do not treat `{}` as a dynamic manifest: it would resolve every action to idle.
+    const animations = config.animations && Object.keys(config.animations).length > 0
+      ? config.animations
+      : legacyAnimations(config);
+    const animation = resolveAnimation(state.animation, animations);
+    const metadata = animations[animation];
+    const row = Math.max(0, Math.min(config.rows - 1, metadata?.row ?? ROW_INDEX[animation] ?? 0));
+    const frameCount = metadata?.frames ?? getFrameCount(config.frameCounts, animation);
+    const frameRate = metadata?.frameDuration ?? getFrameRate(config.frameRates, animation);
     const frameDuration = Math.max(16, frameRate);
 
     let frame = 0;
@@ -130,6 +141,16 @@ export function SpritePet({ config, state, scale = 1, onAnimationComplete }: Spr
 }
 
 /** Codex-compatible row index mapping. */
+function legacyAnimations(config: SpritePetConfig): Record<string, SpriteAnimationConfig> {
+  return Object.fromEntries(Object.entries(ROW_INDEX).map(([name, row]) => [name, {
+    row,
+    frames: getFrameCount(config.frameCounts, name as PetAnimationName),
+    frameDuration: getFrameRate(config.frameRates, name as PetAnimationName),
+    loop: !["waving", "jumping", "review"].includes(name),
+  }]));
+}
+
+/** Legacy Codex-compatible row index mapping. */
 const ROW_INDEX: Record<PetAnimationName, number> = {
   idle: 0,
   "running-right": 1,
@@ -140,4 +161,14 @@ const ROW_INDEX: Record<PetAnimationName, number> = {
   waiting: 6,
   running: 7,
   review: 8,
+  thinking: 7,
+  typing: 7,
+  reading: 7,
+  searching: 7,
+  "tool-using": 7,
+  celebrate: 8,
+  sleep: 0,
+  surprised: 6,
+  confused: 5,
+  pet: 3,
 };

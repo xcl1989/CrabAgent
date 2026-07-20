@@ -29,6 +29,16 @@ class PetAnimationName(StrEnum):
     WAITING = "waiting"
     RUNNING = "running"
     REVIEW = "review"
+    THINKING = "thinking"
+    TYPING = "typing"
+    READING = "reading"
+    SEARCHING = "searching"
+    TOOL_USING = "tool-using"
+    CELEBRATE = "celebrate"
+    SLEEP = "sleep"
+    SURPRISED = "surprised"
+    CONFUSED = "confused"
+    PET = "pet"
 
 
 # A state can be one of the canonical animation rows. Runtime-specific aliases
@@ -43,7 +53,26 @@ PetState = Literal[
     "waiting",
     "running",
     "review",
+    "thinking",
+    "typing",
+    "reading",
+    "searching",
+    "tool-using",
+    "celebrate",
+    "sleep",
+    "surprised",
+    "confused",
+    "pet",
 ]
+
+
+class PetAnimation(BaseModel):
+    """A single animation's location and playback metadata in a spritesheet."""
+
+    row: int = Field(..., ge=0)
+    frames: int = Field(default=1, ge=1)
+    frameDuration: int = Field(default=150, ge=16)
+    loop: bool = True
 
 
 class PetConfig(BaseModel):
@@ -88,6 +117,11 @@ class PetConfig(BaseModel):
         },
         description="Milliseconds per frame.",
     )
+    # Optional dynamic animation manifest. When absent, the legacy 9-row
+    # frame_counts/frame_rates contract is used so existing pets keep working.
+    animations: dict[str, PetAnimation] = Field(default_factory=dict)
+    action_pack: str = Field(default="basic", description="Generated action pack identifier.")
+
     type: Literal["svg", "spritesheet"] = Field(
         default="spritesheet",
         description="Rendering backend. 'svg' is reserved for the built-in pet.",

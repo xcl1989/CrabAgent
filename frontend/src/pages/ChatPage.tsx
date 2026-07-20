@@ -52,6 +52,7 @@ import { useChatState } from "../hooks/useChatState";
 import { useTaskBoard } from "../hooks/useTaskBoard";
 import { useModelSelector } from "../hooks/useModelSelector";
 import { cn } from "../lib/cn";
+import { dbMessagesToChat } from "../lib/messageTransforms";
 import { DocumentPanel, DocState } from "../components/DocumentPanel";
 import { DocOpEvent } from "../components/DocumentTimeline";
 import { CodePanel } from "../components/CodePanel";
@@ -856,11 +857,7 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
     try {
       await sessionsApi.compressSession(activeSession.session_id, compressionModel, compressionProvider);
       const refreshed = await sessionsApi.getMessages(activeSession.session_id);
-      setMessages(refreshed.map((m) => ({
-        ...m,
-        id: String(m.id),
-        tool_calls: Array.isArray(m.tool_calls) ? m.tool_calls : undefined,
-      })));
+      setMessages(dbMessagesToChat(refreshed));
       setShowCompression(false);
     } catch (err) {
       setCompressionError(err instanceof Error ? err.message : t("compression.failed"));

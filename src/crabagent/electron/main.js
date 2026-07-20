@@ -18,6 +18,7 @@ let petLastX = null;
 let petStateSaveTimer = null;
 let tray = null;
 let forceQuit = false;
+let petQuietUntil = 0;
 
 // ── Window state persistence ──
 const STATE_PATH = path.join(app.getPath('userData'), 'window-state.json');
@@ -38,13 +39,23 @@ function saveWindowState() {
 }
 
 function loadPetState() {
-  try { return JSON.parse(fs.readFileSync(PET_STATE_PATH, 'utf-8')); }
-  catch { return {}; }
+  try {
+    const state = JSON.parse(fs.readFileSync(PET_STATE_PATH, 'utf-8'));
+    if (!Number.isFinite(state.quietUntil) || state.quietUntil <= Date.now()) state.quietUntil = 0;
+    return state;
+  } catch { return {}; }
 }
 
 function savePetState() {
-  if (!petWin || petWin.isDestroyed()) return;
-  try { fs.writeFileSync(PET_STATE_PATH, JSON.stringify(petWin.getBounds())); } catch {}
+  try {
+    const bounds = petWin && !petWin.isDestroyed() ? petWin.getBounds() : {};
+    fs.writeFileSync(PET_STATE_PATH, JSON.stringify({ ...bounds, quietUntil: petQuietUntil }));
+  } catch {}
+}
+
+function setPetQuietMode(minutes) {
+  petQuietUntil = minutes ? Date.now() + minutes * 60_000 : 0;
+  savePetState();
 }
 
 function schedulePetStateSave() {
@@ -490,6 +501,7 @@ function createPetWindow() {
   if (petWin && !petWin.isDestroyed()) return petWin;
 
   const saved = loadPetState();
+  petQuietUntil = saved.quietUntil || 0;
   const display = require('electron').screen.getPrimaryDisplay();
   const workArea = display.workArea;
   const width = 228;
@@ -606,6 +618,8 @@ ipcMain.on('pet-resize', (_event, requestedHeight) => {
 ipcMain.on('pet-drag-start', (_event, { offsetX, offsetY }) => {
   petDrag = { offsetX, offsetY };
   petLastX = null;
+  // Render immediate drag feedback; subsequent cursor movement corrects it.
+  petWin?.webContents.send('pet-drag-direction', { direction: 'running-right' });
   if (petDragTimer) clearInterval(petDragTimer);
   petDragTimer = setInterval(movePetToCursor, 33);
 });
@@ -634,9 +648,25 @@ ipcMain.handle('pet-action', (_event, action, sessionId) => {
   return false;
 });
 
+ipcMain.handle('pet-quiet-mode', (_event, minutes) => {
+  const duration = Number(minutes);
+  if (!Number.isFinite(duration) || duration < 0 || duration > 24 * 60) return false;
+  setPetQuietMode(duration);
+  return true;
+});
+
+ipcMain.handle('pet-quiet-status', () => {
+  const remainingMs = Math.max(0, petQuietUntil - Date.now());
+  if (!remainingMs && petQuietUntil) setPetQuietMode(0);
+  return { active: remainingMs > 0, remainingMs };
+});
+
 ipcMain.on('pet-menu', (event) => {
   const menu = Menu.buildFromTemplate([
     { label: '打开 CrabAgent', click: () => showWindow() },
+    petQuietUntil > Date.now()
+      ? { label: '关闭安静模式', click: () => setPetQuietMode(0) }
+      : { label: '安静 1 小时', click: () => setPetQuietMode(60) },
     { type: 'separator' },
     { label: '隐藏桌宠', click: () => petWin?.hide() },
     { label: '退出 CrabAgent', click: () => { forceQuit = true; app.quit(); } },

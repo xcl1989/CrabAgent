@@ -194,6 +194,7 @@ async def run_agent(
     # (litellm would otherwise block trying interactive device code login)
     if provider.provider_type == "chatgpt":
         import os
+
         token_file = os.path.join(
             os.getenv("CHATGPT_TOKEN_DIR", os.path.expanduser("~/.config/litellm/chatgpt")),
             os.getenv("CHATGPT_AUTH_FILE", "auth.json"),
@@ -275,14 +276,16 @@ async def run_agent(
                     context.accumulated_reasoning += reasoning_tokens
 
                     # ── Per-iteration record for DB persistence ──
-                    context.usage_records.append({
-                        "iteration": context.iteration,
-                        "prompt_tokens": prompt_tokens,
-                        "cached_tokens": cached_tokens,
-                        "non_cached_tokens": non_cached_tokens,
-                        "completion_tokens": completion_tokens,
-                        "reasoning_tokens": reasoning_tokens,
-                    })
+                    context.usage_records.append(
+                        {
+                            "iteration": context.iteration,
+                            "prompt_tokens": prompt_tokens,
+                            "cached_tokens": cached_tokens,
+                            "non_cached_tokens": non_cached_tokens,
+                            "completion_tokens": completion_tokens,
+                            "reasoning_tokens": reasoning_tokens,
+                        }
+                    )
 
                     logger.info(
                         "LLM usage: prompt=%d (cached=%d, fresh=%d) completion=%d (reasoning=%d) iter=%d model=%s",
@@ -537,7 +540,7 @@ async def run_agent(
             if isinstance(e, litellm.exceptions.RateLimitError):
                 retryable = True
                 backoff_delay = min(
-                    settings.llm_retry_base_delay * (2 ** _llm_retry_count),
+                    settings.llm_retry_base_delay * (2**_llm_retry_count),
                     settings.llm_retry_max_delay,
                 )
                 user_message = "⚠️ API 速率已达上限"
@@ -545,7 +548,7 @@ async def run_agent(
             elif isinstance(e, (litellm.exceptions.Timeout, asyncio.TimeoutError)):
                 retryable = True
                 backoff_delay = min(
-                    settings.llm_retry_base_delay * (1.5 ** _llm_retry_count),
+                    settings.llm_retry_base_delay * (1.5**_llm_retry_count),
                     settings.llm_retry_max_delay,
                 )
                 user_message = "⏱️ API 请求超时"
@@ -553,7 +556,7 @@ async def run_agent(
             elif isinstance(e, litellm.exceptions.APIConnectionError):
                 retryable = True
                 backoff_delay = min(
-                    settings.llm_retry_base_delay * (2 ** _llm_retry_count),
+                    settings.llm_retry_base_delay * (2**_llm_retry_count),
                     settings.llm_retry_max_delay,
                 )
                 user_message = "🔌 网络连接失败"
@@ -561,7 +564,7 @@ async def run_agent(
             elif isinstance(e, (litellm.exceptions.ServiceUnavailableError, litellm.exceptions.InternalServerError)):
                 retryable = True
                 backoff_delay = min(
-                    settings.llm_retry_base_delay * (2 ** _llm_retry_count),
+                    settings.llm_retry_base_delay * (2**_llm_retry_count),
                     settings.llm_retry_max_delay,
                 )
                 user_message = f"⚠️ API 服务暂时不可用（{err_name}）"
@@ -569,7 +572,7 @@ async def run_agent(
             elif isinstance(e, (ConnectionError, OSError)):
                 retryable = True
                 backoff_delay = min(
-                    settings.llm_retry_base_delay * (2 ** _llm_retry_count),
+                    settings.llm_retry_base_delay * (2**_llm_retry_count),
                     settings.llm_retry_max_delay,
                 )
                 user_message = "🔌 网络异常"
@@ -627,7 +630,11 @@ async def run_agent(
 
                 logger.warning(
                     "%s (retry %d/%d, delay=%.1fs): %s",
-                    err_name, _llm_retry_count, _llm_retry_max, backoff_delay, e,
+                    err_name,
+                    _llm_retry_count,
+                    _llm_retry_max,
+                    backoff_delay,
+                    e,
                 )
                 await asyncio.sleep(backoff_delay)
                 continue
@@ -649,9 +656,7 @@ async def run_agent(
                     },
                 )
             )
-            await context.event_bus.emit(
-                AgentEvent(type=EventType.AGENT_ERROR, data={"error": final_msg})
-            )
+            await context.event_bus.emit(AgentEvent(type=EventType.AGENT_ERROR, data={"error": final_msg}))
             break
 
     if context.budget_exhausted:
@@ -775,46 +780,69 @@ def _build_messages(context: AgentContext) -> list[dict]:
         "assistant": {"role", "content", "tool_calls", "reasoning_content"},
         "tool": {"role", "content", "tool_call_id"},
     }
+    # Repair persisted tool-call blocks before filtering their protocol fields.
+    messages = _validate_tool_calls(messages)
     cleaned = []
     for msg in messages:
         role = msg.get("role", "")
         valid = _VALID_KEYS.get(role, {"role", "content"})
         cleaned.append({k: v for k, v in msg.items() if k in valid})
 
-    return _validate_tool_calls(cleaned)
+    return cleaned
 
 
 def _validate_tool_calls(messages: list[dict]) -> list[dict]:
-    """Strip tool_calls from assistant messages that lack corresponding tool responses.
+    """Remove incomplete or orphaned tool-call blocks from persisted history.
 
-    Protects against corrupted history where assistant tool_calls were saved to DB
-    but the corresponding tool messages were not (e.g. due to a prior crash/error,
-    user interruption, or duplicate tool_call IDs from models like kimi-k2).
-
-    Uses **windowed matching**: tool results must appear between the assistant
-    message and the next user/assistant message. This correctly handles duplicate
-    tool_call_ids because only results in the immediate response window count.
+    Tool responses are only valid immediately after the assistant message that
+    declared their IDs.  Removing an incomplete ``tool_calls`` field alone is
+    insufficient: its retained tool messages then cause providers to reject the
+    next request with "No tool call found for function call output".
     """
-    for i, msg in enumerate(messages):
-        tool_calls = msg.get("tool_calls")
-        if msg.get("role") != "assistant" or not tool_calls:
-            continue
-        required_ids = {tc["id"] for tc in tool_calls if tc.get("id")}
-        if not required_ids:
+    validated: list[dict] = []
+    index = 0
+
+    while index < len(messages):
+        msg = messages[index]
+        if msg.get("role") != "assistant" or not msg.get("tool_calls"):
+            # A tool message without the preceding assistant tool-call block is
+            # invalid API history and must not be sent to the provider.
+            if msg.get("role") != "tool":
+                validated.append(msg)
+            else:
+                logger.warning("Dropping orphan tool response: %s", msg.get("tool_call_id"))
+            index += 1
             continue
 
-        # Scan forward until we hit another assistant message or user message.
-        # Only tool results in this window belong to THIS assistant message.
-        found_ids: set[str] = set()
-        for later_msg in messages[i + 1 :]:
-            later_role = later_msg.get("role", "")
-            if later_role in ("assistant", "user"):
-                break  # Next turn — stop looking
-            if later_role == "tool":
-                found_ids.add(later_msg.get("tool_call_id", ""))
+        tool_calls = msg["tool_calls"]
+        required_ids = {tc.get("id") for tc in tool_calls if tc.get("id")}
+        block_end = index + 1
+        tool_messages: list[dict] = []
+        while block_end < len(messages) and messages[block_end].get("role") == "tool":
+            tool_messages.append(messages[block_end])
+            block_end += 1
 
+        found_ids = {tool_msg.get("tool_call_id") for tool_msg in tool_messages}
         missing = required_ids - found_ids
-        if missing:
-            logger.warning("Stripping %d orphan tool_calls from assistant (missing: %s)", len(missing), missing)
-            messages[i] = {k: v for k, v in msg.items() if k != "tool_calls"}
-    return messages
+        unexpected = found_ids - required_ids
+        if not required_ids or missing:
+            logger.warning(
+                "Dropping incomplete tool-call block (missing: %s)",
+                sorted(missing),
+            )
+            validated.append({k: v for k, v in msg.items() if k != "tool_calls"})
+            # Drop every response in this block because the assistant no longer
+            # declares any matching call IDs.
+        else:
+            validated.append(msg)
+            for tool_msg in tool_messages:
+                if tool_msg.get("tool_call_id") in required_ids:
+                    validated.append(tool_msg)
+                else:
+                    logger.warning("Dropping unexpected tool response: %s", tool_msg.get("tool_call_id"))
+            if unexpected:
+                logger.warning("Dropped unexpected tool response IDs: %s", sorted(unexpected))
+
+        index = block_end
+
+    return validated

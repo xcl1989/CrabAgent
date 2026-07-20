@@ -313,7 +313,19 @@ async def monitor_summary(
         pending_input = get_pending_for_session(session_id)
         pending_confirm = get_pending_confirms_for_session(session_id)
         request_type = "input" if pending_input else "confirm" if pending_confirm else ""
-        status = "waiting" if request_type else info.get("pet_status", "thinking")
+        fallback_status = "working" if info.get("status") == "running" else "thinking"
+        status = "waiting" if request_type else info.get("pet_status", fallback_status)
+        # Once a short tool finishes, its visual grace period may expire before
+        # another agent event arrives. Normalize it here so the pet resumes
+        # thinking instead of remaining in a work pose indefinitely.
+        if (
+            status == "working"
+            and not info.get("pet_tool_active", False)
+            and now >= info.get("pet_tool_min_until", 0)
+        ):
+            status = "thinking"
+            info["pet_status"] = status
+            info["updated_at"] = now
         if status == "waiting" and not request_type:
             status = "thinking"
         if status not in _SUMMARY_PRIORITY:

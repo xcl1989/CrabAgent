@@ -130,6 +130,14 @@ async def compress_session(
 
     persistence = PersistenceListener(conversation_id=conv.id, branch_id=branch_id)
     await persistence.persist_compression(summary)
+
+    # The next prompt restores this value into AgentContext before checking the
+    # automatic compression threshold. The manual summary replaces that context,
+    # so retaining the pre-compression token count would trigger a needless
+    # second compression on the next turn.
+    conv.tokens = 0
+    await db.commit()
+
     return CompressSessionResponse(
         summary=summary,
         model=model_name,

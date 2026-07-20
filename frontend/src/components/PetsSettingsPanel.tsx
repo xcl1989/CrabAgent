@@ -7,6 +7,7 @@ import { cn } from "../lib/cn";
 import {
   createPet,
   deletePet,
+  expandPetActions,
   generatePet,
   getActiveGenerations,
   getActivePet,
@@ -20,6 +21,12 @@ import {
   type GenerationProgress,
   type PetListItem,
 } from "../api/pets";
+
+const ACTION_PACKS = [
+  { id: "basic", labelKey: "pets.actionPackBasic", descriptionKey: "pets.actionPackBasicDesc" },
+  { id: "office", labelKey: "pets.actionPackOffice", descriptionKey: "pets.actionPackOfficeDesc" },
+  { id: "interactive", labelKey: "pets.actionPackInteractive", descriptionKey: "pets.actionPackInteractiveDesc" },
+];
 
 const PET_STYLES = [
   { id: "pixel", labelKey: "pets.stylePixel" },
@@ -37,11 +44,13 @@ export function PetsSettingsPanel() {
   const [activeId, setActiveId] = useState<string | null>("builtin-crab");
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState<string | null>(null);
+  const [expanding, setExpanding] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   // AI generation state
   const [genPrompt, setGenPrompt] = useState("");
   const [genStyle, setGenStyle] = useState("pixel");
+  const [actionPack, setActionPack] = useState("basic");
   const [generating, setGenerating] = useState(false);
   const [genJobId, setGenJobId] = useState<string | null>(null);
   const [genProgress, setGenProgress] = useState<GenerationProgress | null>(null);
@@ -210,12 +219,27 @@ export function PetsSettingsPanel() {
         genStyle,
         refPhoto,
         preserveReferenceStyle,
+        actionPack,
       );
       setGenJobId(resp.id);
       toast.info(t("pets.generateStarted"));
     } catch (e: unknown) {
       setGenerating(false);
       toast.error(e instanceof Error ? e.message : t("pets.generateFailed"));
+    }
+  };
+
+  const handleExpand = async (petId: string, pack: "office" | "interactive") => {
+    setExpanding(petId);
+    try {
+      const response = await expandPetActions(petId, pack);
+      setGenJobId(response.id);
+      setGenerating(true);
+      toast.info(t("pets.expandStarted"));
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : t("pets.generateFailed"));
+    } finally {
+      setExpanding(null);
     }
   };
 
@@ -327,6 +351,28 @@ export function PetsSettingsPanel() {
             {t("pets.preserveReferenceStyle")}
           </label>
         )}
+        <div className="space-y-1.5">
+          <p className="text-xs font-medium text-[var(--text-secondary)]">{t("pets.actionPack")}</p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            {ACTION_PACKS.map((pack) => (
+              <button
+                key={pack.id}
+                type="button"
+                onClick={() => setActionPack(pack.id)}
+                disabled={generating}
+                className={cn(
+                  "rounded-lg border px-2.5 py-2 text-left transition-colors",
+                  actionPack === pack.id
+                    ? "border-[var(--brand)] bg-[var(--brand)]/10"
+                    : "border-[var(--border)] bg-[var(--bg-secondary)] hover:border-[var(--brand)]/50",
+                )}
+              >
+                <span className="block text-xs font-medium text-[var(--text-primary)]">{t(pack.labelKey)}</span>
+                <span className="block mt-0.5 text-[10px] leading-snug text-[var(--text-tertiary)]">{t(pack.descriptionKey)}</span>
+              </button>
+            ))}
+          </div>
+        </div>
         <div className="flex items-center gap-2 flex-wrap">
           {PET_STYLES.map((s) => (
             <button
@@ -382,38 +428,7 @@ export function PetsSettingsPanel() {
                 }}
               />
             </div>
-            {/* Step list */}
-            <div className="flex flex-wrap gap-1 mt-1">
-              {[
-                { label: "参考图", step: 1 },
-                { label: "待机", step: 2 },
-                { label: "跑→", step: 3 },
-                { label: "跑←", step: 4 },
-                { label: "挥手", step: 5 },
-                { label: "跳跃", step: 6 },
-                { label: "失败", step: 7 },
-                { label: "等待", step: 8 },
-                { label: "工作", step: 9 },
-                { label: "完成", step: 10 },
-                { label: "合成", step: 11 },
-                { label: "保存", step: 12 },
-              ].map((s) => (
-                <span
-                  key={s.step}
-                  className={cn(
-                    "px-1.5 py-0.5 text-[10px] rounded transition-colors",
-                    genProgress.step > s.step
-                      ? "bg-[var(--success)]/20 text-[var(--success)]"
-                      : genProgress.step === s.step
-                        ? "bg-[var(--brand)]/20 text-[var(--brand)]"
-                        : "bg-[var(--bg-tertiary)] text-[var(--text-tertiary)]",
-                  )}
-                >
-                  {genProgress.step > s.step ? "✓ " : ""}
-                  {s.label}
-                </span>
-              ))}
-            </div>
+
           </div>
         )}
 
@@ -499,6 +514,18 @@ export function PetsSettingsPanel() {
                 </>
               )}
             </div>
+            {!pet.is_builtin && (
+              <Button
+                variant="secondary"
+                size="sm"
+                className="w-full"
+                disabled={expanding === pet.id || generating}
+                onClick={() => void handleExpand(pet.id, "office")}
+              >
+                {expanding === pet.id ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+                {t("pets.expandOffice")}
+              </Button>
+            )}
           </div>
         ))}
       </div>

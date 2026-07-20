@@ -35,7 +35,6 @@ CELL_H = 208
 COLS = 8
 ROWS = 9
 ATLAS_W = CELL_W * COLS  # 1536
-ATLAS_H = CELL_H * ROWS  # 1872
 
 # Generated strips often bleed into adjacent panels. Keep a small inner gutter
 # when splitting, then use the row-wide bounding box to scale the complete pose
@@ -53,6 +52,16 @@ FRAME_COUNTS: dict[PetAnimationName, int] = {
     PetAnimationName.WAITING: 6,
     PetAnimationName.RUNNING: 6,
     PetAnimationName.REVIEW: 6,
+    PetAnimationName.THINKING: 6,
+    PetAnimationName.TYPING: 6,
+    PetAnimationName.READING: 6,
+    PetAnimationName.SEARCHING: 6,
+    PetAnimationName.TOOL_USING: 6,
+    PetAnimationName.CELEBRATE: 6,
+    PetAnimationName.SLEEP: 6,
+    PetAnimationName.SURPRISED: 4,
+    PetAnimationName.CONFUSED: 6,
+    PetAnimationName.PET: 4,
 }
 
 # Human-readable animation descriptions for image generation prompts.
@@ -69,9 +78,19 @@ ANIMATION_PROMPTS: dict[PetAnimationName, str] = {
     PetAnimationName.WAITING: "waiting patiently, looking forward, arms crossed or hands together",
     PetAnimationName.RUNNING: "working at a desk, typing or thinking, focused expression",
     PetAnimationName.REVIEW: "reviewing completed work, satisfied nod, thumbs up gesture",
+    PetAnimationName.THINKING: "thinking deeply, hand to chin, small thoughtful head tilt",
+    PetAnimationName.TYPING: "typing on a small laptop or keyboard, focused and rhythmic",
+    PetAnimationName.READING: "reading a document or book carefully, eyes moving across the page",
+    PetAnimationName.SEARCHING: "searching for information with a magnifying glass, curious expression",
+    PetAnimationName.TOOL_USING: "using a tiny tool panel, focused hands-on work",
+    PetAnimationName.CELEBRATE: "joyful success celebration, happy clap or victory pose",
+    PetAnimationName.SLEEP: "sleeping peacefully, gentle breathing, small sleep bubble",
+    PetAnimationName.SURPRISED: "brief surprised reaction, eyes wide, small hop",
+    PetAnimationName.CONFUSED: "confused but friendly reaction, puzzled head scratch",
+    PetAnimationName.PET: "enjoying a gentle head pat, happy and affectionate reaction",
 }
 
-ROW_ORDER = [
+BASIC_ROW_ORDER = [
     PetAnimationName.IDLE,
     PetAnimationName.RUNNING_RIGHT,
     PetAnimationName.RUNNING_LEFT,
@@ -82,6 +101,23 @@ ROW_ORDER = [
     PetAnimationName.RUNNING,
     PetAnimationName.REVIEW,
 ]
+
+OFFICE_ACTIONS = [
+    PetAnimationName.THINKING, PetAnimationName.TYPING, PetAnimationName.READING,
+    PetAnimationName.SEARCHING, PetAnimationName.TOOL_USING, PetAnimationName.CELEBRATE,
+    PetAnimationName.SLEEP,
+]
+INTERACTIVE_ACTIONS = [PetAnimationName.SURPRISED, PetAnimationName.CONFUSED, PetAnimationName.PET]
+ACTION_PACKS = {
+    "basic": BASIC_ROW_ORDER,
+    "office": [*BASIC_ROW_ORDER, *OFFICE_ACTIONS],
+    "interactive": [*BASIC_ROW_ORDER, *OFFICE_ACTIONS, *INTERACTIVE_ACTIONS],
+}
+
+
+def resolve_action_pack(action_pack: str) -> list[PetAnimationName]:
+    """Return a safe ordered action list for a requested generation pack."""
+    return ACTION_PACKS.get(action_pack, ACTION_PACKS["basic"])
 
 
 # ── In-memory progress tracking ──────────────────────────────────────────
@@ -108,6 +144,7 @@ def get_all_active_jobs() -> list[dict[str, Any]]:
             "status": job.get("status", "running"),
             "prompt": job.get("prompt", ""),
             "style": job.get("style", ""),
+            "action_pack": job.get("action_pack", "basic"),
             "updated_at": job.get("updated_at", 0),
         }
         for pet_id, job in _generation_jobs.items()
@@ -141,13 +178,15 @@ class PetGenerationService:
         user_id: int | None = None,
         reference_image_path: str | None = None,
         preserve_reference_style: bool = False,
+        action_pack: str = "basic",
     ) -> None:
         """Full generation pipeline with live progress tracking.
 
         If *reference_image_path* is provided, the image is loaded and used as
         the base character design instead of generating one from scratch.
         """
-        total_steps = 2 + len(ROW_ORDER) + 2  # base + 9 rows + compose + save
+        row_order = resolve_action_pack(action_pack)
+        total_steps = 2 + len(row_order) + 2  # base + rows + compose + save
         _set_progress(
             pet_id,
             status="running",
@@ -157,6 +196,7 @@ class PetGenerationService:
             step_label="准备中…",
             prompt=prompt,
             style=style,
+            action_pack=action_pack,
             started_at=time.time(),
         )
         logger.info("Pet generation started: id=%s prompt=%r style=%s", pet_id, prompt[:100], style)
@@ -224,7 +264,7 @@ class PetGenerationService:
                 PetAnimationName.RUNNING: "工作动画",
                 PetAnimationName.REVIEW: "完成动画",
             }
-            for i, row in enumerate(ROW_ORDER):
+            for i, row in enumerate(row_order):
                 step_num = 2 + i
                 label = row_labels.get(row, row.value)
                 _set_progress(
@@ -279,12 +319,12 @@ class PetGenerationService:
                 await asyncio.sleep(0.5)
 
             # Step 11: Compose atlas.
-            step_compose = 2 + len(ROW_ORDER)
+            step_compose = 2 + len(row_order)
             _set_progress(
                 pet_id, step=step_compose, step_name="compose",
                 step_label="合成精灵图…",
             )
-            atlas = self._compose_atlas(strips)
+            atlas = self._compose_atlas(strips, row_order)
             logger.info("Pet %s: atlas composed %dx%d", pet_id, atlas.width, atlas.height)
 
             # Step 12: Save package.
@@ -298,6 +338,21 @@ class PetGenerationService:
                 displayName=pet_id.replace("-", " ").title(),
                 description=prompt,
                 spritesheetPath="spritesheet.png",
+                rows=len(row_order),
+                action_pack=action_pack if action_pack in ACTION_PACKS else "basic",
+                animations={
+                    row.value: {
+                        "row": index,
+                        "frames": max(len(strips.get(row, [])), 1),
+                        "frameDuration": 150,
+                        "loop": row not in {
+                            PetAnimationName.CELEBRATE,
+                            PetAnimationName.SURPRISED,
+                            PetAnimationName.PET,
+                        },
+                    }
+                    for index, row in enumerate(row_order)
+                },
                 type="spritesheet",
             )
             config.frame_counts = {k: max(len(v), 1) for k, v in strips.items() if k in FRAME_COUNTS}
@@ -326,6 +381,81 @@ class PetGenerationService:
                 error=str(e),
             )
             await self._write_error_package(pet_id, prompt, str(e))
+            await asyncio.sleep(30)
+            _clear_progress(pet_id)
+
+    async def expand_action_pack(
+        self,
+        pet_id: str,
+        action_pack: str,
+        *,
+        user_id: int,
+    ) -> None:
+        """Generate only the rows missing from an existing pet package."""
+        requested_rows = resolve_action_pack(action_pack)
+        config = PetConfig.model_validate(self.store.read_config(pet_id))
+        existing = set(config.animations)
+        if not config.animations:
+            existing = {row.value for row in BASIC_ROW_ORDER}
+            config.animations = {
+                row.value: {"row": index, "frames": config.frame_counts.get(row, 1),
+                            "frameDuration": config.frame_rates.get(row, 150), "loop": True}
+                for index, row in enumerate(BASIC_ROW_ORDER)
+            }
+        missing = [row for row in requested_rows if row.value not in existing]
+        if not missing:
+            _set_progress(pet_id, status="done", step=1, total_steps=1, step_name="done", step_label="动作包已完整")
+            await asyncio.sleep(5)
+            _clear_progress(pet_id)
+            return
+
+        _set_progress(
+            pet_id, status="running", step=0, total_steps=len(missing) + 2,
+            step_name="initializing", step_label="准备补充动作…", action_pack=action_pack,
+        )
+        try:
+            provider_info = await self._resolve_provider()
+            if not provider_info:
+                raise RuntimeError("No image generation provider available")
+            atlas_path = self.store.spritesheet_path(pet_id, config.spritesheetPath)
+            atlas = Image.open(atlas_path).convert("RGBA")
+            base_image = self.store.original_path(pet_id, "base.png")
+            reference = str(base_image) if base_image.exists() else None
+            base = Image.open(base_image).convert("RGBA") if base_image.exists() else atlas.crop((0, 0, CELL_W, CELL_H))
+            strips: dict[PetAnimationName, list[Image.Image]] = {}
+            for index, row in enumerate(missing, start=1):
+                _set_progress(pet_id, step=index, step_name=f"row_{row.value}", step_label=f"补充 {row.value} 动作…")
+                strip = await self._generate_row_strip(
+                    pet_id, config.description, "pixel", row, FRAME_COUNTS[row], base, provider_info,
+                    reference_image_path=reference,
+                )
+                strips[row] = self._extract_frames(strip, FRAME_COUNTS[row], row_name=row) if strip else [self._fit_to_cell(base)]
+                await asyncio.sleep(0.5)
+
+            expanded = Image.new("RGBA", (ATLAS_W, CELL_H * len(requested_rows)), (0, 0, 0, 0))
+            expanded.paste(atlas, (0, 0), atlas)
+            for row_index, row in enumerate(requested_rows):
+                if row not in strips:
+                    continue
+                for col_index, frame in enumerate(strips[row]):
+                    if col_index < COLS:
+                        expanded.paste(frame, (col_index * CELL_W, row_index * CELL_H), frame)
+                config.animations[row.value] = {
+                    "row": row_index, "frames": len(strips[row]), "frameDuration": 150,
+                    "loop": row not in {PetAnimationName.CELEBRATE, PetAnimationName.SURPRISED, PetAnimationName.PET},
+                }
+            config.rows = len(requested_rows)
+            config.action_pack = action_pack
+            _set_progress(pet_id, step=len(missing) + 1, step_name="save", step_label="保存扩展动作…")
+            expanded.save(atlas_path, "PNG")
+            self.store.write_config(pet_id, config.model_dump(mode="json"))
+            await self._persist_to_db(pet_id, config, user_id)
+            _set_progress(pet_id, status="done", step=len(missing) + 2, step_name="done", step_label="动作包补充完成！")
+            await asyncio.sleep(60)
+            _clear_progress(pet_id)
+        except Exception as exc:
+            logger.exception("Pet action-pack expansion failed for %s", pet_id)
+            _set_progress(pet_id, status="error", step_name="exception", step_label=f"补充失败：{exc}", error=str(exc))
             await asyncio.sleep(30)
             _clear_progress(pet_id)
 
@@ -952,10 +1082,17 @@ class PetGenerationService:
         PetAnimationName.WAITING,
         PetAnimationName.RUNNING,   # "working at desk" — character stays put
         PetAnimationName.REVIEW,
+        PetAnimationName.THINKING,
+        PetAnimationName.TYPING,
+        PetAnimationName.READING,
+        PetAnimationName.SEARCHING,
+        PetAnimationName.TOOL_USING,
+        PetAnimationName.CELEBRATE,
+        PetAnimationName.SLEEP,
     })
 
     @staticmethod
-    def _align_frames(frames: list[Image.Image], max_shift: int = 8) -> list[Image.Image]:
+    def _align_frames(frames: list[Image.Image], max_shift: int = 18) -> list[Image.Image]:
         """Register anchored frames in both axes using alpha-mask overlap.
 
         AI sprite strips often drift by one to several pixels vertically as
@@ -1009,7 +1146,9 @@ class PetGenerationService:
                 continue
 
             canvas = Image.new("RGBA", frame.size, (0, 0, 0, 0))
-            canvas.alpha_composite(frame, (dx, dy))
+            # Use paste rather than alpha_composite so later atlas writes can
+            # replace an entire transparent cell without leaving old pixels.
+            canvas.paste(frame, (dx, dy))
             aligned.append(canvas)
 
         return aligned
@@ -1186,10 +1325,12 @@ class PetGenerationService:
 
     # ── Atlas composition ────────────────────────────────────────────
 
-    def _compose_atlas(self, strips: dict[PetAnimationName, list[Image.Image]]) -> Image.Image:
-        atlas = Image.new("RGBA", (ATLAS_W, ATLAS_H), (0, 0, 0, 0))
+    def _compose_atlas(
+        self, strips: dict[PetAnimationName, list[Image.Image]], row_order: list[PetAnimationName]
+    ) -> Image.Image:
+        atlas = Image.new("RGBA", (ATLAS_W, CELL_H * len(row_order)), (0, 0, 0, 0))
 
-        for row_idx, row_name in enumerate(ROW_ORDER):
+        for row_idx, row_name in enumerate(row_order):
             frames = strips.get(row_name, [])
             for col_idx, frame in enumerate(frames):
                 if col_idx >= COLS:

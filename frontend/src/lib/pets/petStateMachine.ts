@@ -15,7 +15,17 @@ export type PetAnimationName =
   | "failed"
   | "waiting"
   | "running"
-  | "review";
+  | "review"
+  | "thinking"
+  | "typing"
+  | "reading"
+  | "searching"
+  | "tool-using"
+  | "celebrate"
+  | "sleep"
+  | "surprised"
+  | "confused"
+  | "pet";
 
 export type AgentStatus =
   | "idle"
@@ -42,11 +52,11 @@ export interface PetState {
 
 const AGENT_TO_ANIMATION: Record<AgentStatus, PetAnimationName> = {
   idle: "idle",
-  thinking: "running",
+  thinking: "thinking",
   working: "running",
   waiting: "waiting",
   error: "failed",
-  completed: "review",
+  completed: "celebrate",
 };
 
 const DEFAULT_LABELS: Record<AgentStatus, { label: string; detail: string }> = {
@@ -58,9 +68,17 @@ const DEFAULT_LABELS: Record<AgentStatus, { label: string; detail: string }> = {
   completed: { label: "任务完成", detail: "做得漂亮！" },
 };
 
+const TOOL_LABELS: Partial<Record<PetAnimationName, { label: string; detail: string }>> = {
+  reading: { label: "正在阅读", detail: "查看资料中…" },
+  typing: { label: "正在输入", detail: "编辑内容中…" },
+  searching: { label: "正在搜索", detail: "检索资料中…" },
+  "tool-using": { label: "正在操作工具", detail: "执行任务中…" },
+};
+
 export interface StateMachineInput {
   status: AgentStatus;
   message?: string;
+  toolName?: string;
   targetSessionId?: string | null;
 }
 
@@ -72,8 +90,9 @@ export interface StateMachineInput {
  */
 export function derivePetState(input: StateMachineInput): PetState {
   const status = input.status || "idle";
-  const animation = AGENT_TO_ANIMATION[status];
-  const labels = DEFAULT_LABELS[status];
+  const toolDriven = status === "thinking" || status === "working";
+  const animation = (toolDriven ? toolAnimation(input.toolName) : null) ?? AGENT_TO_ANIMATION[status];
+  const labels = TOOL_LABELS[animation] ?? DEFAULT_LABELS[status];
   return {
     animation,
     loop: true,
@@ -84,6 +103,35 @@ export function derivePetState(input: StateMachineInput): PetState {
   };
 }
 
+/** Resolve an optional tool name into a more expressive work animation. */
+export function toolAnimation(toolName?: string): PetAnimationName | null {
+  if (!toolName) return null;
+  const tool = toolName.toLowerCase();
+  if (["read", "glob", "grep", "office_read"].includes(tool)) return "reading";
+  if (["write", "edit", "office_edit"].includes(tool)) return "typing";
+  if (["web_search", "web_scrape", "browser"].includes(tool)) return "searching";
+  if (["bash", "sandbox", "office_create"].includes(tool)) return "tool-using";
+  return null;
+}
+
+/** Return an available animation or its compatible fallback. */
+export function resolveAnimation(
+  requested: PetAnimationName,
+  available: Record<string, unknown>,
+): PetAnimationName {
+  const fallbacks: Partial<Record<PetAnimationName, PetAnimationName>> = {
+    thinking: "running", typing: "running", reading: "running", searching: "running",
+    "tool-using": "running", celebrate: "review", sleep: "idle", surprised: "waiting",
+    confused: "failed", pet: "waving",
+  };
+  let candidate: PetAnimationName | undefined = requested;
+  while (candidate) {
+    if (available[candidate]) return candidate;
+    candidate = fallbacks[candidate];
+  }
+  return "idle";
+}
+
 /**
  * Derive a one-shot interaction state.
  *
@@ -91,7 +139,7 @@ export function derivePetState(input: StateMachineInput): PetState {
  * back to `baseAfter`.
  */
 export function oneShotAnimation(
-  animation: "waving" | "jumping",
+  animation: "waving" | "jumping" | "pet",
   base: PetAnimationName,
 ): PetState {
   return {

@@ -634,6 +634,9 @@ Use ordinary Markdown when a visualization is not helpful.
     _last_stale_cleanup = time.time()
 
     _CRITICAL_EVENT_TYPES = {EventType.TOOL_CONFIRM_REQUEST, EventType.USER_INPUT_REQUEST}
+    # Keep short tool calls visible long enough for the desktop pet to receive
+    # and render their specialized animation after SSE debounce.
+    _PET_TOOL_MINIMUM_SECONDS = 1.25
 
     async def _sse_forward(event: AgentEvent):
         nonlocal _fwd_count, _fwd_last_log, _last_stale_cleanup
@@ -651,9 +654,21 @@ Use ordinary Markdown when a visualization is not helpful.
             elif event.type in (EventType.TOOL_CALL, EventType.SUB_AGENT_TOOL_CALL):
                 active_info["pet_status"] = "working"
                 active_info["tool_name"] = event.data.get("name", "")
+                active_info["pet_tool_active"] = True
+                active_info["pet_tool_min_until"] = now + _PET_TOOL_MINIMUM_SECONDS
                 active_info["updated_at"] = now
+            elif event.type in (EventType.TOOL_RESULT, EventType.SUB_AGENT_TOOL_RESULT):
+                active_info["pet_tool_active"] = False
+                # A fast result must not immediately replace the tool state.
+                if now >= active_info.get("pet_tool_min_until", 0):
+                    active_info["pet_status"] = "thinking"
+                    active_info["updated_at"] = now
             elif event.type in (EventType.AGENT_START, EventType.ITERATION_START, EventType.THINKING_DELTA):
-                if active_info.get("pet_status") != "waiting":
+                tool_visible = (
+                    active_info.get("pet_status") == "working"
+                    and now < active_info.get("pet_tool_min_until", 0)
+                )
+                if active_info.get("pet_status") != "waiting" and not tool_visible:
                     active_info["pet_status"] = "thinking"
                     active_info["updated_at"] = now
             elif event.type == EventType.AGENT_ERROR:
@@ -1063,6 +1078,10 @@ Use ordinary Markdown when a visualization is not helpful.
         "user_id": user.id,
         "model": req.model or conv.model or "",
         "status": "running",
+        # The summary endpoint reads pet_status. Set it immediately so the pet
+        # never remains idle while the first model/tool event is pending.
+        "pet_status": "working",
+        "updated_at": time.time(),
         "started_at": time.time(),
     }
 

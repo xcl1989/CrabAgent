@@ -105,7 +105,11 @@ def test_build_messages_strips_orphan_tool_calls():
         workspace=Path.cwd(),
         model="gpt-4o",
         messages=[
-            {"role": "assistant", "content": "", "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "x", "arguments": "{}"}}]},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "x", "arguments": "{}"}}],
+            },
             {"role": "user", "content": "next"},
         ],
     )
@@ -149,6 +153,41 @@ def test_validate_tool_calls_keeps_assistant_when_tool_response_exists():
     validated = loop._validate_tool_calls(messages)
 
     assert "tool_calls" in validated[0]
+    assert validated[1]["tool_call_id"] == "call_1"
+
+
+def test_validate_tool_calls_drops_responses_for_incomplete_tool_block():
+    messages = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{"id": "call_1", "type": "function"}, {"id": "call_2", "type": "function"}],
+        },
+        {"role": "tool", "content": "ok", "tool_call_id": "call_1"},
+        {"role": "user", "content": "continue"},
+    ]
+
+    validated = loop._validate_tool_calls(messages)
+
+    assert validated == [
+        {"role": "assistant", "content": ""},
+        {"role": "user", "content": "continue"},
+    ]
+
+
+def test_validate_tool_calls_drops_standalone_tool_response():
+    messages = [
+        {"role": "user", "content": "hello"},
+        {"role": "tool", "content": "stale", "tool_call_id": "call_stale"},
+        {"role": "user", "content": "continue"},
+    ]
+
+    validated = loop._validate_tool_calls(messages)
+
+    assert validated == [
+        {"role": "user", "content": "hello"},
+        {"role": "user", "content": "continue"},
+    ]
 
 
 @pytest.mark.asyncio
@@ -199,7 +238,9 @@ async def test_run_agent_executes_tool_call_and_appends_tool_message(monkeypatch
         return SimpleNamespace(name="mock", provider_type="openai", api_key="k", base_url="", enabled=True)
 
     monkeypatch.setattr(loop, "_resolve_provider", fake_provider)
-    monkeypatch.setattr(loop, "litellm", SimpleNamespace(acompletion=fake_acompletion, exceptions=loop.litellm.exceptions))
+    monkeypatch.setattr(
+        loop, "litellm", SimpleNamespace(acompletion=fake_acompletion, exceptions=loop.litellm.exceptions)
+    )
     monkeypatch.setattr("crabagent.core.proxy.resolve_llm_proxy", _async_return(""))
 
     messages = await loop.run_agent(context, "hello")
@@ -219,13 +260,17 @@ async def test_run_agent_reads_usage_after_finish_chunk(monkeypatch: pytest.Monk
         return SimpleNamespace(name="mock", provider_type="openai", api_key="k", base_url="", enabled=True)
 
     async def fake_acompletion(**kwargs):
-        return _stream([
-            _chunk(delta=_delta(content="done"), finish_reason="stop"),
-            _usage_only_chunk(usage=_usage()),
-        ])
+        return _stream(
+            [
+                _chunk(delta=_delta(content="done"), finish_reason="stop"),
+                _usage_only_chunk(usage=_usage()),
+            ]
+        )
 
     monkeypatch.setattr(loop, "_resolve_provider", fake_provider)
-    monkeypatch.setattr(loop, "litellm", SimpleNamespace(acompletion=fake_acompletion, exceptions=loop.litellm.exceptions))
+    monkeypatch.setattr(
+        loop, "litellm", SimpleNamespace(acompletion=fake_acompletion, exceptions=loop.litellm.exceptions)
+    )
     monkeypatch.setattr("crabagent.core.proxy.resolve_llm_proxy", _async_return(""))
 
     messages = await loop.run_agent(context, "hello")
@@ -262,7 +307,9 @@ async def test_run_agent_emits_auth_error_and_stops(monkeypatch: pytest.MonkeyPa
         )
 
     monkeypatch.setattr(loop, "_resolve_provider", fake_provider)
-    monkeypatch.setattr(loop, "litellm", SimpleNamespace(acompletion=fake_acompletion, exceptions=loop.litellm.exceptions))
+    monkeypatch.setattr(
+        loop, "litellm", SimpleNamespace(acompletion=fake_acompletion, exceptions=loop.litellm.exceptions)
+    )
     monkeypatch.setattr("crabagent.core.proxy.resolve_llm_proxy", _async_return(""))
 
     messages = await loop.run_agent(context, "hello")
@@ -280,7 +327,9 @@ async def test_run_agent_emits_budget_exhausted_and_grace_call(monkeypatch: pyte
     context.event_bus.subscribe(lambda event: events.append(event))
 
     async def fake_grace(context_arg, llm, model):
-        context_arg.messages.append({"role": "assistant", "content": "grace summary", "agent": context_arg.current_agent})
+        context_arg.messages.append(
+            {"role": "assistant", "content": "grace summary", "agent": context_arg.current_agent}
+        )
 
     monkeypatch.setattr(loop, "_grace_call", fake_grace)
 
@@ -316,7 +365,9 @@ async def test_run_agent_retries_context_window_with_compression(monkeypatch: py
 
     monkeypatch.setattr(loop, "_resolve_provider", fake_provider)
     monkeypatch.setattr(loop, "compress_context", fake_compress)
-    monkeypatch.setattr(loop, "litellm", SimpleNamespace(acompletion=fake_acompletion, exceptions=loop.litellm.exceptions))
+    monkeypatch.setattr(
+        loop, "litellm", SimpleNamespace(acompletion=fake_acompletion, exceptions=loop.litellm.exceptions)
+    )
     monkeypatch.setattr("crabagent.core.proxy.resolve_llm_proxy", _async_return(""))
 
     messages = await loop.run_agent(context, "hello")

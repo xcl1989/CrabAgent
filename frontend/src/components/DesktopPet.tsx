@@ -16,6 +16,8 @@ declare global {
       petAction: (action: "open-main" | "hide" | "toggle-always-on-top", sessionId?: string) => Promise<boolean>;
       resizePet: (height: number) => void;
       showPetMenu: () => void;
+      setPetQuietMode: (minutes: number) => Promise<boolean>;
+      getPetQuietStatus: () => Promise<{ active: boolean; remainingMs: number }>;
       startPetDrag: (offsetX: number, offsetY: number) => void;
       movePetDrag: () => void;
       endPetDrag: () => void;
@@ -39,6 +41,11 @@ const INITIAL_SVG_STATE: SvgPetState = {
   detail: "随时可以开始",
 };
 
+// Six standard 150ms frames make one full tool-action cycle.
+const TOOL_ANIMATION_MINIMUM_MS = 900;
+const IDLE_SLEEP_DELAY_MS = 60_000;
+const LONG_PRESS_DELAY_MS = 600;
+
 function stateFromSummary(summary: AgentMonitorSummary): SvgPetState {
   switch (summary.status) {
     case "waiting":
@@ -60,17 +67,40 @@ function svgStateKey(s: SvgPetState): string {
   return `${s.mood}|${s.label}|${s.detail}`;
 }
 
+function inferToolFromMessage(message: string): string | undefined {
+  const text = message.toLowerCase();
+  if (/web_search|web_scrape|搜索|检索|浏览/.test(text)) return "web_search";
+  if (/office_read|读取|查看|read|grep|glob/.test(text)) return "read";
+  if (/office_edit|编辑|修改|写入|write|edit/.test(text)) return "edit";
+  if (/bash|命令|执行|终端|pytest|npm/.test(text)) return "bash";
+  return undefined;
+}
+
+function cardKind(state: PetState): "status" | "attention" | "complete" | "progress" {
+  if (state.animation === "waiting" || state.animation === "failed") return "attention";
+  if (state.animation === "celebrate" || state.animation === "review") return "complete";
+  if (["typing", "reading", "searching", "tool-using", "running"].includes(state.animation)) return "progress";
+  return "status";
+}
+
 function animationToSvgMood(animation: PetState["animation"]): PetMood {
   switch (animation) {
     case "running":
     case "running-right":
     case "running-left":
       return "working";
+    case "thinking":
+    case "typing":
+    case "reading":
+    case "searching":
+    case "tool-using":
+      return "working";
     case "waiting":
       return "waiting";
     case "failed":
       return "error";
     case "review":
+    case "celebrate":
       return "celebrating";
     default:
       return "idle";
@@ -108,6 +138,7 @@ export function DesktopPet() {
 
   // ── Legacy SVG-only state (used when sprite pet is disabled) ───────
   const [svgState, setSvgState] = useState<SvgPetState>(INITIAL_SVG_STATE);
+  const [quietMode, setQuietMode] = useState(false);
 
   // ── Shared refs ───────────────────────────────────────────────────
   const targetSessionRef = useRef<string | null>(null);
@@ -118,6 +149,13 @@ export function DesktopPet() {
   const bubbleRef = useRef<HTMLButtonElement>(null);
   const dragStart = useRef<{ x: number; y: number } | null>(null);
   const dragged = useRef(false);
+  const isDraggingRef = useRef(false);
+  const toolAnimationHoldUntilRef = useRef(0);
+  const toolAnimationTimerRef = useRef<number | null>(null);
+  const idleSleepTimerRef = useRef<number | null>(null);
+  const longPressTimerRef = useRef<number | null>(null);
+  const longPressHandledRef = useRef(false);
+  const wokeFromSleepRef = useRef(false);
 
   // ── Load active pet on mount and when storage changes ──────────────
   const loadActivePet = useCallback(async () => {
@@ -141,6 +179,7 @@ export function DesktopPet() {
         rows: detail.rows,
         frameCounts: detail.frame_counts,
         frameRates: detail.frame_rates,
+        animations: detail.animations,
       };
       setActivePet({ petId, detail, spriteConfig, useSprite: true });
     } catch {
@@ -185,13 +224,25 @@ export function DesktopPet() {
       const nextState = derivePetState({
         status: (summary.status as AgentStatus) || "idle",
         message: summary.message,
+        toolName: summary.target?.tool_name || inferToolFromMessage(summary.message),
         targetSessionId: nextTarget,
       });
       const key = petStateKey(nextState);
       if (key !== stateKeyRef.current) {
         stateKeyRef.current = key;
         baseStateRef.current = nextState;
-        setPetState(nextState);
+        const isToolAnimation = ["reading", "typing", "searching", "tool-using"].includes(nextState.animation);
+        const toolAnimationHeld = Date.now() < toolAnimationHoldUntilRef.current;
+        if (isToolAnimation && !toolAnimationHeld) {
+          toolAnimationHoldUntilRef.current = Date.now() + TOOL_ANIMATION_MINIMUM_MS;
+          if (toolAnimationTimerRef.current !== null) window.clearTimeout(toolAnimationTimerRef.current);
+          toolAnimationTimerRef.current = window.setTimeout(() => {
+            toolAnimationTimerRef.current = null;
+            if (!isDraggingRef.current) setPetState(baseStateRef.current);
+          }, TOOL_ANIMATION_MINIMUM_MS);
+        }
+        // Preserve the directional drag animation until the pointer is released.
+        if (!isDraggingRef.current && (!toolAnimationHeld || isToolAnimation)) setPetState(nextState);
       }
     } catch {
       // Keep the last known state while the backend is temporarily unavailable.
@@ -220,16 +271,69 @@ export function DesktopPet() {
       window.removeEventListener("storage", handleStorage);
       window.clearInterval(monitorTimer);
       if (syncTimerRef.current !== null) window.clearTimeout(syncTimerRef.current);
+      if (toolAnimationTimerRef.current !== null) window.clearTimeout(toolAnimationTimerRef.current);
     };
   }, [syncStateFromMonitor]);
+
+  // ── Idle sleep ────────────────────────────────────────────────────
+  useEffect(() => {
+    if (baseStateRef.current.animation !== "idle") {
+      if (idleSleepTimerRef.current !== null) window.clearTimeout(idleSleepTimerRef.current);
+      idleSleepTimerRef.current = null;
+      return;
+    }
+    idleSleepTimerRef.current = window.setTimeout(() => {
+      if (!isDraggingRef.current && baseStateRef.current.animation === "idle") {
+        setPetState({
+          ...baseStateRef.current,
+          animation: "sleep",
+          baseAfter: "idle",
+          label: "休息一下",
+          detail: "空闲中…",
+        });
+      }
+    }, IDLE_SLEEP_DELAY_MS);
+    return () => {
+      if (idleSleepTimerRef.current !== null) window.clearTimeout(idleSleepTimerRef.current);
+      idleSleepTimerRef.current = null;
+    };
+  }, [petState.animation]);
+
+  // ── Quiet mode ────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!window.electronAPI?.getPetQuietStatus) return;
+    const syncQuietMode = () => {
+      window.electronAPI?.getPetQuietStatus?.()
+        .then((status) => setQuietMode(status.active))
+        .catch(() => setQuietMode(false));
+    };
+    syncQuietMode();
+    const timer = window.setInterval(syncQuietMode, 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   // ── Interactions ──────────────────────────────────────────────────
   const openMain = () => window.electronAPI?.petAction("open-main", targetSessionRef.current || undefined);
 
   const handlePointerDown = (event: React.PointerEvent<HTMLElement>) => {
-    if (event.button !== 0) return;
+    if (event.button !== 0 || !(event.target as HTMLElement).closest(".pet-character")) return;
+    if (petState.animation === "sleep") {
+      wokeFromSleepRef.current = true;
+      setPetState(baseStateRef.current);
+    } else {
+      wokeFromSleepRef.current = false;
+    }
     dragStart.current = { x: event.clientX, y: event.clientY };
     dragged.current = false;
+    longPressHandledRef.current = false;
+    if (longPressTimerRef.current !== null) window.clearTimeout(longPressTimerRef.current);
+    longPressTimerRef.current = window.setTimeout(() => {
+      if (dragStart.current && !dragged.current) {
+        longPressHandledRef.current = true;
+        const base = baseStateRef.current;
+        setPetState(oneShotAnimation("pet", base.animation));
+      }
+    }, LONG_PRESS_DELAY_MS);
     // Do NOT start drag yet — wait until movement exceeds threshold.
     // Starting the drag timer immediately causes a tiny window displacement
     // (screen vs client coordinate mismatch) which pollutes the click/drag
@@ -243,6 +347,20 @@ export function DesktopPet() {
       const dy = event.clientY - start.y;
       if (Math.hypot(dx, dy) > 4) {
         dragged.current = true;
+        if (longPressTimerRef.current !== null) window.clearTimeout(longPressTimerRef.current);
+        longPressTimerRef.current = null;
+        isDraggingRef.current = true;
+        // Show feedback before Electron has moved the native window enough to
+        // determine a direction. The main process replaces this as it moves.
+        const base = baseStateRef.current;
+        setPetState({
+          animation: dx >= 0 ? "running-right" : "running-left",
+          loop: true,
+          baseAfter: base.animation,
+          label: "",
+          detail: "",
+          targetSessionId: null,
+        });
         // Now it's a real drag — start the drag handler with the original
         // pointer-down position as the grab offset.
         window.electronAPI?.startPetDrag(start.x, start.y);
@@ -251,8 +369,12 @@ export function DesktopPet() {
   };
 
   const handlePointerEnd = () => {
+    if (longPressTimerRef.current !== null) window.clearTimeout(longPressTimerRef.current);
+    longPressTimerRef.current = null;
     if (dragged.current) {
       window.electronAPI?.endPetDrag();
+      isDraggingRef.current = false;
+      setPetState(baseStateRef.current);
     }
     dragStart.current = null;
   };
@@ -262,7 +384,7 @@ export function DesktopPet() {
   };
 
   const handleClickPet = () => {
-    if (dragged.current) return;
+    if (dragged.current || longPressHandledRef.current || wokeFromSleepRef.current) return;
     // One-shot jump/wave animation, then open the main window.
     const base = baseStateRef.current;
     if (activePet.useSprite) {
@@ -295,6 +417,7 @@ export function DesktopPet() {
         });
       } else {
         // Drag ended — restore the agent-driven base state.
+        isDraggingRef.current = false;
         setPetState(baseStateRef.current);
       }
     };
@@ -373,6 +496,9 @@ export function DesktopPet() {
   // Determine which label/detail to show. For sprite pets use state machine output.
   const bubbleLabel = activePet.useSprite ? petState.label || svgState.label : svgState.label;
   const bubbleDetail = activePet.useSprite ? petState.detail || svgState.detail : svgState.detail;
+  const currentCardKind = cardKind(petState);
+  // Quiet mode suppresses routine progress and completion cards, but never hides attention states.
+  const bubbleVisible = !quietMode || currentCardKind === "attention" || currentCardKind === "status";
 
   // Resize the transparent native window to fit the current bubble.
   useEffect(() => {
@@ -410,7 +536,7 @@ export function DesktopPet() {
         ref={bubbleRef}
         type="button"
         className="pet-bubble"
-        data-visible="true"
+        data-visible={bubbleVisible}
         onClick={handleOpenMain}
         aria-label="打开 CrabAgent"
       >
@@ -421,6 +547,7 @@ export function DesktopPet() {
         type="button"
         className="pet-character"
         data-mood={activePet.useSprite ? animationToSvgMood(petState.animation) : svgState.mood}
+        data-animation={petState.animation}
         onClick={handleClickPet}
         onDoubleClick={() => window.electronAPI?.petAction("hide")}
         aria-label="CrabAgent 桌面宠物，点击打开主窗口"

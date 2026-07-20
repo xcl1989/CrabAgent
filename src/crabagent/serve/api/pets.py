@@ -78,6 +78,8 @@ class PetDetail(BaseModel):
     rows: int
     frame_counts: dict[str, int]
     frame_rates: dict[str, int]
+    animations: dict[str, dict]
+    action_pack: str
     type: str
     is_builtin: bool
 
@@ -93,6 +95,8 @@ class CreatePetRequest(BaseModel):
     rows: int = 9
     frame_counts: dict[str, int] | None = None
     frame_rates: dict[str, int] | None = None
+    animations: dict[str, dict] | None = None
+    action_pack: str = "basic"
     type: str = "spritesheet"
 
 
@@ -143,6 +147,8 @@ def _to_detail(pet: PetPackage) -> PetDetail:
         rows=config.rows,
         frame_counts={k.value: v for k, v in config.frame_counts.items()},
         frame_rates={k.value: v for k, v in config.frame_rates.items()},
+        animations={name: animation.model_dump() for name, animation in config.animations.items()},
+        action_pack=config.action_pack,
         type=config.type,
         is_builtin=pet.is_builtin,
     )
@@ -251,12 +257,15 @@ async def create_pet(
         height=req.height,
         columns=req.columns,
         rows=req.rows,
+        action_pack=req.action_pack,
         type=req.type,  # type: ignore[arg-type]
     )
     if req.frame_counts:
         config.frame_counts = {PetAnimationName(k): v for k, v in req.frame_counts.items()}  # type: ignore[misc]
     if req.frame_rates:
         config.frame_rates = {PetAnimationName(k): v for k, v in req.frame_rates.items()}  # type: ignore[misc]
+    if req.animations:
+        config.animations = req.animations  # type: ignore[assignment]
 
     store = _store()
     store.write_config(req.id, config.model_dump(mode="json"))
@@ -328,6 +337,7 @@ async def generate_pet(
     prompt: str = Form(...),
     style: str = Form("pixel"),
     preserve_reference_style: bool = Form(False),
+    action_pack: str = Form("basic"),
     reference: UploadFile | None = File(None),
     user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -361,6 +371,7 @@ async def generate_pet(
             user_id=user.id,
             reference_image_path=str(ref_path) if ref_path else None,
             preserve_reference_style=preserve_reference_style,
+            action_pack=action_pack,
         )
     )
     return GeneratePetResponse(
@@ -368,6 +379,39 @@ async def generate_pet(
         displayName=pet_id,
         status="generating",
     )
+
+
+@router.post("/{pet_id}/expand", response_model=GeneratePetResponse, status_code=status.HTTP_202_ACCEPTED)
+async def expand_pet_actions(
+    pet_id: str,
+    action_pack: str = Form(...),
+    user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Extend an existing custom pet with only the missing action rows."""
+    if action_pack not in {"office", "interactive"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported action pack")
+    result = await db.execute(
+        select(PetPackage).where(
+            (PetPackage.pet_id == pet_id)
+            & (PetPackage.user_id == user.id)
+            & (PetPackage.is_builtin == False)  # noqa: E712
+        )
+    )
+    pet = result.scalar_one_or_none()
+    if not pet:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Custom pet not found")
+    if not _store().spritesheet_path(pet_id, pet.spritesheet_filename).exists():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Spritesheet not found")
+
+    import asyncio
+
+    asyncio.create_task(
+        PetGenerationService(store=_store()).expand_action_pack(
+            pet_id, action_pack, user_id=user.id,
+        )
+    )
+    return GeneratePetResponse(id=pet_id, displayName=pet.display_name, status="generating")
 
 
 @router.get("/generate/active")

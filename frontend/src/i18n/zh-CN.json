@@ -735,7 +735,14 @@
     "deleted": "宠物已删除",
     "confirmDelete": "确定删除这个宠物？此操作不可撤销。",
     "aiGenerate": "AI 生成桌宠",
-    "aiGenerateDesc": "描述一个角色，自动生成完整的 9 状态精灵图。需要 2-5 分钟。",
+    "aiGenerateDesc": "描述一个角色，生成可选动作包的精灵图。基础包需要约 2-5 分钟。",
+    "actionPack": "动作包",
+    "actionPackBasic": "基础",
+    "actionPackBasicDesc": "9 个兼容动作，生成更快",
+    "actionPackOffice": "工作",
+    "actionPackOfficeDesc": "增加思考、阅读、输入和搜索等工作动作",
+    "actionPackInteractive": "互动",
+    "actionPackInteractiveDesc": "完整办公动作和互动情绪动作",
     "promptPlaceholder": "例如：一只戴着小围巾的橘猫",
     "generate": "生成",
     "generating": "生成中…",
@@ -753,6 +760,8 @@
     "styleClay": "黏土",
     "styleSticker": "贴纸",
     "styleFlatVector": "扁平矢量",
-    "styleAnime": "动漫"
+    "styleAnime": "动漫",
+    "expandOffice": "补充工作动作",
+    "expandStarted": "正在补充缺失动作，请保持应用打开。"
   }
 }

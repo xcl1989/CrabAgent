@@ -8,6 +8,13 @@ export interface PetListItem {
   created_at: string;
 }
 
+export interface PetAnimationConfig {
+  row: number;
+  frames: number;
+  frameDuration: number;
+  loop: boolean;
+}
+
 export interface PetDetail {
   id: string;
   displayName: string;
@@ -19,6 +26,8 @@ export interface PetDetail {
   rows: number;
   frame_counts: Record<string, number>;
   frame_rates: Record<string, number>;
+  animations: Record<string, PetAnimationConfig>;
+  action_pack: string;
   type: "svg" | "spritesheet";
   is_builtin: boolean;
 }
@@ -34,6 +43,8 @@ export interface CreatePetRequest {
   rows?: number;
   frame_counts?: Record<string, number>;
   frame_rates?: Record<string, number>;
+  animations?: Record<string, PetAnimationConfig>;
+  action_pack?: string;
   type?: "svg" | "spritesheet";
 }
 
@@ -94,15 +105,23 @@ export async function generatePet(
   style: string = "pixel",
   referenceFile?: File | null,
   preserveReferenceStyle: boolean = false,
+  actionPack: string = "basic",
 ): Promise<GeneratePetResponse> {
   const form = new FormData();
   form.append("prompt", prompt);
   form.append("style", style);
   form.append("preserve_reference_style", String(preserveReferenceStyle));
+  form.append("action_pack", actionPack);
   if (referenceFile) {
     form.append("reference", referenceFile);
   }
   return api.post<GeneratePetResponse>("/pets/generate", form as unknown as Record<string, unknown>);
+}
+
+export async function expandPetActions(petId: string, actionPack: "office" | "interactive"): Promise<GeneratePetResponse> {
+  const form = new FormData();
+  form.append("action_pack", actionPack);
+  return api.post<GeneratePetResponse>(`/pets/${petId}/expand`, form as unknown as Record<string, unknown>);
 }
 
 export async function getGenerationStatus(petId: string): Promise<GenerationStatusResponse> {
@@ -118,6 +137,7 @@ export interface ActiveJob {
   status: string;
   prompt: string;
   style: string;
+  action_pack?: string;
   updated_at: number;
 }
 
@@ -134,6 +154,7 @@ export interface GenerationProgress {
   step_label: string;
   prompt?: string;
   style?: string;
+  action_pack?: string;
   error?: string;
 }
 
