@@ -11,7 +11,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -100,6 +100,10 @@ class CreatePetRequest(BaseModel):
     type: str = "spritesheet"
 
 
+class RenamePetRequest(BaseModel):
+    displayName: str = Field(min_length=1, max_length=200)
+
+
 class GeneratePetRequest(BaseModel):
     prompt: str
     style: str = "pixel"
@@ -185,8 +189,7 @@ async def get_pet(
 ):
     result = await db.execute(
         select(PetPackage).where(
-            (PetPackage.pet_id == pet_id)
-            & ((PetPackage.user_id == user.id) | (PetPackage.is_builtin == True))  # noqa: E712
+            (PetPackage.pet_id == pet_id) & ((PetPackage.user_id == user.id) | (PetPackage.is_builtin == True))  # noqa: E712
         )
     )
     pet = result.scalar_one_or_none()
@@ -210,8 +213,7 @@ async def get_pet_spritesheet(
     user = await _resolve_user(request, token, db)
     result = await db.execute(
         select(PetPackage).where(
-            (PetPackage.pet_id == pet_id)
-            & ((PetPackage.user_id == user.id) | (PetPackage.is_builtin == True))  # noqa: E712
+            (PetPackage.pet_id == pet_id) & ((PetPackage.user_id == user.id) | (PetPackage.is_builtin == True))  # noqa: E712
         )
     )
     pet = result.scalar_one_or_none()
@@ -238,9 +240,7 @@ async def create_pet(
     db: AsyncSession = Depends(get_db),
 ):
     existing = await db.execute(
-        select(PetPackage).where(
-            (PetPackage.pet_id == req.id) & (PetPackage.user_id == user.id)
-        )
+        select(PetPackage).where((PetPackage.pet_id == req.id) & (PetPackage.user_id == user.id))
     )
     if existing.scalar_one_or_none():
         raise HTTPException(
@@ -294,6 +294,39 @@ async def create_pet(
     )
 
 
+@router.patch("/{pet_id}", response_model=PetDetail)
+async def rename_pet(
+    pet_id: str,
+    req: RenamePetRequest,
+    user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    display_name = req.displayName.strip()
+    if not display_name:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Pet name must not be empty")
+
+    result = await db.execute(
+        select(PetPackage).where(
+            (PetPackage.pet_id == pet_id) & (PetPackage.user_id == user.id) & (PetPackage.is_builtin == False)  # noqa: E712
+        )
+    )
+    pet = result.scalar_one_or_none()
+    if not pet:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pet not found")
+
+    pet.display_name = display_name
+    try:
+        config = PetConfig.model_validate_json(pet.config_json)
+        config.displayName = display_name
+        pet.config_json = config.model_dump_json()
+        _store().write_config(pet_id, config.model_dump(mode="json"))
+    except Exception:
+        # Keep the database update valid for legacy packages with malformed manifests.
+        pass
+    await db.commit()
+    return _to_detail(pet)
+
+
 @router.post("/{pet_id}/upload")
 async def upload_spritesheet(
     pet_id: str,
@@ -303,9 +336,7 @@ async def upload_spritesheet(
 ):
     result = await db.execute(
         select(PetPackage).where(
-            (PetPackage.pet_id == pet_id)
-            & (PetPackage.user_id == user.id)
-            & (PetPackage.is_builtin == False)  # noqa: E712
+            (PetPackage.pet_id == pet_id) & (PetPackage.user_id == user.id) & (PetPackage.is_builtin == False)  # noqa: E712
         )
     )
     pet = result.scalar_one_or_none()
@@ -393,9 +424,7 @@ async def expand_pet_actions(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported action pack")
     result = await db.execute(
         select(PetPackage).where(
-            (PetPackage.pet_id == pet_id)
-            & (PetPackage.user_id == user.id)
-            & (PetPackage.is_builtin == False)  # noqa: E712
+            (PetPackage.pet_id == pet_id) & (PetPackage.user_id == user.id) & (PetPackage.is_builtin == False)  # noqa: E712
         )
     )
     pet = result.scalar_one_or_none()
@@ -408,7 +437,9 @@ async def expand_pet_actions(
 
     asyncio.create_task(
         PetGenerationService(store=_store()).expand_action_pack(
-            pet_id, action_pack, user_id=user.id,
+            pet_id,
+            action_pack,
+            user_id=user.id,
         )
     )
     return GeneratePetResponse(id=pet_id, displayName=pet.display_name, status="generating")
@@ -441,11 +472,7 @@ async def get_generation_status(
         )
 
     # Fallback: check the filesystem and database.
-    result = await db.execute(
-        select(PetPackage).where(
-            (PetPackage.pet_id == pet_id) & (PetPackage.user_id == user.id)
-        )
-    )
+    result = await db.execute(select(PetPackage).where((PetPackage.pet_id == pet_id) & (PetPackage.user_id == user.id)))
     pet = result.scalar_one_or_none()
 
     store = _store()
@@ -456,15 +483,24 @@ async def get_generation_status(
 
     if pet and has_spritesheet and not is_error:
         return GenerationStatusResponse(
-            id=pet_id, status="ready", displayName=pet.display_name, description=pet.description,
+            id=pet_id,
+            status="ready",
+            displayName=pet.display_name,
+            description=pet.description,
         )
     elif is_error:
         return GenerationStatusResponse(
-            id=pet_id, status="error", displayName=pet_id, description=description,
+            id=pet_id,
+            status="error",
+            displayName=pet_id,
+            description=description,
         )
     else:
         return GenerationStatusResponse(
-            id=pet_id, status="generating", displayName=pet_id, description=description or "Generating…",
+            id=pet_id,
+            status="generating",
+            displayName=pet_id,
+            description=description or "Generating…",
         )
 
 
@@ -504,9 +540,9 @@ async def get_generation_progress_sse(
             else:
                 store = _store()
                 if store.spritesheet_path(pet_id).exists():
-                    yield f'data: {json.dumps({"status": "done", "step_label": "完成"})}\n\n'
+                    yield f"data: {json.dumps({'status': 'done', 'step_label': '完成'})}\n\n"
                 else:
-                    yield f'data: {json.dumps({"status": "idle", "step_label": "等待开始"})}\n\n'
+                    yield f"data: {json.dumps({'status': 'idle', 'step_label': '等待开始'})}\n\n"
                 break
 
             await asyncio.sleep(1.0)
@@ -530,9 +566,7 @@ async def delete_pet(
 ):
     result = await db.execute(
         select(PetPackage).where(
-            (PetPackage.pet_id == pet_id)
-            & (PetPackage.user_id == user.id)
-            & (PetPackage.is_builtin == False)  # noqa: E712
+            (PetPackage.pet_id == pet_id) & (PetPackage.user_id == user.id) & (PetPackage.is_builtin == False)  # noqa: E712
         )
     )
     pet = result.scalar_one_or_none()

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Upload, Trash2, Check, Cat, Sparkles, Loader2, ImageIcon, X } from "lucide-react";
+import { Upload, Trash2, Check, Cat, Sparkles, Loader2, ImageIcon, Pencil, X } from "lucide-react";
 import { Button, Input } from "./ui";
 import { toast } from "./ui/Toast";
 import { cn } from "../lib/cn";
@@ -14,6 +14,7 @@ import {
   getGenerationStatus,
   getPet,
   listPets,
+  renamePet,
   setActivePet,
   subscribeGenerationProgress,
   uploadSpritesheet,
@@ -45,6 +46,8 @@ export function PetsSettingsPanel() {
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState<string | null>(null);
   const [expanding, setExpanding] = useState<string | null>(null);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [petName, setPetName] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
   // AI generation state
@@ -176,6 +179,20 @@ export function PetsSettingsPanel() {
       toast.success(t("pets.activated"));
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Failed to activate");
+    }
+  };
+
+  const handleRename = async (pet: PetListItem) => {
+    const displayName = petName.trim();
+    if (!displayName) return;
+    try {
+      await renamePet(pet.id, displayName);
+      if (activeId === pet.id) window.dispatchEvent(new Event("active_pet_name_changed"));
+      setRenamingId(null);
+      await refresh();
+      toast.success(t("pets.renamed"));
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to rename pet");
     }
   };
 
@@ -454,10 +471,33 @@ export function PetsSettingsPanel() {
             )}
           >
             <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0">
-                <div className="font-medium text-sm text-[var(--text-primary)] truncate">
-                  {pet.displayName}
-                </div>
+              <div className="min-w-0 flex-1">
+                {renamingId === pet.id ? (
+                  <form className="flex gap-1" onSubmit={(event) => { event.preventDefault(); void handleRename(pet); }}>
+                    <Input
+                      value={petName}
+                      onChange={(event) => setPetName(event.target.value)}
+                      maxLength={200}
+                      autoFocus
+                      className="h-8"
+                    />
+                    <Button variant="brand" size="xs" type="submit">{t("common.save")}</Button>
+                  </form>
+                ) : (
+                  <div className="flex items-center gap-1">
+                    <div className="font-medium text-sm text-[var(--text-primary)] truncate">{pet.displayName}</div>
+                    {!pet.is_builtin && (
+                      <button
+                        type="button"
+                        className="shrink-0 p-1 text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
+                        onClick={() => { setRenamingId(pet.id); setPetName(pet.displayName); }}
+                        title={t("pets.rename")}
+                      >
+                        <Pencil size={12} />
+                      </button>
+                    )}
+                  </div>
+                )}
                 <div className="text-xs text-[var(--text-tertiary)] line-clamp-2">
                   {pet.description || (pet.is_builtin ? t("pets.builtin") : t("pets.custom"))}
                 </div>

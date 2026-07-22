@@ -41,6 +41,14 @@ const INITIAL_SVG_STATE: SvgPetState = {
   detail: "随时可以开始",
 };
 
+const BUILTIN_PET_NAME = "CrabAgent 小螃蟹";
+
+function bubbleLabelForPet(name: string, label: string): string {
+  if (!name) return label;
+  if (!label || label === "CrabAgent") return name;
+  return `${name}${label.startsWith("正在") ? "" : "："}${label}`;
+}
+
 // Six standard 150ms frames make one full tool-action cycle.
 const TOOL_ANIMATION_MINIMUM_MS = 900;
 const IDLE_SLEEP_DELAY_MS = 60_000;
@@ -139,6 +147,7 @@ export function DesktopPet() {
   // ── Legacy SVG-only state (used when sprite pet is disabled) ───────
   const [svgState, setSvgState] = useState<SvgPetState>(INITIAL_SVG_STATE);
   const [quietMode, setQuietMode] = useState(false);
+  const petName = activePet.detail?.displayName || BUILTIN_PET_NAME;
 
   // ── Shared refs ───────────────────────────────────────────────────
   const targetSessionRef = useRef<string | null>(null);
@@ -156,6 +165,7 @@ export function DesktopPet() {
   const longPressTimerRef = useRef<number | null>(null);
   const longPressHandledRef = useRef(false);
   const wokeFromSleepRef = useRef(false);
+  const activePointerIdRef = useRef<number | null>(null);
 
   // ── Load active pet on mount and when storage changes ──────────────
   const loadActivePet = useCallback(async () => {
@@ -194,7 +204,14 @@ export function DesktopPet() {
       if (event.key === "active_pet_id") void loadActivePet();
     };
     window.addEventListener("storage", handleStorage);
-    return () => window.removeEventListener("storage", handleStorage);
+    window.addEventListener("active_pet_name_changed", loadActivePet);
+    // The desktop pet is a separate renderer, so poll for renamed manifests.
+    const refreshTimer = window.setInterval(() => void loadActivePet(), 5000);
+    return () => {
+      window.removeEventListener("storage", handleStorage);
+      window.removeEventListener("active_pet_name_changed", loadActivePet);
+      window.clearInterval(refreshTimer);
+    };
   }, [loadActivePet]);
 
   // ── Sync agent monitor summary ────────────────────────────────────
@@ -324,6 +341,8 @@ export function DesktopPet() {
       wokeFromSleepRef.current = false;
     }
     dragStart.current = { x: event.clientX, y: event.clientY };
+    activePointerIdRef.current = event.pointerId;
+    event.currentTarget.setPointerCapture(event.pointerId);
     dragged.current = false;
     longPressHandledRef.current = false;
     if (longPressTimerRef.current !== null) window.clearTimeout(longPressTimerRef.current);
@@ -341,6 +360,7 @@ export function DesktopPet() {
   };
 
   const handlePointerMove = (event: React.PointerEvent<HTMLElement>) => {
+    if (activePointerIdRef.current !== event.pointerId) return;
     const start = dragStart.current;
     if (start && !dragged.current) {
       const dx = event.clientX - start.x;
@@ -368,7 +388,11 @@ export function DesktopPet() {
     }
   };
 
-  const handlePointerEnd = () => {
+  const handlePointerEnd = (event?: React.PointerEvent<HTMLElement>) => {
+    if (event && activePointerIdRef.current !== event.pointerId) return;
+    if (event?.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
     if (longPressTimerRef.current !== null) window.clearTimeout(longPressTimerRef.current);
     longPressTimerRef.current = null;
     if (dragged.current) {
@@ -377,6 +401,15 @@ export function DesktopPet() {
       setPetState(baseStateRef.current);
     }
     dragStart.current = null;
+    activePointerIdRef.current = null;
+  };
+
+  // A Control-click on macOS opens a context menu and can suppress pointerup.
+  // Always stop the native drag loop before showing the pet menu.
+  const handleContextMenu = (event: React.MouseEvent<HTMLElement>) => {
+    event.preventDefault();
+    handlePointerEnd();
+    window.electronAPI?.showPetMenu();
   };
 
   const handleOpenMain = () => {
@@ -493,8 +526,9 @@ export function DesktopPet() {
     );
   };
 
-  // Determine which label/detail to show. For sprite pets use state machine output.
-  const bubbleLabel = activePet.useSprite ? petState.label || svgState.label : svgState.label;
+  // Prefix status text with the selected pet name, e.g. "Mochi: working".
+  const statusLabel = activePet.useSprite ? petState.label || svgState.label : svgState.label;
+  const bubbleLabel = bubbleLabelForPet(petName, statusLabel);
   const bubbleDetail = activePet.useSprite ? petState.detail || svgState.detail : svgState.detail;
   const currentCardKind = cardKind(petState);
   // Quiet mode suppresses routine progress and completion cards, but never hides attention states.
@@ -527,10 +561,8 @@ export function DesktopPet() {
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerEnd}
       onPointerCancel={handlePointerEnd}
-      onContextMenu={(event) => {
-        event.preventDefault();
-        window.electronAPI?.showPetMenu();
-      }}
+      onLostPointerCapture={handlePointerEnd}
+      onContextMenu={handleContextMenu}
     >
       <button
         ref={bubbleRef}

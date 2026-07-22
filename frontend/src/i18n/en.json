@@ -729,6 +729,8 @@
     "active": "Active",
     "builtin": "Built-in",
     "custom": "Custom",
+    "rename": "Rename",
+    "renamed": "Pet name updated",
     "uploadSpritesheet": "Upload spritesheet",
     "uploaded": "Spritesheet uploaded",
     "delete": "Delete",

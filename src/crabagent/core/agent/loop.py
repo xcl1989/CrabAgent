@@ -236,18 +236,23 @@ async def run_agent(
             tool_calls_list: list[dict] = []
 
             _llm_t0 = time.time()
-            reasoning_effort = context.metadata.get("reasoning_effort", settings.reasoning_effort)
-            response = await litellm.acompletion(
-                model=model,
+            completion_params = {
+                "model": model,
                 **llm,
-                messages=_build_messages(context),
-                tools=tools,
+                "messages": _build_messages(context),
+                "tools": tools,
                 **({} if provider.provider_type == "chatgpt" else {"max_tokens": settings.max_tokens}),
-                stream=True,
-                stream_options={"include_usage": True},
-                reasoning_effort=reasoning_effort,
-                allowed_openai_params=["reasoning_effort"],
-            )
+                "stream": True,
+                "stream_options": {"include_usage": True},
+            }
+            # OpenCode Go rejects the OpenAI reasoning_effort extension even for
+            # models that otherwise accept multimodal and tool-call requests.
+            if provider.provider_type != "opencode-go":
+                completion_params["reasoning_effort"] = context.metadata.get(
+                    "reasoning_effort", settings.reasoning_effort
+                )
+                completion_params["allowed_openai_params"] = ["reasoning_effort"]
+            response = await litellm.acompletion(**completion_params)
 
             finished = False
             async for chunk in response:

@@ -729,6 +729,8 @@
     "active": "已启用",
     "builtin": "内置",
     "custom": "自定义",
+    "rename": "修改名称",
+    "renamed": "宠物名称已更新",
     "uploadSpritesheet": "上传精灵图",
     "uploaded": "精灵图已上传",
     "delete": "删除",

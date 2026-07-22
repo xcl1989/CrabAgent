@@ -60,6 +60,10 @@ export async function createPet(req: CreatePetRequest): Promise<PetDetail> {
   return api.post<PetDetail>("/pets", req);
 }
 
+export async function renamePet(id: string, displayName: string): Promise<PetDetail> {
+  return api.patch<PetDetail>(`/pets/${id}`, { displayName });
+}
+
 export async function uploadSpritesheet(
   petId: string,
   file: File,

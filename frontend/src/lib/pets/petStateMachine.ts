@@ -60,12 +60,12 @@ const AGENT_TO_ANIMATION: Record<AgentStatus, PetAnimationName> = {
 };
 
 const DEFAULT_LABELS: Record<AgentStatus, { label: string; detail: string }> = {
-  idle: { label: "CrabAgent", detail: "随时可以开始" },
+  idle: { label: "", detail: "在线待命，随时可以开始" },
   thinking: { label: "正在思考", detail: "整理思路中…" },
   working: { label: "正在工作", detail: "处理任务中…" },
-  waiting: { label: "需要你处理", detail: "点我打开" },
-  error: { label: "遇到一点问题", detail: "点我查看" },
-  completed: { label: "任务完成", detail: "做得漂亮！" },
+  waiting: { label: "需要你", detail: "有一件事等你处理，点我打开" },
+  error: { label: "遇到一点问题", detail: "点我查看详情" },
+  completed: { label: "完成啦", detail: "做得漂亮！" },
 };
 
 const TOOL_LABELS: Partial<Record<PetAnimationName, { label: string; detail: string }>> = {

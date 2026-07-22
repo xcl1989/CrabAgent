@@ -1254,10 +1254,10 @@ class PetGenerationService:
             for x in range(w):
                 r, g, b, a = pixels[x, y]
                 # The generated background is intentionally green, but image
-                # compression often shifts it toward yellow or brown. The old
-                # partial-alpha branch left that contamination visible as a
-                # smeared backdrop in Electron's transparent pet window.
-                if g > 80 and g > r * 1.15 and g > b * 1.15:
+                # compression can leave very dark olive pixels beneath props
+                # such as desks. Green dominance is more reliable than a
+                # brightness cutoff for removing that spill.
+                if g > r * 1.25 and g > b * 1.25:
                     pixels[x, y] = (0, 0, 0, 0)
 
         return rgba

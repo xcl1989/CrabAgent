@@ -257,7 +257,8 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
   const wrappedOnEvent = useCallback((event: SSEEvent) => {
     if (event.type.startsWith("goal_")) {
       const snapshot = event.data.goal as GoalData | undefined;
-      if (snapshot) setGoal(snapshot);
+      // Completed or archived goals should not continue occupying the chat header.
+      if (snapshot) setGoal(["complete", "cleared"].includes(snapshot.status) ? null : snapshot);
     }
     if (event.type.startsWith("doc_op_")) {
       handleDocEvent(event);

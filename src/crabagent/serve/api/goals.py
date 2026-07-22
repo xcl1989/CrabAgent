@@ -13,7 +13,6 @@ from crabagent.core.goals.service import (
     checkpoint_goal,
     create_goal,
     get_current_goal,
-    get_latest_goal,
     goal_to_dict,
     update_goal,
 )
@@ -66,7 +65,7 @@ class CheckpointRequest(BaseModel):
 @router.get("")
 async def get_goal(session_id: str, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     await get_owned_conversation(db, session_id, user)
-    goal = await get_current_goal(db, session_id) or await get_latest_goal(db, session_id)
+    goal = await get_current_goal(db, session_id)
     return {"goal": goal_to_dict(goal) if goal else None}
 
 
