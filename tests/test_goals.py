@@ -84,6 +84,24 @@ async def test_checkpoint_updates_goal_and_records_checkpoint_event(monkeypatch:
     assert events == [("checkpoint", "API verified", {"next_step": "Add tool tests"})]
 
 
+def test_goal_finalization_required_only_when_agent_omits_terminal_status():
+    assert service.goal_finalization_required({"goal_id": 1}) is True
+    assert service.goal_finalization_required({"goal_id": 1, "_goal_checkpoint_updated": True}) is True
+    assert service.goal_finalization_required({"goal_id": 1, "_goal_status_updated": True}) is False
+    assert service.goal_finalization_required({"goal_id": 1, "_agent_error": True}) is False
+
+
+def test_automatic_completion_evidence_requires_outcome_and_verification():
+    assert service.automatic_completion_evidence("已完成实现，测试通过，前端构建成功。")
+    assert service.automatic_completion_evidence("已完成实现，但还没有测试。") is None
+
+
+def test_finalization_checkpoint_includes_response_excerpt():
+    summary, next_step = service.finalization_checkpoint("Build and tests completed.")
+    assert "Build and tests completed." in summary
+    assert "update_goal" in next_step
+
+
 def test_goal_prompt_keeps_criteria_constraints_and_checkpoint():
     goal = SimpleNamespace(
         objective="Ship goal mode",

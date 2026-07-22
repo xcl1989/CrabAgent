@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { PanelRightClose, X, RefreshCw, ChevronDown, ChevronRight, Search, Folder, FileText, ImageIcon } from "lucide-react";
+import { PanelRightClose, X, RefreshCw, ChevronDown, ChevronRight, Search, Folder, FileText, ImageIcon, Copy, Check } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import i18n from "../i18n";
 import { FileEntry, FileContent } from "../api/files";
@@ -44,6 +44,12 @@ function useFileTree(workspace?: string) {
 
   const refresh = () => setRefreshKey((k) => k + 1);
 
+  const clearSelected = () => {
+    setSelectedPath(null);
+    setFileContent(null);
+    setFileError(null);
+  };
+
   const handleSelect = async (path: string) => {
     setSelectedPath(path);
     setFileContent(null);
@@ -62,7 +68,7 @@ function useFileTree(workspace?: string) {
     }
   };
 
-  return { entries, selectedPath, fileContent, fileError, loading, handleSelect, refresh, absolute: isAbsolute };
+  return { entries, selectedPath, fileContent, fileError, loading, handleSelect, clearSelected, refresh, absolute: isAbsolute };
 }
 
 // --- Collapsible Section ---
@@ -117,13 +123,21 @@ function FilePreview({
 }) {
   const { t } = useTranslation();
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const copyContent = async () => {
+    if (fileContent === null) return;
+    await navigator.clipboard.writeText(fileContent);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1500);
+  };
   if (!selectedPath) return null;
 
   return (
     <>
       <div className="border-t border-[var(--border)] flex flex-col" style={{ maxHeight: "30%" }}>
-        <div className="p-2 text-xs font-medium truncate flex-shrink-0 text-[var(--accent)] border-b border-[var(--border)]">
-          {selectedPath}
+        <div className="flex items-center gap-1 border-b border-[var(--border)] p-2 text-xs font-medium text-[var(--accent)]">
+          <span className="min-w-0 flex-1 truncate">{selectedPath}</span>
+          {fileContent !== null && <button type="button" onClick={copyContent} className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]" title="复制全部内容">{copied ? <Check size={13} className="text-[var(--success)]" /> : <Copy size={13} />}{copied ? "已复制" : "复制全部"}</button>}
         </div>
         <div className="overflow-y-auto p-2 flex-1">
           {fileError ? (
@@ -390,8 +404,10 @@ export default function FileBrowser({
             <FileTree
               entries={tree.entries}
               onSelect={tree.handleSelect}
+              onClearSelection={tree.clearSelected}
               selectedPath={tree.selectedPath}
               absolute={tree.absolute}
+              rootPath={workspace || ""}
               onOpenDoc={onOpenDoc}
               onRefresh={tree.refresh}
             />
@@ -460,8 +476,10 @@ export default function FileBrowser({
               <FileTree
                 entries={tree.entries}
                 onSelect={tree.handleSelect}
+                onClearSelection={tree.clearSelected}
                 selectedPath={tree.selectedPath}
                 absolute={tree.absolute}
+                rootPath={workspace || ""}
                 onOpenDoc={onOpenDoc}
                 onRefresh={tree.refresh}
               />

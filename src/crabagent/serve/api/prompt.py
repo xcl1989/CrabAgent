@@ -1117,12 +1117,32 @@ Use ordinary Markdown when a visualization is not helpful.
             _session_locks.pop(session_id, None)
             try:
                 from crabagent.core.goals.scheduler import schedule_goal_continuation
-                from crabagent.core.goals.service import account_goal_usage, get_current_goal, goal_to_dict
+                from crabagent.core.goals.service import (
+                    account_goal_usage,
+                    automatic_completion_evidence,
+                    checkpoint_goal,
+                    finalization_checkpoint,
+                    get_current_goal,
+                    goal_finalization_required,
+                    goal_to_dict,
+                )
 
                 async with async_session_factory() as goal_db:
                     goal = await get_current_goal(goal_db, session_id)
                     if goal:
-                        limited = await account_goal_usage(goal_db, goal, context.accumulated_total_consumed)
+                        if goal_finalization_required(context.metadata):
+                            final_reply = context.messages[-1].get("content", "")
+                            evidence = automatic_completion_evidence(final_reply)
+                            if evidence:
+                                from crabagent.core.goals.service import update_goal
+
+                                await update_goal(goal_db, goal, status="complete", evidence=evidence)
+                            else:
+                                summary, next_step = finalization_checkpoint(final_reply)
+                                await checkpoint_goal(goal_db, goal, summary, next_step)
+                        limited = False if goal.status == "complete" else await account_goal_usage(
+                            goal_db, goal, context.accumulated_total_consumed
+                        )
                         await goal_db.commit()
                         snapshot = goal_to_dict(goal)
                     else:

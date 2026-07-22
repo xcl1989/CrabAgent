@@ -564,6 +564,20 @@ class CreateRequest(BaseModel):
     absolute: bool = False
 
 
+class MoveRequest(BaseModel):
+    paths: list[str]
+    destination: str
+    absolute: bool = False
+
+
+def _is_relative_to(path: Path, parent: Path) -> bool:
+    try:
+        path.relative_to(parent)
+        return True
+    except ValueError:
+        return False
+
+
 @router.delete("/manage")
 async def delete_entry(
     req: DeleteRequest,
@@ -605,6 +619,8 @@ async def create_entry(
     user: User = Depends(get_current_user),
 ):
     """Create a new file or directory."""
+    if req.entry_type not in {"file", "directory"}:
+        raise HTTPException(status_code=400, detail="entry_type must be file or directory")
     target = _resolve_file_path(req.path, req.absolute)
     if target.exists():
         raise HTTPException(status_code=409, detail="Path already exists")
@@ -614,6 +630,38 @@ async def create_entry(
     else:
         target.write_text("", encoding="utf-8")
     return {"status": "ok", "path": req.path, "type": req.entry_type}
+
+
+@router.post("/move")
+async def move_entries(
+    req: MoveRequest,
+    user: User = Depends(get_current_user),
+):
+    """Move one or more entries into an existing directory atomically."""
+    if not req.paths:
+        raise HTTPException(status_code=400, detail="At least one source path is required")
+    if len(set(req.paths)) != len(req.paths):
+        raise HTTPException(status_code=400, detail="Source paths must be unique")
+
+    destination = _resolve_file_path(req.destination, req.absolute)
+    if not destination.is_dir():
+        raise HTTPException(status_code=400, detail="Destination must be an existing directory")
+
+    sources = [_resolve_file_path(path, req.absolute) for path in req.paths]
+    if any(not source.exists() for source in sources):
+        raise HTTPException(status_code=404, detail="Source not found")
+    if any(source == destination for source in sources):
+        raise HTTPException(status_code=400, detail="Cannot move a directory into itself")
+    if any(source.is_dir() and _is_relative_to(destination, source) for source in sources):
+        raise HTTPException(status_code=400, detail="Cannot move a directory into itself")
+
+    targets = [destination / source.name for source in sources]
+    if len(set(targets)) != len(targets) or any(target.exists() for target in targets):
+        raise HTTPException(status_code=409, detail="A target already exists")
+
+    for source, target in zip(sources, targets, strict=True):
+        source.rename(target)
+    return {"status": "ok", "moved": len(sources)}
 
 
 @router.get("/download")

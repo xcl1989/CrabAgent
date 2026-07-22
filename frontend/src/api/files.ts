@@ -157,6 +157,10 @@ export async function createEntry(path: string, entryType: "file" | "directory",
   return api.post("/files/create", { path, entry_type: entryType, absolute });
 }
 
+export async function moveEntries(paths: string[], destination: string, absolute?: boolean): Promise<{ status: string; moved: number }> {
+  return api.post("/files/move", { paths, destination, absolute });
+}
+
 export function getDownloadUrl(path: string, absolute?: boolean): string {
   const params = new URLSearchParams({ path });
   if (absolute) params.set("absolute", "true");

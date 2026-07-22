@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.13.3] — File Workspace & Reliable Goal Completion
+
+### Added
+- **Complete file workspace** — The Work Mode file browser now supports creating folders at the root or inside a selected folder, cancelling creation, multi-selecting with Cmd/Ctrl or Shift, drag-and-drop batch moves, and moving items back to the workspace root.
+- **File actions and preview controls** — Restored the floating context menu for copy path, download, rename, create folder, and delete. Text previews now include one-click copy-all, while `.xlsx`, `.docx`, `.pptx`, `.html`, and `.md` retain their workspace-open action.
+
+### Fixed
+- **Goal completion fallback** — When an agent finishes without recording a terminal goal status, the server now detects verified completion statements and closes the goal with evidence; otherwise it records an explicit finalization checkpoint instead of leaving stale progress silently active.
+- **Safer file moves** — Batch moves validate empty or duplicate sources, destination folders, conflicts, and directory self-nesting before applying changes.
+
+---
+
 ## [0.13.2] — Goal Mode & Autonomous Session Progress
 
 ### Added

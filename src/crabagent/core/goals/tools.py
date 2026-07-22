@@ -34,6 +34,8 @@ def register_goal_tools(context, session_id: str, user_id: int) -> None:
     async def checkpoint_goal_tool(summary: str, next_step: str = "", context=None):
         from crabagent.core.database import async_session_factory
 
+        if context is not None:
+            context.metadata["_goal_checkpoint_updated"] = True
         async with async_session_factory() as db:
             goal = await get_current_goal(db, session_id)
             if not goal:
@@ -67,6 +69,8 @@ def register_goal_tools(context, session_id: str, user_id: int) -> None:
     async def update_goal_tool(status: str, evidence: str = "", blocker: str = "", stop_reason: str = "", context=None):
         from crabagent.core.database import async_session_factory
 
+        if context is not None:
+            context.metadata["_goal_status_updated"] = True
         async with async_session_factory() as db:
             goal = await get_current_goal(db, session_id)
             if not goal:

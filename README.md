@@ -74,7 +74,7 @@ When the AI creates or opens a file, the interface splits: AI chat shrinks to a 
 - **AI Edit toolbar**: Bold, italic, font size, color — one click to style selected text
 - **Natural language edit**: type instructions like "make the heading red" and the AI applies it
 - **Document timeline**: see the full history of AI operations on the document
-- **File browser**: browse project files without leaving Work Mode
+- **File workspace**: create folders, multi-select items, drag files or folders between directories, use a floating context menu, and copy text previews without leaving Work Mode
 - **One-click switch back to Chat Mode** when you're done
 
 ```

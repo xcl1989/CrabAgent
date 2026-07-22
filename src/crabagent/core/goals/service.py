@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import re
 from typing import Any
 
 from sqlalchemy import select
@@ -190,6 +191,42 @@ async def update_goal(
     return goal
 
 
+def goal_finalization_required(metadata: dict[str, Any]) -> bool:
+    """Return whether a successful goal run ended without a terminal status."""
+    return (
+        bool(metadata.get("goal_id"))
+        and not metadata.get("_run_error")
+        and not metadata.get("_agent_error")
+        and not metadata.get("_goal_status_updated")
+    )
+
+
+def automatic_completion_evidence(summary: str) -> str | None:
+    """Accept completion only when the final reply states both outcome and verification."""
+    clean = re.sub(r"\s+", " ", summary).strip()
+    if not clean:
+        return None
+    completed = re.search(r"(已完成|完成了|已实现|已修复|已处理|完成构建)", clean)
+    verified = re.search(r"(测试.*通过|\d+\s+passed|构建成功|build ok|已验证|验证.*通过|diff --check.*通过)", clean, re.I)
+    if not (completed and verified):
+        return None
+    return clean[:1200]
+
+
+def finalization_checkpoint(summary: str) -> tuple[str, str]:
+    """Keep an unfinished goal explicit when the agent ended without closing it."""
+    clean = re.sub(r"\s+", " ", summary).strip()
+    if len(clean) > 240:
+        clean = clean[:237].rstrip() + "..."
+    return (
+        "Agent completed its response without recording a final goal status.",
+        "Review the final response and call update_goal with verified completion evidence, or record the remaining work.",
+    ) if not clean else (
+        "Agent response ended without recording a final goal status: " + clean,
+        "Review the final response and call update_goal with verified completion evidence, or record the remaining work.",
+    )
+
+
 def goal_prompt(goal: Goal) -> str:
     criteria = "\n".join(f"- {item}" for item in (goal.success_criteria or [])) or "- No explicit criteria provided."
     constraints = "\n".join(f"- {item}" for item in (goal.constraints or [])) or "- None."
@@ -204,6 +241,8 @@ def goal_prompt(goal: Goal) -> str:
             "Rules:\n"
             "- Work toward this goal while responding to the user.\n"
             "- Use checkpoint_goal after meaningful progress.\n"
+            "- Before the final user-facing response, you MUST call update_goal with status complete, "
+            "paused, or unmet; do not leave a completed work turn active.\n"
             "- Never claim completion without verifying every applicable success criterion.\n"
             "- Use update_goal with status complete only with concrete verification evidence.\n"
             "- Use status unmet only for a concrete blocker.",
