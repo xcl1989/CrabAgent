@@ -19,6 +19,7 @@ let petStateSaveTimer = null;
 let tray = null;
 let forceQuit = false;
 let petQuietUntil = 0;
+let authToken = null;
 
 // ── Window state persistence ──
 const STATE_PATH = path.join(app.getPath('userData'), 'window-state.json');
@@ -497,6 +498,15 @@ function createWindow() {
 // ── Desktop pet ──
 // It shares the main window's local origin and session, so its React surface can
 // consume the existing authenticated global SSE stream without extra credentials.
+function primeRendererAuth(target) {
+  if (!target || target.isDestroyed() || !authToken) return;
+  target.webContents.once('did-finish-load', () => {
+    if (!target.webContents.getURL().startsWith(URL)) return;
+    const token = JSON.stringify(authToken);
+    target.webContents.executeJavaScript(`window.localStorage.setItem('crab_token', ${token})`);
+  });
+}
+
 function createPetWindow() {
   if (petWin && !petWin.isDestroyed()) return petWin;
 
@@ -526,6 +536,8 @@ function createPetWindow() {
     alwaysOnTop: true,
     visibleOnAllWorkspaces: true,
     hasShadow: false,
+    // Let the first click through even though this non-activating window is on top.
+    acceptFirstMouse: true,
     show: false,
     webPreferences: {
       nodeIntegration: false,
@@ -535,6 +547,11 @@ function createPetWindow() {
   });
   petWin.setAlwaysOnTop(true, 'floating');
   petWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: false });
+  petWin.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  petWin.webContents.on('will-navigate', (event, url) => {
+    if (!url.startsWith(URL)) event.preventDefault();
+  });
+  primeRendererAuth(petWin);
   petWin.loadURL(`${URL}/?surface=pet`);
   petWin.once('ready-to-show', () => petWin?.showInactive());
   // Window moves can fire at frame rate while dragging; debounce disk persistence.
@@ -633,6 +650,9 @@ ipcMain.on('pet-drag-end', () => {
   // Notify renderer to restore idle/agent animation after drag.
   petWin?.webContents.send('pet-drag-direction', { direction: null });
 });
+ipcMain.handle('pet-auth-token', (event) => (
+  event.sender === petWin?.webContents ? authToken : null
+));
 ipcMain.handle('pet-action', (_event, action, sessionId) => {
   if (action === 'open-main') {
     showWindow();
@@ -711,9 +731,8 @@ async function autoLogin() {
       req.write(body);
       req.end();
     });
-    await win?.webContents.executeJavaScript(
-      `window.localStorage.setItem('crab_token','${token}')`,
-    );
+    authToken = String(token);
+    primeRendererAuth(win);
     log('Auto-login done');
   } catch (e) {
     log(`Auto-login: ${e.message}`);
@@ -752,7 +771,10 @@ app.whenReady().then(async () => {
 
   // Auto-login, then load the real SPA (replaces loading screen)
   await autoLogin();
-  if (win) win.loadURL(URL);
+  if (win) {
+    primeRendererAuth(win);
+    win.loadURL(URL);
+  }
   createPetWindow();
 
   // macOS: re-show window on dock click

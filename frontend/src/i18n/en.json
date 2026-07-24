@@ -443,7 +443,18 @@
   },
   "workspaceSwitcher": {
     "chooseDirectory": "Choose directory…",
-    "directory": "Directory"
+    "directory": "Directory",
+    "manage": "Manage workspaces",
+    "manageDescription": "Drag to reorder, pin frequent workspaces, or hide low-use workspaces. Hiding never deletes directories or sessions.",
+    "hiddenCount": "{{count}} hidden workspaces",
+    "sessions": "sessions",
+    "pin": "Pin to top",
+    "unpin": "Unpin",
+    "hide": "Hide workspace",
+    "show": "Show workspace",
+    "visible": "Visible",
+    "hidden": "Hidden",
+    "currentProtected": "The current workspace cannot be hidden"
   },
   "branch": {
     "replay": "Replay this branch"

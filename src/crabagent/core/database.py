@@ -50,6 +50,20 @@ class User(Base):
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
 
 
+class WorkspacePreference(Base):
+    """A user's display preferences for a workspace without touching its sessions."""
+
+    __tablename__ = "workspace_preferences"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    workspace: Mapped[str] = mapped_column(Text, nullable=False)
+    hidden: Mapped[bool] = mapped_column(Boolean, default=False)
+    pinned: Mapped[bool] = mapped_column(Boolean, default=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    updated_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
 class Conversation(Base):
     __tablename__ = "conversations"
 
@@ -566,6 +580,10 @@ async def init_db() -> None:
     async with engine.begin() as conn:
         await conn.execute(text("PRAGMA journal_mode=WAL"))
         await conn.run_sync(Base.metadata.create_all)
+        await conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_workspace_preferences_user_workspace "
+            "ON workspace_preferences(user_id, workspace)"
+        ))
 
         result = await conn.execute(text("PRAGMA table_info(users)"))
         columns = [row[1] for row in result.fetchall()]

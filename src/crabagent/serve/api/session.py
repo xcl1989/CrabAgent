@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from crabagent.core.database import Conversation, Message, User, get_db
+from crabagent.core.database import Conversation, Message, User, WorkspacePreference, get_db
 from crabagent.serve.api.prompt import _tasks
 from crabagent.serve.deps import get_current_user, get_owned_conversation
 from crabagent.serve.services import conversation as conv_svc
@@ -284,6 +284,55 @@ class WorkspaceInfo(BaseModel):
     workspace: str
     session_count: int
     last_active: str | None = None
+    hidden: bool = False
+    pinned: bool = False
+    sort_order: int = 0
+
+
+class UpdateWorkspacePreferenceRequest(BaseModel):
+    hidden: bool | None = None
+    pinned: bool | None = None
+    sort_order: int | None = None
+    current_workspace: str = ""
+
+
+class ReorderWorkspacesRequest(BaseModel):
+    workspaces: list[str]
+
+
+async def _workspace_infos(db: AsyncSession, user_id: int) -> list[WorkspaceInfo]:
+    result = await db.execute(
+        select(Conversation.workspace, Conversation.session_id, Conversation.updated_at)
+        .where(Conversation.user_id == user_id, Conversation.workspace != "")
+        .order_by(Conversation.updated_at.desc())
+    )
+    preferences = await db.execute(
+        select(WorkspacePreference).where(WorkspacePreference.user_id == user_id)
+    )
+    by_workspace = {pref.workspace: pref for pref in preferences.scalars()}
+    seen: dict[str, WorkspaceInfo] = {}
+    default_order: dict[str, int] = {}
+    for workspace, _, updated_at in result.fetchall():
+        if workspace in seen:
+            seen[workspace].session_count += 1
+            continue
+        default_order[workspace] = len(default_order)
+        pref = by_workspace.get(workspace)
+        seen[workspace] = WorkspaceInfo(
+            workspace=workspace,
+            session_count=1,
+            last_active=updated_at.isoformat() if updated_at else None,
+            hidden=pref.hidden if pref else False,
+            pinned=pref.pinned if pref else False,
+            sort_order=pref.sort_order if pref else 0,
+        )
+    return sorted(
+        seen.values(),
+        key=lambda ws: (
+            not ws.pinned,
+            ws.sort_order if ws.workspace in by_workspace else 100000 + default_order[ws.workspace],
+        ),
+    )
 
 
 @router.get("/workspaces", response_model=list[WorkspaceInfo])
@@ -291,22 +340,66 @@ async def list_workspaces(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    return await _workspace_infos(db, user.id)
+
+
+@router.patch("/workspace-preferences/{workspace:path}", response_model=WorkspaceInfo)
+async def update_workspace_preference(
+    workspace: str,
+    req: UpdateWorkspacePreferenceRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if not workspace:
+        raise HTTPException(status_code=400, detail="Workspace is required")
+    current_workspace = req.current_workspace or str(Path.cwd().resolve())
+    if req.hidden and workspace == current_workspace:
+        raise HTTPException(status_code=400, detail="The current workspace cannot be hidden")
+
     result = await db.execute(
-        select(
-            Conversation.workspace,
-            Conversation.session_id,
+        select(WorkspacePreference).where(
+            WorkspacePreference.user_id == user.id,
+            WorkspacePreference.workspace == workspace,
         )
-        .where(Conversation.user_id == user.id, Conversation.workspace != "")
-        .order_by(Conversation.updated_at.desc())
     )
-    rows = result.fetchall()
-    seen: dict[str, dict] = {}
-    for row in rows:
-        ws = row[0]
-        if ws not in seen:
-            seen[ws] = {"workspace": ws, "session_count": 0, "last_active": None}
-        seen[ws]["session_count"] += 1
-    return list(seen.values())
+    preference = result.scalar_one_or_none()
+    if preference is None:
+        preference = WorkspacePreference(user_id=user.id, workspace=workspace)
+        db.add(preference)
+    for field in ("hidden", "pinned", "sort_order"):
+        value = getattr(req, field)
+        if value is not None:
+            setattr(preference, field, value)
+    await db.commit()
+
+    for item in await _workspace_infos(db, user.id):
+        if item.workspace == workspace:
+            return item
+    raise HTTPException(status_code=404, detail="Workspace not found")
+
+
+@router.put("/workspace-preferences/reorder", response_model=list[WorkspaceInfo])
+async def reorder_workspaces(
+    req: ReorderWorkspacesRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    existing = {item.workspace for item in await _workspace_infos(db, user.id)}
+    if len(req.workspaces) != len(set(req.workspaces)) or not set(req.workspaces).issubset(existing):
+        raise HTTPException(status_code=400, detail="Invalid workspace order")
+
+    preferences = await db.execute(
+        select(WorkspacePreference).where(WorkspacePreference.user_id == user.id)
+    )
+    by_workspace = {pref.workspace: pref for pref in preferences.scalars()}
+    for index, workspace in enumerate(req.workspaces):
+        preference = by_workspace.get(workspace)
+        if preference is None:
+            preference = WorkspacePreference(user_id=user.id, workspace=workspace)
+            db.add(preference)
+        preference.sort_order = index
+    await db.commit()
+    return await _workspace_infos(db, user.id)
 
 
 @router.get("/current-workspace")

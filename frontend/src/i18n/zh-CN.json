@@ -443,7 +443,18 @@
   },
   "workspaceSwitcher": {
     "chooseDirectory": "选择目录…",
-    "directory": "目录"
+    "directory": "目录",
+    "manage": "管理工作空间",
+    "manageDescription": "拖拽调整显示顺序；固定常用工作空间，或隐藏低频工作空间。隐藏不会删除目录或会话。",
+    "hiddenCount": "已隐藏 {{count}} 个工作空间",
+    "sessions": "个会话",
+    "pin": "固定到顶部",
+    "unpin": "取消固定",
+    "hide": "隐藏工作空间",
+    "show": "恢复显示",
+    "visible": "显示中",
+    "hidden": "已隐藏",
+    "currentProtected": "当前工作空间不能隐藏"
   },
   "branch": {
     "replay": "回放此分支"

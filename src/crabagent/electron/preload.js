@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   // Desktop pet controls are deliberately limited to window-level actions.
+  getPetAuthToken: () => ipcRenderer.invoke('pet-auth-token'),
   petAction: (action, sessionId) => ipcRenderer.invoke('pet-action', action, sessionId),
   setPetQuietMode: (minutes) => ipcRenderer.invoke('pet-quiet-mode', minutes),
   getPetQuietStatus: () => ipcRenderer.invoke('pet-quiet-status'),

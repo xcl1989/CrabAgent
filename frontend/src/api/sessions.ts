@@ -49,6 +49,16 @@ export interface WorkspaceInfo {
   workspace: string;
   session_count: number;
   last_active: string | null;
+  hidden: boolean;
+  pinned: boolean;
+  sort_order: number;
+}
+
+export interface WorkspacePreferenceUpdate {
+  hidden?: boolean;
+  pinned?: boolean;
+  sort_order?: number;
+  current_workspace?: string;
 }
 
 export function listSessions(workspace?: string): Promise<Session[]> {
@@ -62,6 +72,14 @@ export function listWorkspaces(): Promise<WorkspaceInfo[]> {
 
 export function getCurrentWorkspace(): Promise<{ workspace: string }> {
   return api.get("/sessions/current-workspace");
+}
+
+export function updateWorkspacePreference(workspace: string, update: WorkspacePreferenceUpdate): Promise<WorkspaceInfo> {
+  return api.patch(`/sessions/workspace-preferences/${encodeURIComponent(workspace)}`, update);
+}
+
+export function reorderWorkspaces(workspaces: string[]): Promise<WorkspaceInfo[]> {
+  return api.put("/sessions/workspace-preferences/reorder", { workspaces });
 }
 
 export function createSession(title?: string, workspace?: string): Promise<Session> {
