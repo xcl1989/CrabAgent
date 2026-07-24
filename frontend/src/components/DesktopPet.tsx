@@ -360,7 +360,6 @@ export function DesktopPet() {
     }
     dragStart.current = { x: event.clientX, y: event.clientY };
     activePointerIdRef.current = event.pointerId;
-    event.currentTarget.setPointerCapture(event.pointerId);
     dragged.current = false;
     longPressHandledRef.current = false;
     if (longPressTimerRef.current !== null) window.clearTimeout(longPressTimerRef.current);
@@ -385,6 +384,9 @@ export function DesktopPet() {
       const dy = event.clientY - start.y;
       if (Math.hypot(dx, dy) > 4) {
         dragged.current = true;
+        // Capture the pointer only when a real drag starts, so simple clicks
+        // on the character button still produce a React click event.
+        event.currentTarget.setPointerCapture(event.pointerId);
         if (longPressTimerRef.current !== null) window.clearTimeout(longPressTimerRef.current);
         longPressTimerRef.current = null;
         isDraggingRef.current = true;
