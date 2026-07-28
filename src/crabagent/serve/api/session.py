@@ -104,7 +104,8 @@ async def compress_session(
     if len(records) < 2:
         raise HTTPException(status_code=400, detail="Not enough messages to compress")
 
-    from crabagent.core.agent.compress import summarize_messages
+    from crabagent.core.agent.compress import compress_context
+    from crabagent.core.agent.context import AgentContext
     from crabagent.core.agent.loop import _litellm_params, _resolve_provider
     from crabagent.core.config import settings
     from crabagent.core.proxy import resolve_llm_proxy
@@ -118,18 +119,21 @@ async def compress_session(
     if "/" not in model:
         model = f"chatgpt/{model}" if provider.provider_type == "chatgpt" else f"openai/{model}"
 
-    summary = await summarize_messages(
-        [message_to_dict(msg) for msg in records],
+    # Manual compression must use the same context slicing, summarization,
+    # persistence, and failure handling as automatic compression.
+    context = AgentContext(
+        workspace=Path(conv.workspace) if conv.workspace else Path.cwd(),
+        messages=[message_to_dict(msg) for msg in records],
         system_prompt=conv.system_prompt or "",
-        llm_params=_litellm_params(provider, proxy),
-        model=model,
         locale=getattr(user, "locale", None) or settings.language or "en",
     )
-    if not summary:
-        raise HTTPException(status_code=502, detail="Compression model returned an empty summary")
-
     persistence = PersistenceListener(conversation_id=conv.id, branch_id=branch_id)
-    await persistence.persist_compression(summary)
+    context.metadata["_persistence"] = persistence
+    await compress_context(context, _litellm_params(provider, proxy), model)
+
+    summary_message = next((msg for msg in context.messages if msg.get("role") == "compress"), None)
+    if not summary_message:
+        raise HTTPException(status_code=502, detail="Context compression failed; original messages were kept")
 
     # The next prompt restores this value into AgentContext before checking the
     # automatic compression threshold. The manual summary replaces that context,
@@ -137,6 +141,7 @@ async def compress_session(
     # second compression on the next turn.
     conv.tokens = 0
     await db.commit()
+    summary = summary_message["content"]
 
     return CompressSessionResponse(
         summary=summary,

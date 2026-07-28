@@ -1,12 +1,15 @@
 """AI spritesheet generation pipeline.
 
 Generates Codex-compatible pet packages (pet.json + spritesheet.png) from a
-text prompt. The pipeline mirrors the hatch-pet skill:
+text prompt. The pipeline mirrors the hatch-pet skill with CrabAgent extras:
 
 1. Generate a base reference image from the user's description.
-2. For each of the 9 animation states, generate a horizontal strip of frames.
-3. Extract individual frames from each strip (chroma-key removal, bounding-box
-   crop, center within 192×208 cell).
+2. For each animation state, generate a horizontal strip of frames.  A layout
+   guide is produced for multi-frame rows and attached as a visual reference.
+3. Extract individual frames from each strip with a three-layer strategy:
+   - Layer 1: Connected-components grouping (robust against uneven spacing)
+   - Layer 2: Stable-slots fallback (shared viewport prevents size popping)
+   - Layer 3: Cross-correlation alignment (for stationary rows)
 4. Compose the final 1536×1872 atlas.
 5. Write pet.json + spritesheet.png into the pet package folder.
 6. Persist a PetPackage database record.
@@ -118,6 +121,20 @@ ACTION_PACKS = {
 def resolve_action_pack(action_pack: str) -> list[PetAnimationName]:
     """Return a safe ordered action list for a requested generation pack."""
     return ACTION_PACKS.get(action_pack, ACTION_PACKS["basic"])
+
+
+# ── Image encoding helpers ────────────────────────────────────────────────
+
+def _encode_data_url(image_path: str) -> str:
+    """Read an image file and return a ``data:`` URL suitable for multimodal
+    API requests."""
+    import base64 as _b64
+    import mimetypes
+
+    mt = mimetypes.guess_type(image_path)[0] or "image/png"
+    with open(image_path, "rb") as f:
+        img_b64 = _b64.b64encode(f.read()).decode("ascii")
+    return f"data:{mt};base64,{img_b64}"
 
 
 # ── In-memory progress tracking ──────────────────────────────────────────
@@ -744,11 +761,19 @@ class PetGenerationService:
 
         When a reference photo is available, it is passed to the image edit
         API (gpt-image-1) or described in the prompt to maintain consistency.
+
+        A layout guide is generated for multi-frame rows and passed to the
+        image model as an invisible construction reference.
         """
         import litellm
 
         model, kwargs = self._resolve_model_and_kwargs(provider_info)
         self._setup_litellm_provider(provider_info)
+
+        # Generate layout guide for multi-frame rows
+        layout_guide_path: str | None = None
+        if n_frames > 1:
+            layout_guide_path = self._generate_layout_guide(pet_id, row, n_frames)
 
         style_desc = self._style_descriptor(style)
         if reference_image_path and preserve_reference_style:
@@ -815,6 +840,12 @@ class PetGenerationService:
             f"Clean solid green background (#00FF00) for chroma key removal. "
             f"No text, no borders, no panel separators."
         )
+        if n_frames > 1:
+            full_prompt += (
+                f" LAYOUT: exactly {n_frames} equal-width panels in one horizontal row. "
+                f"Each panel is {CELL_W}x{CELL_H}px with clean green separation between them. "
+                "The panel structure must match the provided layout guide image."
+            )
         if row == PetAnimationName.IDLE:
             full_prompt += (
                 " IDLE STABILITY RULE: use a locked-off camera and a planted base pose. "
@@ -839,6 +870,7 @@ class PetGenerationService:
                             model, full_prompt, reference_image_path,
                             size="1536x1024", kwargs=kwargs,
                             provider_type=provider_info.provider_type,
+                            layout_guide_path=layout_guide_path,
                         )
                         if resp:
                             return resp
@@ -886,6 +918,7 @@ class PetGenerationService:
         size: str = "1536x1024",
         kwargs: dict[str, Any] | None = None,
         provider_type: str = "",
+        layout_guide_path: str | None = None,
     ) -> Image.Image | None:
         """Generate an image that references an existing image.
 
@@ -897,11 +930,16 @@ class PetGenerationService:
         endpoint (``/backend-api/codex/responses``) with the reference image
         embedded as ``input_image`` content and the ``image_generation`` tool
         enabled.  This is the same approach used by Codex CLI image skills.
+
+        When *layout_guide_path* is provided it is forwarded as an additional
+        reference image that shows the model the expected frame grid.
         """
 
         # ── ChatGPT subscription: use codex/responses with image_generation tool ──
         if provider_type == "chatgpt":
-            return await self._chatgpt_image_edit(prompt, image_path)
+            return await self._chatgpt_image_edit(
+                prompt, image_path, layout_guide_path=layout_guide_path,
+            )
 
         # ── OpenAI API: use litellm.aimage_edit ──
         import litellm
@@ -928,13 +966,18 @@ class PetGenerationService:
         self,
         prompt: str,
         image_path: str,
+        *,
+        layout_guide_path: str | None = None,
     ) -> Image.Image | None:
         """Generate image from a reference via ChatGPT Codex responses API.
 
         Sends the reference image as multimodal ``input_image`` content to
         ``/backend-api/codex/responses`` with the ``image_generation`` tool.
         The model sees the reference and generates a new image based on it.
-        """
+
+        When *layout_guide_path* is provided, it is attached as a second
+        ``input_image`` in the same message so the model can follow the
+        expected frame count, spacing, and padding from the visual guide."""
         import base64 as _b64
         import mimetypes
         import re
@@ -949,43 +992,43 @@ class PetGenerationService:
             logger.warning("ChatGPT auth failed for image edit: %s", e)
             return None
 
-        # Read and encode reference image
-        mt = mimetypes.guess_type(image_path)[0] or "image/png"
-        with open(image_path, "rb") as f:
-            img_b64 = _b64.b64encode(f.read()).decode("ascii")
-        data_url = f"data:{mt};base64,{img_b64}"
+        # Build the content array with the character reference
+        content: list[dict] = [
+            {
+                "type": "input_text",
+                "text": (
+                    "Use the image generation tool to create a new image "
+                    "based on the reference image(s). "
+                    "Preserve the main character identity, colors, and style. "
+                    "Request: " + prompt
+                ),
+            },
+            {
+                "type": "input_image",
+                "image_url": _encode_data_url(image_path),
+            },
+        ]
 
-        headers = {
-            "Authorization": f"Bearer {access_token}",
-            "Content-Type": "application/json",
-            "Accept": "text/event-stream",
-            "User-Agent": "codex_cli_rs/0.0.0 (Darwin 24.0; arm64) xterm-256color",
-            "originator": "codex_cli_rs",
-        }
+        # Attach the layout guide as a second input image
+        if layout_guide_path:
+            content.append({
+                "type": "input_text",
+                "text": (
+                    "The following image is an invisible layout guide showing "
+                    f"the exact frame grid you need to draw. Follow its cell "
+                    "count, spacing, and centering. Do NOT include visible "
+                    "borders, labels, or guide colors in the output."
+                ),
+            })
+            content.append({
+                "type": "input_image",
+                "image_url": _encode_data_url(layout_guide_path),
+            })
 
         payload = {
             "model": "gpt-5.4",
             "instructions": "You are a helpful assistant. Use tools when available.",
-            "input": [
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "input_text",
-                            "text": (
-                                "Use the image generation tool to create a new image "
-                                "based on the reference image. "
-                                "Preserve the main character identity, colors, and style. "
-                                "Request: " + prompt
-                            ),
-                        },
-                        {
-                            "type": "input_image",
-                            "image_url": data_url,
-                        },
-                    ],
-                }
-            ],
+            "input": [{"role": "user", "content": content}],
             "store": False,
             "tools": [{"type": "image_generation"}],
             "reasoning": {"effort": "low"},
@@ -993,6 +1036,14 @@ class PetGenerationService:
             "tool_choice": "auto",
             "parallel_tool_calls": True,
             "stream": True,
+        }
+
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
+            "Accept": "text/event-stream",
+            "User-Agent": "codex_cli_rs/0.0.0 (Darwin 24.0; arm64) xterm-256color",
+            "originator": "codex_cli_rs",
         }
 
         try:
@@ -1012,15 +1063,11 @@ class PetGenerationService:
                         )
                         return None
 
-                    # Read full SSE stream and extract base64 PNG image
                     raw = b""
                     async for chunk in resp.aiter_bytes():
                         raw += chunk
 
             text = raw.decode("utf-8", errors="replace")
-            # The image_generation tool returns a base64-encoded PNG in the
-            # SSE stream, typically as a very long base64 string starting
-            # with the PNG header "iVBOR".
             matches = re.findall(r"(iVBOR[A-Za-z0-9+/=]{1000,})", text)
             if not matches:
                 logger.warning("ChatGPT image edit: no image data in response")
@@ -1154,75 +1201,270 @@ class PetGenerationService:
         return aligned
 
     def _extract_frames(self, strip: Image.Image, n_frames: int, row_name: PetAnimationName | None = None) -> list[Image.Image]:
-        """Extract frames from a horizontal strip and place each in a cell.
+        """Extract frames from a horizontal strip using a three-layer strategy.
 
-        Three-stage pipeline:
-        1. Split strip and discard the panel-edge bleed → remove green bg →
-           compute union bbox → uniform crop+scale+center.
-        2. For stationary rows (idle, working, …) register every frame against
-           frame 0 in both axes to cancel residual camera/composition drift.
-        3. Paste aligned frames into 192×208 cells.
+        Layer 1 — Connected components: find sprite blobs in the full strip
+        after chroma removal, group them into N frames by horizontal position.
+        This is robust against uneven spacing, overlapping poses, and varying
+        sprite sizes.
+
+        Layer 2 — Stable slots: when components can't separate N frames
+        (e.g. sprites are fused together), fall back to equal-width splitting
+        with a shared viewport so all frames get identical dimensions. This
+        prevents size popping without hiding real layout problems.
+
+        Layer 3 — Cross-correlation alignment: for stationary rows (idle,
+        working, …) register every frame against frame 0 in both axes to
+        cancel residual camera/composition drift. This is the existing
+        CrabAgent alignment pass, applied after extraction.
         """
-        w, h = strip.size
-        frame_w = w // n_frames
-        gutter = min(int(frame_w * SOURCE_FRAME_GUTTER_RATIO), max(0, (frame_w - 1) // 2))
+        # Layer 1 input: remove green from the *entire* strip first
+        no_bg_strip = self._remove_green_background(strip)
 
-        # Stage 1 — discard the panel edges where consecutive generated poses
-        # frequently overlap. The prompt asks for an inner margin, but the
-        # source must still be treated defensively when it is not respected.
-        raw_frames: list[Image.Image] = []
-        for i in range(n_frames):
-            x = i * frame_w
-            crop = strip.crop((x + gutter, 0, x + frame_w - gutter, h))
-            no_bg = self._remove_green_background(crop)
-            if row_name in {
-                PetAnimationName.RUNNING_RIGHT,
-                PetAnimationName.RUNNING_LEFT,
-            }:
-                # Running strips are the only rows where the model regularly
-                # leaks a detached slice of the adjacent pose into the gutter.
-                no_bg = self._keep_largest_component(no_bg)
-            raw_frames.append(no_bg)
+        # Try connected-components extraction first
+        cell_frames = self._extract_component_frames(no_bg_strip, n_frames)
 
-        union_bbox = None
-        for no_bg in raw_frames:
-            bbox = no_bg.getbbox()
-            if not bbox:
-                continue
-            if union_bbox is None:
-                union_bbox = list(bbox)
-            else:
-                union_bbox[0] = min(union_bbox[0], bbox[0])
-                union_bbox[1] = min(union_bbox[1], bbox[1])
-                union_bbox[2] = max(union_bbox[2], bbox[2])
-                union_bbox[3] = max(union_bbox[3], bbox[3])
+        # Layer 2: stable-slots fallback
+        if cell_frames is None:
+            logger.debug(
+                "Component extraction failed for %s (%d frames), falling back to stable-slots",
+                row_name, n_frames,
+            )
+            cell_frames = self._extract_stable_slot_frames(no_bg_strip, n_frames)
 
-        cell_frames: list[Image.Image] = []
-        for no_bg in raw_frames:
-            if union_bbox:
-                pad = 6
-                bbox = (
-                    max(0, union_bbox[0] - pad),
-                    max(0, union_bbox[1] - pad),
-                    min(no_bg.width, union_bbox[2] + pad),
-                    min(no_bg.height, union_bbox[3] + pad),
-                )
-                no_bg = no_bg.crop(bbox)
+        # Pad to n_frames if extraction returned fewer (edge cases)
+        while len(cell_frames) < n_frames:
+            cell_frames.append(Image.new("RGBA", (CELL_W, CELL_H), (0, 0, 0, 0)))
 
-            # Preserve slightly more side room for wide poses while retaining
-            # a transparent buffer between atlas cells.
-            no_bg = self._scale_to_fit(no_bg, CELL_W - 8, CELL_H - 20)
-
-            cell = Image.new("RGBA", (CELL_W, CELL_H), (0, 0, 0, 0))
-            offset = ((CELL_W - no_bg.width) // 2, (CELL_H - no_bg.height) // 2)
-            cell.paste(no_bg, offset, no_bg)
-            cell_frames.append(cell)
-
-        # Stage 2 — cross-correlation alignment for stationary rows only
+        # Layer 3: cross-correlation alignment for stationary rows
         if row_name and row_name in self._STATIONARY_ROWS:
             cell_frames = self._align_frames(cell_frames)
 
         return cell_frames
+
+    # ── Connected-component extraction (Layer 1) ─────────────────────
+
+    @staticmethod
+    def _find_connected_components(image: Image.Image) -> list[dict[str, Any]]:
+        """Find all connected components in an RGBA image using the alpha channel.
+
+        Uses 4-connectivity flood fill. Returns components sorted by area
+        descending, each with pixel indices, bounding box, and center_x.
+        """
+        alpha = image.getchannel("A")
+        width, height = image.size
+        data = alpha.tobytes()
+        visited = bytearray(width * height)
+        components: list[dict[str, Any]] = []
+
+        for seed in range(len(data)):
+            if data[seed] <= 16 or visited[seed]:
+                continue
+
+            stack = [seed]
+            visited[seed] = 1
+            pixels: list[int] = []
+            min_x, min_y = width, height
+            max_x, max_y = 0, 0
+
+            while stack:
+                current = stack.pop()
+                pixels.append(current)
+                x = current % width
+                y = current // width
+                if x < min_x:
+                    min_x = x
+                if y < min_y:
+                    min_y = y
+                if x > max_x:
+                    max_x = x
+                if y > max_y:
+                    max_y = y
+
+                if x > 0:
+                    n = current - 1
+                    if not visited[n] and data[n] > 16:
+                        visited[n] = 1
+                        stack.append(n)
+                if x + 1 < width:
+                    n = current + 1
+                    if not visited[n] and data[n] > 16:
+                        visited[n] = 1
+                        stack.append(n)
+                if y > 0:
+                    n = current - width
+                    if not visited[n] and data[n] > 16:
+                        visited[n] = 1
+                        stack.append(n)
+                if y + 1 < height:
+                    n = current + width
+                    if not visited[n] and data[n] > 16:
+                        visited[n] = 1
+                        stack.append(n)
+
+            components.append({
+                "pixels": pixels,
+                "area": len(pixels),
+                "bbox": (min_x, min_y, max_x + 1, max_y + 1),
+                "center_x": (min_x + max_x + 1) / 2,
+            })
+
+        components.sort(key=lambda c: c["area"], reverse=True)
+        return components
+
+    @staticmethod
+    def _group_components_into_frames(
+        components: list[dict[str, Any]], n_frames: int,
+    ) -> list[list[dict[str, Any]]] | None:
+        """Group connected components into N frames by horizontal position.
+
+        Selects the N largest components as seeds (threshold: ≥20% of the
+        largest), sorts them left-to-right, then assigns each small fragment
+        to its nearest seed by center_x.
+
+        Returns None when fewer than n_frames components exist.
+        """
+        if not components:
+            return None
+
+        largest_area = components[0]["area"]
+        seed_threshold = max(120, largest_area * 0.20)
+        seeds = [c for c in components if c["area"] >= seed_threshold]
+
+        if len(seeds) < n_frames:
+            seeds = components[:n_frames]
+
+        if len(seeds) < n_frames:
+            return None
+
+        seeds = sorted(seeds[:n_frames], key=lambda c: c["center_x"])
+        seed_ids = {id(s) for s in seeds}
+        groups: list[list[dict[str, Any]]] = [[seed] for seed in seeds]
+        noise_threshold = max(12, largest_area * 0.002)
+
+        for comp in components:
+            if id(comp) in seed_ids or comp["area"] < noise_threshold:
+                continue
+            nearest = min(
+                range(len(seeds)),
+                key=lambda i: abs(seeds[i]["center_x"] - comp["center_x"]),
+            )
+            groups[nearest].append(comp)
+
+        return groups
+
+    def _extract_component_frames(
+        self, strip_no_bg: Image.Image, n_frames: int,
+    ) -> list[Image.Image] | None:
+        """Extract frames using connected-component grouping.
+
+        Each group of components forms one frame. All frames share the same
+        viewport dimensions (union of all group bboxes) so size and framing
+        stay consistent without pixel-level registration.
+        """
+        components = self._find_connected_components(strip_no_bg)
+        groups = self._group_components_into_frames(components, n_frames)
+        if groups is None:
+            return None
+
+        width, height = strip_no_bg.size
+        source_pixels = strip_no_bg.load()
+        padding = 6
+
+        # Compute per-group bboxes and a shared vertical range + max width
+        group_bboxes = []
+        for group in groups:
+            min_x = min(c["bbox"][0] for c in group)
+            min_y = min(c["bbox"][1] for c in group)
+            max_x = max(c["bbox"][2] for c in group)
+            max_y = max(c["bbox"][3] for c in group)
+            group_bboxes.append((min_x, min_y, max_x, max_y))
+
+        shared_top = max(0, min(b[1] for b in group_bboxes) - padding)
+        shared_bottom = min(height, max(b[3] for b in group_bboxes) + padding)
+        viewport_w = max(b[2] - b[0] for b in group_bboxes) + padding * 2
+        viewport_h = max(1, shared_bottom - shared_top)
+
+        frames: list[Image.Image] = []
+        for group, bbox in zip(groups, group_bboxes):
+            # Render only this group's pixels into a cropped image
+            g_min_x = max(0, bbox[0] - padding)
+            g_min_y = max(0, bbox[1] - padding)
+            g_max_x = min(width, bbox[2] + padding)
+            g_max_y = min(height, bbox[3] + padding)
+
+            grouped = Image.new(
+                "RGBA", (g_max_x - g_min_x, g_max_y - g_min_y), (0, 0, 0, 0),
+            )
+            gp = grouped.load()
+            for comp in group:
+                for idx in comp["pixels"]:
+                    px = idx % width
+                    py = idx // width
+                    gp[px - g_min_x, py - g_min_y] = source_pixels[px, py]
+
+            # Place into the shared viewport for consistent framing
+            viewport = Image.new("RGBA", (viewport_w, viewport_h), (0, 0, 0, 0))
+            left = (viewport_w - grouped.width) // 2
+            viewport.alpha_composite(grouped, (max(0, left), g_min_y - shared_top))
+            frames.append(self._fit_viewport_to_cell(viewport))
+
+        return frames
+
+    # ── Stable-slots extraction (Layer 2 fallback) ───────────────────
+
+    def _extract_stable_slot_frames(
+        self, strip_no_bg: Image.Image, n_frames: int,
+    ) -> list[Image.Image]:
+        """Equal-width split with a shared vertical viewport.
+
+        All frames use the same crop height (union bbox top/bottom) and are
+        scaled by the same viewport dimensions, preventing per-frame size
+        popping while keeping the extraction simple and predictable.
+        """
+        bbox = strip_no_bg.getbbox()
+        if bbox is None:
+            return [Image.new("RGBA", (CELL_W, CELL_H), (0, 0, 0, 0))
+                    for _ in range(n_frames)]
+
+        padding = 6
+        shared_top = max(0, bbox[1] - padding)
+        shared_bottom = min(strip_no_bg.height, bbox[3] + padding)
+        slot_width = strip_no_bg.width / n_frames
+
+        frames: list[Image.Image] = []
+        for i in range(n_frames):
+            left = round(i * slot_width)
+            right = round((i + 1) * slot_width)
+            crop = strip_no_bg.crop((left, shared_top, right, shared_bottom))
+            frames.append(self._fit_viewport_to_cell(crop))
+
+        return frames
+
+    def _fit_viewport_to_cell(self, image: Image.Image) -> Image.Image:
+        """Scale a viewport image to fit inside a 192×208 cell, centered.
+
+        Uses LANCZOS resampling for smooth non-pixel styles; pixel art
+        callers should use _scale_to_fit with NEAREST instead.
+        """
+        target = Image.new("RGBA", (CELL_W, CELL_H), (0, 0, 0, 0))
+        if image.getbbox() is None:
+            return target
+
+        viewport = image.copy()
+        max_w = CELL_W - 10
+        max_h = CELL_H - 10
+        scale = min(max_w / viewport.width, max_h / viewport.height, 1.0)
+        if scale != 1.0:
+            viewport = viewport.resize(
+                (max(1, round(viewport.width * scale)),
+                 max(1, round(viewport.height * scale))),
+                Image.NEAREST,
+            )
+        left = (CELL_W - viewport.width) // 2
+        top = (CELL_H - viewport.height) // 2
+        target.alpha_composite(viewport, (left, top))
+        return target
 
     def _process_frame(self, img: Image.Image) -> Image.Image:
         no_bg = self._remove_green_background(img)
@@ -1354,6 +1596,41 @@ class PetGenerationService:
             "chibi": "chibi style, big head, small body, super deformed",
         }
         return styles.get(style, styles["pixel"])
+
+    # ── Layout guide generation ──────────────────────────────────────
+
+    def _generate_layout_guide(
+        self, pet_id: str, row: PetAnimationName, n_frames: int,
+    ) -> str | None:
+        """Generate a visual layout guide showing expected frame positions.
+
+        Creates a horizontal strip with N labelled cells on a solid green
+        background. The guide is passed to the image model as a construction
+        reference so it can follow the correct frame count, spacing, and
+        safe padding without drawing visible guide elements in the output.
+        """
+        from PIL import ImageDraw
+
+        cell_gap = 16
+        guide_w = CELL_W * n_frames + cell_gap * (n_frames + 1)
+        guide_h = CELL_H + cell_gap * 2
+        guide = Image.new("RGBA", (guide_w, guide_h), (0, 255, 0, 255))
+        draw = ImageDraw.Draw(guide)
+
+        for i in range(n_frames):
+            x = cell_gap + i * (CELL_W + cell_gap)
+            y = cell_gap
+            draw.rectangle(
+                (x, y, x + CELL_W - 1, y + CELL_H - 1),
+                outline=(200, 0, 200, 255), width=2,
+            )
+            # Frame number in top-left corner
+            draw.text((x + 6, y + 4), f"{i + 1}", fill=(200, 0, 200, 255))
+
+        path = self.store.original_path(pet_id, f"layout-guide-{row.value}.png")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        guide.save(path, "PNG")
+        return str(path)
 
     # ── Database persistence ─────────────────────────────────────────
 

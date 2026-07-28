@@ -83,6 +83,25 @@ async def test_compress_context_replaces_messages_with_summary(monkeypatch: pyte
 
 
 @pytest.mark.asyncio
+async def test_compress_context_preserves_recent_messages(monkeypatch: pytest.MonkeyPatch):
+    context = AgentContext(
+        workspace=Path.cwd(),
+        messages=[{"role": "user", "content": str(index)} for index in range(10)],
+    )
+
+    async def fake_acompletion(**kwargs):
+        return FakeStream([FakeChunk(content="SUMMARY")])
+
+    monkeypatch.setattr(litellm, "acompletion", fake_acompletion)
+    monkeypatch.setattr(compress.settings, "context_keep_recent", 3)
+
+    await compress.compress_context(context, {}, "gpt-4o")
+
+    assert context.messages[0]["content"] == "SUMMARY"
+    assert [message["content"] for message in context.messages[-3:]] == ["7", "8", "9"]
+
+
+@pytest.mark.asyncio
 async def test_compression_converts_tool_protocol_to_plain_text(monkeypatch: pytest.MonkeyPatch):
     captured: dict = {}
     messages = [
