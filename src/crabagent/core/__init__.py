@@ -60,6 +60,7 @@ def configure_litellm() -> None:
 
 
 import crabagent.core.agent.tools.bash  # noqa: F401
+import crabagent.core.agent.tools.conversation  # noqa: F401
 import crabagent.core.agent.tools.edit  # noqa: F401
 import crabagent.core.agent.tools.glob  # noqa: F401
 import crabagent.core.agent.tools.grep  # noqa: F401

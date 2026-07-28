@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from crabagent.core.config import settings as app_settings
-from crabagent.core.database import AppSetting, get_db
+from crabagent.core.database import AppSetting, UserPreference, get_db
 from crabagent.serve.deps import get_current_user
 
 router = APIRouter(prefix="/settings", tags=["settings"])
@@ -18,7 +18,10 @@ async def get_settings(
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(select(AppSetting))
-    return {row.key: row.value for row in result.scalars().all()}
+    values = {row.key: row.value for row in result.scalars().all()}
+    preferences = await db.execute(select(UserPreference).where(UserPreference.user_id == user.id))
+    values.update({row.key: row.value for row in preferences.scalars().all()})
+    return values
 
 
 class UpdateSettingsRequest(BaseModel):
@@ -31,7 +34,18 @@ async def update_settings(
     user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    user_setting_keys = {"conversation_history_tool_enabled"}
     for key, value in req.settings.items():
+        if key in user_setting_keys:
+            result = await db.execute(
+                select(UserPreference).where(UserPreference.user_id == user.id, UserPreference.key == key)
+            )
+            row = result.scalar_one_or_none()
+            if row:
+                row.value = value
+            else:
+                db.add(UserPreference(user_id=user.id, key=key, value=value))
+            continue
         result = await db.execute(select(AppSetting).where(AppSetting.key == key))
         row = result.scalar_one_or_none()
         if row:
@@ -47,7 +61,10 @@ async def update_settings(
         invalidate_sub_agent_model_map()
 
     result = await db.execute(select(AppSetting))
-    return {row.key: row.value for row in result.scalars().all()}
+    values = {row.key: row.value for row in result.scalars().all()}
+    preferences = await db.execute(select(UserPreference).where(UserPreference.user_id == user.id))
+    values.update({row.key: row.value for row in preferences.scalars().all()})
+    return values
 
 
 class TestSearxngRequest(BaseModel):

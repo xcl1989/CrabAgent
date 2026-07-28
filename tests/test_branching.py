@@ -75,3 +75,17 @@ class TestConversationBranchField:
         db_session.commit()
         loaded = db_session.get(Conversation, conv.id)
         assert loaded.active_branch == "main"
+
+
+class TestConversationHistorySearchable:
+    def test_conversation_history_searchable_defaults_to_true(self, db_session):
+        conv = Conversation(session_id="history-default", user_id=1)
+        db_session.add(conv)
+        db_session.commit()
+        assert db_session.get(Conversation, conv.id).history_searchable is True
+
+    def test_conversation_can_be_excluded_from_history_search(self, db_session):
+        conv = Conversation(session_id="history-private", user_id=1, history_searchable=False)
+        db_session.add(conv)
+        db_session.commit()
+        assert db_session.get(Conversation, conv.id).history_searchable is False

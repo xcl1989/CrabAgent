@@ -35,6 +35,7 @@ export interface SettingsValues {
   llm_proxy: string;
   browser_proxy: string;
   sub_agent_model_map: string;
+  conversation_history_tool_enabled: string;
 }
 
 // ── Settings cache (fast track) ──────────────────────────────────────────
@@ -52,6 +53,7 @@ function normalizeSettings(raw: Record<string, string>): SettingsValues {
     llm_proxy: raw.llm_proxy || "",
     browser_proxy: raw.browser_proxy || "",
     sub_agent_model_map: raw.sub_agent_model_map || "",
+    conversation_history_tool_enabled: raw.conversation_history_tool_enabled || "false",
   };
 }
 

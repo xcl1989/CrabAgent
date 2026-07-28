@@ -9,6 +9,7 @@ export interface Session {
   agent: string;
   active_branch: string;
   prompt_locale: string;
+  history_searchable: boolean;
   created_at: string | null;
   updated_at: string | null;
 }
@@ -88,6 +89,10 @@ export function createSession(title?: string, workspace?: string): Promise<Sessi
 
 export function getSession(sessionId: string): Promise<Session> {
   return api.get(`/sessions/${sessionId}`);
+}
+
+export function updateSession(sessionId: string, update: { title?: string; history_searchable?: boolean }): Promise<Session> {
+  return api.patch(`/sessions/${sessionId}`, update);
 }
 
 export function deleteSession(sessionId: string): Promise<void> {

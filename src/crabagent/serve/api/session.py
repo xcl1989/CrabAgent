@@ -26,6 +26,7 @@ class CreateSessionRequest(BaseModel):
 
 class UpdateSessionRequest(BaseModel):
     title: str | None = None
+    history_searchable: bool | None = None
 
 
 class CompressSessionRequest(BaseModel):
@@ -49,6 +50,7 @@ class SessionResponse(BaseModel):
     agent: str = "default"
     active_branch: str = "main"
     prompt_locale: str = ""
+    history_searchable: bool = True
     created_at: str | None = None
     updated_at: str | None = None
 
@@ -63,6 +65,7 @@ def _conv_to_response(conv) -> SessionResponse:
         agent=getattr(conv, "agent", None) or "default",
         active_branch=conv.active_branch or "main",
         prompt_locale=getattr(conv, "prompt_locale", "") or "",
+        history_searchable=getattr(conv, "history_searchable", True),
         created_at=conv.created_at.isoformat() if conv.created_at else None,
         updated_at=conv.updated_at.isoformat() if conv.updated_at else None,
     )
@@ -169,6 +172,7 @@ async def search_sessions(
 
     # Tokenize query with jieba for CJK-aware FTS5 search
     from crabagent.core.fts import segment as _segment
+
     tokenized_q = _segment(q).strip() or q
     # Use prefix matching (*) so partial token search works
     # e.g. "项目" → "项目*" matches token "项目管理"
@@ -183,6 +187,7 @@ async def search_sessions(
         JOIN conversations c ON m.conversation_id = c.id
         WHERE messages_fts_cjk MATCH :q
           AND c.user_id = :user_id
+          AND c.history_searchable = 1
           {ws_filter}
           AND m.role IN ('user', 'assistant')
           AND m.compressed = 0
@@ -204,6 +209,7 @@ async def search_sessions(
         FROM messages m
         JOIN conversations c ON m.conversation_id = c.id
         WHERE c.user_id = :user_id
+          AND c.history_searchable = 1
           AND m.content LIKE :like_q
           {ws_filter}
           AND m.role IN ('user', 'assistant')
@@ -235,6 +241,7 @@ async def search_sessions(
         if content.startswith("[") and content.endswith("]"):
             try:
                 import json as _j
+
                 blocks = _j.loads(content)
                 texts = []
                 for b in blocks:
@@ -251,20 +258,23 @@ async def search_sessions(
             snippet = ("…" if start > 0 else "") + plain[start:end] + ("…" if end < len(plain) else "")
         else:
             snippet = plain[:100]
-        items.append(SearchResultItem(
-            session_id=session_id,
-            title=row[1] or "",
-            snippet=snippet,
-            role=role,
-            updated_at=str(row[4]) if row[4] else None,
-        ))
+        items.append(
+            SearchResultItem(
+                session_id=session_id,
+                title=row[1] or "",
+                snippet=snippet,
+                role=role,
+                updated_at=str(row[4]) if row[4] else None,
+            )
+        )
 
     # Also search titles directly (supplements FTS5 results)
     title_sql = text(f"""
         SELECT session_id, title, updated_at FROM conversations
         WHERE user_id = :user_id
+          AND history_searchable = 1
           AND title LIKE :like_q
-          {'AND workspace = :workspace' if workspace else ''}
+          {"AND workspace = :workspace" if workspace else ""}
         ORDER BY updated_at DESC
         LIMIT :lim
     """)
@@ -274,13 +284,15 @@ async def search_sessions(
     result = await db.execute(title_sql, title_params)
     for row in result.fetchall():
         if row[0] not in seen:
-            items.append(SearchResultItem(
-                session_id=row[0],
-                title=row[1] or "",
-                snippet="",
-                role="",
-                updated_at=str(row[2]) if row[2] else None,
-            ))
+            items.append(
+                SearchResultItem(
+                    session_id=row[0],
+                    title=row[1] or "",
+                    snippet="",
+                    role="",
+                    updated_at=str(row[2]) if row[2] else None,
+                )
+            )
 
     return items[:limit]
 
@@ -311,9 +323,7 @@ async def _workspace_infos(db: AsyncSession, user_id: int) -> list[WorkspaceInfo
         .where(Conversation.user_id == user_id, Conversation.workspace != "")
         .order_by(Conversation.updated_at.desc())
     )
-    preferences = await db.execute(
-        select(WorkspacePreference).where(WorkspacePreference.user_id == user_id)
-    )
+    preferences = await db.execute(select(WorkspacePreference).where(WorkspacePreference.user_id == user_id))
     by_workspace = {pref.workspace: pref for pref in preferences.scalars()}
     seen: dict[str, WorkspaceInfo] = {}
     default_order: dict[str, int] = {}
@@ -393,9 +403,7 @@ async def reorder_workspaces(
     if len(req.workspaces) != len(set(req.workspaces)) or not set(req.workspaces).issubset(existing):
         raise HTTPException(status_code=400, detail="Invalid workspace order")
 
-    preferences = await db.execute(
-        select(WorkspacePreference).where(WorkspacePreference.user_id == user.id)
-    )
+    preferences = await db.execute(select(WorkspacePreference).where(WorkspacePreference.user_id == user.id))
     by_workspace = {pref.workspace: pref for pref in preferences.scalars()}
     for index, workspace in enumerate(req.workspaces):
         preference = by_workspace.get(workspace)

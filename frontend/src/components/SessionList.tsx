@@ -2,6 +2,8 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import {
   Plus,
   Trash2,
+  Eye,
+  EyeOff,
   ChevronLeft,
   Search,
   Plug,
@@ -32,6 +34,7 @@ interface Props {
   onSelect: (session: Session) => void;
   onNew: () => void;
   onDelete: (sessionId: string) => void;
+  onToggleHistorySearchable: (session: Session) => void;
   onOpenProviders: () => void;
   onOpenMcpServers: () => void;
   onOpenScheduledTasks: () => void;
@@ -51,6 +54,7 @@ export default function SessionList({
   onSelect,
   onNew,
   onDelete,
+  onToggleHistorySearchable,
   onOpenProviders,
   onOpenMcpServers,
   onOpenScheduledTasks,
@@ -292,6 +296,7 @@ export default function SessionList({
                         agent: "default",
                         active_branch: "main",
                         prompt_locale: "",
+                        history_searchable: true,
                         created_at: null,
                         updated_at: r.updated_at,
                       });
@@ -385,20 +390,37 @@ export default function SessionList({
                       {formatDate(s.updated_at)}
                     </div>
                   </div>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setDeleteTarget(s);
-                    }}
-                    title={t("session.deleteSession")}
-                    className={cn(
+                  <div className="flex items-center gap-0.5">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onToggleHistorySearchable(s);
+                      }}
+                      title={s.history_searchable ? "允许历史检索" : "已禁止历史检索"}
+                      className={cn(
+                        "shrink-0 p-1 rounded transition-all opacity-0 group-hover:opacity-100",
+                        s.history_searchable
+                          ? "text-[var(--text-tertiary)] hover:text-[var(--brand)] hover:bg-[var(--bg-tertiary)]"
+                          : "text-[var(--warning)] opacity-100 hover:bg-[var(--warning-bg)]",
+                      )}
+                    >
+                      {s.history_searchable ? <Eye size={12} /> : <EyeOff size={12} />}
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDeleteTarget(s);
+                      }}
+                      title={t("session.deleteSession")}
+                      className={cn(
                       "shrink-0 p-1 rounded transition-all",
                       "opacity-0 group-hover:opacity-100",
                       "text-[var(--text-tertiary)] hover:text-[var(--danger)] hover:bg-[var(--danger-bg)]",
                     )}
-                  >
-                    <Trash2 size={12} />
-                  </button>
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  </div>
                 </div>
               </div>
             );

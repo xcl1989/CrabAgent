@@ -1427,7 +1427,7 @@ class TuiSession:
             pass
         ctx = AgentContext(
             workspace=ws,
-            tool_registry=registry,
+            tool_registry=registry.clone(),
             max_iterations=settings.max_iterations,
             model=getattr(self.args, "model", None),
             provider_name=getattr(self.args, "provider", None),
@@ -1438,6 +1438,11 @@ class TuiSession:
             ctx.metadata["branch_id"] = "main"
         if self._user and self._user.id:
             ctx.metadata["user_id"] = self._user.id
+            from crabagent.core.conversations.history import history_access_enabled
+
+            ctx.metadata["conversation_history_tool_enabled"] = await history_access_enabled(self._user.id)
+            if not ctx.metadata["conversation_history_tool_enabled"]:
+                ctx.tool_registry.unregister("conversation_search")
         ctx.metadata["workspace_path"] = str(ws)
         # Attach middleware (reflect + title) so TUI benefits from lesson/preference extraction too
         try:

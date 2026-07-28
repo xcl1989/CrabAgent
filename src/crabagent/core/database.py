@@ -50,6 +50,18 @@ class User(Base):
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
 
 
+class UserPreference(Base):
+    """A user's privacy and product preferences."""
+
+    __tablename__ = "user_preferences"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    key: Mapped[str] = mapped_column(String(100), nullable=False)
+    value: Mapped[str] = mapped_column(Text, default="")
+    updated_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
 class WorkspacePreference(Base):
     """A user's display preferences for a workspace without touching its sessions."""
 
@@ -83,6 +95,7 @@ class Conversation(Base):
     source: Mapped[str] = mapped_column(String(20), default="chat")  # chat | wechat | email | scheduled
     current_file: Mapped[str] = mapped_column(Text, default="")
     workspace_type: Mapped[str] = mapped_column(Text, default="")
+    history_searchable: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
@@ -584,6 +597,10 @@ async def init_db() -> None:
             "CREATE UNIQUE INDEX IF NOT EXISTS ux_workspace_preferences_user_workspace "
             "ON workspace_preferences(user_id, workspace)"
         ))
+        await conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_user_preferences_user_key "
+            "ON user_preferences(user_id, key)"
+        ))
 
         result = await conn.execute(text("PRAGMA table_info(users)"))
         columns = [row[1] for row in result.fetchall()]
@@ -612,6 +629,8 @@ async def init_db() -> None:
             await conn.execute(text("ALTER TABLE conversations ADD COLUMN current_file TEXT DEFAULT ''"))
         if "workspace_type" not in columns:
             await conn.execute(text("ALTER TABLE conversations ADD COLUMN workspace_type TEXT DEFAULT ''"))
+        if "history_searchable" not in columns:
+            await conn.execute(text("ALTER TABLE conversations ADD COLUMN history_searchable BOOLEAN DEFAULT 1"))
 
         # Goals are created by metadata for new databases. The tables below are
         # intentionally independent so existing user databases only gain data.

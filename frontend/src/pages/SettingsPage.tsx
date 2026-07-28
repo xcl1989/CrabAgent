@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { useState, useEffect } from "react";
-import { Save, FlaskConical, Search, Check, Smartphone, SlidersHorizontal, Globe, Wifi, Cat } from "lucide-react";
+import { Save, FlaskConical, Search, Check, Smartphone, SlidersHorizontal, Globe, Wifi, Cat, ShieldCheck } from "lucide-react";
 import { Input, Button } from "../components/ui";
 import { toast } from "../components/ui/Toast";
 import { cn } from "../lib/cn";
@@ -11,7 +11,7 @@ import WeChatPanel from "../components/WeChatPanel";
 import { PetsSettingsPanel } from "../components/PetsSettingsPanel";
 import { useSettingsData } from "../hooks/useSettingsData";
 
-type SettingsTab = "general" | "search" | "network" | "wechat" | "pets";
+type SettingsTab = "general" | "search" | "privacy" | "network" | "wechat" | "pets";
 
 export default function SettingsPage() {
   const { t } = useTranslation();
@@ -32,6 +32,7 @@ export default function SettingsPage() {
   const [llmProxy, setLlmProxy] = useState("");
   const [browserProxy, setBrowserProxy] = useState("");
   const [subAgentMapRows, setSubAgentMapRows] = useState<ModelMapRow[]>([]);
+  const [conversationHistoryEnabled, setConversationHistoryEnabled] = useState(false);
   const [seeded, setSeeded] = useState(false);
 
   const [saving, setSaving] = useState(false);
@@ -49,6 +50,7 @@ export default function SettingsPage() {
     setLlmProxy(settings.llm_proxy);
     setBrowserProxy(settings.browser_proxy);
     setSubAgentMapRows(parseModelMap(settings.sub_agent_model_map));
+    setConversationHistoryEnabled(settings.conversation_history_tool_enabled === "true");
     setSeeded(true);
   }, [settings]);
 
@@ -84,6 +86,7 @@ export default function SettingsPage() {
       data.llm_proxy = llmProxy;
       data.browser_proxy = browserProxy;
       data.sub_agent_model_map = serializeModelMap(subAgentMapRows);
+      data.conversation_history_tool_enabled = String(conversationHistoryEnabled);
       await settingsApi.updateSettings(data);
       // Sync cache so the next visit shows saved values without refetch.
       updateSettings({
@@ -95,6 +98,7 @@ export default function SettingsPage() {
         llm_proxy: llmProxy,
         browser_proxy: browserProxy,
         sub_agent_model_map: data.sub_agent_model_map,
+        conversation_history_tool_enabled: data.conversation_history_tool_enabled,
       });
       toast.success(t("settingsPage.saved"));
     } catch (e: unknown) {
@@ -169,12 +173,13 @@ export default function SettingsPage() {
   const tabs: { id: SettingsTab; label: string; icon: React.ReactNode }[] = [
     { id: "general", label: t("settingsPage.sectionGeneral"), icon: <SlidersHorizontal size={14} /> },
     { id: "search", label: t("settingsPage.sectionSearch"), icon: <Search size={14} /> },
+    { id: "privacy", label: "隐私", icon: <ShieldCheck size={14} /> },
     { id: "network", label: t("settingsPage.sectionNetwork"), icon: <Globe size={14} /> },
     { id: "pets", label: t("settingsPage.sectionPets"), icon: <Cat size={14} /> },
     { id: "wechat", label: "微信渠道", icon: <Smartphone size={14} /> },
   ];
 
-  const showSaveButton = activeTab === "general" || activeTab === "search" || activeTab === "network";
+  const showSaveButton = activeTab === "general" || activeTab === "search" || activeTab === "privacy" || activeTab === "network";
 
   return (
     <div className="h-full flex flex-col p-6 sm:p-8 max-w-2xl mx-auto">
@@ -283,6 +288,29 @@ export default function SettingsPage() {
                 )}
               </Button>
             </div>
+          </div>
+        )}
+
+        {activeTab === "privacy" && (
+          <div className="bg-[var(--bg-secondary)] border border-[var(--border)] rounded-xl p-5 space-y-4">
+            <div className="flex items-start justify-between gap-5">
+              <div className="space-y-1">
+                <h2 className="text-sm font-medium text-[var(--text-primary)]">允许 Agent 检索历史会话</h2>
+                <p className="text-xs leading-5 text-[var(--text-tertiary)] max-w-lg">
+                  开启后，Agent 可搜索并读取您拥有的其他会话和工作空间内容。检索结果会作为上下文发送给当前选择的模型服务。
+                </p>
+              </div>
+              <input
+                aria-label="允许 Agent 检索历史会话"
+                type="checkbox"
+                checked={conversationHistoryEnabled}
+                onChange={(event) => setConversationHistoryEnabled(event.target.checked)}
+                className="mt-1 h-4 w-4 shrink-0 accent-[var(--brand)]"
+              />
+            </div>
+            <p className="rounded-lg bg-[var(--warning-bg)] px-3 py-2 text-xs leading-5 text-[var(--text-secondary)]">
+              历史内容可能包含不可信指令。请仅在信任当前模型服务时开启；其他用户的会话永远不可访问。
+            </p>
           </div>
         )}
 

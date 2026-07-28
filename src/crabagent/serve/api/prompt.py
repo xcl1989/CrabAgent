@@ -610,6 +610,11 @@ Use ordinary Markdown when a visualization is not helpful.
     context.metadata["session_id"] = session_id
     context.metadata["branch_id"] = active_branch
     context.metadata["user_id"] = user.id
+    from crabagent.core.conversations.history import history_access_enabled
+
+    context.metadata["conversation_history_tool_enabled"] = await history_access_enabled(user.id)
+    if not context.metadata["conversation_history_tool_enabled"]:
+        context.tool_registry.unregister("conversation_search")
     context.metadata["reasoning_effort"] = req.reasoning_effort or settings.reasoning_effort
 
     context.current_agent = effective_agent
@@ -1140,8 +1145,10 @@ Use ordinary Markdown when a visualization is not helpful.
                             else:
                                 summary, next_step = finalization_checkpoint(final_reply)
                                 await checkpoint_goal(goal_db, goal, summary, next_step)
-                        limited = False if goal.status == "complete" else await account_goal_usage(
-                            goal_db, goal, context.accumulated_total_consumed
+                        limited = (
+                            False
+                            if goal.status == "complete"
+                            else await account_goal_usage(goal_db, goal, context.accumulated_total_consumed)
                         )
                         await goal_db.commit()
                         snapshot = goal_to_dict(goal)

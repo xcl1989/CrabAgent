@@ -59,6 +59,10 @@ class ToolRegistry:
     def get(self, name: str) -> ToolInfo | None:
         return self._tools.get(name)
 
+    def unregister(self, name: str) -> None:
+        """Remove a tool from this registry instance without touching global registrations."""
+        self._tools.pop(name, None)
+
     def list_tools(self) -> list[ToolInfo]:
         return list(self._tools.values())
 
@@ -160,8 +164,8 @@ class ToolRegistry:
         if not pending:
             return
         from crabagent.core.database import async_session_factory
-        from crabagent.core.molt.store import create_molt, prune_molts
         from crabagent.core.molt.snapshot import _molt_id
+        from crabagent.core.molt.store import create_molt, prune_molts
 
         files = sorted(pending)
         desc = f"Before: {', '.join(files[:3])}" + (f" +{len(files) - 3} more" if len(files) > 3 else "")
@@ -178,6 +182,7 @@ class ToolRegistry:
         if not staged_files:
             # All files were new (didn't exist before) — nothing to snapshot
             import shutil
+
             shutil.rmtree(str(staging), ignore_errors=True)
             return
 
@@ -199,7 +204,10 @@ class ToolRegistry:
                 for fp in staged_files:
                     try:
                         proc = await asyncio.create_subprocess_exec(
-                            "git", "diff", "--", fp,
+                            "git",
+                            "diff",
+                            "--",
+                            fp,
                             stdout=asyncio.subprocess.PIPE,
                             stderr=asyncio.subprocess.PIPE,
                             cwd=str(ws),
@@ -250,7 +258,11 @@ class ToolRegistry:
                 )
                 await prune_molts(workspace=ws)
         except Exception:
-            logger.warning("Failed to persist molt %s to DB, cleaning up orphaned files", snap.get("molt_id", ""), exc_info=True)
+            logger.warning(
+                "Failed to persist molt %s to DB, cleaning up orphaned files",
+                snap.get("molt_id", ""),
+                exc_info=True,
+            )
             shutil.rmtree(str(md), ignore_errors=True)
 
     async def execute(self, name: str, arguments: dict[str, Any], context: Any = None) -> str:

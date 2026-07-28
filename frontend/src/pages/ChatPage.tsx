@@ -562,6 +562,18 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
     clearTaskBoard();
   }, [newSession, selectedModel, models, setSelectedModel, clearTaskBoard]);
 
+  const handleToggleHistorySearchable = useCallback(async (session: Session) => {
+    try {
+      const updated = await sessionsApi.updateSession(session.session_id, {
+        history_searchable: !session.history_searchable,
+      });
+      setSessions((current) => current.map((item) => item.session_id === updated.session_id ? updated : item));
+      if (activeSession?.session_id === updated.session_id) setActiveSession(updated);
+    } catch (error) {
+      console.error("Failed to update historical search access", error);
+    }
+  }, [activeSession?.session_id, setActiveSession, setSessions]);
+
   const onSelectSessionById = useCallback(
     async (sessionId: string) => {
       const model = await selectSessionById(sessionId, selectedModel, models);
@@ -978,6 +990,7 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
           onSelect={onSelectSession}
           onNew={onNewSession}
           onDelete={handleDeleteSession}
+          onToggleHistorySearchable={handleToggleHistorySearchable}
           onOpenProviders={() => setShowProviders(true)}
           onOpenMcpServers={() => setShowMcpServers(true)}
           onOpenTasks={() => setShowTasks(true)}

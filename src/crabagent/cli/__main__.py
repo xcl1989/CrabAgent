@@ -585,6 +585,11 @@ async def _setup_agent_context(
 
     if user_id:
         context.metadata["user_id"] = user_id
+        from crabagent.core.conversations.history import history_access_enabled
+
+        context.metadata["conversation_history_tool_enabled"] = await history_access_enabled(user_id)
+        if not context.metadata["conversation_history_tool_enabled"]:
+            context.tool_registry.unregister("conversation_search")
     context.metadata["workspace_path"] = str(workspace)
 
     if conversation_id and session_id_str:
