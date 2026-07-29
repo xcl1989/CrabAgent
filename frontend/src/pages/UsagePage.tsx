@@ -157,10 +157,10 @@ export default function UsagePage() {
           </section>
 
           {overview.trend.length > 0 && <Card title={overview.hourly ? t("usage.hourlyTrend") : t("usage.dailyTrend")} action={<TrendTabs mode={trendMode} onChange={setTrendMode} t={t} />}>
-            <MeasuredChartContainer height={260}>{({ width, height }) => <AreaChart width={width} height={height} data={overview.trend} margin={{ top: 12, right: 8, left: -12, bottom: 0 }}>
+            <MeasuredChartContainer height={260}>{({ width, height }) => <AreaChart width={width} height={height} data={overview.trend} margin={{ top: 12, right: 8, left: 8, bottom: 0 }}>
               <defs><linearGradient id="usage-total" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--brand)" stopOpacity={0.42} /><stop offset="100%" stopColor="var(--brand)" stopOpacity={0.02} /></linearGradient></defs>
               <XAxis dataKey={overview.hourly ? "hour" : "date"} tick={{ fontSize: 10, fill: "var(--text-tertiary)" }} tickLine={false} axisLine={false} minTickGap={28} />
-              <YAxis tick={{ fontSize: 10, fill: "var(--text-tertiary)" }} tickFormatter={formatTokens} tickLine={false} axisLine={false} width={48} />
+              <YAxis tick={{ fontSize: 10, fill: "var(--text-tertiary)" }} tickFormatter={formatTokens} tickLine={false} axisLine={false} width={64} />
               <Tooltip contentStyle={tooltipStyle} formatter={(value: unknown, name: unknown) => [formatTokens(Number(value)), String(name)]} />
               {trendMode === "total" && <Area type="monotone" dataKey="total_tokens" name={t("usage.total")} stroke="var(--brand)" strokeWidth={2.5} fill="url(#usage-total)" />}
               {trendMode === "input-output" && <><Area type="monotone" dataKey="prompt_tokens" name={t("usage.prompt")} stackId="flow" stroke="var(--accent)" fill="var(--accent)" fillOpacity={0.25} /><Area type="monotone" dataKey="completion_tokens" name={t("usage.completion")} stackId="flow" stroke="var(--warning)" fill="var(--warning)" fillOpacity={0.3} /></>}

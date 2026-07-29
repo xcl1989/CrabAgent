@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.13.4] — Usage Insights
+
+### Added
+- **Usage insights dashboard** — Token Usage now leads with period totals, calls, cache health, and active sessions. It adds focused trend modes, model and agent rankings, and searchable, sortable session diagnostics with expandable summaries.
+
+### Fixed
+- **Consistent usage filtering** — The selected time range now applies to both overview metrics and the session list. Trend-chart Y-axis labels reserve enough space and no longer clip at the left edge.
+
+---
+
 ## [0.13.3] — File Workspace & Reliable Goal Completion
 
 ### Added

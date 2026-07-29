@@ -253,6 +253,9 @@ Pause, resume, edit, or inspect the goal timeline at any time. With **Auto Conti
 ### 🛠️ Work Mode
 Split-pane workspace with live document preview, code editor, prototype builder, meeting notes, and Markdown editor. AI chat sidebar stays interactive while you work.
 
+### 📈 Usage Insights
+Track token consumption by time range and workspace. The Usage page highlights period totals, calls, cache health, and active sessions, then lets you compare model and agent consumption, search and sort sessions, and expand a session to inspect its recent calls.
+
 ### 📊 Rich Conversation Visualizations
 Assistant responses can turn Markdown into shareable visuals: Mermaid flowcharts, sequence/state/ER diagrams, architecture diagrams, and bar, line, area, pie, or scatter charts. KPI cards summarize a key metric. Open any visualization in a larger view, then copy it as a PNG or download a high-resolution PNG to share.
 
