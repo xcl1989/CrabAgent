@@ -115,10 +115,11 @@ export function getOverview(days = 30, workspace = "") {
   });
 }
 
-export function getSessionsUsage(limit = 20, offset = 0, workspace = "") {
+export function getSessionsUsage(limit = 20, offset = 0, days = 30, workspace = "") {
   return api.get<{ sessions: SessionUsage[]; total: number }>("/token-usage/sessions", {
     limit: String(limit),
     offset: String(offset),
+    days: String(days),
     ...(workspace ? { workspace } : {}),
   });
 }

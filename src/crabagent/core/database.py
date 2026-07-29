@@ -2154,7 +2154,7 @@ def _cutoff_filter(cutoff_dt):
 
 
 async def token_usage_sessions(
-    user_id: int, limit: int = 20, offset: int = 0, workspace: str = ""
+    user_id: int, limit: int = 20, offset: int = 0, days: int = 30, workspace: str = ""
 ) -> tuple[list[dict], int]:
     """Per-session aggregated token usage."""
     from sqlalchemy import func, select
@@ -2162,7 +2162,13 @@ async def token_usage_sessions(
     ws_session_ids = await _resolve_session_ids_by_workspace(user_id, workspace)
 
     async with async_session_factory() as db:
-        conds = [TokenUsage.user_id == user_id]
+        if days <= 1:
+            cutoff_dt = datetime.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        elif days < 365:
+            cutoff_dt = datetime.datetime.fromtimestamp(_time.time() - days * 86400)
+        else:
+            cutoff_dt = datetime.datetime.min
+        conds = [TokenUsage.user_id == user_id, *_cutoff_filter(cutoff_dt)]
         if ws_session_ids is not None:
             if not ws_session_ids:
                 return [], 0
