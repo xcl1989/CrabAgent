@@ -423,3 +423,22 @@ def _async_return(value):
         return value
 
     return inner
+
+
+class TestTeamPromptLocalization:
+    @pytest.mark.asyncio
+    async def test_team_prompt_uses_chinese_translations(self, monkeypatch):
+        async def registry():
+            return [{
+                "name": "coder",
+                "display_name": "Code Expert",
+                "role": "Write code",
+                "goal": "Ship fixes",
+                "tool_permissions": {},
+            }]
+
+        monkeypatch.setattr(agents_module, "load_agent_registry", registry)
+        prompt = await agents_module.build_team_prompt(locale="zh-CN")
+
+        assert "## Agent 团队" in prompt
+        assert "team_prompt." not in prompt

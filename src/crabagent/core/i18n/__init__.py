@@ -8,11 +8,52 @@ Supports:
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
-_LOCALE_DIR = Path(__file__).parent
+
+def _resolve_locale_dir() -> Path:
+    """Resolve the directory containing i18n JSON files.
+
+    Works in three environments:
+    1. Normal Python install — Path(__file__).parent
+    2. PyInstaller frozen — sys._MEIPASS / crabagent / core / i18n
+    3. importlib.resources fallback
+    """
+    # Primary: same directory as this module
+    d = Path(__file__).parent
+    if (d / "en.json").exists():
+        return d
+
+    # Frozen / PyInstaller: try _MEIPASS-based path
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        for candidate in (
+            Path(meipass) / "crabagent" / "core" / "i18n",
+            Path(meipass) / "core" / "i18n",
+        ):
+            if (candidate / "en.json").exists():
+                return candidate
+
+    # Fallback: importlib.resources
+    try:
+        import importlib.resources as _res
+
+        ref = _res.files("crabagent.core.i18n")
+        if hasattr(ref, "is_dir") and ref.is_dir():
+            return Path(str(ref))
+    except Exception:
+        pass
+
+    # Last resort: return default path even if files may not exist
+    return d
+
+
+_LOCALE_DIR = _resolve_locale_dir()
 _translations: dict[str, dict] = {}
+# Track file modification times so we can auto-reload when JSON is updated
+_translation_mtimes: dict[str, float] = {}
 
 # Weekday names indexed by locale -> weekday number (0=Monday)
 _WEEKDAY_NAMES: dict[str, dict[int, str]] = {
@@ -31,13 +72,23 @@ _TOOL_MESSAGES: dict[str, dict[str, str]] = {}
 
 
 def _load(locale: str) -> dict:
-    """Load translation file for a locale."""
-    if locale not in _translations:
-        path = _LOCALE_DIR / f"{locale}.json"
-        if path.exists():
+    """Load translation file for a locale.
+
+    Automatically reloads if the JSON file has been modified on disk
+    (e.g., after a code update without server restart).
+    """
+    path = _LOCALE_DIR / f"{locale}.json"
+    if path.exists():
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            mtime = 0
+        cached_mtime = _translation_mtimes.get(locale, -1)
+        if locale not in _translations or mtime != cached_mtime:
             _translations[locale] = json.loads(path.read_text("utf-8"))
-        else:
-            _translations[locale] = {}
+            _translation_mtimes[locale] = mtime
+    elif locale not in _translations:
+        _translations[locale] = {}
     return _translations[locale]
 
 

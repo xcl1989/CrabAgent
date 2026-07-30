@@ -283,12 +283,17 @@ DATAS.append((str(_VERSION_FILE), "crabagent"))
 print(f"[spec] VERSION file: {_version}")
 
 # ── crabagent: i18n JSON files (needed for agent switch / system prompt translations) ──
+# The destination MUST be "crabagent/core/i18n" (not relative_to(SRC))
+# because the runtime module uses Path(__file__).parent to find them,
+# and __file__ always resolves to crabagent/core/i18n/__init__.py in the bundle.
 _I18N_DIR = SRC / "crabagent" / "core" / "i18n"
+if not _I18N_DIR.exists():
+    # pip-installed flat layout: SRC is the package root (crabagent/)
+    _I18N_DIR = SRC / "core" / "i18n"
 _i18n_count = 0
 if _I18N_DIR.exists():
     for _f in _I18N_DIR.glob("*.json"):
-        _rel = _f.relative_to(SRC)
-        DATAS.append((str(_f), str(_rel.parent)))
+        DATAS.append((str(_f), "crabagent/core/i18n"))
         _i18n_count += 1
 print(f"[spec] Collected {_i18n_count} i18n translation files")
 

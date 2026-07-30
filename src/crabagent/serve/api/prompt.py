@@ -364,7 +364,23 @@ async def prompt_async(
     _use_cache = False
     if conv.system_prompt:
         _use_cache = True
-        if locale != "en":
+        # Detect raw/unresolved translation keys — indicates a broken cache
+        # (e.g., server process had stale i18n data when the prompt was generated)
+        if any(
+            marker in conv.system_prompt
+            for marker in (
+                "team_prompt.",
+                "agent_system.",
+                "memory_prompt.",
+                "shared_context.",
+            )
+        ):
+            _use_cache = False
+            logger.info(
+                "[CACHE] Session %s: MISS (raw translation keys detected in cached prompt)",
+                session_id,
+            )
+        if _use_cache and locale != "en":
             from crabagent.core.i18n import get_locale_instruction
 
             lang_inst = get_locale_instruction(locale)

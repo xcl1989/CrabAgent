@@ -1610,11 +1610,12 @@ def _run_build_desktop():
             'str(SRC / "crabagent" / "runtime_hooks.py")',
             'str(SRC / "runtime_hooks.py")'
         )
-        # Fix VERSION file path (already uses SRC/crabagent/VERSION -> SRC/VERSION after SRC fix)
+        # Fix data-file paths for the flat pip package layout.
         content = content.replace(
             'SRC / "crabagent" / "VERSION"',
             'SRC / "VERSION"'
         )
+        # Note: i18n JSON path is handled inside the spec itself (both layouts)
         # Fix pyproject.toml lookup — editable installs have it at pkg_dir/../../pyproject.toml
         content = content.replace(
             '_PYPROJECT = PROJECT_ROOT / "pyproject.toml"',
