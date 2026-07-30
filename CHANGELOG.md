@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.13.5] — Desktop Prompt Localization
+
+### Fixed
+- **Localized desktop system prompts** — The PyInstaller desktop build now packages the dynamically loaded `en.json` and `zh-CN.json` translation resources. The pip-installed desktop build path also rewrites the i18n data path for its flat package layout, preventing English fallback text and raw `team_prompt.*` keys in localized prompts.
+
+---
+
 ## [0.13.4] — Usage Insights
 
 ### Added
