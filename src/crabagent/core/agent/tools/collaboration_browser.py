@@ -32,8 +32,10 @@ def _bridge_request(command: str, payload: dict[str, Any] | None = None) -> dict
             "Content-Type": "application/json",
         },
     )
+    # Navigation and waiting can take a while for slow sites.
+    timeout = 120 if command in ("navigate", "wait_for") else 35
     try:
-        with urlopen(request, timeout=35) as response:
+        with urlopen(request, timeout=timeout) as response:
             data = json.loads(response.read().decode("utf-8"))
     except HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")

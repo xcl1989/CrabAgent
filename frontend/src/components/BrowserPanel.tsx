@@ -45,7 +45,16 @@ export default function BrowserPanel() {
       const rect = host.getBoundingClientRect();
       const w = Math.round(rect.width);
       const h = Math.round(rect.height);
-      if (w < 10 || h < 10) return;
+      // When the host is hidden (e.g. user switched to Settings/Usage page),
+      // the native WebContentsView must be explicitly hidden — CSS display:none
+      // on the parent has no effect on native surfaces.
+      if (w < 10 || h < 10) {
+        if (lastBoundsRef.current !== "hidden") {
+          lastBoundsRef.current = "hidden";
+          void bridge(null, false).catch(() => {});
+        }
+        return;
+      }
       const key = `${Math.round(rect.left)},${Math.round(rect.top)},${w},${h}`;
       if (key === lastBoundsRef.current) return;
       lastBoundsRef.current = key;

@@ -209,7 +209,12 @@ async function handleCollaborationBridge(command, payload) {
   const contents = view.webContents;
   if (command === 'status') return { page_version: collaborationPageVersion, url: contents.getURL(), title: contents.getTitle(), loading: contents.isLoading() };
   if (command === 'navigate') {
-    await contents.loadURL(normalizeBrowserUrl(payload.url));
+    const target = normalizeBrowserUrl(payload.url);
+    try {
+      await contents.loadURL(target);
+    } catch (loadError) {
+      log('[CollabView] loadURL error (page may still have loaded): ' + loadError.message);
+    }
     return { page_version: collaborationPageVersion, url: contents.getURL(), title: contents.getTitle() };
   }
   if (command === 'observe') return contents.executeJavaScript(collaborationSnapshotScript(collaborationPageVersion), true);
