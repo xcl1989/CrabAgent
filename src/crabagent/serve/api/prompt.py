@@ -31,6 +31,11 @@ except Exception:
     pass
 
 try:
+    import crabagent.core.agent.tools.collaboration_browser  # noqa: F401
+except Exception:
+    pass
+
+try:
     import crabagent.core.agent.tools.scheduled_task  # noqa: F401
 except Exception:
     pass

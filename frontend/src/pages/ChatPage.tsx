@@ -64,6 +64,7 @@ import { CodePanel } from "../components/CodePanel";
 import { PrototypePanel } from "../components/PrototypePanel";
 import { MeetingPanel } from "../components/MeetingPanel";
 import { MarkdownPanel } from "../components/MarkdownPanel";
+import BrowserPanel from "../components/BrowserPanel";
 import { SSEEvent } from "../api/events";
 import * as documentsApi from "../api/documents";
 
@@ -77,7 +78,7 @@ const STARTER_PROMPTS = [
   { icon: <MessageSquare size={14} />, labelKey: "chat.writeDocLabel", promptKey: "chat.writeDocPrompt" },
 ];
 
-export default function ChatPage({ onActiveSessionChange }: { onActiveSessionChange?: (sessionId: string | null) => void }) {
+export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: { onActiveSessionChange?: (sessionId: string | null) => void; enterBrowserSignal?: number }) {
   const { t, i18n } = useTranslation();
   const [workspace, setWorkspace] = useState<string>("");
   const [goal, setGoal] = useState<GoalData | null>(null);
@@ -151,7 +152,7 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
     return "chat";
   });
   const [pendingHighlight, setPendingHighlight] = useState<{ path?: string; text?: string } | null>(null);
-  type WorkspaceType = "document" | "code" | "prototype" | "meeting" | "markdown";
+  type WorkspaceType = "document" | "code" | "prototype" | "meeting" | "markdown" | "browser";
   const [workspaceType, setWorkspaceType] = useState<WorkspaceType>("document");
   const [meetingActive, setMeetingActive] = useState(false);
   const [fileTreeRefreshKey, setFileTreeRefreshKey] = useState(0);
@@ -161,6 +162,23 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
     setWorkspaceType("meeting");
     setMode("work");
   }, []);
+
+  const [browserMode, setBrowserMode] = useState(false);
+
+  const handleEnterBrowserMode = useCallback(() => {
+    setBrowserMode(true);
+    setWorkspaceType("browser");
+    setMeetingActive(false);
+    setDocState(null);
+    setCurrentDocPath(null);
+    setMode("work");
+  }, []);
+
+  useEffect(() => {
+    if (enterBrowserSignal && enterBrowserSignal > 0) {
+      handleEnterBrowserMode();
+    }
+  }, [enterBrowserSignal, handleEnterBrowserMode]);
 
   useEffect(() => {
     localStorage.setItem("crabagent_mode", mode);
@@ -713,7 +731,7 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
         selectedProvider ?? undefined,
         currentDocPath || undefined,
         mode === "work" ? workspaceType : undefined,
-        mode === "work",
+        mode === "work" && workspaceType !== "browser",
       );
     } catch {
       setSending(false);
@@ -1310,6 +1328,12 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
               >
                 📝 {t("chat.startMeeting")}
               </button>
+              <button
+                onClick={handleEnterBrowserMode}
+                className={`flex items-center gap-1 px-2 py-1 rounded text-[11px] transition-colors ${browserMode ? "text-[var(--brand)] bg-[var(--brand-bg)]" : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]"}`}
+              >
+                🌐 协作浏览器
+              </button>
               <div className="flex-1 min-w-0" />
               <WorkspaceSwitcher current={workspace} onChange={setWorkspace} />
               <Button
@@ -1351,7 +1375,9 @@ export default function ChatPage({ onActiveSessionChange }: { onActiveSessionCha
             <div className="flex-1 min-h-0 flex">
               {/* Content area (left) */}
               <div className="flex-1 min-h-0 overflow-hidden">
-                {meetingActive && activeSession ? (
+                {workspaceType === "browser" ? (
+                  <BrowserPanel />
+                ) : meetingActive && activeSession ? (
                   <MeetingPanel
                     sessionId={activeSession.session_id}
                     onPrompt={(text) => {

@@ -73,6 +73,16 @@ class UserInputRequest(BaseModel):
     answer: str
 
 
+@router.get("/pending-inputs")
+async def list_pending_inputs(
+    session_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await get_owned_conversation(db, session_id, user)
+    return {"inputs": get_pending_for_session(session_id)}
+
+
 @router.post("/user-input")
 async def submit_user_input(
     session_id: str,

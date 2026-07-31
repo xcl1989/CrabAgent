@@ -66,6 +66,7 @@ When the AI creates or opens a file, the interface splits: AI chat shrinks to a 
 | 💻 **Code** | Monaco-based code editor with syntax highlighting | AI works on a code file |
 | 🔬 **Prototype** | Split-pane: source code on left, live preview on right | AI builds an HTML/JS prototype |
 | 📝 **Meeting** | Structured meeting notes panel with action item extraction | You click "Start Meeting" |
+| 🌐 **Browser** | Real embedded browser with shared login state; AI navigates and interacts while you handle CAPTCHA and MFA | You click "Collaboration Browser" |
 
 ### Work Mode features
 
@@ -75,6 +76,7 @@ When the AI creates or opens a file, the interface splits: AI chat shrinks to a 
 - **Natural language edit**: type instructions like "make the heading red" and the AI applies it
 - **Document timeline**: see the full history of AI operations on the document
 - **File workspace**: create folders, multi-select items, drag files or folders between directories, use a floating context menu, and copy text previews without leaving Work Mode
+- **Collaboration browser**: AI navigates websites, fills forms, and extracts data in an embedded browser with page-version safety, sensitive-field blocking, and high-risk click interception — all while you maintain login state and handle human-only steps
 - **One-click switch back to Chat Mode** when you're done
 
 ```

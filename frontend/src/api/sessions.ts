@@ -62,9 +62,11 @@ export interface WorkspacePreferenceUpdate {
   current_workspace?: string;
 }
 
-export function listSessions(workspace?: string): Promise<Session[]> {
-  const params = workspace ? { workspace } : undefined;
-  return api.get("/sessions", params);
+export function listSessions(workspace?: string, browserOnly = false): Promise<Session[]> {
+  const params: Record<string, string> = {};
+  if (workspace) params.workspace = workspace;
+  if (browserOnly) params.browser_only = "true";
+  return api.get("/sessions", Object.keys(params).length ? params : undefined);
 }
 
 export function listWorkspaces(): Promise<WorkspaceInfo[]> {
@@ -99,9 +101,52 @@ export function deleteSession(sessionId: string): Promise<void> {
   return api.del(`/sessions/${sessionId}`);
 }
 
-export function getMessages(sessionId: string): Promise<Message[]> {
-  // The UI keeps compressed history visible; the backend excludes it when rebuilding LLM context.
-  return api.get(`/sessions/${sessionId}/messages?limit=1000&include_compressed=true`);
+export function getMessages(sessionId: string, limit = 1000, includeCompressed = true): Promise<Message[]> {
+  // The browser collaboration surface only needs a small recent activity preview.
+  return api.get(`/sessions/${sessionId}/messages?limit=${limit}&include_compressed=${includeCompressed}`);
+}
+
+export interface BrowserTask {
+  id: number;
+  session_id: string;
+  goal: string;
+  status: string;
+  url: string;
+  page_version: number | null;
+  summary: string;
+  created_at: string | null;
+  updated_at: string | null;
+  completed_at: string | null;
+}
+
+export interface BrowserTaskEvent {
+  id: number;
+  task_id: number;
+  event_type: string;
+  detail: string;
+  risk: string;
+  data: Record<string, unknown>;
+  created_at: string | null;
+}
+
+export function listBrowserTasks(sessionId: string): Promise<{ tasks: BrowserTask[] }> {
+  return api.get(`/sessions/${sessionId}/browser-tasks`);
+}
+
+export function createBrowserTask(sessionId: string, goal: string, url = ""): Promise<BrowserTask> {
+  return api.post(`/sessions/${sessionId}/browser-tasks`, { goal, url });
+}
+
+export function updateBrowserTask(sessionId: string, taskId: number, update: Partial<Pick<BrowserTask, "status" | "url" | "page_version" | "summary">>): Promise<BrowserTask> {
+  return api.patch(`/sessions/${sessionId}/browser-tasks/${taskId}`, update);
+}
+
+export function listBrowserTaskEvents(sessionId: string, taskId: number): Promise<{ events: BrowserTaskEvent[] }> {
+  return api.get(`/sessions/${sessionId}/browser-tasks/${taskId}/events`);
+}
+
+export function createBrowserTaskEvent(sessionId: string, taskId: number, event: Pick<BrowserTaskEvent, "event_type" | "detail"> & Partial<Pick<BrowserTaskEvent, "risk" | "data">>): Promise<BrowserTaskEvent> {
+  return api.post(`/sessions/${sessionId}/browser-tasks/${taskId}/events`, event);
 }
 
 export interface CompressionResult {
@@ -150,6 +195,16 @@ export function abortSession(sessionId: string): Promise<{ status: string }> {
 
 export function confirmTool(sessionId: string, confirmId: string, approved: boolean): Promise<{ status: string }> {
   return api.post(`/sessions/${sessionId}/tool-confirm`, { confirm_id: confirmId, approved });
+}
+
+export interface PendingToolConfirm {
+  confirm_id: string;
+  tool_name: string;
+  args_summary: string;
+}
+
+export function getPendingToolConfirms(sessionId: string): Promise<{ confirms: PendingToolConfirm[] }> {
+  return api.get(`/sessions/${sessionId}/pending-confirms`);
 }
 
 export function listBranches(sessionId: string): Promise<BranchInfo[]> {
@@ -222,6 +277,16 @@ export function deleteTodo(sessionId: string, todoId: number): Promise<void> {
 
 export function submitInput(sessionId: string, inputId: string, answer: string): Promise<void> {
   return api.post(`/sessions/${sessionId}/user-input`, { input_id: inputId, answer });
+}
+
+export interface PendingInput {
+  input_id: string;
+  question: string;
+  options?: string[];
+}
+
+export function getPendingInputs(sessionId: string): Promise<{ inputs: PendingInput[] }> {
+  return api.get(`/sessions/${sessionId}/pending-inputs`);
 }
 
 export function searchSessions(q: string, workspace?: string): Promise<SearchResult[]> {

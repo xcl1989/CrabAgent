@@ -1,6 +1,7 @@
 {
   "nav": {
     "chat": "Chat",
+    "browser": "Browser",
     "agents": "Agents",
     "calendar": "Calendar",
     "memory": "Memory",

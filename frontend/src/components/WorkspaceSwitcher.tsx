@@ -16,13 +16,14 @@ import { Modal } from "./ui/Modal";
 interface Props {
   current: string;
   onChange: (workspace: string) => void;
+  onOverlayChange?: (open: boolean) => void;
 }
 
 function workspaceName(workspace: string): string {
   return workspace.split("/").pop() || workspace;
 }
 
-export default function WorkspaceSwitcher({ current, onChange }: Props) {
+export default function WorkspaceSwitcher({ current, onChange, onOverlayChange }: Props) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [workspaces, setWorkspaces] = useState<WorkspaceInfo[]>([]);
@@ -58,6 +59,10 @@ export default function WorkspaceSwitcher({ current, onChange }: Props) {
     const interval = setInterval(poll, 5000);
     return () => { cancelled = true; clearInterval(interval); };
   }, []);
+
+  useEffect(() => {
+    onOverlayChange?.(open || showPicker || showManager);
+  }, [onOverlayChange, open, showPicker, showManager]);
 
   useEffect(() => {
     if (!open) return;

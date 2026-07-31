@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from crabagent.core.database import Conversation, Message, User, WorkspacePreference, get_db
+from crabagent.core.database import BrowserTask, Conversation, Message, User, WorkspacePreference, get_db
 from crabagent.serve.api.prompt import _tasks
 from crabagent.serve.deps import get_current_user, get_owned_conversation
 from crabagent.serve.services import conversation as conv_svc
@@ -74,10 +74,17 @@ def _conv_to_response(conv) -> SessionResponse:
 @router.get("", response_model=list[SessionResponse])
 async def list_sessions(
     workspace: str | None = Query(None, description="Filter by workspace path"),
+    browser_only: bool = Query(False, description="Only sessions with collaboration browser tasks"),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     convs = await conv_svc.list_conversations(db, user.id, workspace=workspace)
+    if browser_only:
+        task_sessions = await db.execute(
+            select(BrowserTask.session_id).where(BrowserTask.user_id == user.id).distinct()
+        )
+        allowed_ids = set(task_sessions.scalars())
+        convs = [conv for conv in convs if conv.session_id in allowed_ids]
     return [_conv_to_response(c) for c in convs]
 
 

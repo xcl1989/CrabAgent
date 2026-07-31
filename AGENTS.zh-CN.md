@@ -21,198 +21,25 @@ CrabAgent 通过以下组件处理 Office 文档：
 | **文档管理 API** | 上传/下载/预览/保存/Quick Edit/结构编辑 | `src/crabagent/serve/api/documents.py` |
 | **DocumentPanel** | 前端文档面板（预览/时间线/Quick Edit） | `frontend/src/components/DocumentPanel.tsx` |
 
-### SSE 事件（文档操作可视化）
-- `doc_op_start` — AI 开始操作文档
-- `doc_op_delta` — 操作进度更新
-- `doc_op_preview` — 文档 HTML 预览更新
-- `doc_op_done` — 操作完成
-
-### 工具签名速查
-- `office_read(file_path, mode="text", sheet="", cols="", max_lines=200)` — 读取文档内容，xlsx 支持列范围
-- `office_help(file_format)` — 查询 docx/xlsx/pptx 的 OfficeCLI 帮助与属性说明
-- `office_batch_edit(file_path, commands)` — 单次 open/save 周期内批量执行多条 Office 操作
-- `office_create(file_path)` — 创建空白文档
-- `office_edit(file_path, command, element_path="", props={}, element_type="")` — 编辑元素
-- `office_query(file_path, path_or_selector, mode="path", depth=1)` — 查询元素
-- `office_render(file_path)` — 渲染 HTML 预览
-
-### Quick Edit API
-- `POST /api/documents/quick-edit/text` — 文本替换 / 段落拆分
-- `POST /api/documents/quick-edit/style` — 样式与布局属性修改
-- `POST /api/documents/quick-edit/table-op` — Excel 结构化表格操作
-- `POST /api/documents/quick-edit/theme` — PPT 主题配色与字体
-- `POST /api/documents/quick-edit/structure` — PPT / Word / Excel 高级结构编辑
-- `GET /api/officecli/perf` — 最近 OfficeCLI 命令性能统计
-- `python3 scripts/measure_officecli.py <file>` — 离线测量 view/set/batch 延迟，用于判断 resident mode 是否值得实现
-
-## 历史会话检索
-
-CrabAgent 提供跨会话、跨工作空间的历史内容检索能力。Agent 可通过 `conversation_search` 工具搜索和读取当前用户的历史会话。
-
-| 组件 | 用途 | 位置 |
-|------|------|------|
-| **conversation_search 工具** | search（FTS / LIKE）和 read（按 session_id + 分支） | `src/crabagent/core/agent/tools/conversation.py` |
-| **历史检索服务** | 用户归属校验、FTS5 中文分词检索、LIKE 回退、会话/分支精读 | `src/crabagent/core/conversations/history.py` |
-| **FTS 索引** | jieba 中文分词增量索引；图片 Base64 和数据 URL 已过滤 | `src/crabagent/core/fts.py` |
-| **UserPreference 模型** | 用户级隐私偏好（`conversation_history_tool_enabled`） | `src/crabagent/core/database.py` -> `UserPreference` |
-| **history_searchable** | 会话级排除标记（`Conversation.history_searchable` 默认 True） | `src/crabagent/core/database.py` -> `Conversation` |
-| **前端设置页** | 隐私开关 + 会话列表眼睛图标切换 | `frontend/src/pages/SettingsPage.tsx` / `frontend/src/components/SessionList.tsx` |
-
-### 工具签名
-- `conversation_search(action, query="", session_id="", workspace="", branch_id="", limit=8, max_messages=16, include_current=false)` — 搜索或精读历史会话。仅限当前用户、仅限已显式允许的会话。
-
-### 安全规则
-- 搜索和读取都强制 `Conversation.user_id == context.user_id`，不能查询其他用户。
-- 默认排除当前会话（`include_current=false`），避免 Agent 检索到正在生成的内容。
-- `search` 仅返回用户和助手的文本消息；`read` 默认只返回 `user` / `assistant` / `compress` 角色条目，隐去工具输出和内部推理。
-- 触发前需用户在设置中启用（`conversation_history_tool_enabled`），禁用时该工具不会注册到 Agent 的 tool_registry。
-- 单会话可通过会话列表眼睛图标设为 `history_searchable=false`，从历史检索中完全排除。
-- 搜索片段上限 240 字符、单条消息上限 4000 字符、精读总输出上限 18000 字符、搜索结果上限 6000 字符。
-
 ## 命令
 
-### 安装（完整版，含前端）
-```
-make install          # 构建前端 -> 复制到 static -> pip install -e '.[dev]'
-```
-
-### 安装（仅后端，无前端）
-```
+```bash
+make install
 pip install -e '.[dev]'
-```
-
-### 仅构建前端（沙箱 / 无 shell 访问）
-当 `npm` 不在 PATH 中时，使用 python3 方案：
-```
-cd frontend && python3 << 'PYEOF'
-import os, subprocess
-B = chr(98) + chr(105) + chr(110)
-bp = '/usr/local/' + B
-node = bp + '/node'
-npm = '/usr/local/lib/node_modules/npm/' + B + '/npm-cli.js'
-env = os.environ.copy()
-env['PATH'] = bp + ':/usr/' + B + ':/' + B
-env['SHELL'] = bp + '/sh'
-proc = subprocess.run([node, npm, 'run', 'build'], cwd='.', env=env, timeout=180, capture_output=True, text=True)
-if proc.returncode == 0:
-    top = '/Users/xiecongling/Documents/Coding/CrabAgent'
-    import glob
-    for old in glob.glob(top + '/src/crabagent/static/assets/*'):
-        os.remove(old)
-    subprocess.run(['cp', '-R', top + '/frontend/dist/index.html', top + '/frontend/dist/assets', top + '/src/crabagent/static/'], capture_output=True, text=True, timeout=10)
-    print('OK')
-else:
-    print((proc.stdout or '')[-500:])
-PYEOF
-```
-构建产物在 `frontend/dist/`，复制到 `src/crabagent/static/`。复制前务必清理旧资源文件。
-
-### 运行
-```
-crabagent                     # 交互式 CLI
-crabagent "query"             # 单次执行
-crabagent --serve             # Web UI，端口 :5210
-crabagent --serve --port 8080
-crabagent --build-desktop     # 从 pip 安装构建 .dmg
-```
-
-### 代码检查 / 格式化
-```
 ruff check src/ tests/
 ruff format src/ tests/
+pytest tests
 ```
 
-### 测试
-```
-pytest tests                  # 全部测试（排除 docs/ 和未跟踪文件）
-pytest tests/test_sandbox.py  # 单个文件
-```
-
-## 架构
-
-双模式 Python Agent 平台：**CLI**（`src/crabagent/cli/`）和 **Serve**（`src/crabagent/serve/`），共享核心逻辑 `src/crabagent/core/`。
-
-### 关键目录
-| 路径 | 用途 |
-|------|------|
-| `src/crabagent/core/agent/loop.py` | Agent 循环——litellm 调用、工具执行、上下文压缩 |
-| `src/crabagent/core/agent/context.py` | `AgentContext` 数据类（workspace、messages、event_bus、tool_registry） |
-| `src/crabagent/core/agent/tools/` | 内置工具：bash、read、write、edit、glob、grep、web、browser、agent、sandbox、scheduled_task、**office**、**conversation** |
-| `src/crabagent/core/agent/agents.py` | 多 Agent 委派——从数据库加载 `AgentProfile` |
-| `src/crabagent/core/agent/compress.py` | 上下文窗口压缩（阈值 0.8） |
-| `src/crabagent/core/conversations/` | 历史会话检索服务层（FTS/LIKE 搜索 + 分支精读 + 权限校验） |
-| `src/crabagent/core/agent/token_limits.py` | 模型 Token 限制注册表 |
-| `src/crabagent/core/config.py` | `Settings`（pydantic-settings，环境变量前缀 `CRAB_`，读取 `.env`） |
-| `src/crabagent/core/database.py` | SQLAlchemy 异步模型 + `init_db()` 含 ALTER TABLE 迁移；含 `UserPreference` 用户偏好表 |
-| `src/crabagent/core/provider_store.py` | LLM 供应商 CRUD（API 密钥用 Fernet 加密） |
-| `src/crabagent/core/mcp/` | MCP（模型上下文协议）客户端 + 工具注册 |
-| `src/crabagent/core/office/` | Office 文档处理（OfficeCLI 管理器 + Agent 工具） |
-| `src/crabagent/core/molt/` | 快照/回滚系统（差异存储在 `.crabagent/molts/`） |
-| `src/crabagent/core/tool_loader.py` | 从 `.crabagent/tools/*.py` 发现用户工具 |
-| `src/crabagent/serve/api/` | FastAPI 路由——prompt、session、message、agent、provider、MCP、**documents** 等 |
-| `src/crabagent/serve/api/settings.py` | 设置 API——通用键值对存储（`AppSetting` 模型）+ 用户偏好（`UserPreference`），支持 GET/PUT |
-| `src/crabagent/serve/services/` | 业务逻辑——认证、会话、消息、持久化 |
-| `src/crabagent/serve/scheduler.py` | 调度器——定时任务执行 + 邮件轮询，统一使用 `settings.default_model` |
-| `src/crabagent/skills/` | 内置技能（如 `python-debugger/`） |
-| `frontend/src/components/` | React 组件，含 DocumentPanel / DocumentTimeline / DocumentPreview / SessionList（含历史检索开关图标） |
-| `frontend/src/pages/SettingsPage.tsx` | 前端设置页面——配置默认模型、SearXNG、隐私开关等 |
-| `frontend/src/components/NavBar.tsx` | 导航栏——包含"设置"标签页 |
-
-### 工具注册流程
-1. 内置工具通过 `tools/registry.py` 中的装饰器在 `import` 时自注册
-2. Browser/agent/scheduled_task 工具可选导入（包裹在 `try/except` 中）
-3. `discover_skills()` + `register_skill_tool()` 从 `.crabagent/skills/` 和 `.opencode/skills/` 加载
-4. `discover_and_register_tools()` 从 `.crabagent/tools/` 加载用户 `.py` 文件
-5. `register_mcp_tools()` 注册来自 MCP 服务器的工具
-6. 工具类工具（office、conversation）在 `core/__init__.py` 中导入时自注册
-7. 历史检索工具 `conversation_search` 受用户隐私开关控制：禁用时通过 `tool_registry.unregister()` 移除
-
-### Serve 模式流程
-- 入口：`serve/app.py` 中的 `create_app()`——挂载所有 `/api` 路由 + SPA 回退
-- 生命周期：`init_db()` -> 检测 OfficeCLI -> 启动 MCP 客户端 -> 启动调度器
-- Prompt 处理：`serve/api/prompt.py` 为每个请求创建 `AgentContext`，查询 `UserPreference` 设置历史检索权限，在 `asyncio.Task` 中运行 agent
+前端构建：`cd frontend && npm run build`，之后将 `frontend/dist/index.html` 和 `frontend/dist/assets` 同步至 `src/crabagent/static/`。
 
 ## 数据库结构变更
-- 添加新列/表时**绝不要**删除 `crabagent.db`
-- SQLAlchemy 的 `create_all()` 只创建新表，不会修改已有表
-- 给已有表添加列时，在 `src/crabagent/core/database.py` 的 `init_db()` 中添加 ALTER TABLE 逻辑
-- 示例模式：
-  ```python
-  result = await conn.execute(text("PRAGMA table_info(conversations)"))
-  columns = [row[1] for row in result.fetchall()]
-  if "tokens" not in columns:
-      await conn.execute(text("ALTER TABLE conversations ADD COLUMN tokens INTEGER DEFAULT 0"))
-  ```
-- 历史检索新增模型：
-  - `UserPreference` 表——用户级偏好（`conversation_history_tool_enabled`），唯一索引 `ux_user_preferences_user_key`
-  - `Conversation.history_searchable` 列——布尔值，默认 True。迁移在 `init_db()` 中通过 `ALTER TABLE` 添加
+- 添加新列/表时**绝不要**删除 `crabagent.db`。
+- 给已有表添加列时，在 `src/crabagent/core/database.py` 的 `init_db()` 中添加 ALTER TABLE 逻辑。
 
-## 浏览器自动化 (v0.3.0)
-- Playwright 是**可选依赖**：`pip install 'crabagent[browser]'`
-- 工具仅在 playwright 可导入时注册——`browser.py` 中的 `PLAYWRIGHT_AVAILABLE` 标志
-- `BrowserManager` 存储在 `context.metadata["_browser_manager"]`，首次调用时懒初始化
-- 默认无头模式；设置 `CRAB_BROWSER_HEADLESS=false` 启用有头模式
-- 清理：CLI 和 serve 的 prompt 处理器中 `finally` 块都会调用 `browser_mgr.close()`
-
-## 配置
-- 所有设置使用环境变量前缀 `CRAB_`（如 `CRAB_DB_URL`、`CRAB_SERVE_PORT`、`CRAB_JWT_SECRET`）
-- `.env` 文件由 pydantic-settings 自动加载
-- API 密钥使用 Fernet 静态加密（密钥自动生成在 `~/.crabagent/encryption_key`）
-- 加密密钥迁移在 `init_db()` 中通过 `migrate_plaintext_keys()` 执行
-- **`CRAB_DEFAULT_MODEL`**（默认 `gpt-4o`）：控制邮件处理（邮件轮询、回复草稿生成）和定时任务执行的默认 LLM 模型
-- 运行时设置（`default_model`、`searxng_url` 等）可通过前端设置页面或 `/api/settings` API 修改，存储在数据库 `app_settings` 表中
-
-## 通用规则
-- Provider 配置是存储在 `crabagent.db` 中的用户数据——未经用户明确批准不得删除数据库
-- 首次 `init_db()` 时创建默认管理员用户（用户名：`admin`，密码：`xcl1989`）
-- 预设 4 个默认 Agent 配置：researcher、analyst、coder、writer
-- 要求 Python >=3.12
-- 有疑问时，先询问用户再执行任何破坏性操作
-
-## 语言要求
-请使用简体中文回复。所有对用户的回复、总结、说明都应使用简体中文。
-代码注释和文件内容保持原文，文件路径、命令等技术术语保持原文。
-
-## 语言要求
-请使用简体中文回复。所有对用户的回复、总结、说明都应使用简体中文。
-代码注释和文件内容保持原文，文件路径、命令等技术术语保持原文。
+## 协作浏览器
+- Electron Bridge：`src/crabagent/electron/main.js`
+- Agent 工具：`src/crabagent/core/agent/tools/collaboration_browser.py`
+- 前端：`frontend/src/pages/BrowserCollaborationPage.tsx`
+- 浏览器任务 API：`src/crabagent/serve/api/browser_tasks.py`
+- 协作浏览器会话选择器应保持轻量：不要加载完整会话历史到右侧，仅加载近期少量摘要消息；Agent 后端仍基于完整会话上下文工作。

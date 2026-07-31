@@ -120,6 +120,20 @@ def get_pending_confirms_for_session(session_id: str) -> list[dict]:
     return result
 
 
+@router.get("/sessions/{session_id}/pending-confirms")
+async def list_pending_confirms(
+    session_id: str,
+    user: User = Depends(get_current_user),
+    db=Depends(get_db),
+):
+    from crabagent.serve.services.conversation import get_conversation
+
+    conv = await get_conversation(db, session_id)
+    if not conv or conv.user_id != user.id:
+        raise HTTPException(status_code=403, detail="Not your session")
+    return {"confirms": get_pending_confirms_for_session(session_id)}
+
+
 @router.post("/sessions/{session_id}/tool-confirm")
 async def confirm_tool(
     session_id: str,

@@ -14,9 +14,9 @@ import { toast } from "./components/ui/Toast";
 import { FtsStatusBar } from "./components/FtsStatusBar";
 import { DesktopPet } from "./components/DesktopPet";
 
-export type PageId = "chat" | "agents" | "memory" | "usage" | "calendar" | "settings";
+export type PageId = "chat" | "browser" | "agents" | "memory" | "usage" | "calendar" | "settings";
 
-const pageIds: readonly PageId[] = ["chat", "agents", "memory", "usage", "calendar", "settings"];
+const pageIds: readonly PageId[] = ["chat", "browser", "agents", "memory", "usage", "calendar", "settings"];
 
 function pageFromHash(): PageId | null {
   const page = window.location.hash.replace(/^#\/?/, "");
@@ -32,6 +32,7 @@ interface FtsRebuild {
 function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
   const [page, setPage] = useState<PageId>(() => pageFromHash() ?? "chat");
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [enterBrowser, setEnterBrowser] = useState(0);
   const [ftsStatus, setFtsStatus] = useState<FtsRebuild | null>(null);
 
   // Lightweight health poll — only for FTS progress, never blocks the UI
@@ -55,7 +56,14 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
     return () => clearInterval(timer);
   }, [checkHealth]);
 
-  // Native Electron menus navigate by updating the SPA hash.
+  const handleNavigate = useCallback((target: PageId) => {
+    if (target === "browser") {
+      setPage("chat");
+      setEnterBrowser((n) => n + 1);
+    } else {
+      setPage(target);
+    }
+  }, []);
   useEffect(() => {
     const handleHashChange = () => {
       const targetPage = pageFromHash();
@@ -87,11 +95,15 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
 
   return (
     <div className="flex flex-col h-dvh overflow-hidden">
-      <NavBar currentPage={page} onNavigate={setPage} onLogout={onLogout} sessionId={activeSessionId} />
+      <NavBar currentPage={page} onNavigate={handleNavigate} onLogout={onLogout} sessionId={activeSessionId} />
       <div className="flex-1 relative overflow-hidden">
         <div className={cn("absolute inset-0", page !== "chat" && "hidden")}>
-          <ChatPage onActiveSessionChange={setActiveSessionId} />
+          <ChatPage
+            onActiveSessionChange={setActiveSessionId}
+            enterBrowserSignal={enterBrowser}
+          />
         </div>
+        {page === "browser" && null}
         {page === "agents" && <div className="absolute inset-0"><AgentsPage /></div>}
         {page === "memory" && <div className="absolute inset-0"><MemoryPage /></div>}
         {page === "usage" && <div className="absolute inset-0"><UsagePage /></div>}

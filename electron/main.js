@@ -1,11 +1,11 @@
-const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain } = require('electron');
+const { app, BrowserWindow, WebContentsView, Tray, Menu, nativeImage, ipcMain } = require('electron');
 const { spawn, execSync, exec } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
 
 const PORT = 5210;
-const URL = `http://127.0.0.1:${PORT}`;
+const BACKEND_URL = `http://127.0.0.1:${PORT}`;
 const isMac = process.platform === 'darwin';
 const isWin = process.platform === 'win32';
 
@@ -20,6 +20,229 @@ let tray = null;
 let forceQuit = false;
 let petQuietUntil = 0;
 let authToken = null;
+let collaborationView = null;
+let collaborationBridge = null;
+let collaborationBridgePort = null;
+const collaborationBridgeToken = require('crypto').randomBytes(32).toString('hex');
+
+const COLLABORATION_START_URL = 'https://www.google.com/';
+
+function normalizeBrowserUrl(rawUrl) {
+  const value = String(rawUrl || '').trim();
+  if (!value) return COLLABORATION_START_URL;
+  const candidate = /^[a-z][a-z\d+.-]*:/i.test(value) ? value : `https://${value}`;
+  const parsed = new URL(candidate);
+  if (!['http:', 'https:'].includes(parsed.protocol)) {
+    throw new Error('Only http and https websites can be opened here.');
+  }
+  return parsed.toString();
+}
+
+function sendCollaborationBrowserState() {
+  if (!win || win.isDestroyed() || !collaborationView) return;
+  const contents = collaborationView.webContents;
+  win.webContents.send('collaboration-browser-state', {
+    url: contents.getURL(),
+    title: contents.getTitle(),
+    canGoBack: contents.canGoBack(),
+    canGoForward: contents.canGoForward(),
+    loading: contents.isLoading(),
+  });
+}
+
+function ensureCollaborationView() {
+  if (collaborationView && !collaborationView.webContents.isDestroyed()) return collaborationView;
+  collaborationView = new WebContentsView({
+    webPreferences: {
+      partition: 'persist:crabagent-collaboration',
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+    },
+  });
+  collaborationView.webContents.setWindowOpenHandler(({ url }) => {
+    try {
+      collaborationView.webContents.loadURL(normalizeBrowserUrl(url));
+    } catch (error) {
+      log(`Blocked collaboration popup: ${error.message}`);
+    }
+    return { action: 'deny' };
+  });
+  collaborationView.webContents.on('will-navigate', (event, url) => {
+    try {
+      normalizeBrowserUrl(url);
+    } catch {
+      event.preventDefault();
+    }
+  });
+  for (const eventName of ['did-navigate', 'did-navigate-in-page', 'did-start-loading', 'did-stop-loading', 'page-title-updated']) {
+    collaborationView.webContents.on(eventName, () => sendCollaborationBrowserState());
+  }
+  collaborationView.webContents.loadURL(COLLABORATION_START_URL).catch((error) => {
+    log(`Collaboration browser initial navigation failed: ${error.message}`);
+  });
+  return collaborationView;
+}
+
+function setCollaborationViewBounds(bounds, visible) {
+  if (!win || win.isDestroyed()) {
+    log('[CollabView] setBounds skipped: win not available');
+    return false;
+  }
+  if (!visible) {
+    log('[CollabView] hide requested');
+    if (collaborationView) {
+      try {
+        if (win.contentView && win.contentView.children && win.contentView.children.includes(collaborationView)) {
+          win.contentView.removeChildView(collaborationView);
+          log('[CollabView] removed from contentView');
+        }
+      } catch (e) { log('[CollabView] hide error: ' + e.message); }
+      try {
+        if (typeof win.removeBrowserView === 'function') win.removeBrowserView(collaborationView);
+      } catch {}
+    }
+    return false;
+  }
+  if (!bounds || ![bounds.x, bounds.y, bounds.width, bounds.height].every(Number.isFinite)) {
+    log('[CollabView] invalid bounds: ' + JSON.stringify(bounds));
+    return false;
+  }
+
+  const view = ensureCollaborationView();
+  const nextBounds = {
+    x: Math.max(0, Math.round(bounds.x)),
+    y: Math.max(0, Math.round(bounds.y)),
+    width: Math.max(1, Math.round(bounds.width)),
+    height: Math.max(1, Math.round(bounds.height)),
+  };
+  log('[CollabView] show bounds=' + JSON.stringify(nextBounds));
+
+  // Try contentView API (Electron 30+)
+  let added = false;
+  try {
+    if (win.contentView && typeof win.contentView.addChildView === 'function') {
+      const children = win.contentView.children || [];
+      if (!children.includes(view)) {
+        win.contentView.addChildView(view);
+        const types = (win.contentView.children || []).map(function(c) { try { return c.constructor.name; } catch { return '?'; } });
+        log('[CollabView] addChildView OK, children=' + (win.contentView.children || []).length + ', types=' + JSON.stringify(types));
+      }
+      added = true;
+    }
+  } catch (e) {
+    log('[CollabView] addChildView error: ' + e.message);
+  }
+
+  // Fallback: setBrowserView
+  if (!added) {
+    try {
+      win.setBrowserView(view);
+      log('[CollabView] setBrowserView fallback OK');
+      added = true;
+    } catch (e) {
+      log('[CollabView] setBrowserView error: ' + e.message);
+    }
+  }
+
+  try {
+    view.setBounds(nextBounds);
+    log('[CollabView] setBounds OK, actual=' + JSON.stringify(view.getBounds()));
+  } catch (e) {
+    log('[CollabView] setBounds error: ' + e.message);
+  }
+
+  sendCollaborationBrowserState();
+  return true;
+}
+
+
+function collaborationBridgeJson(res, status, payload) {
+  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+  res.end(JSON.stringify(payload));
+}
+
+function collaborationSnapshotScript() {
+  return `(() => {
+    const nodes = document.querySelectorAll('a, button, input, select, textarea, [role="button"], [role="link"]');
+    const elements = [];
+    let index = 1;
+    for (const el of nodes) {
+      if (elements.length >= 80) break;
+      const rect = el.getBoundingClientRect();
+      const style = getComputedStyle(el);
+      if (!rect.width || !rect.height || style.display === 'none' || style.visibility === 'hidden' || el.disabled) continue;
+      const selector = el.id ? '#' + CSS.escape(el.id) : '[data-crab-collab="' + index + '"]';
+      el.setAttribute('data-crab-collab', String(index));
+      const sensitive = el.tagName === 'INPUT' && ['password', 'hidden'].includes((el.type || '').toLowerCase());
+      elements.push({ index, tag: el.tagName.toLowerCase(), type: el.type || '', text: String(el.innerText || el.placeholder || el.getAttribute('aria-label') || el.name || '').slice(0, 100), selector, sensitive });
+      index += 1;
+    }
+    return { url: location.href, title: document.title, text: String(document.body?.innerText || '').replace(/\s+/g, ' ').slice(0, 5000), elements };
+  })()`;
+}
+
+async function handleCollaborationBridge(command, payload) {
+  const view = ensureCollaborationView();
+  const contents = view.webContents;
+  if (command === 'status') return { url: contents.getURL(), title: contents.getTitle(), loading: contents.isLoading() };
+  if (command === 'navigate') {
+    await contents.loadURL(normalizeBrowserUrl(payload.url));
+    return { url: contents.getURL(), title: contents.getTitle() };
+  }
+  if (command === 'observe') return contents.executeJavaScript(collaborationSnapshotScript(), true);
+  if (command === 'click') {
+    const index = Number(payload.index);
+    if (!Number.isInteger(index) || index < 1 || index > 80) throw new Error('Invalid element index');
+    return contents.executeJavaScript(`(() => { const el = document.querySelector('[data-crab-collab="${index}"]'); if (!el) throw new Error('Element not found; observe again'); el.click(); return { clicked: ${index}, url: location.href, title: document.title }; })()`, true);
+  }
+  if (command === 'type') {
+    const index = Number(payload.index);
+    const text = String(payload.text || '');
+    if (!Number.isInteger(index) || index < 1 || index > 80 || text.length > 10000) throw new Error('Invalid type request');
+    return contents.executeJavaScript(`(() => { const el = document.querySelector('[data-crab-collab="${index}"]'); if (!el) throw new Error('Element not found; observe again'); if (el.type === 'password') throw new Error('AI cannot type into password fields'); el.focus(); el.value = ${JSON.stringify(text)}; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); return { typed: ${index}, url: location.href, title: document.title }; })()`, true);
+  }
+  if (command === 'scroll') {
+    const amount = Math.max(-2000, Math.min(2000, Number(payload.amount) || 600));
+    return contents.executeJavaScript(`(() => { window.scrollBy(0, ${amount}); return { scrollY: window.scrollY, url: location.href }; })()`, true);
+  }
+  throw new Error('Unsupported collaboration browser command');
+}
+
+async function startCollaborationBridge() {
+  if (collaborationBridge && collaborationBridgePort) return collaborationBridgePort;
+  collaborationBridge = http.createServer(async (req, res) => {
+    if (req.method !== 'POST' || req.headers.authorization !== `Bearer ${collaborationBridgeToken}`) {
+      collaborationBridgeJson(res, 401, { detail: 'Unauthorized' });
+      return;
+    }
+    let raw = '';
+    req.on('data', (chunk) => { raw += chunk; if (raw.length > 100_000) req.destroy(); });
+    req.on('end', async () => {
+      try {
+        const body = JSON.parse(raw || '{}');
+        const result = await handleCollaborationBridge(String(body.command || ''), body.payload || {});
+        collaborationBridgeJson(res, 200, { result });
+      } catch (error) {
+        collaborationBridgeJson(res, 400, { detail: error.message || 'Bridge request failed' });
+      }
+    });
+  });
+  await new Promise((resolve, reject) => {
+    collaborationBridge.once('error', reject);
+    collaborationBridge.listen(0, '127.0.0.1', () => {
+      collaborationBridge.off('error', reject);
+      resolve();
+    });
+  });
+  const address = collaborationBridge.address();
+  if (!address || typeof address === 'string') {
+    throw new Error('Collaboration browser bridge failed to bind a local port');
+  }
+  collaborationBridgePort = address.port;
+  log(`Collaboration browser bridge listening on 127.0.0.1:${collaborationBridgePort}`);
+  return collaborationBridgePort;
+}
 
 // ── Window state persistence ──
 const STATE_PATH = path.join(app.getPath('userData'), 'window-state.json');
@@ -68,7 +291,14 @@ function schedulePetStateSave() {
 }
 
 // ── Logging ──
-function log(msg) { console.log(`[CrabAgent] ${msg}`); }
+function log(msg) {
+  console.log(`[CrabAgent] ${msg}`);
+  try {
+    const logPath = require('path').join(require('os').homedir(), '.crabagent', 'electron.log');
+    const line = new Date().toISOString() + ' ' + msg + '\n';
+    require('fs').appendFileSync(logPath, line);
+  } catch {}
+}
 
 // ── Loading screen (shown while backend starts up) ──
 const LOADING_HTML = `<!DOCTYPE html>
@@ -162,7 +392,7 @@ function resolvePath(cmd) {
 
 function startBackend() {
   return new Promise((resolve, reject) => {
-    const env = { ...process.env, PYTHONUNBUFFERED: '1' };
+    const env = { ...process.env, PYTHONUNBUFFERED: '1', CRAB_COLLAB_BROWSER_PORT: String(collaborationBridgePort || ''), CRAB_COLLAB_BROWSER_TOKEN: collaborationBridgeToken };
 
     // Priority 1: crabagent CLI from PATH (fastest, most reliable)
     const crabagentBin = resolvePath('crabagent');
@@ -220,7 +450,7 @@ function waitForServer(maxWait = 60000) {
   return new Promise((resolve, reject) => {
     const t0 = Date.now();
     function check() {
-      http.get(`${URL}/health`, (r) => { if (r.statusCode === 200) resolve(); else retry(); })
+      http.get(`${BACKEND_URL}/health`, (r) => { if (r.statusCode === 200) resolve(); else retry(); })
         .on('error', retry);
       function retry() { if (Date.now() - t0 > maxWait) reject(new Error('Timeout')); else setTimeout(check, 500); }
     }
@@ -476,6 +706,12 @@ function createWindow() {
     }
   });
 
+  // A native BrowserView sits above the renderer. Hide it whenever the SPA
+  // leaves the collaboration route so it cannot cover another CrabAgent page.
+  win.webContents.on('did-navigate-in-page', (_event, url) => {
+    if (!url.includes('#/browser')) setCollaborationViewBounds(null, false);
+  });
+
   // Save window state on resize/move
   win.on('resize', saveWindowState);
   win.on('move', saveWindowState);
@@ -492,7 +728,10 @@ function createWindow() {
     killBackend();
   });
 
-  win.on('closed', () => { win = null; });
+  win.on('closed', () => {
+    collaborationView = null;
+    win = null;
+  });
 }
 
 // ── Desktop pet ──
@@ -501,7 +740,7 @@ function createWindow() {
 function primeRendererAuth(target) {
   if (!target || target.isDestroyed() || !authToken) return;
   target.webContents.once('did-finish-load', () => {
-    if (!target.webContents.getURL().startsWith(URL)) return;
+    if (!target.webContents.getURL().startsWith(BACKEND_URL)) return;
     const token = JSON.stringify(authToken);
     target.webContents.executeJavaScript(`window.localStorage.setItem('crab_token', ${token})`);
   });
@@ -549,10 +788,10 @@ function createPetWindow() {
   petWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: false });
   petWin.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   petWin.webContents.on('will-navigate', (event, url) => {
-    if (!url.startsWith(URL)) event.preventDefault();
+    if (!url.startsWith(BACKEND_URL)) event.preventDefault();
   });
   primeRendererAuth(petWin);
-  petWin.loadURL(`${URL}/?surface=pet`);
+  petWin.loadURL(`${BACKEND_URL}/?surface=pet`);
   petWin.once('ready-to-show', () => petWin?.showInactive());
   // Window moves can fire at frame rate while dragging; debounce disk persistence.
   petWin.on('move', schedulePetStateSave);
@@ -621,6 +860,34 @@ ipcMain.on('window-maximize', () => {
 });
 ipcMain.on('window-close', () => win?.close());
 ipcMain.handle('window-is-maximized', () => win?.isMaximized() ?? false);
+ipcMain.handle('collaboration-browser-layout', (event, bounds, visible) => {
+  if (event.sender !== win?.webContents) return false;
+  return setCollaborationViewBounds(bounds, Boolean(visible));
+});
+ipcMain.handle('collaboration-browser-navigate', (event, url) => {
+  if (event.sender !== win?.webContents) throw new Error('Unauthorized browser request');
+  const target = normalizeBrowserUrl(url);
+  const view = ensureCollaborationView();
+  log('[CollabView] navigate to ' + target + ' current=' + view.webContents.getURL());
+  void view.webContents.loadURL(target).then(() => {
+    log('[CollabView] navigate OK, url now=' + view.webContents.getURL());
+    view.webContents.focus();
+    sendCollaborationBrowserState();
+  }).catch((error) => {
+    log('[CollabView] navigate FAILED: ' + error.message);
+    sendCollaborationBrowserState();
+  });
+  return { url: target };
+});
+ipcMain.handle('collaboration-browser-action', async (event, action) => {
+  if (event.sender !== win?.webContents) throw new Error('Unauthorized browser request');
+  const contents = ensureCollaborationView().webContents;
+  if (action === 'back' && contents.canGoBack()) contents.goBack();
+  if (action === 'forward' && contents.canGoForward()) contents.goForward();
+  if (action === 'reload') contents.reload();
+  if (action === 'stop') contents.stop();
+  sendCollaborationBrowserState();
+});
 ipcMain.on('pet-resize', (_event, requestedHeight) => {
   if (!petWin || petWin.isDestroyed() || !Number.isFinite(requestedHeight)) return;
 
@@ -717,7 +984,7 @@ async function autoLogin() {
   try {
     const body = JSON.stringify({ username: 'admin', password: 'xcl1989' });
     const token = await new Promise((resolve, reject) => {
-      const req = http.request(`${URL}/api/auth/login`, {
+      const req = http.request(`${BACKEND_URL}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
       }, (res) => {
@@ -754,6 +1021,7 @@ function clearBrowserCache() {
 // ── App lifecycle ──
 app.whenReady().then(async () => {
   killExistingBackend();
+  await startCollaborationBridge();
 
   // Clear browser cache on each launch (prevents stale JS/CSS after updates)
   clearBrowserCache();
@@ -773,7 +1041,7 @@ app.whenReady().then(async () => {
   await autoLogin();
   if (win) {
     primeRendererAuth(win);
-    win.loadURL(URL);
+    win.loadURL(BACKEND_URL);
   }
   createPetWindow();
 
@@ -797,4 +1065,5 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   forceQuit = true;
+  collaborationBridge?.close();
 });

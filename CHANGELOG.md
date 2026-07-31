@@ -9,7 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [0.13.5] — Desktop Prompt Localization
+## [0.13.6] — Collaboration Browser as Chat Work Mode
+
+### Changed
+- **Browser is now a chat work mode** — The collaboration browser is no longer a standalone page with its own session management, SSE subscription, and message list. It is now a workspace type inside the chat page, alongside document editing, code editing, and meeting notes. The browser view (address bar, back/forward, reload) lives in the content area while the existing chat panel handles all session context, messages, tool confirmations, and input.
+- **Shared session context** — Discussing requirements in chat and then switching to browser mode keeps the same conversation, message history, and agent context. No more disconnected sessions or cross-session message leaks.
+
+### Added
+- **Page version safety** — All browser interactions (click, type, scroll, select) are now bound to a page version returned by `collab_browser_observe`. Stale-page operations are rejected at the Electron Bridge level, forcing a re-observe before acting.
+- **Sensitive field blocking** — Password, hidden, file upload, OTP, CVV, and payment fields are hard-blocked in the Electron Bridge. The AI cannot type into them regardless of tool arguments.
+- **High-risk click interception** — Elements matching payment, delete, send, submit, or transfer patterns return `confirmation_required` instead of executing, routing through `collab_browser_wait_for_user`.
+- **New browser tools** — `collab_browser_select`, `collab_browser_press_key`, and `collab_browser_wait_for` (network idle / text appears / URL match).
+- **Browser task persistence** — `BrowserTask` and `BrowserTaskEvent` models with REST API for task lifecycle and redacted audit timeline.
+- **Session filtering by browser tasks** — `GET /sessions?browser_only=true` returns only sessions that have collaboration browser tasks.
+
+### Removed
+- **Standalone BrowserCollaborationPage** — The old independent browser page with duplicate session/SSE/message management has been removed. All browser collaboration now flows through the unified chat experience.
+- **Per-tool confirmation prompts** — `requires_permission` removed from all collaboration browser tools. Safety is enforced at the Bridge level instead of interrupting the user for every action.
+
+### Fixed
+- **Cross-session message contamination** — Eliminated the root cause where the browser page's independent SSE connection and session state could receive events from other sessions.
+- **Dropdown z-index over native web view** — Moved all session/workspace/task controls into the chat sidebar, removing the layering conflict between DOM menus and the native `WebContentsView`.
+
+---
 
 ### Fixed
 - **Localized desktop system prompts** — The PyInstaller desktop build now packages the dynamically loaded `en.json` and `zh-CN.json` translation resources. The pip-installed desktop build path also rewrites the i18n data path for its flat package layout, preventing English fallback text and raw `team_prompt.*` keys in localized prompts.

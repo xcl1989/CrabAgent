@@ -8,9 +8,11 @@ export function useSSE(sessionId: string | null, onEvent: (event: SSEEvent) => v
   const esRef = useRef<EventSource | null>(null);
   const [connected, setConnected] = useState(false);
   const onEventRef = useRef(onEvent);
+  const activeSessionRef = useRef(sessionId);
   const heartbeatRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   onEventRef.current = onEvent;
+  activeSessionRef.current = sessionId;
 
   const disconnect = useCallback(() => {
     if (reconnectRef.current) {
@@ -32,7 +34,11 @@ export function useSSE(sessionId: string | null, onEvent: (event: SSEEvent) => v
     disconnect();
     if (!sessionId) return;
 
-    const es = connectSSE(sessionId, (event: SSEEvent) => {
+    const connectedSessionId = sessionId;
+    const es = connectSSE(connectedSessionId, (event: SSEEvent) => {
+      // EventSource can deliver queued events after a session switch. Ignore the
+      // stale connection before it mutates the newly selected session UI.
+      if (activeSessionRef.current !== connectedSessionId || esRef.current !== es) return;
       // Reset heartbeat on every event (including keepalive)
       if (heartbeatRef.current) clearTimeout(heartbeatRef.current);
       heartbeatRef.current = setTimeout(() => {

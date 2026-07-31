@@ -26,6 +26,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   startPetDrag: (offsetX, offsetY) => ipcRenderer.send('pet-drag-start', { offsetX, offsetY }),
   movePetDrag: () => ipcRenderer.send('pet-drag-move'),
   endPetDrag: () => ipcRenderer.send('pet-drag-end'),
+  collaborationBrowserLayout: (bounds, visible) => ipcRenderer.invoke('collaboration-browser-layout', bounds, visible),
+  collaborationBrowserNavigate: (url) => ipcRenderer.invoke('collaboration-browser-navigate', url),
+  collaborationBrowserAction: (action) => ipcRenderer.invoke('collaboration-browser-action', action),
+  onCollaborationBrowserState: (callback) => ipcRenderer.on('collaboration-browser-state', (_event, state) => callback(state)),
   onOpenSession: (callback) => ipcRenderer.on('open-session', (_event, sessionId) => callback(sessionId)),
   onPetDragDirection: (callback) => ipcRenderer.on('pet-drag-direction', (_event, data) => callback(data)),
 });

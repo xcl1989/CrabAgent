@@ -418,6 +418,38 @@ class MemoryEmbedding(Base):
     updated_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
 
 
+class BrowserTask(Base):
+    """Persistent, non-sensitive lifecycle state for a collaboration browser task."""
+
+    __tablename__ = "browser_tasks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    goal: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(32), default="draft", index=True)
+    url: Mapped[str] = mapped_column(Text, default="")
+    page_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    summary: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+    completed_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class BrowserTaskEvent(Base):
+    """A redacted task timeline event. Never use this for page text or typed values."""
+
+    __tablename__ = "browser_task_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    task_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    event_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    detail: Mapped[str] = mapped_column(Text, default="")
+    risk: Mapped[str] = mapped_column(String(20), default="low")
+    data: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
+
+
 class TaskRecord(Base):
     __tablename__ = "task_records"
 

@@ -1,6 +1,7 @@
 {
   "nav": {
     "chat": "对话",
+    "browser": "协作浏览器",
     "agents": "Agent 团队",
     "calendar": "日历",
     "memory": "记忆",
