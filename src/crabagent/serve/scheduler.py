@@ -285,7 +285,12 @@ class SchedulerService:
         except Exception:
             pass
 
-        settings.auto_approve_tools = True
+        # auto_approve_tools is no longer mutated globally.
+        # The scheduler builds its own AgentContext without a confirm_callback,
+        # so tools auto-execute.  Setting the global flag here was dangerous
+        # because a CancelledError (BaseException, not caught by except Exception)
+        # would leave it stuck at True forever, disabling confirmation cards in
+        # the desktop UI.
 
         ctx_conv_id = _generate_session_id()
         context.metadata["session_id"] = ctx_conv_id
@@ -350,7 +355,7 @@ class SchedulerService:
                 await _asyncio.wait_for(mcp_mgr.stop_all(), timeout=10)
             except Exception:
                 pass
-        settings.auto_approve_tools = False
+        # auto_approve_tools cleanup removed — see comment above.
         logger.info("[ST] cleanup done, returning session_id=%s", ctx_conv_id)
 
         return ctx_conv_id

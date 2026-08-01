@@ -105,6 +105,27 @@ async def collab_browser_observe(context=None) -> str:
 
 
 @registry.register(
+    name="collab_browser_screenshot",
+    description=(
+        "Capture a screenshot of the currently visible shared browser page. The image is "
+        "returned inline so vision-capable models can inspect visual content."
+    ),
+    parameters={"type": "object", "properties": {}},
+    metadata={"source": "builtin", "category": "collaboration_browser"},
+)
+async def collab_browser_screenshot(context=None) -> str | list[dict[str, Any]]:
+    value = await asyncio.to_thread(lambda: _bridge_request("screenshot"))
+    value = _remember_page_version(context, value)
+    data_url = value.pop("data_url", "")
+    if not data_url:
+        return _result(value)
+    return [
+        {"type": "text", "text": _result(value)},
+        {"type": "image_url", "image_url": {"url": data_url}, "mime": value.get("mime", "image/png")},
+    ]
+
+
+@registry.register(
     name="collab_browser_click",
     description=(
         "Click a numbered element from the latest collab_browser_observe result in the shared browser. "

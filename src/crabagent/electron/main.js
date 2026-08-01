@@ -218,6 +218,16 @@ async function handleCollaborationBridge(command, payload) {
     return { page_version: collaborationPageVersion, url: contents.getURL(), title: contents.getTitle() };
   }
   if (command === 'observe') return contents.executeJavaScript(collaborationSnapshotScript(collaborationPageVersion), true);
+  if (command === 'screenshot') {
+    const image = await contents.capturePage();
+    return {
+      page_version: collaborationPageVersion,
+      url: contents.getURL(),
+      title: contents.getTitle(),
+      mime: 'image/png',
+      data_url: `data:image/png;base64,${image.toPNG().toString('base64')}`,
+    };
+  }
   if (command === 'click') {
     requireCurrentPageVersion(payload);
     const index = Number(payload.index);

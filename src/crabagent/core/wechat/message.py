@@ -914,15 +914,16 @@ async def _run_agent_for_wechat(msg: IncomingMessage, client: WeChatClient | Non
 
         query = content_blocks if content_blocks else msg.content
 
-    # Run agent
-    app_settings.auto_approve_tools = True
+    # Run agent — no need to mutate the global auto_approve_tools flag.
+    # This context has no confirm_callback, so tools auto-execute.
+    # Mutating the global was unsafe: a concurrent desktop prompt would read
+    # True and skip installing its own confirm_callback.
     try:
         await run_agent(context, query)
     except Exception as e:
         logger.error("[WeChatLoop] run_agent error: %s", e)
         return f"处理时出错：{str(e)[:100]}", conv_id
     finally:
-        app_settings.auto_approve_tools = False
         # Stop the heartbeat timer
         if progress:
             await progress.stop()

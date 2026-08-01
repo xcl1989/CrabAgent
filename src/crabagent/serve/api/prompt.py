@@ -961,17 +961,23 @@ Use ordinary Markdown when a visualization is not helpful.
 
     context.event_bus.subscribe(_on_image_generated)
 
-    if not settings.auto_approve_tools:
-        from crabagent.serve.api.confirm import request_confirmation
+    # Always install the confirm callback for interactive (desktop) prompts.
+    # The global settings.auto_approve_tools is a process-wide singleton that
+    # can be temporarily set to True by concurrent scheduled tasks or WeChat
+    # message handlers.  Those automated paths build their own AgentContext
+    # without a confirm_callback, so they do not need the global flag at all.
+    # Checking it here caused a race condition where the desktop UI lost its
+    # authorization cards whenever a background task was running.
+    from crabagent.serve.api.confirm import request_confirmation
 
-        async def _serve_confirm(tool_name: str, args: dict) -> bool:
-            future = await request_confirmation(context.event_bus, session_id, tool_name, args)
-            try:
-                return await asyncio.wait_for(future, timeout=120.0)
-            except TimeoutError:
-                return False
+    async def _serve_confirm(tool_name: str, args: dict) -> bool:
+        future = await request_confirmation(context.event_bus, session_id, tool_name, args)
+        try:
+            return await asyncio.wait_for(future, timeout=120.0)
+        except TimeoutError:
+            return False
 
-        context.confirm_callback = _serve_confirm
+    context.confirm_callback = _serve_confirm
 
     from crabagent.serve.api.input import request_user_input
 

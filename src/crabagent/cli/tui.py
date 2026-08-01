@@ -1460,8 +1460,9 @@ class TuiSession:
             if hist:
                 p.sequence = ms if ms > 0 else len(hist)
             ctx.event_bus.subscribe(p.on_event)
-        if not settings.auto_approve_tools:
-            ctx.confirm_callback = None
+        # TUI builds its own context; auto_approve_tools no longer needs
+        # global mutation. The confirm_callback is not installed for TUI
+        # (it has its own interactive confirmation flow).
         try:
             from crabagent.core.mcp.client import MCPClientManager
             from crabagent.core.mcp.tools import register_mcp_tools
