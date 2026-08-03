@@ -8,6 +8,22 @@ English version: [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
+## [0.13.7] — 执行追踪与洞察
+
+### 新增
+- **执行追踪树** — 每次 Agent 执行现在会记录结构化的 span 树（LLM 调用、工具调用、子 Agent 委派），包含每步的 token 用量、耗时和状态。Span 数据持久化到 `execution_spans` 数据库表，并在聊天面板中可视化为可折叠树。
+- **追踪面板** — 点击统计栏上的 "Trace" 链接，侧边面板展开完整执行树，按 span 类型颜色编码，带 token 占比条、耗时高亮，可展开查看详情（provider、token 明细、摘要、错误）。
+- **自动化洞察引擎** — 每次执行后自动分析 span：工具调用循环（同一工具调用 5 次以上）、Token 热点（单次 LLM 调用占 prompt 总量 60%+）、上下文膨胀（prompt tokens 每轮增长 30%+）、错误集中、慢工具调用（>30 秒）。
+- **实时循环检测** — Agent 调用同一工具达 5 次时，通过 SSE 发出 `BUDGET_WARNING` 事件即时提醒用户。
+- **Provider 归因** — LLM span 显示真实 provider 名称（如 `ZAI`、`openai`），而非 litellm 的内部路由前缀。
+- **执行 API** — 在 `/api/execution/` 下新增五个 REST 端点，用于查询执行记录、span 树和洞察。
+
+### 变更
+- `AgentContext` 新增 `spans` 列表和 `_span_counter`，用于 Agent 执行期间的轻量内存级 span 收集。
+- `init_db()` 新增 `execution_spans` 表和 `provider` 列迁移逻辑。
+
+---
+
 ## [0.13.6] — 协作浏览器作为聊天工作模式
 
 ### 变更

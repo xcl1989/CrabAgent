@@ -258,6 +258,9 @@ Split-pane workspace with live document preview, code editor, prototype builder,
 ### 📈 Usage Insights
 Track token consumption by time range and workspace. The Usage page highlights period totals, calls, cache health, and active sessions, then lets you compare model and agent consumption, search and sort sessions, and expand a session to inspect its recent calls.
 
+### 🔍 Execution Trace
+Every agent run records a structured span tree — LLM calls, tool invocations, and sub-agent delegations — with per-step token usage, duration, and status. Click "Trace" on the stats bar to open a side panel with a color-coded tree, token share bars, expandable details, and automated insights (tool loop detection, token hotspots, context bloat, error concentration).
+
 ### 📊 Rich Conversation Visualizations
 Assistant responses can turn Markdown into shareable visuals: Mermaid flowcharts, sequence/state/ER diagrams, architecture diagrams, and bar, line, area, pie, or scatter charts. KPI cards summarize a key metric. Open any visualization in a larger view, then copy it as a PNG or download a high-resolution PNG to share.
 

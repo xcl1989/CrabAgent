@@ -517,6 +517,45 @@ class TokenUsage(Base):
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
 
 
+class ExecutionSpan(Base):
+    """A single step in an agent execution tree (LLM call, tool call, or agent delegation).
+
+    One row = one span. Spans are nested via ``parent_id`` to form a tree.
+    All spans in a single ``run_agent`` invocation share the same ``run_id``.
+    """
+
+    __tablename__ = "execution_spans"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    run_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    parent_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    seq: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    # llm_call | tool_call | agent_delegate | compress
+    span_type: Mapped[str] = mapped_column(String(32), nullable=False)
+
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    agent_name: Mapped[str] = mapped_column(String(100), default="")
+    source: Mapped[str] = mapped_column(String(50), default="")  # builtin / mcp / custom
+    provider: Mapped[str] = mapped_column(String(100), default="")  # ZAI / openai / anthropa
+
+    started_at: Mapped[float] = mapped_column(Float, nullable=False)
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0)
+
+    prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cached_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    reasoning_tokens: Mapped[int] = mapped_column(Integer, default=0)
+
+    status: Mapped[str] = mapped_column(String(20), default="ok")  # ok / error / timeout
+    summary: Mapped[str] = mapped_column(Text, default="")
+    error: Mapped[str] = mapped_column(Text, default="")
+
+    attributes: Mapped[str | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
+
+
 class PetPackage(Base):
     """A user-installed or built-in desktop pet package.
 
@@ -841,6 +880,21 @@ async def init_db() -> None:
         if "caldav_password" not in columns:
             await conn.execute(text(
                 "ALTER TABLE calendar_ical_sources ADD COLUMN caldav_password TEXT DEFAULT ''"
+            ))
+
+        # Execution spans — table is created by create_all(); add indexes here.
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_execution_spans_session_id ON execution_spans (session_id)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_execution_spans_run_id ON execution_spans (run_id)"
+        ))
+        # Add provider column for existing databases
+        result = await conn.execute(text("PRAGMA table_info(execution_spans)"))
+        es_columns = [row[1] for row in result.fetchall()]
+        if "provider" not in es_columns:
+            await conn.execute(text(
+                "ALTER TABLE execution_spans ADD COLUMN provider VARCHAR(100) DEFAULT ''"
             ))
 
     from crabagent.core.provider_store import migrate_plaintext_keys
@@ -2365,3 +2419,130 @@ async def token_usage_session_detail(user_id: int, session_id: str) -> dict | No
             "by_model": list(model_map.values()),
             "records": [_usage_to_dict(r) for r in rows],
         }
+
+
+# ── Execution span persistence and queries ──
+
+
+async def execution_span_batch_create(
+    session_id: str, run_id: str, spans: list[dict]
+) -> None:
+    """Batch insert execution spans for a single run."""
+    if not spans:
+        return
+    async with async_session_factory() as db:
+        for s in spans:
+            db.add(
+                ExecutionSpan(
+                    session_id=session_id,
+                    run_id=run_id,
+                    parent_id=s.get("parent_id"),
+                    seq=s.get("seq", 0),
+                    span_type=s.get("span_type", "llm_call"),
+                    name=s.get("name", ""),
+                    agent_name=s.get("agent_name", ""),
+                    source=s.get("source", ""),
+                    provider=s.get("provider", ""),
+                    started_at=s.get("started_at", _time.time()),
+                    duration_ms=s.get("duration_ms", 0),
+                    prompt_tokens=s.get("prompt_tokens", 0),
+                    completion_tokens=s.get("completion_tokens", 0),
+                    cached_tokens=s.get("cached_tokens", 0),
+                    reasoning_tokens=s.get("reasoning_tokens", 0),
+                    status=s.get("status", "ok"),
+                    summary=s.get("summary", ""),
+                    error=s.get("error", ""),
+                )
+            )
+        await db.commit()
+
+
+def _span_to_dict(s: ExecutionSpan) -> dict:
+    return {
+        "id": s.id,
+        "session_id": s.session_id,
+        "run_id": s.run_id,
+        "parent_id": s.parent_id,
+        "seq": s.seq,
+        "span_type": s.span_type,
+        "name": s.name,
+        "agent_name": s.agent_name,
+        "source": s.source,
+        "provider": s.provider,
+        "started_at": s.started_at,
+        "duration_ms": s.duration_ms,
+        "prompt_tokens": s.prompt_tokens,
+        "completion_tokens": s.completion_tokens,
+        "cached_tokens": s.cached_tokens,
+        "reasoning_tokens": s.reasoning_tokens,
+        "status": s.status,
+        "summary": s.summary,
+        "error": s.error,
+        "attributes": s.attributes,
+        "created_at": s.created_at.isoformat() if s.created_at else "",
+    }
+
+
+async def get_spans_by_session(session_id: str) -> list[dict]:
+    """Return all spans for a session, ordered by start time."""
+    from sqlalchemy import select
+
+    async with async_session_factory() as db:
+        result = await db.execute(
+            select(ExecutionSpan)
+            .where(ExecutionSpan.session_id == session_id)
+            .order_by(ExecutionSpan.started_at, ExecutionSpan.id)
+        )
+        return [_span_to_dict(s) for s in result.scalars().all()]
+
+
+async def get_spans_by_run(session_id: str, run_id: str) -> list[dict]:
+    """Return all spans for a specific run."""
+    from sqlalchemy import select
+
+    async with async_session_factory() as db:
+        result = await db.execute(
+            select(ExecutionSpan)
+            .where(
+                ExecutionSpan.session_id == session_id,
+                ExecutionSpan.run_id == run_id,
+            )
+            .order_by(ExecutionSpan.started_at, ExecutionSpan.id)
+        )
+        return [_span_to_dict(s) for s in result.scalars().all()]
+
+
+async def get_session_runs(session_id: str) -> list[dict]:
+    """Return a summary of each run in the session (one row per run_id)."""
+    from sqlalchemy import func, select
+
+    async with async_session_factory() as db:
+        result = await db.execute(
+            select(
+                ExecutionSpan.run_id,
+                func.count(ExecutionSpan.id).label("span_count"),
+                func.sum(ExecutionSpan.prompt_tokens).label("prompt_tokens"),
+                func.sum(ExecutionSpan.completion_tokens).label("completion_tokens"),
+                func.min(ExecutionSpan.started_at).label("started_at"),
+                func.max(ExecutionSpan.started_at + ExecutionSpan.duration_ms / 1000.0).label("ended_at"),
+                func.min(ExecutionSpan.agent_name).label("agent_name"),
+            )
+            .where(ExecutionSpan.session_id == session_id)
+            .group_by(ExecutionSpan.run_id)
+            .order_by(func.min(ExecutionSpan.started_at).desc())
+        )
+        runs = []
+        for row in result.fetchall():
+            runs.append(
+                {
+                    "run_id": row.run_id,
+                    "span_count": row.span_count,
+                    "prompt_tokens": row.prompt_tokens or 0,
+                    "completion_tokens": row.completion_tokens or 0,
+                    "total_tokens": (row.prompt_tokens or 0) + (row.completion_tokens or 0),
+                    "started_at": row.started_at,
+                    "ended_at": row.ended_at,
+                    "agent_name": row.agent_name or "",
+                }
+            )
+        return runs

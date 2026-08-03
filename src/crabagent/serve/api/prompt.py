@@ -1145,6 +1145,18 @@ Use ordinary Markdown when a visualization is not helpful.
                 except Exception:
                     logger.debug("Failed to write token_usage", exc_info=True)
 
+            # ── Persist execution spans to DB ──
+            if context.spans:
+                try:
+                    from crabagent.core.database import execution_span_batch_create
+                    from crabagent.core.observability.spans import export_spans
+
+                    run_id = context.metadata.get("_run_id", "")
+                    if run_id:
+                        await execution_span_batch_create(session_id, run_id, export_spans(context))
+                except Exception:
+                    logger.debug("Failed to write execution_spans", exc_info=True)
+
             _tasks.pop(session_id, None)
             _session_locks.pop(session_id, None)
             try:

@@ -189,6 +189,7 @@ def create_app() -> FastAPI:
     from crabagent.serve.api.documents import router as documents_router
     from crabagent.serve.api.email import router as email_router
     from crabagent.serve.api.event import router as event_router
+    from crabagent.serve.api.execution import router as execution_router
     from crabagent.serve.api.files import router as files_router
     from crabagent.serve.api.goals import router as goals_router
     from crabagent.serve.api.input import router as input_router
@@ -242,6 +243,7 @@ def create_app() -> FastAPI:
     app.include_router(wechat_router, prefix="/api")
     app.include_router(chatgpt_router, prefix="/api")
     app.include_router(calendar_router, prefix="/api")
+    app.include_router(execution_router, prefix="/api")
 
     @app.get("/health")
     async def health(request: Request):

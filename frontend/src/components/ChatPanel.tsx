@@ -19,11 +19,13 @@ import {
   Zap,
   X,
   ArrowDown,
+  Activity,
 } from "lucide-react";
 import { Modal } from "./ui";
 import { RichMarkdown } from "./rich-content/RichMarkdown";
 import ToolResultRender from "./ToolResultRender";
 import { SubAgentCard, DelegateGroup } from "./SubAgentCard";
+import ExecutionTreePanel from "./ExecutionTreePanel";
 import { cn } from "../lib/cn";
 
 interface ChatMessage {
@@ -597,6 +599,9 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(
                       {p}
                     </span>
                   ))}
+                  {sessionId && (
+                    <ExecutionTreeToggle sessionId={sessionId} />
+                  )}
                 </div>
               </div>
             );
@@ -974,4 +979,49 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(
 );
 
 ChatPanel.displayName = "ChatPanel";
+
+// ── Execution tree toggle ──
+function ExecutionTreeToggle({ sessionId }: { sessionId: string }) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <>
+      <span className="text-[var(--border-strong)] mx-1">·</span>
+      <button
+        className="inline-flex items-center gap-0.5 text-[var(--brand)] hover:underline"
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen(!open);
+        }}
+      >
+        <Activity size={11} />
+        {open ? "Hide trace" : "Trace"}
+      </button>
+      {open && (
+        <div className="fixed inset-0 z-50 flex justify-end bg-black/30" onClick={() => setOpen(false)}>
+          <div
+            className="w-full max-w-md h-full bg-[var(--bg-primary)] border-l border-[var(--border)] overflow-y-auto shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="sticky top-0 flex items-center justify-between px-4 py-3 border-b border-[var(--border)] bg-[var(--bg-primary)] z-10">
+              <span className="text-sm font-semibold flex items-center gap-1.5">
+                <Activity size={15} className="text-[var(--brand)]" />
+                Execution Trace
+              </span>
+              <button
+                className="p-1 rounded hover:bg-[var(--bg-tertiary)]"
+                onClick={() => setOpen(false)}
+              >
+                <X size={15} className="text-[var(--text-tertiary)]" />
+              </button>
+            </div>
+            <div className="p-3">
+              <ExecutionTreePanel sessionId={sessionId} />
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
 export default ChatPanel;

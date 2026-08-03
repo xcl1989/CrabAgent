@@ -41,6 +41,10 @@ class AgentContext:
     accumulated_reasoning: int = 0
     usage_records: list[dict[str, Any]] = field(default_factory=list)
 
+    # ── Execution span collection (lightweight in-memory, flushed to DB after run) ──
+    spans: list[dict[str, Any]] = field(default_factory=list)
+    _span_counter: int = 0
+
     @property
     def accumulated_non_cached(self) -> int:
         return self.accumulated_prompt - self.accumulated_cached

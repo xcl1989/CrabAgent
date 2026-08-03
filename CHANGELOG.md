@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.13.7] — Execution Trace & Insights
+
+### Added
+- **Execution trace tree** — Every agent run now records a structured span tree (LLM calls, tool calls, agent delegations) with per-step token usage, duration, and status. Spans are persisted to the `execution_spans` database table and visualized as a collapsible tree in the chat panel.
+- **Trace panel** — Click the "Trace" link on the stats bar to open a side panel showing the full execution tree with color-coded span types, token share bars, duration highlights, and expandable details (provider, token breakdown, summary, errors).
+- **Automated insights engine** — After each run, spans are analyzed for: tool call loops (same tool called 5+ times), token hotspots (one LLM call consuming 60%+ of prompt tokens), context bloat (prompt tokens growing 30%+ per iteration), error concentration, and slow tool calls (>30s).
+- **Real-time loop detection** — When an agent calls the same tool 5 times, a `BUDGET_WARNING` event is emitted via SSE to alert the user immediately.
+- **Provider attribution** — LLM spans display the real provider name (e.g. `ZAI`, `openai`) rather than litellm's internal routing prefix.
+- **Execution API** — Five new REST endpoints under `/api/execution/` for querying runs, span trees, and insights.
+
+### Changed
+- `AgentContext` now carries a `spans` list and `_span_counter` for lightweight in-memory span collection during agent runs.
+- `init_db()` adds the `execution_spans` table and `provider` column migration for existing databases.
+
+---
+
 ## [0.13.6] — Collaboration Browser as Chat Work Mode
 
 ### Changed

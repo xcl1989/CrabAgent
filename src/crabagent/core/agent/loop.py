@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import time
+import uuid
 
 import litellm
 
@@ -12,6 +13,7 @@ from crabagent.core.agent.context import AgentContext
 from crabagent.core.agent.token_limits import get_model_token_limit
 from crabagent.core.config import settings
 from crabagent.core.event import AgentEvent, EventType
+from crabagent.core.observability.spans import end_span, start_span
 from crabagent.core.provider_store import ProviderInfo, get_default_provider, get_provider
 
 logger = logging.getLogger(__name__)
@@ -169,6 +171,11 @@ async def run_agent(
     context.messages.append({"role": "user", "content": query, "agent": context.current_agent})
     context.metadata["_batch_molt"] = True  # batch molts per round
 
+    # ── Execution span: root ──
+    run_id = str(uuid.uuid4())
+    context.metadata["_run_id"] = run_id
+    _root_span = start_span(context, "agent_run", context.current_agent or "default")
+
     # Fire middleware start hooks (reflect / title / compress etc.)
     if context.middlewares:
         try:
@@ -236,6 +243,12 @@ async def run_agent(
             tool_calls_list: list[dict] = []
 
             _llm_t0 = time.time()
+            _display_model = model.split("/", 1)[-1] if "/" in model else model
+            _llm_span = start_span(
+                context, "llm_call", _display_model,
+                parent_id=_root_span["_id"],
+                provider=context.metadata.get("resolved_provider", provider.name),
+            )
             completion_params = {
                 "model": model,
                 **llm,
@@ -360,6 +373,25 @@ async def run_agent(
             if _llm_elapsed > 10:
                 logger.debug("litellm call took %.1fs", _llm_elapsed)
 
+            # ── Finalise LLM span with per-iteration token data ──
+            if context.usage_records:
+                _rec = context.usage_records[-1]
+                end_span(
+                    _llm_span,
+                    prompt_tokens=_rec.get("prompt_tokens", 0),
+                    completion_tokens=_rec.get("completion_tokens", 0),
+                    cached_tokens=_rec.get("cached_tokens", 0),
+                    reasoning_tokens=_rec.get("reasoning_tokens", 0),
+                    summary=full_text[:200] if full_text else "",
+                    status="ok" if not tool_calls_list else "tool_calls",
+                )
+            else:
+                end_span(
+                    _llm_span,
+                    summary=full_text[:200] if full_text else "",
+                    status="ok" if not tool_calls_list else "tool_calls",
+                )
+
             if tool_calls_list:
                 assistant_msg["tool_calls"] = tool_calls_list
             if reasoning_text:
@@ -437,6 +469,22 @@ async def run_agent(
                 )
 
             for meta in tool_metas:
+                # ── Real-time tool loop detection ──
+                _tool_counter = context.metadata.setdefault("_tool_call_counts", {})
+                _tool_counter[meta["name"]] = _tool_counter.get(meta["name"], 0) + 1
+                if _tool_counter[meta["name"]] == 5:
+                    await context.event_bus.emit(
+                        AgentEvent(
+                            type=EventType.BUDGET_WARNING,
+                            data={
+                                "type": "tool_loop",
+                                "message": f"⚠️ 工具 '{meta['name']}' 已被调用 5 次，Agent 可能在循环中",
+                                "tool_name": meta["name"],
+                                "count": 5,
+                            },
+                        )
+                    )
+
                 await context.event_bus.emit(
                     AgentEvent(
                         type=EventType.TOOL_CALL,
@@ -451,21 +499,40 @@ async def run_agent(
                 )
 
             async def _run_and_emit(meta: dict):
-                result = await context.tool_registry.execute(meta["name"], meta["args"], context=context)
-                preview = _preview_result(result)
-                await context.event_bus.emit(
-                    AgentEvent(
-                        type=EventType.TOOL_RESULT,
-                        data={
-                            "name": meta["name"],
-                            "result": preview,
-                            "id": meta["tc"]["id"],
-                            "source": meta["source"],
-                            "server_name": meta["server"],
-                        },
-                    )
+                _tool_span = start_span(
+                    context, "tool_call", meta["name"],
+                    parent_id=_root_span["_id"],
+                    source=meta["source"],
                 )
-                return meta, result
+                try:
+                    result = await context.tool_registry.execute(meta["name"], meta["args"], context=context)
+                    preview = _preview_result(result)
+                    end_span(
+                        _tool_span,
+                        summary=preview[:200] if preview else "",
+                        status="ok",
+                    )
+                    await context.event_bus.emit(
+                        AgentEvent(
+                            type=EventType.TOOL_RESULT,
+                            data={
+                                "name": meta["name"],
+                                "result": preview,
+                                "id": meta["tc"]["id"],
+                                "source": meta["source"],
+                                "server_name": meta["server"],
+                            },
+                        )
+                    )
+                    return meta, result
+                except Exception as exc:
+                    end_span(
+                        _tool_span,
+                        summary=str(exc)[:200],
+                        status="error",
+                        error=str(exc)[:500],
+                    )
+                    raise
 
             gathered = await asyncio.gather(*[_run_and_emit(m) for m in tool_metas], return_exceptions=True)
 
@@ -673,6 +740,13 @@ async def run_agent(
 
     # Fire middleware end hooks (reflect / title / etc.)
     context.metadata["_run_elapsed"] = round(time.time() - _t0, 1)
+
+    # ── Finalise root span ──
+    end_span(
+        _root_span,
+        summary=f"{context.iteration} iterations, {context.accumulated_prompt + context.accumulated_completion} tokens",
+    )
+
     if context.middlewares:
         try:
             await context.middlewares.run_end(context)

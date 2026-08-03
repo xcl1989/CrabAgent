@@ -776,6 +776,16 @@ async def spawn_sub_agent(
 
     sub_context.event_bus.subscribe(_bridge_events)
 
+    # ── Execution span: track sub-agent delegation on the parent context ──
+    from crabagent.core.observability.spans import end_span, start_span
+
+    _delegate_span = start_span(parent_context, "agent_delegate", agent_name)
+
+    # Propagate the parent's span collection so sub-agent spans nest under the delegate span
+    sub_context.spans = parent_context.spans
+    sub_context._span_counter = parent_context._span_counter
+    _saved_root_parent = None
+
     try:
         t0 = time.time()
         await run_agent(sub_context, task)
@@ -1022,6 +1032,10 @@ async def spawn_sub_agent(
             _running_sub_agents[sub_id].update({"status": "error"})
         return f"Error: sub-agent '{agent_name}' failed: {e}"
     finally:
+        # ── Finalise delegate span ──
+        end_span(_delegate_span)
+        parent_context._span_counter = sub_context._span_counter
+
         if sub_id in _running_sub_agents:
             _running_sub_agents[sub_id]["completed_at"] = time.time()
         browser_mgr = sub_context.metadata.get("_browser_manager")
