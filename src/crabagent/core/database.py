@@ -2427,33 +2427,61 @@ async def token_usage_session_detail(user_id: int, session_id: str) -> dict | No
 async def execution_span_batch_create(
     session_id: str, run_id: str, spans: list[dict]
 ) -> None:
-    """Batch insert execution spans for a single run."""
+    """Batch insert execution spans for a single run.
+
+    In-memory spans use ``_id`` (a per-run counter starting from 1) as the
+    identity, and ``parent_id`` references that counter.  The database uses an
+    auto-increment primary key, so we must remap ``_id`` → DB ``id`` and fix
+    ``parent_id`` references accordingly.
+    """
     if not spans:
         return
+    # Build the mapping: in-memory _id → database row id
+    id_map: dict[int | None, int | None] = {None: None}
     async with async_session_factory() as db:
         for s in spans:
-            db.add(
-                ExecutionSpan(
-                    session_id=session_id,
-                    run_id=run_id,
-                    parent_id=s.get("parent_id"),
-                    seq=s.get("seq", 0),
-                    span_type=s.get("span_type", "llm_call"),
-                    name=s.get("name", ""),
-                    agent_name=s.get("agent_name", ""),
-                    source=s.get("source", ""),
-                    provider=s.get("provider", ""),
-                    started_at=s.get("started_at", _time.time()),
-                    duration_ms=s.get("duration_ms", 0),
-                    prompt_tokens=s.get("prompt_tokens", 0),
-                    completion_tokens=s.get("completion_tokens", 0),
-                    cached_tokens=s.get("cached_tokens", 0),
-                    reasoning_tokens=s.get("reasoning_tokens", 0),
-                    status=s.get("status", "ok"),
-                    summary=s.get("summary", ""),
-                    error=s.get("error", ""),
-                )
+            row = ExecutionSpan(
+                session_id=session_id,
+                run_id=run_id,
+                parent_id=None,  # will be updated after flush
+                seq=s.get("seq", 0),
+                span_type=s.get("span_type", "llm_call"),
+                name=s.get("name", ""),
+                agent_name=s.get("agent_name", ""),
+                source=s.get("source", ""),
+                provider=s.get("provider", ""),
+                started_at=s.get("started_at", _time.time()),
+                duration_ms=s.get("duration_ms", 0),
+                prompt_tokens=s.get("prompt_tokens", 0),
+                completion_tokens=s.get("completion_tokens", 0),
+                cached_tokens=s.get("cached_tokens", 0),
+                reasoning_tokens=s.get("reasoning_tokens", 0),
+                status=s.get("status", "ok"),
+                summary=s.get("summary", ""),
+                error=s.get("error", ""),
             )
+            db.add(row)
+            await db.flush()
+            mem_id = s.get("_id")
+            id_map[mem_id] = row.id
+
+        # Second pass: fix parent_id references using the id_map
+        for s in spans:
+            mem_id = s.get("_id")
+            db_id = id_map.get(mem_id)
+            if db_id is None:
+                continue
+            parent_mem_id = s.get("parent_id")
+            db_parent_id = id_map.get(parent_mem_id)
+            if db_parent_id is not None:
+                from sqlalchemy import update
+
+                await db.execute(
+                    update(ExecutionSpan)
+                    .where(ExecutionSpan.id == db_id)
+                    .values(parent_id=db_parent_id)
+                )
+
         await db.commit()
 
 

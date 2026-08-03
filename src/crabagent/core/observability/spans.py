@@ -82,10 +82,9 @@ def _count_children(ctx: AgentContext, parent_id: int | None) -> int:
 
 
 def export_spans(ctx: AgentContext) -> list[dict[str, Any]]:
-    """Return spans in a format suitable for DB persistence (strip ``_id``)."""
-    result = []
-    for s in ctx.spans:
-        row = dict(s)
-        row.pop("_id", None)
-        result.append(row)
-    return result
+    """Return spans in a format suitable for DB persistence.
+
+    The ``_id`` field is kept so that :func:`execution_span_batch_create`
+    can map in-memory IDs to database IDs and fix ``parent_id`` references.
+    """
+    return [dict(s) for s in ctx.spans]
