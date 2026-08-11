@@ -70,7 +70,7 @@ export function PetsSettingsPanel() {
     try {
       const [list, active] = await Promise.all([listPets(), getActivePet()]);
       const sorted = [
-        { id: "builtin-crab", displayName: "CrabAgent 小螃蟹", description: "", is_builtin: true, created_at: "" },
+        { id: "builtin-crab", displayName: "CrabAgent 小螃蟹", description: "", is_builtin: true, created_at: "", action_pack: "basic" },
         ...list.filter((p) => p.id !== "builtin-crab"),
       ];
       setPets(sorted);
@@ -554,18 +554,20 @@ export function PetsSettingsPanel() {
                 </>
               )}
             </div>
-            {!pet.is_builtin && (
-              <Button
-                variant="secondary"
-                size="sm"
-                className="w-full"
-                disabled={expanding === pet.id || generating}
-                onClick={() => void handleExpand(pet.id, "office")}
-              >
-                {expanding === pet.id ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
-                {t("pets.expandOffice")}
-              </Button>
-            )}
+            {!pet.is_builtin &&
+              pet.action_pack !== "office" &&
+              pet.action_pack !== "interactive" && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="w-full"
+                  disabled={expanding === pet.id || generating}
+                  onClick={() => void handleExpand(pet.id, "office")}
+                >
+                  {expanding === pet.id ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+                  {t("pets.expandOffice")}
+                </Button>
+              )}
           </div>
         ))}
       </div>

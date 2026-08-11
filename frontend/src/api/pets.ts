@@ -6,6 +6,7 @@ export interface PetListItem {
   description: string;
   is_builtin: boolean;
   created_at: string;
+  action_pack: string;
 }
 
 export interface PetAnimationConfig {

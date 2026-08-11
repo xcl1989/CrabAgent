@@ -65,6 +65,7 @@ class PetListItem(BaseModel):
     description: str
     is_builtin: bool
     created_at: str
+    action_pack: str = "basic"
 
 
 class PetDetail(BaseModel):
@@ -126,6 +127,15 @@ def _store() -> PetStore:
     return get_pet_store()
 
 
+def _action_pack_from_config(config_json: str) -> str:
+    """Safely read action_pack from a pet config_json string."""
+    try:
+        config = PetConfig.model_validate_json(config_json)
+        return config.action_pack
+    except Exception:
+        return "basic"
+
+
 def _spritesheet_disk_path(pet: PetPackage, store: PetStore) -> Path:
     return store.spritesheet_path(pet.pet_id, pet.spritesheet_filename)
 
@@ -176,6 +186,7 @@ async def list_pets(
             description=r.description,
             is_builtin=r.is_builtin,
             created_at=r.created_at.isoformat(),
+            action_pack=_action_pack_from_config(r.config_json),
         )
         for r in rows
     ]
