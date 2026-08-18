@@ -2,26 +2,51 @@ import { ChatMessage } from "../types/ChatMessage";
 import { SSEEvent } from "../api/events";
 import { Message } from "../api/sessions";
 
+/** Append `text` to the last message's `content` if `predicate` matches.
+ *  Returns true when the message was updated (and the array slot now holds
+ *  a new object reference, so memoized consumers re-render). */
+function appendToLast(
+  messages: ChatMessage[],
+  predicate: (m: ChatMessage) => boolean,
+  text: string,
+): boolean {
+  const last = messages[messages.length - 1];
+  if (!last || !predicate(last)) return false;
+  messages[messages.length - 1] = { ...last, content: last.content + text };
+  return true;
+}
+
+/** Append `text` to the `bashStream` of the most recent bash tool_call.
+ *  Returns true when a matching tool_call was found. */
+function appendBashOutput(messages: ChatMessage[], text: string): boolean {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role === "tool_call" && m.content?.includes('"bash"')) {
+      messages[i] = { ...m, bashStream: (m.bashStream || "") + text };
+      return true;
+    }
+  }
+  return false;
+}
+
 export function sseEventToMessages(event: SSEEvent, messages: ChatMessage[]): ChatMessage[] {
   const updated = [...messages];
 
   if (event.type === "text_delta") {
-    const last = updated[updated.length - 1];
-    if (last?.role === "assistant" && last.isStreaming) {
-      last.content += (event.data.text as string) || "";
+    const text = (event.data.text as string) || "";
+    if (appendToLast(updated, (m) => m.role === "assistant" && !!m.isStreaming, text)) {
       return updated;
     }
-    updated.push({ id: `s-${Date.now()}`, role: (event.data.role as string) || "assistant", content: (event.data.text as string) || "", isStreaming: true });
+    updated.push({ id: `s-${Date.now()}`, role: (event.data.role as string) || "assistant", content: text, isStreaming: true });
     return updated;
   }
 
   if (event.type === "thinking_delta") {
-    const last = updated[updated.length - 1];
-    if (last?.role === "thinking") {
-      last.content += (event.data.text as string) || "";
+    const text = (event.data.text as string) || "";
+    if (appendToLast(updated, (m) => m.role === "thinking", text)) {
       return updated;
     }
-    updated.push({ id: `t-${Date.now()}`, role: "thinking", content: (event.data.text as string) || "" });
+    updated.push({ id: `t-${Date.now()}`, role: "thinking", content: text });
     return updated;
   }
 
@@ -68,20 +93,7 @@ export function sseEventToMessages(event: SSEEvent, messages: ChatMessage[]): Ch
 
   if (event.type === "bash_output") {
     const text = (event.data.text as string) || "";
-    // Find the last tool_call for "bash" and append streaming output
-    let bashCallIdx = -1;
-    for (let i = updated.length - 1; i >= 0; i--) {
-      const m = updated[i];
-      if (m.role === "tool_call" && m.content?.includes('"bash"')) {
-        bashCallIdx = i;
-        break;
-      }
-    }
-    if (bashCallIdx < 0) return updated;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const bashCall: any = updated[bashCallIdx];
-    const prevStream = bashCall.bashStream || "";
-    bashCall.bashStream = prevStream + text;
+    if (appendBashOutput(updated, text)) return updated;
     return updated;
   }
 
@@ -192,9 +204,8 @@ export function sseEventToMessages(event: SSEEvent, messages: ChatMessage[]): Ch
   }
 
   if (event.type === "compress_delta") {
-    const last = updated[updated.length - 1];
-    if (last?.role === "compress" && last.isStreaming) {
-      last.content += (event.data.text as string) || "";
+    const text = (event.data.text as string) || "";
+    if (appendToLast(updated, (m) => m.role === "compress" && !!m.isStreaming, text)) {
       return updated;
     }
     return updated;
