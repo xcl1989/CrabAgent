@@ -226,6 +226,21 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
                 );
               if (sameShape) return prev;
 
+              // ID stability: when DB messages have the same role sequence as
+              // live messages, preserve the live IDs to avoid React key changes
+              // and the resulting full unmount/remount cascade (which freezes
+              // the UI for 1-2s on large conversations with code blocks).
+              const sameRoleSequence =
+                dbMsgs.length === prev.length &&
+                dbMsgs.every((m, idx) => m.role === prev[idx]?.role);
+              if (sameRoleSequence) {
+                return dbMsgs.map((m, idx) => ({
+                  ...m,
+                  id: prev[idx].id,
+                  isStreaming: false,
+                }));
+              }
+
               const dbTotal = dbMsgs.reduce((s, m) => s + (m.content?.length || 0), 0);
               const prevTotal = prev.reduce((s, m) => s + (m.content?.length || 0), 0);
               const dbHasScreenshots = dbMsgs.some((m) => m.role === "screenshot");

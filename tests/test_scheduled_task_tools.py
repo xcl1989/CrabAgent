@@ -37,6 +37,10 @@ class FakeDB:
     async def refresh(self, task):
         self.refreshed += 1
 
+    async def delete(self, obj):
+        if self.task is obj:
+            self.task = None
+
     async def close(self):
         self.closed += 1
 
@@ -49,7 +53,8 @@ class FakeScheduler:
     async def add_task(self, task):
         self.added.append(task)
 
-    async def remove_task(self, task_id):
+    def remove_task(self, task_id):
+        # Real SchedulerService.remove_task is a sync method returning None.
         self.removed.append(task_id)
 
 
@@ -133,7 +138,8 @@ async def test_scheduled_task_update_changes_cron_and_reschedules(monkeypatch: p
 
 @pytest.mark.asyncio
 async def test_scheduled_task_delete_removes_from_scheduler(monkeypatch: pytest.MonkeyPatch):
-    db = FakeDB()
+    task = SimpleNamespace(id=3, name="Old", cron_expression="0 9 * * *", enabled=True)
+    db = FakeDB(task=task)
     scheduler = FakeScheduler()
     monkeypatch.setattr(scheduled_task_tools, "_get_db", _async_return(db))
     monkeypatch.setattr("crabagent.serve.scheduler.get_scheduler", lambda: scheduler)
@@ -143,6 +149,20 @@ async def test_scheduled_task_delete_removes_from_scheduler(monkeypatch: pytest.
     assert scheduler.removed == [3]
     assert db.committed == 1
     assert "3" in result
+
+
+@pytest.mark.asyncio
+async def test_scheduled_task_delete_missing_returns_not_found(monkeypatch: pytest.MonkeyPatch):
+    db = FakeDB()
+    scheduler = FakeScheduler()
+    monkeypatch.setattr(scheduled_task_tools, "_get_db", _async_return(db))
+    monkeypatch.setattr("crabagent.serve.scheduler.get_scheduler", lambda: scheduler)
+
+    result = await scheduled_task_tools.scheduled_task_delete(99, context=SimpleNamespace(locale="en", metadata={}))
+
+    assert scheduler.removed == []
+    assert db.committed == 0
+    assert "99" in result
 
 
 @pytest.mark.asyncio

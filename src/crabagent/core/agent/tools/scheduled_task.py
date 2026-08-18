@@ -252,17 +252,23 @@ async def scheduled_task_update(
             parts = cron_expression.strip().split()
             if len(parts) != 5:
                 return _t("scheduled_task_cron_error", locale, cron=cron_expression)
-            from crabagent.serve.scheduler import get_scheduler
-
             task.cron_expression = cron_expression.strip()
-            await get_scheduler().remove_task(task_id)
-            await get_scheduler().add_task(task)
             changes.append(f"cron\u2192{cron_expression}")
-
-        await db.commit()
 
         if not changes:
             return _t("scheduled_task_no_changes", locale, id=task_id)
+
+        # Commit DB first, then sync the in-memory scheduler so the two
+        # never diverge on commit failure.
+        await db.commit()
+
+        if cron_expression is not None:
+            from crabagent.serve.scheduler import get_scheduler
+
+            sched = get_scheduler()
+            sched.remove_task(task_id)  # sync method — do NOT await
+            await sched.add_task(task)
+
         return _t("scheduled_task_updated", locale, id=task_id, changes=", ".join(changes))
     except Exception as e:
         await db.rollback()
@@ -287,7 +293,7 @@ async def scheduled_task_update(
     metadata={"source": "builtin", "category": "scheduled"},
 )
 async def scheduled_task_delete(task_id: int, context=None) -> str:
-    from sqlalchemy import delete
+    from sqlalchemy import select
 
     from crabagent.core.database import ScheduledTask
     from crabagent.serve.scheduler import get_scheduler
@@ -295,9 +301,16 @@ async def scheduled_task_delete(task_id: int, context=None) -> str:
     locale = _get_locale(context)
     db = await _get_db()
     try:
-        await get_scheduler().remove_task(task_id)
-        await db.execute(delete(ScheduledTask).where(ScheduledTask.id == task_id))
+        # Verify existence first so we can report "not found" accurately.
+        result = await db.execute(select(ScheduledTask).where(ScheduledTask.id == task_id))
+        task = result.scalar_one_or_none()
+        if not task:
+            return _t("scheduled_task_not_found", locale, id=task_id)
+
+        await db.delete(task)
         await db.commit()
+
+        get_scheduler().remove_task(task_id)  # sync method — do NOT await
         return _t("scheduled_task_deleted", locale, id=task_id)
     except Exception as e:
         await db.rollback()
@@ -336,7 +349,7 @@ async def scheduled_task_pause(task_id: int, context=None) -> str:
             return _t("scheduled_task_not_found", locale, id=task_id)
         task.enabled = False
         await db.commit()
-        await get_scheduler().remove_task(task_id)
+        get_scheduler().remove_task(task_id)  # sync method — do NOT await
         return _t("scheduled_task_paused", locale, id=task_id, name=task.name)
     except Exception as e:
         await db.rollback()
