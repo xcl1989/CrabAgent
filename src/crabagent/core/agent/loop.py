@@ -28,9 +28,7 @@ async def _get_default_model_settings() -> tuple[str | None, str | None]:
 
         async with async_session_factory() as db:
             result = await db.execute(
-                select(AppSetting).where(
-                    AppSetting.key.in_(("default_model", "default_model_provider"))
-                )
+                select(AppSetting).where(AppSetting.key.in_(("default_model", "default_model_provider")))
             )
             values = {row.key: row.value for row in result.scalars() if row.value}
         return values.get("default_model"), values.get("default_model_provider")
@@ -225,6 +223,10 @@ async def run_agent(
     _max_stream_retries = 2
     _llm_retry_count = 0
     _llm_retry_max = settings.llm_retry_max
+    # Graceful degradation flag: set when the provider rejects multimodal
+    # content blocks (e.g. "content.type 取值范围 ['text']") so subsequent
+    # requests are rebuilt with image blocks stripped.
+    _force_text_only = bool(context.metadata.get("_force_text_only", False))
     context.metadata["_llm_params"] = dict(llm)
     context.metadata["_resolved_model"] = model.split("/", 1)[-1] if "/" in model else model
     context.metadata["_resolved_model_full"] = model  # keep provider prefix for compress
@@ -245,14 +247,16 @@ async def run_agent(
             _llm_t0 = time.time()
             _display_model = model.split("/", 1)[-1] if "/" in model else model
             _llm_span = start_span(
-                context, "llm_call", _display_model,
+                context,
+                "llm_call",
+                _display_model,
                 parent_id=_root_span["_id"],
                 provider=context.metadata.get("resolved_provider", provider.name),
             )
             completion_params = {
                 "model": model,
                 **llm,
-                "messages": _build_messages(context),
+                "messages": _build_messages(context, text_only=_force_text_only),
                 "tools": tools,
                 **({} if provider.provider_type == "chatgpt" else {"max_tokens": settings.max_tokens}),
                 "stream": True,
@@ -500,7 +504,9 @@ async def run_agent(
 
             async def _run_and_emit(meta: dict):
                 _tool_span = start_span(
-                    context, "tool_call", meta["name"],
+                    context,
+                    "tool_call",
+                    meta["name"],
                     parent_id=_root_span["_id"],
                     source=meta["source"],
                 )
@@ -678,8 +684,28 @@ async def run_agent(
                 user_message = "🚫 内容被安全策略拦截，请修改输入后重试。"
 
             elif isinstance(e, litellm.exceptions.BadRequestError):
-                user_message = f"❌ 请求参数错误：{e!s}"
-                logger.warning("BadRequestError details: %s", e)
+                err_text = str(e)
+                # Providers running text-only models reject multimodal content
+                # blocks with e.g. "messages.content.type 参数非法，取值范围 ['text']".
+                # Recover by stripping image blocks and retrying once in text-only mode.
+                _err_compact = err_text.lower().replace(" ", "").replace("_", "")
+                _is_content_type_reject = (
+                    "content.type" in _err_compact or "contentparts" in _err_compact
+                ) and "text" in _err_compact
+                if _is_content_type_reject and not _force_text_only:
+                    _force_text_only = True
+                    _llm_retry_count = 0
+                    user_message = "🖼️ 当前模型不支持图片输入，已自动切换为纯文本模式重试…"
+                    await context.event_bus.emit(AgentEvent(type=EventType.AGENT_INFO, data={"message": user_message}))
+                    logger.warning(
+                        "Provider rejected multimodal content blocks; retrying in text-only mode: %s",
+                        err_text[:200],
+                    )
+                    retryable = True
+                    backoff_delay = 0.0
+                else:
+                    user_message = f"❌ 请求参数错误：{e!s}"
+                    logger.warning("BadRequestError details: %s", e)
 
             else:
                 # Generic / unknown error — still retry once for safety
@@ -780,7 +806,7 @@ async def _grace_call(context: AgentContext, llm: dict, model: str):
         response = await litellm.acompletion(
             model=model,
             **llm,
-            messages=_build_messages(context),
+            messages=_build_messages(context, text_only=context.metadata.get("_force_text_only", False)),
             max_tokens=1024,
         )
         content = response.choices[0].message.content or ""
@@ -793,10 +819,12 @@ async def _grace_call(context: AgentContext, llm: dict, model: str):
         logger.error(f"Grace call failed: {e}")
 
 
-def _build_messages(context: AgentContext) -> list[dict]:
+def _build_messages(context: AgentContext, text_only: bool = False) -> list[dict]:
     from crabagent.core.agent.token_limits import is_vision_model
 
-    vision = is_vision_model(context.model or "")
+    vision = is_vision_model(context.model or "") and not text_only
+    if text_only:
+        logger.info("Rebuilding messages in text-only mode (image blocks stripped)")
     messages = []
     if context.system_prompt:
         messages.append({"role": "system", "content": context.system_prompt})

@@ -8,6 +8,15 @@ English version: [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
+## [0.13.8] — 纯文本模型兼容性修复
+
+### 修复
+- **纯文本模型拒绝多模态内容的致命错误** — 会话历史包含图片（截图、上传图片等）时，纯文本模型（如 kimi-k2 系列、moonshot-v1 非 vision 版）会报 `BadRequestError: messages.content.type 参数非法，取值范围 ['text']` 且无法恢复。
+- **视觉模型识别增强** — 新增 `VISION_SUPPORTED_FRAGMENTS` 白名单（`vision`、`-vl`、`omni` 等片段），优先于黑名单判断，确保 `moonshot-v1-*-vision-preview`、`kimi-vl-*`、`qwen-omni-*` 等视觉模型不受影响；同时将 `kimi-`、`moonshot-v1-` 前缀加入不支持视觉的黑名单。
+- **自动降级重试** — 检测到 provider 拒绝多模态内容块的 `BadRequestError` 时，自动切换为纯文本模式（图片块替换为 `[Attached image: 路径 (类型, 大小)]` 文本占位符）并立即重试，会话不再中断。降级标志存入 `context.metadata["_force_text_only"]`，跨迭代及预算耗尽时的 grace call 均生效。
+
+---
+
 ## [0.13.7] — 执行追踪与洞察
 
 ### 新增

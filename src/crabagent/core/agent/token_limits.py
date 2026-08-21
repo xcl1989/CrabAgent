@@ -114,11 +114,28 @@ VISION_UNSUPPORTED_PREFIXES = [
     "minimax-",
     "gpt-3.5-",
     "o1-",
+    "kimi-",
+    "moonshot-v1-",
+]
+
+# Model name fragments that unambiguously indicate vision capability.
+# Checked BEFORE the unsupported lists so e.g. "moonshot-v1-8k-vision-preview"
+# or "kimi-vl-..." are still treated as vision-capable.
+VISION_SUPPORTED_FRAGMENTS = [
+    "vision",
+    "kimi-vl",
+    "-vl",
+    "vl-",
+    "omni",
 ]
 
 
 def is_vision_model(model: str) -> bool:
     clean = model.split("/", 1)[-1] if "/" in model else model
+    low = clean.lower()
+    for fragment in VISION_SUPPORTED_FRAGMENTS:
+        if fragment in low:
+            return True
     if clean in VISION_UNSUPPORTED_EXACT:
         return False
     for prefix in VISION_UNSUPPORTED_PREFIXES:

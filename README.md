@@ -276,7 +276,7 @@ AI agents can read, create, edit, and preview Office documents (`.docx`, `.xlsx`
 Remembers your project context across sessions. Zero extra cost.
 
 ### 🖼️ Multi-modal
-Paste/drop images into conversations. Auto-detects vision model support. AI-generated images persist across sessions with inline rendering. **Lazy loading**: images are fetched on-demand after text renders, so opening image-heavy sessions is instant.
+Paste/drop images into conversations. Auto-detects vision model support; on text-only models (e.g. kimi-k2, moonshot-v1) images degrade gracefully to text placeholders and the session keeps running. AI-generated images persist across sessions with inline rendering. **Lazy loading**: images are fetched on-demand after text renders, so opening image-heavy sessions is instant.
 
 ### 🗂️ Multi-Workspace
 Work across multiple projects simultaneously. The workspace switcher shows a **live badge** with the count of active sessions in each workspace — no need to switch back and forth to check if a background agent has finished. Running sessions in the current workspace are marked with a pulsing green indicator.

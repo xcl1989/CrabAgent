@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.13.8] — Text-Only Model Compatibility Fix
+
+### Fixed
+- **Fatal error when text-only models reject multimodal content** — Sessions whose history contained images (screenshots, uploads, etc.) would fail irrecoverably on text-only models (e.g. the kimi-k2 family, non-vision moonshot-v1) with `BadRequestError: messages.content.type invalid, allowed values ['text']`.
+- **Improved vision model detection** — Added a `VISION_SUPPORTED_FRAGMENTS` whitelist (`vision`, `-vl`, `omni` fragments) checked before the blacklist, so `moonshot-v1-*-vision-preview`, `kimi-vl-*`, and `qwen-omni-*` remain vision-capable; the `kimi-` and `moonshot-v1-` prefixes are now on the vision-unsupported blacklist.
+- **Automatic text-only fallback** — When the provider rejects multimodal content blocks with a `BadRequestError`, the agent automatically rebuilds messages with image blocks replaced by `[Attached image: path (mime, size)]` placeholders and retries immediately instead of aborting the session. The flag is stored in `context.metadata["_force_text_only"]` and persists across iterations and the budget-exhausted grace call.
+
+---
+
 ## [0.13.7] — Execution Trace & Insights
 
 ### Added
