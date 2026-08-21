@@ -56,14 +56,10 @@ cd "$PROJECT_ROOT/electron"
 npm ci --silent 2>/dev/null
 npx electron-builder --mac --dir -p never 2>&1 | tail -5
 
-# 6. Create .dmg using system hdiutil (no network needed)
-echo "[6/6] Creating .dmg with hdiutil..."
-APP_DIR="$PROJECT_ROOT/electron/dist-electron/mac-arm64"
-DMG_NAME="CrabAgent-$(node -e "console.log(require('./package.json').version)")-arm64.dmg"
-DMG_PATH="$PROJECT_ROOT/electron/dist-electron/$DMG_NAME"
-rm -f "$DMG_PATH"  # remove old if any
-hdiutil create -volname "CrabAgent" -srcfolder "$APP_DIR/CrabAgent.app" -ov -format UDZO "$DMG_PATH" 2>&1
+# 6. Build DMG with electron-builder (drag-to-Applications layout from package.json)
+echo "[6/6] Creating .dmg with electron-builder..."
+npx electron-builder --mac dmg -p never 2>&1 | tail -3
 
 echo ""
 echo "=== Build Complete! ==="
-ls -lh "$DMG_PATH"
+ls -lh dist-electron/CrabAgent-*-arm64.dmg | tail -1
