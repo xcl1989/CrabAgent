@@ -44,6 +44,8 @@ DEFAULT_MODEL_TOKEN_LIMITS: dict[str, int] = {
     "glm-5-turbo": 200_000,
     "glm-5.1": 200_000,
     "glm-5.2": 1_000_000,
+    "glm-5.3": 1_000_000,
+    "glm-5.3-flash": 1_000_000,
     "qwen-turbo": 1_000_000,
     "qwen-plus": 128_000,
     "qwen-max": 32_000,
@@ -118,6 +120,11 @@ VISION_UNSUPPORTED_PREFIXES = [
     "moonshot-v1-",
 ]
 
+# Explicit capabilities take precedence over legacy family-level deny rules.
+VISION_SUPPORTED_EXACT = {
+    "glm-5.3-flash",
+}
+
 # Model name fragments that unambiguously indicate vision capability.
 # Checked BEFORE the unsupported lists so e.g. "moonshot-v1-8k-vision-preview"
 # or "kimi-vl-..." are still treated as vision-capable.
@@ -133,13 +140,15 @@ VISION_SUPPORTED_FRAGMENTS = [
 def is_vision_model(model: str) -> bool:
     clean = model.split("/", 1)[-1] if "/" in model else model
     low = clean.lower()
+    if low in VISION_SUPPORTED_EXACT:
+        return True
     for fragment in VISION_SUPPORTED_FRAGMENTS:
         if fragment in low:
             return True
-    if clean in VISION_UNSUPPORTED_EXACT:
+    if low in VISION_UNSUPPORTED_EXACT:
         return False
     for prefix in VISION_UNSUPPORTED_PREFIXES:
-        if clean.startswith(prefix):
+        if low.startswith(prefix):
             return False
     return True
 
