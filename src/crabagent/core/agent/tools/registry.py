@@ -76,15 +76,20 @@ class ToolRegistry:
             for t in self._tools.values()
         ]
 
-    def tool_defs(self, locale: str = "en") -> list[dict[str, Any]]:
+    def tool_defs(self, locale: str = "en", exclude_names: set[str] | None = None) -> list[dict[str, Any]]:
         """Return tool definitions for LLM function calling.
 
         When locale != 'en', overrides descriptions from i18n translation files.
+        ``exclude_names`` supports per-request capability filtering without
+        mutating the session's registry.
         """
         from crabagent.core.i18n import translate_tool
 
         result = []
+        excluded = exclude_names or set()
         for t in self._tools.values():
+            if t.name in excluded:
+                continue
             desc = t.description
             params = t.parameters
 
@@ -265,7 +270,7 @@ class ToolRegistry:
             )
             shutil.rmtree(str(md), ignore_errors=True)
 
-    async def execute(self, name: str, arguments: dict[str, Any], context: Any = None) -> str:
+    async def execute(self, name: str, arguments: dict[str, Any], context: Any = None) -> object:
         import time as _t
 
         tool = self._tools.get(name)
@@ -335,7 +340,9 @@ class ToolRegistry:
             # Flush pending molts immediately for direct tool calls (outside run_agent)
             if context is not None and not context.metadata.get("_batch_molt"):
                 await self._flush_molt_snapshot(context)
-            return str(result)
+            # Preserve structured and multimodal outputs. The agent loop handles
+            # protocol-safe serialization and moves image blocks to user messages.
+            return result if isinstance(result, (str, list, dict)) else str(result)
         except Exception as e:
             return f"Error executing {name}: {e}"
 

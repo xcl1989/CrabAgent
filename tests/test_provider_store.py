@@ -41,6 +41,32 @@ def test_build_litellm_params_for_openai_compatible_provider_includes_api_key_an
     }
 
 
+def test_same_type_providers_keep_separate_api_keys():
+    first = ProviderInfo(
+        name="zhipu-work",
+        display_name="智谱 GLM",
+        provider_type="zhipu",
+        api_key="work-key",
+        base_url="https://open.bigmodel.cn/api/paas/v4",
+        is_default=True,
+        enabled=True,
+        extra={},
+    )
+    second = ProviderInfo(
+        name="zhipu-personal",
+        display_name="智谱 GLM",
+        provider_type="zhipu",
+        api_key="personal-key",
+        base_url="https://open.bigmodel.cn/api/paas/v4",
+        is_default=False,
+        enabled=True,
+        extra={},
+    )
+
+    assert build_litellm_params(first)["api_key"] == "work-key"
+    assert build_litellm_params(second)["api_key"] == "personal-key"
+
+
 def test_resolve_model_for_provider_adds_chatgpt_prefix():
     provider = ProviderInfo(
         name="gptplus",

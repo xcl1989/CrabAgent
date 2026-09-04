@@ -2,15 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from crabagent.core.agent.context import AgentContext
 from crabagent.core.agent.tools.edit import edit_file
 from crabagent.core.agent.tools.glob import _glob_to_regex, glob_files
 from crabagent.core.agent.tools.grep import _expand_braces, _match_include, grep_files
 from crabagent.core.agent.tools.read import read_file
 from crabagent.core.agent.tools.write import write_file
-
 
 # ── write ─────────────────────────────────────────────────────────────
 
@@ -108,6 +105,34 @@ def test_read_file_handles_binary(tmp_path: Path):
     result = read_file("blob.bin", context=context)
 
     assert "Binary file" in result
+
+
+def test_read_file_returns_image_blocks_for_vision_model(tmp_path: Path):
+    from PIL import Image
+
+    target = tmp_path / "sample.png"
+    Image.new("RGB", (20, 10), "red").save(target)
+    context = AgentContext(workspace=tmp_path, model="gpt-4o")
+
+    result = read_file("sample.png", context=context)
+
+    assert isinstance(result, list)
+    assert result[1]["type"] == "image_url"
+    assert result[1]["image_url"]["url"].startswith("data:image/png;base64,")
+    assert result[1]["file_path"] == str(target)
+
+
+def test_read_file_keeps_image_text_only_for_non_vision_model(tmp_path: Path):
+    from PIL import Image
+
+    target = tmp_path / "sample.png"
+    Image.new("RGB", (20, 10), "red").save(target)
+    context = AgentContext(workspace=tmp_path, model="deepseek-chat")
+
+    result = read_file("sample.png", context=context)
+
+    assert isinstance(result, str)
+    assert "cannot receive this image directly" in result
 
 
 # ── glob ──────────────────────────────────────────────────────────────

@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     db_url: str = ""
     redis_url: str = "redis://localhost:6379/0"
     jwt_secret: str = "crabagent-secret-change-me"
-    jwt_expire_minutes: int = 1440
+    jwt_expire_minutes: int = 43_200
 
     serve_host: str = "0.0.0.0"
     serve_port: int = 5210
@@ -79,7 +79,7 @@ class Settings(BaseSettings):
     browser_strategy: str = "dom"
     browser_screenshot_to_llm: bool = True
     browser_screenshot_history: int = 3
-    browser_screenshot_max_bytes: int = 200_000
+    browser_screenshot_max_bytes: int = 1_500_000
 
     molt_keep_count: int = 20
     molt_keep_days: int = 7

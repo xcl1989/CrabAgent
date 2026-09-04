@@ -83,6 +83,14 @@ async def get_provider_quota(
         return {"provider_type": "deepseek", "raw": raw, "summary": summary}
 
     elif provider.provider_type == "zhipu":
+        if "/api/coding/" not in provider.base_url:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Zhipu quota query is only available for personal Coding Plan providers; "
+                    "organization and standard API keys are not supported by this endpoint"
+                ),
+            )
         try:
             raw = await _query_zhipu_quota(provider.base_url, provider.api_key)
         except Exception as e:

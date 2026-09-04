@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.13.9] — Native Multimodal Image Inspection
+
+### Added
+- **Direct local image inspection** — When the active model supports vision, the built-in `read` tool now embeds local PNG, JPEG, WebP, GIF, BMP, and TIFF files into the next model request instead of returning only binary-file metadata.
+- **Image resizing and format normalization** — Oversized or unsupported image formats are converted to bounded JPEG payloads before being added to the model context, reducing request size while preserving visual access.
+- **Multimodal tool result support** — Built-in and MCP tools can return structured text and image blocks. Tool protocol messages remain text-only, while images are delivered in a protocol-safe follow-up message for direct model inspection.
+
+### Changed
+- **Native vision takes priority over generic MCP analysis** — For vision-capable models, generic MCP `analyze_image` tools are hidden from that request so the model uses `read` and its native visual understanding. Specialized OCR, UI extraction, diagram, chart, comparison, and video tools remain available.
+- **Localized tool guidance** — English and Simplified Chinese `read` descriptions now explicitly direct vision models to inspect existing image paths without a generic image-analysis tool.
+
+### Fixed
+- **Capability fallback remains recoverable** — If a provider rejects multimodal content despite the selected model being classified as vision-capable, CrabAgent persists text-only mode for the run and makes generic MCP image analysis available again on the retry.
+- **Browser screenshot delivery** — Browser screenshots use the same bounded multimodal pipeline instead of being discarded when they exceed the former 200 KB embedding limit.
+
+---
+
 ## [0.13.8] — Text-Only Model Compatibility Fix
 
 ### Fixed

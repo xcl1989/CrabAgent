@@ -12,6 +12,75 @@ from crabagent.core.event import EventType
 
 
 @pytest.mark.asyncio
+async def test_resolve_provider_uses_instance_name(monkeypatch: pytest.MonkeyPatch):
+    requested = []
+    providers = {
+        "zhipu-work": SimpleNamespace(name="zhipu-work", api_key="work-key", enabled=True),
+        "zhipu-personal": SimpleNamespace(name="zhipu-personal", api_key="personal-key", enabled=True),
+    }
+
+    async def fake_get_provider(name):
+        requested.append(name)
+        return providers.get(name)
+
+    monkeypatch.setattr(loop, "get_provider", fake_get_provider)
+
+    first = await loop._resolve_provider("zhipu-work")
+    second = await loop._resolve_provider("zhipu-personal")
+
+    assert requested == ["zhipu-work", "zhipu-personal"]
+    assert first.api_key == "work-key"
+    assert second.api_key == "personal-key"
+
+
+@pytest.mark.asyncio
+async def test_run_agent_hides_generic_vision_mcp_for_multimodal_model(monkeypatch: pytest.MonkeyPatch):
+    registry = ToolRegistry()
+
+    @registry.register(
+        name="read",
+        description="read",
+        parameters={},
+    )
+    async def read(context=None):
+        return ""
+
+    @registry.register(
+        name="mcp__zai-vision__analyze_image",
+        description="generic image analysis",
+        parameters={},
+        metadata={"source": "mcp", "original_tool_name": "analyze_image"},
+    )
+    async def analyze_image(context=None):
+        return ""
+
+    context = AgentContext(workspace=Path.cwd(), tool_registry=registry, model="gpt-4o", max_iterations=1)
+    received = {}
+
+    async def fake_provider(provider_name=None):
+        return SimpleNamespace(name="openai", provider_type="openai", api_key="k", base_url="", enabled=True)
+
+    async def fake_acompletion(**kwargs):
+        received["tools"] = kwargs["tools"]
+        return _stream([_chunk(delta=_delta(content="done"), finish_reason="stop", usage=_usage())])
+
+    monkeypatch.setattr(loop, "_resolve_provider", fake_provider)
+    monkeypatch.setattr(
+        loop,
+        "litellm",
+        SimpleNamespace(acompletion=fake_acompletion, exceptions=loop.litellm.exceptions),
+    )
+    monkeypatch.setattr("crabagent.core.proxy.resolve_llm_proxy", _async_return(""))
+
+    await loop.run_agent(context, "inspect an image")
+
+    names = {tool["function"]["name"] for tool in received["tools"]}
+    assert "read" in names
+    assert "mcp__zai-vision__analyze_image" not in names
+    assert context.tool_registry.get("mcp__zai-vision__analyze_image") is not None
+
+
+@pytest.mark.asyncio
 async def test_run_agent_uses_saved_default_model_and_provider(monkeypatch: pytest.MonkeyPatch):
     context = AgentContext(workspace=Path.cwd(), max_iterations=1)
     received = {}
@@ -60,6 +129,38 @@ def test_preview_result_handles_text_lists_and_images():
     assert "hello" in result
     assert "[image embedded]" in result
     assert "https://example.com" in result
+
+
+def test_attach_images_from_structured_tool_result(tmp_path: Path):
+    from PIL import Image
+
+    image = tmp_path / "generated.png"
+    Image.new("RGB", (10, 10), "blue").save(image)
+    context = AgentContext(workspace=tmp_path)
+
+    result = loop.attach_images_from_tool_result(f'{{"images":[{{"path":"{image}"}}]}}', context)
+
+    assert isinstance(result, list)
+    assert result[1]["type"] == "image_url"
+
+
+def test_split_tool_dict_result_serializes_as_json():
+    result, images = loop.split_multimodal_tool_result({"status": "ok", "count": 2})
+
+    assert '"status": "ok"' in result
+    assert images == []
+
+
+def test_split_multimodal_tool_result_moves_images_out_of_tool_content():
+    result, images = loop.split_multimodal_tool_result(
+        [
+            {"type": "text", "text": "screenshot ready"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}},
+        ]
+    )
+
+    assert result == "screenshot ready"
+    assert images[0]["type"] == "image_url"
 
 
 def test_truncate_result_truncates_text_blocks_only():

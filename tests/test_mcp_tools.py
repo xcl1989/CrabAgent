@@ -1,4 +1,5 @@
 """Tests for MCP tool registration."""
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -7,6 +8,7 @@ import pytest
 
 from crabagent.core.agent.tools.registry import ToolRegistry
 from crabagent.core.mcp import tools as mcp_tools
+from crabagent.core.mcp.client import McpConnection
 
 
 class FakeMcpTool:
@@ -24,6 +26,14 @@ class FakeConn:
 
     async def call_tool(self, name, kwargs):
         return f"called {name} with {kwargs}"
+
+
+class FakeMcpSession:
+    def __init__(self, result):
+        self.result = result
+
+    async def call_tool(self, name, arguments):
+        return self.result
 
 
 class FakeManager:
@@ -68,6 +78,24 @@ def test_register_mcp_tools_registers_connected():
     assert t2 is not None
 
 
+def test_direct_vision_redundant_tool_names_only_selects_generic_analysis():
+    registry = ToolRegistry()
+    conn = FakeConn(
+        [
+            FakeMcpTool("analyze_image", "generic image analysis"),
+            FakeMcpTool("extract_text_from_screenshot", "specialized OCR"),
+        ]
+    )
+    conn.config = SimpleNamespace(name="zai-vision", display_name="Z.AI Vision")
+    manager = FakeManager({"zai-vision": conn})
+    mcp_tools.register_mcp_tools(registry, manager)
+
+    excluded = mcp_tools.direct_vision_redundant_tool_names(registry)
+
+    assert excluded == {"mcp__zai-vision__analyze_image"}
+    assert registry.get("mcp__zai-vision__extract_text_from_screenshot") is not None
+
+
 def test_register_mcp_tools_skips_duplicate():
     registry = ToolRegistry()
     conn = FakeConn([FakeMcpTool("tool1", "desc")])
@@ -91,6 +119,29 @@ def test_register_mcp_tools_with_multiple_servers():
 
     assert registry.get("mcp__server1__search") is not None
     assert registry.get("mcp__server2__fetch") is not None
+
+
+@pytest.mark.asyncio
+async def test_mcp_client_preserves_image_content():
+    connection = object.__new__(McpConnection)
+    connection.config = SimpleNamespace(name="vision")
+    connection.status = "connected"
+    connection.last_error = ""
+    connection._session = FakeMcpSession(
+        SimpleNamespace(
+            content=[
+                SimpleNamespace(text="image ready"),
+                SimpleNamespace(data="aGVsbG8=", mimeType="image/png"),
+            ],
+            isError=False,
+        )
+    )
+
+    result = await connection.call_tool("capture", {})
+
+    assert isinstance(result, list)
+    assert result[1]["type"] == "image_url"
+    assert result[1]["image_url"]["url"] == "data:image/png;base64,aGVsbG8="
 
 
 @pytest.mark.asyncio

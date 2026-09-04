@@ -22,8 +22,8 @@ def test_format_results_truncates_to_limit():
 
 
 def test_format_results_handles_missing_fields():
-    text = web_module._format_results("q", [{}], 5)
-    assert "Untitled" in text
+    text = web_module._format_results("q", [{"url": "https://example.com"}], 5)
+    assert "example.com" in text
 
 
 @pytest.mark.asyncio
@@ -47,8 +47,9 @@ async def test_search_searxng_builds_url_and_parses_results(monkeypatch: pytest.
         async def __aexit__(self, *a):
             return False
 
-        async def get(self, url):
+        async def get(self, url, **kwargs):
             captured["url"] = url
+            captured.update(kwargs)
             return FakeResponse()
 
     monkeypatch.setitem(__import__("sys").modules, "httpx", SimpleNamespace(AsyncClient=FakeClient))
@@ -58,8 +59,16 @@ async def test_search_searxng_builds_url_and_parses_results(monkeypatch: pytest.
 
     assert len(results) == 1
     assert results[0]["title"] == "A"
-    assert "q=hello+world" in captured["url"]
-    assert captured["url"].startswith("https://sx.example/search")
+    assert captured["params"]["q"] == "hello world"
+    assert captured["url"] == "https://sx.example/search"
+
+
+@pytest.mark.asyncio
+async def test_fetch_html_rejects_invalid_url():
+    html, error = await web_module._fetch_html("file:///etc/passwd")
+
+    assert html == ""
+    assert "http:// or https://" in error
 
 
 @pytest.mark.asyncio
@@ -108,7 +117,7 @@ async def test_web_search_falls_back_to_duckduckgo(monkeypatch: pytest.MonkeyPat
 
 
 @pytest.mark.asyncio
-async def test_web_search_returns_error_when_all_backends_fail(monkeypatch: pytest.MonkeyPatch):
+async def test_web_search_reports_provider_failure(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(web_module, "_get_setting", _async_return(None))
 
     async def failing_ddg(query, limit):
@@ -118,7 +127,35 @@ async def test_web_search_returns_error_when_all_backends_fail(monkeypatch: pyte
 
     result = await web_module.web_search("hello", 3)
 
-    assert result == "Error searching: ddg down"
+    assert "No results found" in result
+    assert "DDGS: RuntimeError: ddg down" in result
+
+
+@pytest.mark.asyncio
+async def test_web_search_falls_back_when_searxng_returns_empty(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(web_module, "_get_setting", _async_return("https://sx.example"))
+    monkeypatch.setattr(web_module, "_search_searxng", _async_return([]))
+    monkeypatch.setattr(
+        web_module,
+        "_search_duckduckgo",
+        _async_return([{"title": "Fallback", "url": "https://example.com", "snippet": "ok"}]),
+    )
+
+    result = await web_module.web_search("hello", 50)
+
+    assert "Fallback" in result
+
+
+def test_normalize_results_filters_invalid_and_duplicate_urls():
+    results = [
+        {"title": "A", "url": "https://example.com", "snippet": "  hello\nworld  "},
+        {"title": "duplicate", "url": "https://example.com"},
+        {"title": "bad", "url": "javascript:alert(1)"},
+    ]
+
+    assert web_module._normalize_results(results, 5) == [
+        {"title": "A", "url": "https://example.com", "snippet": "hello world"}
+    ]
 
 
 def test_scrapling_blocks_extracts_headings_and_lists():
@@ -141,7 +178,7 @@ def test_extract_with_scrapling_respects_css_selector():
     if not web_module.SCRAPLING_AVAILABLE:
         pytest.skip("scrapling not installed")
 
-    html = '<html><head><title>Page</title></head><body><article><p>Main</p></article><aside>skip</aside></body></html>'
+    html = "<html><head><title>Page</title></head><body><article><p>Main</p></article><aside>skip</aside></body></html>"
     result = web_module._extract_with_scrapling(html, "http://x", 5000, "article")
 
     assert "Main" in result
@@ -162,7 +199,9 @@ def test_extract_with_lxml_truncates_and_formats_content():
 async def test_web_scrape_falls_back_to_lxml_when_scrapling_raises(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(web_module, "SCRAPLING_AVAILABLE", True)
     monkeypatch.setattr(web_module, "_fetch_html", _async_return(("<html><body><p>fallback</p></body></html>", "")))
-    monkeypatch.setattr(web_module, "_extract_with_scrapling", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("boom")))
+    monkeypatch.setattr(
+        web_module, "_extract_with_scrapling", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("boom"))
+    )
     monkeypatch.setattr(web_module, "_extract_with_lxml", lambda html, url, max_length: "lxml fallback")
 
     result = await web_module.web_scrape("http://x", 50)

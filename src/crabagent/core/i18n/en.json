@@ -13,7 +13,7 @@
       }
     },
     "read": {
-      "description": "Read a file or directory from the filesystem. Returns file contents with line numbers, or directory listing.",
+      "description": "Read a file or directory. Returns text with line numbers, a directory listing, or an image inline when the model supports vision. For an existing image path, use read instead of a generic vision analysis tool.",
       "params": {
         "file_path": "Absolute path to the file or directory to read.",
         "offset": "Line number to start reading from (1-indexed). Default: 1.",

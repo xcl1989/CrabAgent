@@ -10,6 +10,11 @@ import litellm
 
 from crabagent.core.agent.compress import compress_context
 from crabagent.core.agent.context import AgentContext
+from crabagent.core.agent.multimodal import (
+    attach_images_from_tool_result,
+    split_multimodal_tool_result,
+    stringify_tool_result,
+)
 from crabagent.core.agent.token_limits import get_model_token_limit
 from crabagent.core.config import settings
 from crabagent.core.event import AgentEvent, EventType
@@ -90,7 +95,7 @@ def _preview_result(result: object, max_chars: int = 2000) -> str:
                 break
         text = "\n".join(parts)
         return text[:max_chars]
-    return str(result)[:max_chars]
+    return stringify_tool_result(result)[:max_chars]
 
 
 def _truncate_result(result: object, max_chars: int) -> object:
@@ -110,6 +115,11 @@ def _truncate_result(result: object, max_chars: int) -> object:
                     block = {**block, "text": text[:max_chars] + "\n\n... [truncated]"}
             out.append(block)
         return out
+    if isinstance(result, dict):
+        text = stringify_tool_result(result)
+        if len(text) > max_chars:
+            return text[:max_chars] + f"\n\n... [truncated {len(text) - max_chars} chars]"
+        return text
     return result
 
 
@@ -236,7 +246,14 @@ async def run_agent(
         await context.event_bus.emit(AgentEvent(type=EventType.ITERATION_START, data={"iteration": context.iteration}))
 
         locale = context.metadata.get("locale", context.locale)
-        tools = context.tool_registry.tool_defs(locale=locale) or None
+        excluded_tools: set[str] = set()
+        if not _force_text_only:
+            from crabagent.core.agent.token_limits import is_vision_model
+            from crabagent.core.mcp.tools import direct_vision_redundant_tool_names
+
+            if is_vision_model(context.metadata.get("_resolved_model", context.model or "")):
+                excluded_tools = direct_vision_redundant_tool_names(context.tool_registry)
+        tools = context.tool_registry.tool_defs(locale=locale, exclude_names=excluded_tools) or None
 
         try:
             full_text = ""
@@ -271,7 +288,6 @@ async def run_agent(
                 completion_params["allowed_openai_params"] = ["reasoning_effort"]
             response = await litellm.acompletion(**completion_params)
 
-            finished = False
             async for chunk in response:
                 if hasattr(chunk, "usage") and chunk.usage is not None:
                     usage = chunk.usage
@@ -359,9 +375,6 @@ async def run_agent(
                             else:
                                 target = len(tool_calls_list) - 1
                             tool_calls_list[target]["function"]["arguments"] += tc.function.arguments
-
-                if chunk.choices[0].finish_reason:
-                    finished = True
 
             # Some providers stream a user-facing reply only as reasoning_content.
             # Preserve it as the response instead of leaving the CLI with no answer.
@@ -512,6 +525,8 @@ async def run_agent(
                 )
                 try:
                     result = await context.tool_registry.execute(meta["name"], meta["args"], context=context)
+                    if meta["source"] == "builtin":
+                        result = attach_images_from_tool_result(result, context)
                     preview = _preview_result(result)
                     end_span(
                         _tool_span,
@@ -542,6 +557,7 @@ async def run_agent(
 
             gathered = await asyncio.gather(*[_run_and_emit(m) for m in tool_metas], return_exceptions=True)
 
+            pending_tool_images: list[tuple[str, list[dict]]] = []
             for i in range(len(tool_metas)):
                 result_entry = gathered[i]
                 meta = tool_metas[i]
@@ -563,9 +579,13 @@ async def run_agent(
                 else:
                     meta, result = result_entry
                     result = _truncate_result(result, _MAX_TOOL_RESULT_CHARS)
+                # OpenAI-compatible APIs generally require tool outputs to be text.
+                # Move image blocks into a following user message so vision models can
+                # inspect screenshots and files without a separate vision MCP call.
+                tool_content, image_blocks = split_multimodal_tool_result(result)
                 tool_msg = {
                     "role": "tool",
-                    "content": result,
+                    "content": tool_content,
                     "tool_call_id": tc["id"],
                     "agent": context.current_agent,
                     "name": meta["name"],
@@ -573,6 +593,26 @@ async def run_agent(
                 context.messages.append(tool_msg)
 
                 await context.event_bus.emit(AgentEvent(type=EventType.MESSAGE_CREATED, data={"message": tool_msg}))
+                if image_blocks:
+                    pending_tool_images.append((meta["name"], image_blocks))
+
+            # All tool responses must stay contiguous after the assistant tool_calls
+            # message. Append visual follow-ups only after the complete tool block.
+            for tool_name, image_blocks in pending_tool_images:
+                image_msg = {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Visual output returned by tool `{tool_name}`. Inspect it directly.",
+                        },
+                        *image_blocks,
+                    ],
+                    "agent": context.current_agent,
+                    "internal": True,
+                }
+                context.messages.append(image_msg)
+                await context.event_bus.emit(AgentEvent(type=EventType.MESSAGE_CREATED, data={"message": image_msg}))
 
             for msg in context.metadata.pop("_pending_sub_agent_messages", []):
                 await context.event_bus.emit(AgentEvent(type=EventType.MESSAGE_CREATED, data={"message": msg}))
@@ -694,6 +734,7 @@ async def run_agent(
                 ) and "text" in _err_compact
                 if _is_content_type_reject and not _force_text_only:
                     _force_text_only = True
+                    context.metadata["_force_text_only"] = True
                     _llm_retry_count = 0
                     user_message = "🖼️ 当前模型不支持图片输入，已自动切换为纯文本模式重试…"
                     await context.event_bus.emit(AgentEvent(type=EventType.AGENT_INFO, data={"message": user_message}))
@@ -822,7 +863,8 @@ async def _grace_call(context: AgentContext, llm: dict, model: str):
 def _build_messages(context: AgentContext, text_only: bool = False) -> list[dict]:
     from crabagent.core.agent.token_limits import is_vision_model
 
-    vision = is_vision_model(context.model or "") and not text_only
+    resolved_model = context.metadata.get("_resolved_model", context.model or "")
+    vision = is_vision_model(resolved_model) and not text_only
     if text_only:
         logger.info("Rebuilding messages in text-only mode (image blocks stripped)")
     messages = []

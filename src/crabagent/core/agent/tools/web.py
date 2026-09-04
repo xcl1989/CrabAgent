@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import logging
-import time
+import re
 from typing import Any
-from urllib.parse import quote_plus
+from urllib.parse import urlparse
 
 from crabagent.core.agent.tools.registry import registry
-from crabagent.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -31,19 +31,43 @@ async def _get_setting(key: str) -> str | None:
         return row.value if row else None
 
 
+def _clean_text(value: Any) -> str:
+    return re.sub(r"\s+", " ", str(value or "")).strip()
+
+
+def _normalize_results(results: list[dict], limit: int) -> list[dict]:
+    normalized: list[dict] = []
+    seen: set[str] = set()
+    for result in results:
+        url = _clean_text(result.get("url") or result.get("href"))
+        if not url or url in seen:
+            continue
+        parsed = urlparse(url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            continue
+        seen.add(url)
+        normalized.append(
+            {
+                "title": _clean_text(result.get("title")) or parsed.netloc,
+                "url": url,
+                "snippet": _clean_text(result.get("snippet") or result.get("content") or result.get("body")),
+            }
+        )
+        if len(normalized) >= limit:
+            break
+    return normalized
+
+
 def _format_results(query: str, results: list[dict], limit: int) -> str:
-    results = results[:limit]
+    results = _normalize_results(results, limit)
     if not results:
         return f'No results found for "{query}".'
 
     lines = [f'## Search results for "{query}"\n']
-    for i, r in enumerate(results, 1):
-        title = r.get("title", "Untitled")
-        url = r.get("url", "")
-        snippet = r.get("snippet", "").strip()
-        lines.append(f"{i}. **{title}**\n   {url}")
-        if snippet:
-            lines.append(f"   {snippet}")
+    for i, result in enumerate(results, 1):
+        lines.append(f"{i}. **{result['title']}**\n   {result['url']}")
+        if result["snippet"]:
+            lines.append(f"   {result['snippet']}")
         lines.append("")
 
     return "\n".join(lines)
@@ -54,61 +78,48 @@ async def _search_searxng(query: str, limit: int, searxng_url: str) -> list[dict
 
     from crabagent.core.proxy import resolve_category_proxy
 
-    url = f"{searxng_url.rstrip('/')}/search?q={quote_plus(query)}&format=json&categories=general"
-    client_kwargs = {"timeout": 15.0}
+    client_kwargs: dict[str, Any] = {"timeout": 15.0, "follow_redirects": True}
     proxy = await resolve_category_proxy("web")
     if proxy:
         client_kwargs["proxy"] = proxy
     async with httpx.AsyncClient(**client_kwargs) as client:
-        resp = await client.get(url)
+        resp = await client.get(
+            f"{searxng_url.rstrip('/')}/search",
+            params={"q": query, "format": "json", "categories": "general", "language": "auto"},
+            headers={"Accept": "application/json", "User-Agent": "CrabAgent/1.0"},
+        )
         resp.raise_for_status()
         data = resp.json()
 
-    return [
-        {"title": r.get("title", ""), "url": r.get("url", ""), "snippet": r.get("content", "")}
-        for r in data.get("results", [])
-    ]
+    return _normalize_results(data.get("results", []), limit)
 
 
 async def _search_duckduckgo(query: str, limit: int) -> list[dict]:
-    import asyncio
-
     from crabagent.core.proxy import resolve_category_proxy
 
     proxy = await resolve_category_proxy("web")
 
-    def _do_search():
+    def _do_search() -> list[dict]:
         from ddgs import DDGS
 
-        results = []
-        t0 = time.time()
-        kwargs = {}
+        kwargs = {"timeout": 8}
         if proxy:
             kwargs["proxy"] = proxy
         ddgs = DDGS(**kwargs)
         try:
-            it = ddgs.text(query, max_results=limit)
-            for r in it:
-                if time.time() - t0 > 18.0:
-                    break
-                results.append(
-                    {
-                        "title": r.get("title", ""),
-                        "url": r.get("href", ""),
-                        "snippet": r.get("body", ""),
-                    }
-                )
+            # Request extra candidates so invalid and duplicate URLs do not consume the limit.
+            raw_results = ddgs.text(query, max_results=min(limit * 2, 20), backend="auto")
+            return _normalize_results(list(raw_results or []), limit)
         finally:
             try:
                 ddgs.close()
             except Exception:
                 pass
-        return results
 
     try:
         return await asyncio.wait_for(asyncio.to_thread(_do_search), timeout=20.0)
     except TimeoutError:
-        logger.info("DuckDuckGo search timed out for query: %s", query[:50])
+        logger.info("DDGS search timed out for query: %s", query[:50])
         return []
 
 
@@ -116,46 +127,85 @@ async def _search_duckduckgo(query: str, limit: int) -> list[dict]:
 
 
 async def _fetch_html(url: str) -> tuple[str, str]:
-    """Fetch HTML via httpx. Returns (html, error_msg)."""
+    """Fetch a bounded HTML response. Returns (html, error_msg)."""
     import httpx
 
     from crabagent.core.proxy import resolve_category_proxy
 
+    parsed = urlparse(url.strip())
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return "", "Error fetching URL: only valid http:// or https:// URLs are supported."
+
     try:
-        client_kwargs = {
-            "timeout": 15.0,
+        client_kwargs: dict[str, Any] = {
+            "timeout": httpx.Timeout(20.0, connect=7.0),
             "follow_redirects": True,
             "headers": {
                 "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Accept-Language": "en-US,en;q=0.9",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.5",
+                "Accept-Language": "en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7",
+                "Accept-Encoding": "gzip, deflate",
             },
         }
         proxy = await resolve_category_proxy("web")
         if proxy:
             client_kwargs["proxy"] = proxy
         async with httpx.AsyncClient(**client_kwargs) as client:
-            resp = await client.get(url)
+            resp = await client.get(url.strip())
             resp.raise_for_status()
-            return resp.text[:200000], ""
+            content_type = resp.headers.get("content-type", "").lower()
+            if content_type and not any(kind in content_type for kind in ("text/", "html", "xml", "json")):
+                return "", f"Error fetching URL: unsupported content type {content_type}."
+            return resp.text[:500_000], ""
     except httpx.HTTPError as e:
-        return "", f"Error fetching URL: {e}"
+        return "", f"Error fetching URL: {type(e).__name__}: {e}"
+    except Exception as e:
+        logger.exception("Unexpected web fetch failure for %s", url)
+        return "", f"Error fetching URL: {type(e).__name__}: {e}"
 
 
 # ── Scrapling-based structured extraction ────────────────────────────
 
-_SKIP_TAGS = frozenset([
-    "script", "style", "nav", "footer", "header", "aside", "noscript",
-    "iframe", "svg", "form", "button", "input", "select", "textarea",
-])
+_SKIP_TAGS = frozenset(
+    [
+        "script",
+        "style",
+        "nav",
+        "footer",
+        "header",
+        "aside",
+        "noscript",
+        "iframe",
+        "svg",
+        "form",
+        "button",
+        "input",
+        "select",
+        "textarea",
+    ]
+)
 
 _HEADING_TAGS = frozenset(["h1", "h2", "h3", "h4", "h5", "h6"])
 
-_BLOCK_TAGS = frozenset([
-    "h1", "h2", "h3", "h4", "h5", "h6", "p", "li", "tr",
-    "blockquote", "pre", "code", "dd", "dt",
-])
+_BLOCK_TAGS = frozenset(
+    [
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "p",
+        "li",
+        "tr",
+        "blockquote",
+        "pre",
+        "code",
+        "dd",
+        "dt",
+    ]
+)
 
 
 def _scrapling_blocks(el: Any, depth: int = 0) -> list[str]:
@@ -181,11 +231,7 @@ def _scrapling_blocks(el: Any, depth: int = 0) -> list[str]:
         if tag == "li":
             return [f"- {full}"]
         if tag == "tr":
-            cells = [
-                td.get_all_text().strip()
-                for td in el.css("td,th")
-                if td.get_all_text().strip()
-            ]
+            cells = [td.get_all_text().strip() for td in el.css("td,th") if td.get_all_text().strip()]
             return [f"| {' | '.join(cells)} |"] if cells else []
         # p, blockquote, pre, … — process inline links
         return [_scrapling_inline(el)]
@@ -217,7 +263,7 @@ def _scrapling_inline(el: Any) -> str:
     parts: list[str] = []
     if el.text:
         parts.append(el.text)
-    for child in (el.children if hasattr(el, "children") else []):
+    for child in el.children if hasattr(el, "children") else []:
         if isinstance(getattr(child, "tag", None), str) and child.tag == "a":
             href = child.attrib.get("href", "")
             link_text = child.get_all_text().strip()
@@ -351,20 +397,34 @@ def _extract_with_lxml(html: str, url: str, max_length: int) -> str:
     },
 )
 async def web_search(query: str, limit: int = 5) -> str:
+    query = query.strip()
+    if not query:
+        return "Error searching: query must not be empty."
+    limit = max(1, min(limit, 10))
+    errors: list[str] = []
     searxng_url = await _get_setting("searxng_url")
 
     if searxng_url:
         try:
             results = await _search_searxng(query, limit, searxng_url)
-            return _format_results(query, results, limit)
+            if results:
+                return _format_results(query, results, limit)
+            errors.append("SearXNG returned no results")
         except Exception as e:
-            logger.warning("SearXNG search failed, falling back to DuckDuckGo: %s", e)
+            errors.append(f"SearXNG: {type(e).__name__}: {e}")
+            logger.warning("SearXNG search failed, falling back to DDGS: %s", e)
 
     try:
         results = await _search_duckduckgo(query, limit)
-        return _format_results(query, results, limit)
+        if results:
+            return _format_results(query, results, limit)
+        errors.append("DDGS returned no results")
     except Exception as e:
-        return f"Error searching: {e}"
+        errors.append(f"DDGS: {type(e).__name__}: {e}")
+        logger.warning("DDGS search failed for %s: %s", query[:50], e)
+
+    detail = "; ".join(errors)
+    return f'No results found for "{query}". Search providers failed or returned no usable results. {detail}'
 
 
 @registry.register(
@@ -397,6 +457,9 @@ async def web_search(query: str, limit: int = 5) -> str:
     },
 )
 async def web_scrape(url: str, max_length: int = 10000, selector: str | None = None) -> str:
+    max_length = max(100, min(max_length, 100_000))
+    selector = selector.strip() if selector else None
+
     # 1. Fetch HTML
     html, error = await _fetch_html(url)
     if error:

@@ -1,18 +1,20 @@
 from __future__ import annotations
 
-import base64
 import hashlib
 import logging
 import os
 import tempfile
+from pathlib import Path
 from typing import Any
 
+from crabagent.core.agent.multimodal import image_file_to_block
 from crabagent.core.agent.tools.browser_dom import (
     find_element_by_index,
     format_elements_for_llm,
     label_page_elements,
 )
 from crabagent.core.agent.tools.registry import registry
+from crabagent.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -46,29 +48,6 @@ def _is_vision_model_context(context: Any) -> bool:
         return False
 
 
-def _read_screenshot_as_data_url(path: str, max_bytes: int = 200_000) -> str:
-    """Read a saved screenshot file and return a base64 data URL.
-
-    If the file is larger than ``max_bytes``, returns an empty string (the
-    caller will fall back to text-only). This prevents giant screenshots from
-    blowing up the LLM context window.
-    """
-
-    if not path or not os.path.exists(path):
-        return ""
-    try:
-        size = os.path.getsize(path)
-        if size > max_bytes:
-            logger.debug("screenshot %s skipped: %d bytes > %d", path, size, max_bytes)
-            return ""
-        with open(path, "rb") as f:
-            data = f.read()
-        b64 = base64.b64encode(data).decode("ascii")
-        return f"data:image/png;base64,{b64}"
-    except Exception:
-        return ""
-
-
 def _build_browser_result(
     text_body: str,
     screenshot_path: str,
@@ -90,30 +69,20 @@ def _build_browser_result(
     parts.append(text_body)
     text = "\n\n".join(p for p in parts if p).strip()
 
-    if not _is_vision_model_context(context):
+    screenshots_enabled = bool(getattr(settings, "browser_screenshot_to_llm", True))
+    if not _is_vision_model_context(context) or not screenshots_enabled:
         if screenshot_path:
             text += f"\n\n[Screenshot saved at: {screenshot_path} — visible in Web UI]"
         return text
 
     blocks: list[dict] = [{"type": "text", "text": text}]
     if screenshot_path:
-        data_url = _read_screenshot_as_data_url(screenshot_path)
-        if data_url:
-            blocks.append(
-                {
-                    "type": "image_url",
-                    "image_url": {"url": data_url},
-                    "file_path": screenshot_path,
-                    "mime": "image/png",
-                }
-            )
+        max_bytes = int(getattr(settings, "browser_screenshot_max_bytes", 1_500_000))
+        image_block = image_file_to_block(Path(screenshot_path), max_bytes=max(50_000, max_bytes))
+        if image_block:
+            blocks.append(image_block)
         else:
-            blocks.append(
-                {
-                    "type": "text",
-                    "text": f"\n[Screenshot saved at: {screenshot_path} — too large to embed]",
-                }
-            )
+            blocks.append({"type": "text", "text": f"\n[Screenshot saved at: {screenshot_path} — unable to embed]"})
     return blocks
 
 
@@ -132,8 +101,6 @@ class BrowserManager:
         # Rolling history of recent screenshots (for context-aware models)
         self._screenshot_history: list[dict[str, Any]] = []
         try:
-            from crabagent.core.config import settings
-
             self._history_max = int(getattr(settings, "browser_screenshot_history", 3))
         except Exception:
             self._history_max = 3

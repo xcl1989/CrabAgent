@@ -172,7 +172,7 @@ class McpConnection:
             for t in result.tools
         ]
 
-    async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> str | list[dict[str, Any]]:
         if not self._session:
             raise RuntimeError(f"Not connected to MCP server '{self.config.name}'")
         try:
@@ -181,16 +181,30 @@ class McpConnection:
             self.status = "error"
             self.last_error = str(e)
             raise
-        parts = []
+        blocks: list[dict[str, Any]] = []
         for content in result.content:
-            if hasattr(content, "text"):
-                parts.append(content.text)
+            text = getattr(content, "text", None)
+            data = getattr(content, "data", None)
+            mime = getattr(content, "mimeType", None) or getattr(content, "mime_type", None)
+            if text is not None:
+                blocks.append({"type": "text", "text": str(text)})
+            elif data and isinstance(mime, str) and mime.startswith("image/"):
+                blocks.append(
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{mime};base64,{data}"},
+                        "mime": mime,
+                    }
+                )
             else:
-                parts.append(str(content))
-        text = "\n".join(parts)
+                blocks.append({"type": "text", "text": str(content)})
+
         if result.isError:
-            text = f"[MCP Error] {text}"
-        return text
+            text = "\n".join(block.get("text", "[image]") for block in blocks)
+            return f"[MCP Error] {text}"
+        if all(block["type"] == "text" for block in blocks):
+            return "\n".join(block["text"] for block in blocks)
+        return blocks
 
     async def disconnect(self):
         await self._cleanup()

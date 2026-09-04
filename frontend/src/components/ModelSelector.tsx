@@ -4,6 +4,11 @@ import { ChevronDown, Check, Search } from "lucide-react";
 import { cn } from "../lib/cn";
 import { ProviderModels } from "../hooks/useModelSelector";
 
+function providerLabel(provider: ProviderModels["provider"]): string {
+  const displayName = provider.display_name || provider.name;
+  return displayName === provider.name ? provider.name : `${displayName} (${provider.name})`;
+}
+
 interface Props {
   providerModels: ProviderModels[];
   selectedModel: string;
@@ -42,7 +47,7 @@ export default function ModelSelector({
     const q = searchQuery.toLowerCase();
     return providerModels
       .map((pm) => {
-        const matchProvider = (pm.provider.display_name || pm.provider.name).toLowerCase().includes(q);
+        const matchProvider = providerLabel(pm.provider).toLowerCase().includes(q);
         const models = matchProvider
           ? pm.models
           : pm.models.filter((m) => m.id.toLowerCase().includes(q));
@@ -120,11 +125,11 @@ export default function ModelSelector({
     const provider = resolvedProvider;
     if (provider) {
       const pm = providerModels.find((p) => p.provider.name === provider);
-      if (pm) return `${pm.provider.display_name || provider}/${selectedModel}`;
+      if (pm) return `${providerLabel(pm.provider)}/${selectedModel}`;
     }
     for (const pm of providerModels) {
       const m = pm.models.find((x) => x.id === selectedModel);
-      if (m) return `${pm.provider.display_name || pm.provider.name}/${m.id}`;
+      if (m) return `${providerLabel(pm.provider)}/${m.id}`;
     }
     return selectedModel;
   })();
@@ -246,7 +251,7 @@ export default function ModelSelector({
               filtered.map((pm) => (
                 <div key={pm.provider.name} className="mb-1 last:mb-0">
                   <div className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-tertiary)]">
-                    {pm.provider.display_name || pm.provider.name}
+                    {providerLabel(pm.provider)}
                   </div>
                   {pm.models.map((m) => {
                     const isSelected = m.id === selectedModel && pm.provider.name === resolvedProvider;

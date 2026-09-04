@@ -32,6 +32,23 @@ async def test_execute_calls_sync_handler_in_thread():
 
 
 @pytest.mark.asyncio
+async def test_execute_preserves_structured_result():
+    registry = ToolRegistry()
+
+    @registry.register(
+        name="structured_tool",
+        description="structured",
+        parameters={"type": "object", "properties": {}},
+    )
+    async def structured_tool(context=None):
+        return [{"type": "text", "text": "ok"}]
+
+    result = await registry.execute("structured_tool", {}, context=None)
+
+    assert result == [{"type": "text", "text": "ok"}]
+
+
+@pytest.mark.asyncio
 async def test_execute_passes_context_when_present():
     registry = ToolRegistry()
 
@@ -164,6 +181,23 @@ def test_tool_defs_includes_registered_tools():
     defs = registry.tool_defs()
     assert len(defs) == 1
     assert defs[0]["function"]["name"] == "my_tool"
+
+
+def test_tool_defs_can_exclude_tools_without_mutating_registry():
+    registry = ToolRegistry()
+
+    @registry.register(name="keep", description="keep", parameters={})
+    async def keep(context=None):
+        return ""
+
+    @registry.register(name="hide", description="hide", parameters={})
+    async def hide(context=None):
+        return ""
+
+    defs = registry.tool_defs(exclude_names={"hide"})
+
+    assert [item["function"]["name"] for item in defs] == ["keep"]
+    assert registry.get("hide") is not None
 
 
 def test_tool_info_list_shows_permission_info():

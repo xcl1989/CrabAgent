@@ -20,6 +20,15 @@ function formatReset(seconds: number | null | undefined): string {
   if (seconds >= 3600) return `${(seconds / 3600).toFixed(1)} 小时后重置`;
   return `${Math.round(seconds / 60)} 分钟后重置`;
 }
+
+function providerLabel(provider: Provider): string {
+  const displayName = provider.display_name || provider.name;
+  return displayName === provider.name ? provider.name : `${displayName} (${provider.name})`;
+}
+
+function isZhipuCodingPlan(provider: Provider): boolean {
+  return provider.base_url.includes("/api/coding/");
+}
 import * as quotaApi from "../api/quota";
 import { Modal, Button, Input, PasswordInput, ConfirmDialog, EmptyState } from "./ui";
 import { toast } from "./ui/Toast";
@@ -61,10 +70,10 @@ export default function ProviderPanel({
   const [chatgptAccountBusy, setChatgptAccountBusy] = useState(false);
   const [resetBusy, setResetBusy] = useState(false);
   const [resetConfirmTarget, setResetConfirmTarget] = useState(false);
-  const [deepseekQuota, setDeepseekQuota] = useState<quotaApi.ProviderQuota | null>(null);
-  const [deepseekBusy, setDeepseekBusy] = useState(false);
-  const [zhipuQuota, setZhipuQuota] = useState<quotaApi.ProviderQuota | null>(null);
-  const [zhipuBusy, setZhipuBusy] = useState(false);
+  const [deepseekQuotas, setDeepseekQuotas] = useState<Record<string, quotaApi.ProviderQuota>>({});
+  const [deepseekBusy, setDeepseekBusy] = useState<string | null>(null);
+  const [zhipuQuotas, setZhipuQuotas] = useState<Record<string, quotaApi.ProviderQuota>>({});
+  const [zhipuBusy, setZhipuBusy] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Check ChatGPT auth status when a chatgpt provider exists
@@ -164,26 +173,26 @@ export default function ProviderPanel({
   };
 
   const handleDeepSeekQuota = async (name: string) => {
-    setDeepseekBusy(true);
+    setDeepseekBusy(name);
     try {
       const info = await quotaApi.getProviderQuota(name);
-      setDeepseekQuota(info);
-    } catch {
-      toast.error("获取 DeepSeek 余额失败");
+      setDeepseekQuotas((current) => ({ ...current, [name]: info }));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "获取 DeepSeek 余额失败");
     } finally {
-      setDeepseekBusy(false);
+      setDeepseekBusy(null);
     }
   };
 
   const handleZhipuQuota = async (name: string) => {
-    setZhipuBusy(true);
+    setZhipuBusy(name);
     try {
       const info = await quotaApi.getProviderQuota(name);
-      setZhipuQuota(info);
-    } catch {
-      toast.error("获取智谱额度失败");
+      setZhipuQuotas((current) => ({ ...current, [name]: info }));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "获取智谱额度失败");
     } finally {
-      setZhipuBusy(false);
+      setZhipuBusy(null);
     }
   };
 
@@ -284,6 +293,7 @@ export default function ProviderPanel({
     try {
       await providersApi.createProvider({
         name: formName,
+        display_name: formName,
         type: formType,
         api_key: formKey,
         variant_id: formVariantId || undefined,
@@ -383,7 +393,7 @@ export default function ProviderPanel({
                   <div className="p-3 flex items-center justify-between gap-3">
                     <div className="min-w-0 flex-1">
                       <div className="text-sm font-medium text-[var(--text-primary)] flex items-center gap-1.5">
-                        <span className="truncate">{p.display_name}</span>
+                        <span className="truncate">{providerLabel(p)}</span>
                         {p.is_default && (
                           <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--brand-bg)] text-[var(--brand)] border border-[var(--brand-border)] flex items-center gap-1 shrink-0">
                             <Star size={9} /> default
@@ -623,19 +633,19 @@ export default function ProviderPanel({
                       {p.type === "deepseek" && (
                         <div className="pt-1.5 space-y-2">
                           <div className="flex items-center gap-2">
-                            <Button variant="secondary" size="sm" onClick={() => handleDeepSeekQuota(p.name)} loading={deepseekBusy}>
-                              {deepseekBusy ? "查询中..." : "查看余额"}
+                            <Button variant="secondary" size="sm" onClick={() => handleDeepSeekQuota(p.name)} loading={deepseekBusy === p.name}>
+                              {deepseekBusy === p.name ? "查询中..." : "查看余额"}
                             </Button>
                           </div>
-                          {deepseekQuota && (
+                          {deepseekQuotas[p.name] && (
                             <div className="p-3 rounded-lg bg-[var(--bg-secondary)] border border-[var(--border)] text-[11px] space-y-2">
                               <div className="flex justify-between">
                                 <span className="text-[var(--text-tertiary)]">可用</span>
-                                <span className={(deepseekQuota.summary as quotaApi.DeepSeekQuota).is_available ? "text-green-500" : "text-[var(--danger)]"}>
-                                  {(deepseekQuota.summary as quotaApi.DeepSeekQuota).is_available ? "是" : "否"}
+                                <span className={(deepseekQuotas[p.name].summary as quotaApi.DeepSeekQuota).is_available ? "text-green-500" : "text-[var(--danger)]"}>
+                                  {(deepseekQuotas[p.name].summary as quotaApi.DeepSeekQuota).is_available ? "是" : "否"}
                                 </span>
                               </div>
-                              {(deepseekQuota.summary as quotaApi.DeepSeekQuota).balances.map((b, i) => (
+                              {(deepseekQuotas[p.name].summary as quotaApi.DeepSeekQuota).balances.map((b, i) => (
                                 <div key={i} className="pt-1.5 border-t border-[var(--border)] space-y-1.5">
                                   <div className="text-[var(--text-secondary)] font-medium">
                                     {b.currency === "CNY" ? "💴 人民币" : "💵 美元"}
@@ -662,48 +672,51 @@ export default function ProviderPanel({
                       {/* Zhipu Quota Section */}
                       {p.type === "zhipu" && (
                         <div className="pt-1.5 space-y-2">
-                          <div className="flex items-center gap-2">
-                            <Button variant="secondary" size="sm" onClick={() => handleZhipuQuota(p.name)} loading={zhipuBusy}>
-                              {zhipuBusy ? "查询中..." : "查看额度"}
-                            </Button>
-                          </div>
-                          {zhipuQuota && (
-                            <div className="p-3 rounded-lg bg-[var(--bg-secondary)] border border-[var(--border)] text-[11px] space-y-2">
-                              <div className="flex justify-between">
-                                <span className="text-[var(--text-tertiary)]">套餐等级</span>
-                                <span className="px-1.5 py-0.5 rounded bg-[var(--brand-bg)] text-[var(--brand)] border border-[var(--brand-border)] font-medium uppercase text-[10px]">
-                                  {(zhipuQuota.summary as quotaApi.ZhipuQuota).level || "?"}
-                                </span>
+                          {isZhipuCodingPlan(p) ? (
+                            <>
+                              <div className="flex items-center gap-2">
+                                <Button variant="secondary" size="sm" onClick={() => handleZhipuQuota(p.name)} loading={zhipuBusy === p.name}>
+                                  {zhipuBusy === p.name ? "查询中..." : "查看额度"}
+                                </Button>
                               </div>
-                              {(zhipuQuota.summary as quotaApi.ZhipuQuota).token_limits.map((tl, i) => (
-                                <div key={i} className="pt-2 border-t border-[var(--border)]">
-                                  <UsageBar
-                                    label={tl.label === "WEEK" ? "📅 周窗口" : `⏱ ${tl.number} 小时窗口`}
-                                    usedPercent={tl.percentage}
-                                    resetText={formatResetCountdown(tl.nextResetTime)}
-                                  />
-                                </div>
-                              ))}
-                              {(zhipuQuota.summary as quotaApi.ZhipuQuota).time_limit && (
-                                <div className="pt-2 border-t border-[var(--border)] space-y-1.5">
-                                  <div className="text-[var(--text-secondary)] font-medium">📊 MCP 月度配额</div>
-                                  <UsageBar
-                                    label="已用"
-                                    usedPercent={(zhipuQuota.summary as quotaApi.ZhipuQuota).time_limit!.percentage}
-                                  />
-                                  <div className="flex justify-between text-[10px] text-[var(--text-tertiary)]">
-                                    <span>
-                                      剩余: {(zhipuQuota.summary as quotaApi.ZhipuQuota).time_limit!.remaining} /{" "}
-                                      {(zhipuQuota.summary as quotaApi.ZhipuQuota).time_limit!.usage}
-                                    </span>
-                                    {(zhipuQuota.summary as quotaApi.ZhipuQuota).time_limit!.nextResetTime && (
-                                      <span>
-                                        {formatResetCountdown((zhipuQuota.summary as quotaApi.ZhipuQuota).time_limit!.nextResetTime!)}
+                              {zhipuQuotas[p.name] && (() => {
+                                const quota = zhipuQuotas[p.name].summary as quotaApi.ZhipuQuota;
+                                return (
+                                  <div className="p-3 rounded-lg bg-[var(--bg-secondary)] border border-[var(--border)] text-[11px] space-y-2">
+                                    <div className="flex justify-between">
+                                      <span className="text-[var(--text-tertiary)]">套餐等级</span>
+                                      <span className="px-1.5 py-0.5 rounded bg-[var(--brand-bg)] text-[var(--brand)] border border-[var(--brand-border)] font-medium uppercase text-[10px]">
+                                        {quota.level || "?"}
                                       </span>
+                                    </div>
+                                    {quota.token_limits.map((tl, i) => (
+                                      <div key={i} className="pt-2 border-t border-[var(--border)]">
+                                        <UsageBar
+                                          label={tl.label === "WEEK" ? "📅 周窗口" : `⏱ ${tl.number} 小时窗口`}
+                                          usedPercent={tl.percentage}
+                                          resetText={formatResetCountdown(tl.nextResetTime)}
+                                        />
+                                      </div>
+                                    ))}
+                                    {quota.time_limit && (
+                                      <div className="pt-2 border-t border-[var(--border)] space-y-1.5">
+                                        <div className="text-[var(--text-secondary)] font-medium">📊 MCP 月度配额</div>
+                                        <UsageBar label="已用" usedPercent={quota.time_limit.percentage} />
+                                        <div className="flex justify-between text-[10px] text-[var(--text-tertiary)]">
+                                          <span>剩余: {quota.time_limit.remaining} / {quota.time_limit.usage}</span>
+                                          {quota.time_limit.nextResetTime && (
+                                            <span>{formatResetCountdown(quota.time_limit.nextResetTime)}</span>
+                                          )}
+                                        </div>
+                                      </div>
                                     )}
                                   </div>
-                                </div>
-                              )}
+                                );
+                              })()}
+                            </>
+                          ) : (
+                            <div className="text-[10px] text-[var(--text-tertiary)]">
+                              组织版或标准开放平台 API Key 暂不支持在此查询额度；智谱用量接口仅支持个人版 Coding Plan。
                             </div>
                           )}
                         </div>

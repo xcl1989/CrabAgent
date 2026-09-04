@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from crabagent.core.agent.multimodal import image_file_to_block, is_image_path
+from crabagent.core.agent.token_limits import is_vision_model
 from crabagent.core.agent.tools.path_utils import resolve_tool_path
 from crabagent.core.agent.tools.registry import registry
 
@@ -40,7 +42,9 @@ def _is_binary(filepath: str) -> bool:
 @registry.register(
     name="read",
     description=(
-        "Read a file or directory from the filesystem. Returns file contents with line numbers, or directory listing."
+        "Read a file or directory from the filesystem. Returns text with line numbers, a directory listing, "
+        "or an image inline for direct inspection when the current model supports vision. Prefer this over "
+        "a separate vision tool when an image path is already available."
     ),
     parameters={
         "type": "object",
@@ -68,7 +72,7 @@ def read_file(
     offset: int = 1,
     limit: int = 2000,
     context: Any = None,
-) -> str:
+) -> str | list[dict[str, Any]]:
     path, error = resolve_tool_path(file_path, context)
     if error:
         return error
@@ -88,7 +92,24 @@ def read_file(
         return "\n".join(entries) if entries else "(empty directory)"
 
     # ── File reading ────────────────────────────────────────────────────
-    # Skip binary files
+    if is_image_path(path):
+        model = getattr(context, "model", "") or ""
+        if context is not None:
+            model = context.metadata.get("_resolved_model", model)
+        if model and is_vision_model(model):
+            block = image_file_to_block(path)
+            if block:
+                return [
+                    {"type": "text", "text": f"[Image file: {path} — inspect the attached image directly.]"},
+                    block,
+                ]
+        size = path.stat().st_size
+        return (
+            f"[Image file: {path} ({size:,} bytes)]\n"
+            "The current model cannot receive this image directly; use an image analysis tool if needed."
+        )
+
+    # Skip other binary files
     if _is_binary(str(path)):
         size = path.stat().st_size
         return (
