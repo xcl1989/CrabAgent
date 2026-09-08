@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid
 from dataclasses import dataclass
 from typing import Any
 
@@ -10,6 +11,33 @@ from sqlalchemy import select, update
 from crabagent.core.database import ProviderConfig, async_session_factory
 
 logger = logging.getLogger(__name__)
+
+# Process-lifetime fallback session ID for OpenCode Go requests made outside a
+# conversation context (compress, title generation, mail matching, scheduler…).
+# OpenCode Go rejects requests missing `x-opencode-session` since 2026-09; it
+# prefers a stable ID per conversation for routing/prompt-cache optimisation.
+_OPENCODE_FALLBACK_SESSION = str(uuid.uuid4())
+
+try:
+    from importlib.metadata import version as _pkg_version
+
+    _CRABAGENT_USER_AGENT = f"crabagent/{_pkg_version('crabagent')}"
+except Exception:  # pragma: no cover — package metadata unavailable (bare checkout)
+    _CRABAGENT_USER_AGENT = "crabagent"
+
+
+def opencode_extra_headers(session_id: str | None = None) -> dict[str, str]:
+    """Headers OpenCode Go expects on every request.
+
+    See https://opencode.ai/docs/go/#where-can-i-use-it — requests must carry
+    a stable `x-opencode-session` (one ID per conversation) and identify
+    themselves with their own user agent. Callers that know the conversation
+    should pass its ID; otherwise a process-lifetime fallback is used.
+    """
+    return {
+        "x-opencode-session": session_id or _OPENCODE_FALLBACK_SESSION,
+        "User-Agent": _CRABAGENT_USER_AGENT,
+    }
 
 
 def _get_fernet():
@@ -262,8 +290,12 @@ async def delete_provider(name: str) -> bool:
         return True
 
 
-def build_litellm_params(provider: ProviderInfo, proxy: str = "") -> dict[str, Any]:
-    """Build litellm connection params for a provider."""
+def build_litellm_params(provider: ProviderInfo, proxy: str = "", session_id: str | None = None) -> dict[str, Any]:
+    """Build litellm connection params for a provider.
+
+    ``session_id`` is only used by the OpenCode Go provider, which requires a
+    stable per-conversation `x-opencode-session` header.
+    """
     if provider.provider_type == "chatgpt":
         params: dict[str, Any] = {}
     else:
@@ -271,16 +303,18 @@ def build_litellm_params(provider: ProviderInfo, proxy: str = "") -> dict[str, A
         if provider.base_url:
             params["api_base"] = provider.base_url
             params["custom_llm_provider"] = "openai"
+        if provider.provider_type == "opencode-go":
+            params["extra_headers"] = opencode_extra_headers(session_id)
     if proxy:
         params["proxy"] = proxy
     return params
 
 
-async def resolve_litellm_params(provider: ProviderInfo) -> dict[str, Any]:
+async def resolve_litellm_params(provider: ProviderInfo, session_id: str | None = None) -> dict[str, Any]:
     from crabagent.core.proxy import resolve_llm_proxy
 
     proxy = await resolve_llm_proxy(provider)
-    return build_litellm_params(provider, proxy)
+    return build_litellm_params(provider, proxy, session_id=session_id)
 
 
 def resolve_model_for_provider(provider: ProviderInfo, model: str) -> str:

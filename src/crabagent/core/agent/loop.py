@@ -54,7 +54,7 @@ async def _resolve_provider(provider_name: str | None = None) -> ProviderInfo:
     raise ValueError("No provider configured. Run 'crabagent provider add' to add one.")
 
 
-def _litellm_params(provider: ProviderInfo, proxy: str = "") -> dict:
+def _litellm_params(provider: ProviderInfo, proxy: str = "", session_id: str | None = None) -> dict:
     # ChatGPT subscription provider uses litellm's built-in OAuth flow.
     # No api_key / api_base needed — litellm's ChatGPTConfig handles everything.
     if provider.provider_type == "chatgpt":
@@ -63,6 +63,10 @@ def _litellm_params(provider: ProviderInfo, proxy: str = "") -> dict:
     if provider.base_url:
         params["api_base"] = provider.base_url
         params["custom_llm_provider"] = "openai"
+    if provider.provider_type == "opencode-go":
+        from crabagent.core.provider_store import opencode_extra_headers
+
+        params["extra_headers"] = opencode_extra_headers(session_id)
     if proxy:
         params["proxy"] = proxy
     return params
@@ -196,7 +200,10 @@ async def run_agent(
     from crabagent.core.proxy import resolve_llm_proxy
 
     proxy = await resolve_llm_proxy(provider)
-    llm = _litellm_params(provider, proxy)
+    # OpenCode Go requires a stable x-opencode-session per conversation
+    # (requests without it are rejected since 2026-09). Reuse the chat
+    # session ID so all turns of one conversation share the same value.
+    llm = _litellm_params(provider, proxy, session_id=context.metadata.get("session_id") or None)
     # CLI/API overrides win; otherwise use the Settings page pair before env defaults.
     model = context.model or saved_model or settings.default_model
     if "/" not in model:

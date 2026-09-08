@@ -34,11 +34,48 @@ def test_build_litellm_params_for_openai_compatible_provider_includes_api_key_an
 
     params = build_litellm_params(provider)
 
+    # OpenCode Go requires a stable x-opencode-session header on every request.
+    headers = params.pop("extra_headers")
     assert params == {
         "api_key": "sk-test",
         "api_base": "https://example.com/v1",
         "custom_llm_provider": "openai",
     }
+    assert headers["x-opencode-session"]
+    assert headers["User-Agent"].startswith("crabagent/")
+
+
+def test_opencode_session_id_is_used_when_provided():
+    provider = ProviderInfo(
+        name="opencodeGO",
+        display_name="OpenCode Go",
+        provider_type="opencode-go",
+        api_key="sk-test",
+        base_url="https://example.com/v1",
+        is_default=False,
+        enabled=True,
+        extra={},
+    )
+
+    params = build_litellm_params(provider, session_id="conv-123")
+    headers = params["extra_headers"]
+
+    assert headers["x-opencode-session"] == "conv-123"
+
+
+def test_non_opencode_providers_have_no_extra_headers():
+    provider = ProviderInfo(
+        name="deepseek",
+        display_name="DeepSeek",
+        provider_type="deepseek",
+        api_key="sk-test",
+        base_url="https://api.deepseek.com/v1",
+        is_default=False,
+        enabled=True,
+        extra={},
+    )
+
+    assert "extra_headers" not in build_litellm_params(provider)
 
 
 def test_same_type_providers_keep_separate_api_keys():
