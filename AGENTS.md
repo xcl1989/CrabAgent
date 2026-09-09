@@ -4,7 +4,7 @@
 > 保持简洁——最多约 8000 字符。使用 `update_agents_md` 工具来更新。
 
 ## 版本
-- 当前：**0.13.9**（原生多模态图片读取）
+- 当前：**0.14.0**（稳定的 ChatGPT 图像编辑）
 - **版本唯一源头：`pyproject.toml`**
 - Python 代码通过 `from crabagent import __version__` 动态读取（`importlib.metadata.version("crabagent")`），自动同步
 - Electron `package.json` 需手动运行 `python3 scripts/sync_version.py` 同步

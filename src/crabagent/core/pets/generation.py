@@ -982,15 +982,19 @@ class PetGenerationService:
         import mimetypes
         import re
 
-        from crabagent.serve.api.chatgpt_auth import get_chatgpt_access_token
+        from crabagent.serve.api.chatgpt_auth import (
+            get_codex_model,
+            get_codex_request_headers,
+        )
 
         CHATGPT_API_BASE = "https://chatgpt.com/backend-api/codex"
 
         try:
-            access_token = await get_chatgpt_access_token()
+            headers = await get_codex_request_headers()
         except Exception as e:
             logger.warning("ChatGPT auth failed for image edit: %s", e)
             return None
+        model = await get_codex_model()
 
         # Build the content array with the character reference
         content: list[dict] = [
@@ -1026,7 +1030,7 @@ class PetGenerationService:
             })
 
         payload = {
-            "model": "gpt-5.4",
+            "model": model,
             "instructions": "You are a helpful assistant. Use tools when available.",
             "input": [{"role": "user", "content": content}],
             "store": False,
@@ -1038,13 +1042,7 @@ class PetGenerationService:
             "stream": True,
         }
 
-        headers = {
-            "Authorization": f"Bearer {access_token}",
-            "Content-Type": "application/json",
-            "Accept": "text/event-stream",
-            "User-Agent": "codex_cli_rs/0.0.0 (Darwin 24.0; arm64) xterm-256color",
-            "originator": "codex_cli_rs",
-        }
+        headers["Content-Type"] = "application/json"
 
         try:
             async with httpx.AsyncClient(timeout=240) as client:

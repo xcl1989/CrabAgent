@@ -8,6 +8,18 @@ English version: [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
+## [0.14.0] — 稳定的 ChatGPT 图像编辑
+
+### Fixed
+- **`image_edit` 工具不返回图像** — ChatGPT Codex 后端开始按 `User-Agent` 中的客户端版本拦截请求。代码里硬编码的 `codex_cli_rs/0.0.0` 过旧，导致所有请求返回 HTTP 400，且报错误导性地显示"model is not supported when using Codex with a ChatGPT account"，与实际发送的模型名无关。已升级客户端版本号，并替换已下线的 `gpt-5.4` 模型。
+- **修复文件尾部损坏** — `chatgpt_auth.py` 与 `pets/generation.py` 文件尾部存在此前编辑事故留下的重复坏片段，两个文件现已恢复正常编译。
+
+### Changed
+- **Codex API 集成集中化** — `chatgpt_auth` 新增共享辅助函数（`CODEX_CLIENT_VERSION`、`build_codex_headers`、`get_codex_request_headers`、`get_codex_model`）。Codex 模型 slug 现在从 `GET /codex/models` 动态解析（10 分钟缓存，回退 `gpt-6-astra`），今后模型下线无需改代码。宠物动画的图编路径同步修复。
+- **报错日志可诊断** — 图像编辑工具在非 200 响应时记录响应体，200 响应无图像数据时也会告警，不再静默失败。
+
+---
+
 ## [0.13.9] — 原生多模态图片读取
 
 ### 新增

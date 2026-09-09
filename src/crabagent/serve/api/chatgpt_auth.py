@@ -48,6 +48,81 @@ CHATGPT_TOKEN_DIR = os.getenv(
 )
 CHATGPT_AUTH_FILE = os.path.join(CHATGPT_TOKEN_DIR, os.getenv("CHATGPT_AUTH_FILE", "auth.json"))
 
+# ── Codex API client version & model ────────────────────────────────────
+# The backend gates /codex/* endpoints by the client version embedded in the
+# User-Agent. An outdated version makes every request fail with a misleading
+# "model is not supported when using Codex with a ChatGPT account" 400.
+CODEX_CLIENT_VERSION = "1.0.0"
+# Fallback when /codex/models is unreachable. The live list is preferred
+# because OpenAI retires model slugs without notice (gpt-5.4 → gpt-6-astra).
+CODEX_FALLBACK_MODEL = "gpt-6-astra"
+
+_codex_model_cache: dict[str, Any] = {"slug": None, "fetched_at": 0.0}
+_CODEX_MODEL_TTL = 600.0  # seconds
+
+
+def build_codex_headers(access_token: str, account_id: str | None) -> dict[str, str]:
+    """Build headers accepted by the /backend-api/codex/* endpoints."""
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "User-Agent": f"codex_cli_rs/{CODEX_CLIENT_VERSION} (Darwin 24.0; arm64) xterm-256color",
+        "originator": "codex_cli_rs",
+    }
+    if account_id:
+        headers["ChatGPT-Account-Id"] = account_id
+    return headers
+
+
+async def get_codex_request_headers(
+    content_type: str = "application/json",
+) -> dict[str, str]:
+    """Headers for a Codex API request, including a fresh access token."""
+    access_token = await get_chatgpt_access_token()
+    auth_data = _read_auth_file() or {}
+    account_id = auth_data.get("account_id") or _extract_account_id(access_token)
+    headers = build_codex_headers(access_token, account_id)
+    headers["Content-Type"] = content_type
+    headers["Accept"] = "text/event-stream"
+    return headers
+
+
+async def get_codex_model() -> str:
+    """Return the default Codex model slug, cached for ``_CODEX_MODEL_TTL``.
+
+    Queries ``/codex/models`` (which requires the current client version) and
+    falls back to ``CODEX_FALLBACK_MODEL`` on any failure.
+    """
+    import time as _time
+
+    now = _time.monotonic()
+    if _codex_model_cache["slug"] and now - _codex_model_cache["fetched_at"] < _CODEX_MODEL_TTL:
+        return str(_codex_model_cache["slug"])
+
+    slug = CODEX_FALLBACK_MODEL
+    try:
+        access_token = await get_chatgpt_access_token()
+        headers = build_codex_headers(access_token, None)
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(
+                f"{CHATGPT_API_BASE}/models",
+                params={"client_version": CODEX_CLIENT_VERSION},
+                headers=headers,
+            )
+            if resp.status_code == 200:
+                models = resp.json().get("models") or []
+                visible = [m for m in models if m.get("visibility") != "hidden"]
+                if visible:
+                    visible.sort(key=lambda m: m.get("priority", 999))
+                    slug = visible[0].get("slug") or slug
+    except Exception as e:
+        logger.debug("Failed to fetch Codex model list, using fallback: %s", e)
+
+    _codex_model_cache["slug"] = slug
+    _codex_model_cache["fetched_at"] = now
+    return slug
+
 # In-memory device code sessions (short-lived)
 _device_code_cache: dict[str, dict[str, Any]] = {}
 _DEVICE_CODE_TTL = 15 * 60  # 15 minutes
@@ -507,7 +582,7 @@ async def get_account_info(user: User = Depends(get_current_user)):
             "accept": "text/event-stream",
         }
         payload = {
-            "model": "gpt-5.4",
+            "model": await get_codex_model(),
             "input": [{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "hi"}]}],
             "instructions": "Reply with one word.",
             "stream": True,
@@ -599,15 +674,8 @@ CHATGPT_WHAM_BASE = "https://chatgpt.com/backend-api/wham"
 
 def _build_wham_headers(access_token: str, account_id: str | None) -> dict[str, str]:
     """Build the headers required for /wham/* endpoints."""
-    headers = {
-        "Authorization": f"Bearer {access_token}",
-        "Content-Type": "application/json",
-        "accept": "application/json",
-        "User-Agent": "codex_cli_rs/0.0.0 (Darwin 24.0; arm64) xterm-256color",
-        "originator": "codex_cli_rs",
-    }
-    if account_id:
-        headers["ChatGPT-Account-Id"] = account_id
+    headers = build_codex_headers(access_token, account_id)
+    headers["Accept"] = "application/json"
     return headers
 
 

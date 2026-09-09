@@ -148,18 +148,19 @@ async def _chatgpt_image_edit(prompt: str, image_path: Path) -> bytes | None:
     """Use the ChatGPT subscription image-generation endpoint with a reference."""
     import httpx
 
-    from crabagent.serve.api.chatgpt_auth import get_chatgpt_access_token
+    from crabagent.serve.api.chatgpt_auth import get_codex_model, get_codex_request_headers
 
     try:
-        access_token = await get_chatgpt_access_token()
         encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
+        headers = await get_codex_request_headers()
+        model = await get_codex_model()
     except Exception as e:
         logger.warning("Unable to prepare ChatGPT image edit: %s", e)
         return None
 
     mime = mimetypes.guess_type(image_path.name)[0] or "image/png"
     payload = {
-        "model": "gpt-5.4",
+        "model": model,
         "instructions": "You are a helpful assistant. Use tools when available.",
         "input": [
             {
@@ -183,13 +184,6 @@ async def _chatgpt_image_edit(prompt: str, image_path: Path) -> bytes | None:
         "parallel_tool_calls": True,
         "stream": True,
     }
-    headers = {
-        "Authorization": f"Bearer {access_token}",
-        "Content-Type": "application/json",
-        "Accept": "text/event-stream",
-        "User-Agent": "codex_cli_rs/0.0.0 (Darwin; arm64)",
-        "originator": "codex_cli_rs",
-    }
     try:
         async with httpx.AsyncClient(timeout=240) as client:
             async with client.stream(
@@ -199,10 +193,17 @@ async def _chatgpt_image_edit(prompt: str, image_path: Path) -> bytes | None:
                 json=payload,
             ) as response:
                 if response.status_code != 200:
-                    logger.warning("ChatGPT image edit HTTP %d", response.status_code)
+                    body = await response.aread()
+                    logger.warning(
+                        "ChatGPT image edit HTTP %d: %s",
+                        response.status_code,
+                        body[:500],
+                    )
                     return None
                 raw = b"".join([chunk async for chunk in response.aiter_bytes()])
         matches = re.findall(rb"(iVBOR[A-Za-z0-9+/=]{1000,})", raw)
+        if not matches:
+            logger.warning("ChatGPT image edit: no image data in %d-byte response", len(raw))
         return base64.b64decode(matches[0]) if matches else None
     except Exception as e:
         logger.warning("ChatGPT image edit failed: %s", e)

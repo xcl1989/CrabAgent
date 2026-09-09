@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.14.0] — Resilient ChatGPT Image Editing
+
+### Fixed
+- **`image_edit` tool returned no image** — The ChatGPT Codex backend now gates every request by the client version embedded in the `User-Agent`. The hardcoded `codex_cli_rs/0.0.0` became too old, so all requests failed with HTTP 400 and a misleading "model is not supported when using Codex with a ChatGPT account" message, regardless of the model slug actually sent. The client version has been bumped and the retired `gpt-5.4` model replaced.
+- **Repaired corrupted file tails** — `chatgpt_auth.py` and `pets/generation.py` contained broken duplicated fragments at the end of the files from a previous edit accident; both files now compile cleanly again.
+
+### Changed
+- **Centralized Codex API integration** — New shared helpers in `chatgpt_auth` (`CODEX_CLIENT_VERSION`, `build_codex_headers`, `get_codex_request_headers`, `get_codex_model`). The Codex model slug is now resolved dynamically from `GET /codex/models` with a 10-minute cache, falling back to `gpt-6-astra`, so future model retirements no longer require code changes. The pet animation image-edit path shares the same fix.
+- **Actionable error logging** — The image-edit tool now logs the response body on non-200 replies and warns when a 200 response contains no image data, instead of failing silently with "no image data".
+
+---
+
 ## [0.13.9] — Native Multimodal Image Inspection
 
 ### Added
