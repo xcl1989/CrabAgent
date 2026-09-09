@@ -17,6 +17,8 @@ DEFAULT_MODEL_TOKEN_LIMITS: dict[str, int] = {
     "gpt-3.5-turbo": 16_000,
     "o3": 200_000,
     "o4-mini": 200_000,
+    "gpt-6-astra": 272_000,
+    "gpt-reserve": 272_000,
     "gpt-5.6-sol": 1_050_000,
     "gpt-5.6-terra": 1_050_000,
     "gpt-5.6-luna": 1_050_000,

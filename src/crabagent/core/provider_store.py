@@ -80,7 +80,9 @@ class ProviderInfo:
 
 
 CHATGPT_MODELS = [
-    # Current generation (verified working on Plus 2026-07)
+    # Current generation (verified on Plus 2026-09 via GET /codex/models)
+    "gpt-6-astra",
+    "gpt-reserve",
     "gpt-5.6-sol",
     "gpt-5.6-terra",
     "gpt-5.6-luna",
