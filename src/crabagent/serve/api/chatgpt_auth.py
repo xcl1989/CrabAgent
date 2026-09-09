@@ -57,7 +57,12 @@ CODEX_CLIENT_VERSION = "1.0.0"
 # because OpenAI retires model slugs without notice (gpt-5.4 → gpt-6-astra).
 CODEX_FALLBACK_MODEL = "gpt-6-astra"
 
-_codex_model_cache: dict[str, Any] = {"slug": None, "fetched_at": 0.0}
+_codex_model_cache: dict[str, Any] = {
+    "slug": None,
+    "slugs": None,       # list[str] — visible model slugs, priority order
+    "context": {},       # slug -> max_context_window reported by the API
+    "fetched_at": 0.0,
+}
 _CODEX_MODEL_TTL = 600.0  # seconds
 
 
@@ -88,19 +93,52 @@ async def get_codex_request_headers(
     return headers
 
 
-async def get_codex_model() -> str:
-    """Return the default Codex model slug, cached for ``_CODEX_MODEL_TTL``.
+def _fallback_codex_slugs() -> list[str]:
+    """Static model list used when /codex/models is unreachable."""
+    try:
+        from crabagent.core.provider_store import CHATGPT_MODELS
 
-    Queries ``/codex/models`` (which requires the current client version) and
-    falls back to ``CODEX_FALLBACK_MODEL`` on any failure.
+        return list(CHATGPT_MODELS)
+    except Exception:
+        return [CODEX_FALLBACK_MODEL]
+
+
+def _register_dynamic_model_cost(slug: str, max_input_tokens: int) -> None:
+    """Register a dynamically discovered ChatGPT model in litellm's model_cost.
+
+    litellm raises "model not mapped" for unregistered models, so every new
+    slug coming from /codex/models must be registered before first use.
+    Idempotent per slug.
     """
+    try:
+        import litellm
+
+        key = f"chatgpt/{slug}"
+        if key in litellm.model_cost and litellm.model_cost[key].get("litellm_provider") == "chatgpt":
+            return
+        litellm.model_cost[key] = {
+            "max_tokens": 128_000,
+            "max_input_tokens": max_input_tokens,
+            "output_cost_per_token": 0.0,
+            "input_cost_per_token": 0.0,
+            "mode": "responses",
+            "litellm_provider": "chatgpt",
+        }
+    except Exception as e:  # pragma: no cover - registration is best-effort
+        logger.debug("Failed to register model_cost for %s: %s", slug, e)
+
+
+async def _fetch_codex_models() -> None:
+    """Refresh the /codex/models cache. Never raises; falls back to statics."""
     import time as _time
 
     now = _time.monotonic()
-    if _codex_model_cache["slug"] and now - _codex_model_cache["fetched_at"] < _CODEX_MODEL_TTL:
-        return str(_codex_model_cache["slug"])
+    if _codex_model_cache["slugs"] and now - _codex_model_cache["fetched_at"] < _CODEX_MODEL_TTL:
+        return
 
-    slug = CODEX_FALLBACK_MODEL
+    fallback = _fallback_codex_slugs()
+    slugs: list[str] = []
+    context: dict[str, int] = {}
     try:
         access_token = await get_chatgpt_access_token()
         headers = build_codex_headers(access_token, None)
@@ -113,15 +151,51 @@ async def get_codex_model() -> str:
             if resp.status_code == 200:
                 models = resp.json().get("models") or []
                 visible = [m for m in models if m.get("visibility") != "hidden"]
-                if visible:
-                    visible.sort(key=lambda m: m.get("priority", 999))
-                    slug = visible[0].get("slug") or slug
+                visible.sort(key=lambda m: m.get("priority", 999))
+                for m in visible:
+                    slug = m.get("slug")
+                    if not slug:
+                        continue
+                    slugs.append(slug)
+                    max_ctx = m.get("max_context_window") or m.get("context_window")
+                    if isinstance(max_ctx, int) and max_ctx > 0:
+                        context[slug] = max_ctx
     except Exception as e:
         logger.debug("Failed to fetch Codex model list, using fallback: %s", e)
 
-    _codex_model_cache["slug"] = slug
+    if not slugs:
+        slugs = fallback
+
+    for slug in slugs:
+        _register_dynamic_model_cost(slug, context.get(slug, 270_000))
+
+    _codex_model_cache["slugs"] = slugs
+    _codex_model_cache["context"] = context
+    _codex_model_cache["slug"] = slugs[0] if slugs else CODEX_FALLBACK_MODEL
     _codex_model_cache["fetched_at"] = now
-    return slug
+
+
+async def get_codex_model_slugs() -> list[str]:
+    """Return the account's available Codex model slugs, priority order.
+
+    Live list from ``/codex/models`` cached for ``_CODEX_MODEL_TTL`` seconds;
+    falls back to the static ``CHATGPT_MODELS`` list on failure.
+    """
+    import time as _time
+
+    if not _codex_model_cache["slugs"] or _time.monotonic() - _codex_model_cache["fetched_at"] >= _CODEX_MODEL_TTL:
+        await _fetch_codex_models()
+    return list(_codex_model_cache["slugs"] or [])
+
+
+async def get_codex_model() -> str:
+    """Return the default Codex model slug (highest priority / first in list).
+
+    Queries ``/codex/models`` (which requires the current client version) and
+    falls back to ``CODEX_FALLBACK_MODEL`` on any failure.
+    """
+    slugs = await get_codex_model_slugs()
+    return slugs[0] if slugs else CODEX_FALLBACK_MODEL
 
 # In-memory device code sessions (short-lived)
 _device_code_cache: dict[str, dict[str, Any]] = {}
@@ -795,7 +869,9 @@ async def get_rate_limit_status_endpoint(user: User = Depends(get_current_user))
 
 @router.get("/models")
 async def list_chatgpt_models(user: User = Depends(get_current_user)):
-    """List available ChatGPT subscription models."""
+    """List available ChatGPT subscription models (live list ∪ static presets)."""
     from crabagent.core.provider_store import CHATGPT_MODELS
 
-    return [{"id": m, "owned_by": "chatgpt"} for m in CHATGPT_MODELS]
+    slugs = await get_codex_model_slugs()
+    ordered = list(dict.fromkeys(slugs + list(CHATGPT_MODELS)))
+    return [{"id": m, "owned_by": "chatgpt"} for m in ordered]

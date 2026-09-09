@@ -238,12 +238,18 @@ async def get_provider_models(name: str, user: User = Depends(get_current_user))
     if not p:
         raise HTTPException(status_code=404, detail="Provider not found")
 
-    # ChatGPT subscription provider — return preset model list
+    # ChatGPT subscription provider — live model list from /codex/models,
+    # unioned with static presets and user-configured extra models.
     if p.provider_type == "chatgpt":
         from crabagent.core.provider_store import CHATGPT_MODELS
+        from crabagent.serve.api.chatgpt_auth import get_codex_model_slugs
 
-        existing_ids = set()
-        models = [{"id": m, "owned_by": "chatgpt"} for m in CHATGPT_MODELS]
+        try:
+            dynamic = await get_codex_model_slugs()
+        except Exception:
+            dynamic = []
+        ordered = list(dict.fromkeys(dynamic + list(CHATGPT_MODELS)))
+        models = [{"id": m, "owned_by": "chatgpt"} for m in ordered]
         existing_ids = {m["id"] for m in models}
         for mid in p.extra.get("extra_models", []):
             if mid and mid not in existing_ids:
