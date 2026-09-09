@@ -104,6 +104,7 @@ CHATGPT_MODELS = [
 ]
 
 CHATGPT_IMAGE_MODELS = [
+    "image-2.5",
     "image-2",
     "gpt-image-2",
     "chatgpt-image-latest",

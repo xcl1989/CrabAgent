@@ -27,8 +27,8 @@ logger = logging.getLogger(__name__)
 
 # ── Provider → default image model mapping ─────────────────────────────
 _CHATGPT_IMAGE_MODELS = [
+    "image-2.5",
     "image-2",
-    "gpt-image-2",
     "chatgpt-image-latest",
 ]
 _OPENAI_IMAGE_MODELS = [
@@ -179,7 +179,7 @@ async def _chatgpt_image_edit(prompt: str, image_path: Path) -> bytes | None:
             }
         ],
         "store": False,
-        "tools": [{"type": "image_generation"}],
+        "tools": [{"type": "image_generation", "model": "image-2.5"}],
         "tool_choice": "auto",
         "parallel_tool_calls": True,
         "stream": True,
@@ -292,6 +292,7 @@ async def image_edit(
         size = "1024x1024"
 
     try:
+        edit_model = "image-2.5" if provider_type == "chatgpt" else "gpt-image-2"
         if provider_type == "chatgpt":
             image_bytes = await _chatgpt_image_edit(prompt, reference)
         else:
@@ -328,7 +329,7 @@ async def image_edit(
         {
             "generated": 1,
             "provider": provider_name,
-            "model": "gpt-image-2",
+            "model": edit_model,
             "size": size,
             "reference_image": str(reference),
             "images": [{"index": 1, "path": str(path), "filename": path.name, "prompt": prompt, "size": size}],
@@ -449,7 +450,7 @@ async def image_generate(
 
     # ── Determine model ──────────────────────────────────────────────
     if provider_type == "chatgpt":
-        model = "chatgpt/image-2"
+        model = "chatgpt/image-2.5"
         # Clamp n for chatgpt provider (typically max 1-2)
         if n > 2:
             n = 2
