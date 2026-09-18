@@ -50,6 +50,11 @@ class AgentContext:
         return self.accumulated_prompt - self.accumulated_cached
 
     @property
+    def accumulated_total(self) -> int:
+        """Total billed tokens across every LLM call in this run."""
+        return self.accumulated_prompt + self.accumulated_completion
+
+    @property
     def accumulated_total_consumed(self) -> int:
         """Actual tokens consumed (non-cached input + all output)."""
         return self.accumulated_non_cached + self.accumulated_completion

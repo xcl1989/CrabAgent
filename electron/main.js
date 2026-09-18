@@ -23,6 +23,7 @@ let authToken = null;
 let collaborationView = null;
 let collaborationBridge = null;
 let collaborationBridgePort = null;
+let collaborationPageVersion = 0;
 const collaborationBridgeToken = require('crypto').randomBytes(32).toString('hex');
 
 const COLLABORATION_START_URL = 'https://www.google.com/';
@@ -76,7 +77,10 @@ function ensureCollaborationView() {
     }
   });
   for (const eventName of ['did-navigate', 'did-navigate-in-page', 'did-start-loading', 'did-stop-loading', 'page-title-updated']) {
-    collaborationView.webContents.on(eventName, () => sendCollaborationBrowserState());
+    collaborationView.webContents.on(eventName, () => {
+      collaborationPageVersion += 1;
+      sendCollaborationBrowserState();
+    });
   }
   collaborationView.webContents.loadURL(COLLABORATION_START_URL).catch((error) => {
     log(`Collaboration browser initial navigation failed: ${error.message}`);
@@ -162,7 +166,7 @@ function collaborationBridgeJson(res, status, payload) {
   res.end(JSON.stringify(payload));
 }
 
-function collaborationSnapshotScript() {
+function collaborationSnapshotScript(pageVersion) {
   return `(() => {
     const nodes = document.querySelectorAll('a, button, input, select, textarea, [role="button"], [role="link"]');
     const elements = [];
@@ -172,39 +176,134 @@ function collaborationSnapshotScript() {
       const rect = el.getBoundingClientRect();
       const style = getComputedStyle(el);
       if (!rect.width || !rect.height || style.display === 'none' || style.visibility === 'hidden' || el.disabled) continue;
+      const type = (el.type || '').toLowerCase();
+      const label = String(el.innerText || el.placeholder || el.getAttribute('aria-label') || el.name || '').slice(0, 100);
+      const sensitive = el.tagName === 'INPUT' && ['password', 'hidden', 'file'].includes(type);
+      const risk = /pay|payment|purchase|order|delete|remove|send|submit|transfer|checkout|付款|支付|下单|删除|发送|提交|转账/i.test(label);
       const selector = el.id ? '#' + CSS.escape(el.id) : '[data-crab-collab="' + index + '"]';
       el.setAttribute('data-crab-collab', String(index));
-      const sensitive = el.tagName === 'INPUT' && ['password', 'hidden'].includes((el.type || '').toLowerCase());
-      elements.push({ index, tag: el.tagName.toLowerCase(), type: el.type || '', text: String(el.innerText || el.placeholder || el.getAttribute('aria-label') || el.name || '').slice(0, 100), selector, sensitive });
+      elements.push({ index, tag: el.tagName.toLowerCase(), type, text: label, selector, sensitive, risk, fingerprint: [el.tagName, type, el.id, el.name, label].join('|').slice(0, 240) });
       index += 1;
     }
-    return { url: location.href, title: document.title, text: String(document.body?.innerText || '').replace(/\s+/g, ' ').slice(0, 5000), elements };
+    const bodyText = String(document.body?.innerText || '').replace(/\s+/g, ' ').slice(0, 5000);
+    return { page_version: ${pageVersion}, url: location.href, title: document.title, text: bodyText, viewport: { width: innerWidth, height: innerHeight, scrollY }, elements };
   })()`;
+}
+
+function requireCurrentPageVersion(payload) {
+  const requested = Number(payload.page_version);
+  if (!Number.isInteger(requested) || requested !== collaborationPageVersion) {
+    const error = new Error('STALE_PAGE: observe the page again before acting');
+    error.code = 'STALE_PAGE';
+    throw error;
+  }
+}
+
+function isSensitiveInput(type, label) {
+  return ['password', 'hidden', 'file'].includes(type)
+    || /password|passcode|otp|verification|cvv|card|银行卡|密码|验证码|校验码|支付/i.test(label);
 }
 
 async function handleCollaborationBridge(command, payload) {
   const view = ensureCollaborationView();
   const contents = view.webContents;
-  if (command === 'status') return { url: contents.getURL(), title: contents.getTitle(), loading: contents.isLoading() };
+  if (command === 'status') return { page_version: collaborationPageVersion, url: contents.getURL(), title: contents.getTitle(), loading: contents.isLoading() };
   if (command === 'navigate') {
-    await contents.loadURL(normalizeBrowserUrl(payload.url));
-    return { url: contents.getURL(), title: contents.getTitle() };
+    const target = normalizeBrowserUrl(payload.url);
+    try {
+      await contents.loadURL(target);
+    } catch (loadError) {
+      log('[CollabView] loadURL error (page may still have loaded): ' + loadError.message);
+    }
+    return { page_version: collaborationPageVersion, url: contents.getURL(), title: contents.getTitle() };
   }
-  if (command === 'observe') return contents.executeJavaScript(collaborationSnapshotScript(), true);
+  if (command === 'observe') return contents.executeJavaScript(collaborationSnapshotScript(collaborationPageVersion), true);
+  if (command === 'screenshot') {
+    const image = await contents.capturePage();
+    return {
+      page_version: collaborationPageVersion,
+      url: contents.getURL(),
+      title: contents.getTitle(),
+      mime: 'image/png',
+      data_url: `data:image/png;base64,${image.toPNG().toString('base64')}`,
+    };
+  }
   if (command === 'click') {
+    requireCurrentPageVersion(payload);
     const index = Number(payload.index);
     if (!Number.isInteger(index) || index < 1 || index > 80) throw new Error('Invalid element index');
-    return contents.executeJavaScript(`(() => { const el = document.querySelector('[data-crab-collab="${index}"]'); if (!el) throw new Error('Element not found; observe again'); el.click(); return { clicked: ${index}, url: location.href, title: document.title }; })()`, true);
+    const target = await contents.executeJavaScript(`(async () => {
+      const el = document.querySelector('[data-crab-collab="${index}"]');
+      if (!el) throw new Error('Element not found; observe again');
+      const label = String(el.innerText || el.getAttribute('aria-label') || el.value || '').slice(0, 100);
+      if (/pay|payment|purchase|order|delete|remove|send|submit|transfer|checkout|付款|支付|下单|删除|发送|提交|转账/i.test(label)) {
+        return { confirmation_required: true, index: ${index}, label, url: location.href, title: document.title };
+      }
+      el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const rect = el.getBoundingClientRect();
+      const x = Math.round(rect.left + rect.width / 2);
+      const y = Math.round(rect.top + rect.height / 2);
+      if (!rect.width || !rect.height || x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) {
+        throw new Error('Element is outside the visible viewport; observe again');
+      }
+      return { index: ${index}, label, x, y, url: location.href, title: document.title };
+    })()`, true);
+    if (target.confirmation_required) return { ...target, page_version: collaborationPageVersion };
+
+    // Electron input events produce a trusted pointer sequence, unlike HTMLElement.click().
+    contents.sendInputEvent({ type: 'mouseMove', x: target.x, y: target.y });
+    contents.sendInputEvent({ type: 'mouseDown', x: target.x, y: target.y, button: 'left', clickCount: 1 });
+    contents.sendInputEvent({ type: 'mouseUp', x: target.x, y: target.y, button: 'left', clickCount: 1 });
+    return {
+      clicked: target.index,
+      method: 'native_mouse',
+      point: { x: target.x, y: target.y },
+      url: target.url,
+      title: target.title,
+      page_version: collaborationPageVersion,
+    };
   }
   if (command === 'type') {
+    requireCurrentPageVersion(payload);
     const index = Number(payload.index);
-    const text = String(payload.text || '');
-    if (!Number.isInteger(index) || index < 1 || index > 80 || text.length > 10000) throw new Error('Invalid type request');
-    return contents.executeJavaScript(`(() => { const el = document.querySelector('[data-crab-collab="${index}"]'); if (!el) throw new Error('Element not found; observe again'); if (el.type === 'password') throw new Error('AI cannot type into password fields'); el.focus(); el.value = ${JSON.stringify(text)}; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); return { typed: ${index}, url: location.href, title: document.title }; })()`, true);
+    const input = String(payload.text || '');
+    if (!Number.isInteger(index) || index < 1 || index > 80 || input.length > 10000) throw new Error('Invalid type request');
+    const outcome = await contents.executeJavaScript(`(() => { const el = document.querySelector('[data-crab-collab="${index}"]'); if (!el) throw new Error('Element not found; observe again'); const type = String(el.type || '').toLowerCase(); const label = String(el.placeholder || el.getAttribute('aria-label') || el.name || ''); if (${isSensitiveInput.toString()}(type, label)) throw new Error('SENSITIVE_INPUT: AI cannot type into this field'); el.focus(); el.value = ${JSON.stringify(input)}; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); return { typed: ${index}, url: location.href, title: document.title }; })()`, true);
+    return { ...outcome, page_version: collaborationPageVersion };
   }
   if (command === 'scroll') {
+    requireCurrentPageVersion(payload);
     const amount = Math.max(-2000, Math.min(2000, Number(payload.amount) || 600));
-    return contents.executeJavaScript(`(() => { window.scrollBy(0, ${amount}); return { scrollY: window.scrollY, url: location.href }; })()`, true);
+    const outcome = await contents.executeJavaScript(`(() => { window.scrollBy(0, ${amount}); return { scrollY: window.scrollY, url: location.href }; })()`, true);
+    return { ...outcome, page_version: collaborationPageVersion };
+  }
+  if (command === 'select') {
+    requireCurrentPageVersion(payload);
+    const index = Number(payload.index);
+    const value = String(payload.value || '');
+    if (!Number.isInteger(index) || index < 1 || index > 80 || value.length > 1000) throw new Error('Invalid select request');
+    const outcome = await contents.executeJavaScript(`(() => { const el = document.querySelector('[data-crab-collab="${index}"]'); if (!el) throw new Error('Element not found; observe again'); if (el.tagName !== 'SELECT') throw new Error('Element is not a select control'); const option = Array.from(el.options).find((item) => item.value === ${JSON.stringify(value)} || item.text === ${JSON.stringify(value)}); if (!option) throw new Error('Option not found'); el.value = option.value; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); return { selected: ${index}, value: option.value, url: location.href, title: document.title }; })()`, true);
+    return { ...outcome, page_version: collaborationPageVersion };
+  }
+  if (command === 'press_key') {
+    requireCurrentPageVersion(payload);
+    const key = String(payload.key || '');
+    if (!/^(Enter|Escape|Tab|ArrowUp|ArrowDown|ArrowLeft|ArrowRight)$/.test(key)) throw new Error('Unsupported key');
+    const outcome = await contents.executeJavaScript(`(() => { const el = document.activeElement || document.body; const options = { key: ${JSON.stringify(key)}, bubbles: true, cancelable: true }; el.dispatchEvent(new KeyboardEvent('keydown', options)); el.dispatchEvent(new KeyboardEvent('keyup', options)); return { pressed: ${JSON.stringify(key)}, url: location.href, title: document.title }; })()`, true);
+    return { ...outcome, page_version: collaborationPageVersion };
+  }
+  if (command === 'wait_for') {
+    const timeout = Math.max(100, Math.min(30_000, Number(payload.timeout_ms) || 10_000));
+    const text = String(payload.text || '').slice(0, 500);
+    const urlIncludes = String(payload.url_includes || '').slice(0, 500);
+    const started = Date.now();
+    while (Date.now() - started < timeout) {
+      const matched = await contents.executeJavaScript(`(() => ({ text: ${JSON.stringify(text)} ? document.body?.innerText?.includes(${JSON.stringify(text)}) : false, url: ${JSON.stringify(urlIncludes)} ? location.href.includes(${JSON.stringify(urlIncludes)}) : false, loading: document.readyState !== 'complete' }))()`, true);
+      if ((!text || matched.text) && (!urlIncludes || matched.url) && !matched.loading) return { matched: true, page_version: collaborationPageVersion, url: contents.getURL(), title: contents.getTitle() };
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    throw new Error('WAIT_TIMEOUT: requested page condition was not met');
   }
   throw new Error('Unsupported collaboration browser command');
 }

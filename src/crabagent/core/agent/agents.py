@@ -542,6 +542,36 @@ def get_all_session_subs(session_id: str) -> dict[str, dict]:
     return result
 
 
+async def _persist_sub_agent_usage(sub_context, parent_context, agent_name: str) -> None:
+    """Persist the child context's per-call usage independently of the parent run."""
+    if not sub_context.usage_records:
+        return
+
+    user_id = parent_context.metadata.get("user_id", 0)
+    session_id = parent_context.metadata.get("session_id", "")
+    if not user_id or not session_id:
+        return
+
+    from crabagent.core.database import token_usage_batch_create
+
+    model = sub_context.metadata.get("resolved_model", sub_context.model or "")
+    provider = sub_context.metadata.get("resolved_provider", sub_context.provider_name or "")
+    branch_id = parent_context.metadata.get("branch_id", "main")
+    records = [
+        {
+            "user_id": user_id,
+            "session_id": session_id,
+            "agent_name": agent_name,
+            "model": model,
+            "provider": provider,
+            "branch_id": branch_id,
+            **record,
+        }
+        for record in sub_context.usage_records
+    ]
+    await token_usage_batch_create(records)
+
+
 async def spawn_sub_agent(
     agent_name: str,
     task: str,
@@ -605,6 +635,7 @@ async def spawn_sub_agent(
         max_iterations=min(parent_context.max_iterations, 50),
         model=_sub_model,
         provider_name=_sub_provider,
+        current_agent=agent_name,
         system_prompt=_build_system_prompt(
             agent_def,
             has_shared=has_shared,
@@ -835,7 +866,7 @@ async def spawn_sub_agent(
                 stats = {
                     "iterations": sub_context.iteration,
                     "max_iterations": sub_context.max_iterations,
-                    "tokens": sub_context.total_tokens,
+                    "tokens": sub_context.accumulated_total,
                     "elapsed": elapsed,
                 }
 
@@ -899,7 +930,7 @@ async def spawn_sub_agent(
                     task_summary=task[:200],
                     success=True,
                     elapsed=elapsed,
-                    tokens=sub_context.total_tokens,
+                    tokens=sub_context.accumulated_total,
                     iterations=sub_context.iteration,
                 )
             except Exception:
@@ -913,7 +944,7 @@ async def spawn_sub_agent(
                     "agent_name": agent_name,
                     "display_name": agent_def["display_name"],
                     "elapsed": elapsed,
-                    "tokens": sub_context.total_tokens,
+                    "tokens": sub_context.accumulated_total,
                     "iterations": sub_context.iteration,
                     "result": last_text,
                     "task": task[:200],
@@ -927,7 +958,7 @@ async def spawn_sub_agent(
                 {
                     "status": "done",
                     "elapsed": elapsed,
-                    "tokens": sub_context.total_tokens,
+                    "tokens": sub_context.accumulated_total,
                     "iterations": sub_context.iteration,
                 }
             )
@@ -943,7 +974,7 @@ async def spawn_sub_agent(
                 "agent_name": agent_name,
                 "display_name": agent_def["display_name"],
                 "elapsed": elapsed,
-                "tokens": sub_context.total_tokens,
+                "tokens": sub_context.accumulated_total,
                 "iterations": sub_context.iteration,
                 "task": task[:200],
                 "model": sub_context.model or parent_context.model or "",
@@ -989,7 +1020,7 @@ async def spawn_sub_agent(
                 reflect_provider = sub_context.provider_name or parent_context.provider_name
                 error_stats = {
                     "iterations": sub_context.iteration,
-                    "tokens": sub_context.total_tokens,
+                    "tokens": sub_context.accumulated_total,
                     "elapsed": error_elapsed,
                 }
                 if reflect_model:
@@ -1032,6 +1063,11 @@ async def spawn_sub_agent(
             _running_sub_agents[sub_id].update({"status": "error"})
         return f"Error: sub-agent '{agent_name}' failed: {e}"
     finally:
+        try:
+            await _persist_sub_agent_usage(sub_context, parent_context, agent_name)
+        except Exception:
+            logger.debug("Failed to write token usage for sub-agent %s", agent_name, exc_info=True)
+
         # ── Finalise delegate span ──
         end_span(_delegate_span)
         parent_context._span_counter = sub_context._span_counter

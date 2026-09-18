@@ -128,7 +128,7 @@ async def collab_browser_screenshot(context=None) -> str | list[dict[str, Any]]:
 @registry.register(
     name="collab_browser_click",
     description=(
-        "Click a numbered element from the latest collab_browser_observe result in the shared browser. "
+        "Click a numbered element from the latest collab_browser_observe result using a trusted native mouse event. "
         "Never use this to submit purchases, payments, deletions, account changes, or external messages "
         "without first asking the user for explicit confirmation."
     ),

@@ -232,8 +232,37 @@ async function handleCollaborationBridge(command, payload) {
     requireCurrentPageVersion(payload);
     const index = Number(payload.index);
     if (!Number.isInteger(index) || index < 1 || index > 80) throw new Error('Invalid element index');
-    const outcome = await contents.executeJavaScript(`(() => { const el = document.querySelector('[data-crab-collab="${index}"]'); if (!el) throw new Error('Element not found; observe again'); const label = String(el.innerText || el.getAttribute('aria-label') || el.value || '').slice(0, 100); if (/pay|payment|purchase|order|delete|remove|send|submit|transfer|checkout|付款|支付|下单|删除|发送|提交|转账/i.test(label)) return { confirmation_required: true, index: ${index}, label, url: location.href, title: document.title }; el.click(); return { clicked: ${index}, url: location.href, title: document.title }; })()`, true);
-    return { ...outcome, page_version: collaborationPageVersion };
+    const target = await contents.executeJavaScript(`(async () => {
+      const el = document.querySelector('[data-crab-collab="${index}"]');
+      if (!el) throw new Error('Element not found; observe again');
+      const label = String(el.innerText || el.getAttribute('aria-label') || el.value || '').slice(0, 100);
+      if (/pay|payment|purchase|order|delete|remove|send|submit|transfer|checkout|付款|支付|下单|删除|发送|提交|转账/i.test(label)) {
+        return { confirmation_required: true, index: ${index}, label, url: location.href, title: document.title };
+      }
+      el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      const rect = el.getBoundingClientRect();
+      const x = Math.round(rect.left + rect.width / 2);
+      const y = Math.round(rect.top + rect.height / 2);
+      if (!rect.width || !rect.height || x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) {
+        throw new Error('Element is outside the visible viewport; observe again');
+      }
+      return { index: ${index}, label, x, y, url: location.href, title: document.title };
+    })()`, true);
+    if (target.confirmation_required) return { ...target, page_version: collaborationPageVersion };
+
+    // Electron input events produce a trusted pointer sequence, unlike HTMLElement.click().
+    contents.sendInputEvent({ type: 'mouseMove', x: target.x, y: target.y });
+    contents.sendInputEvent({ type: 'mouseDown', x: target.x, y: target.y, button: 'left', clickCount: 1 });
+    contents.sendInputEvent({ type: 'mouseUp', x: target.x, y: target.y, button: 'left', clickCount: 1 });
+    return {
+      clicked: target.index,
+      method: 'native_mouse',
+      point: { x: target.x, y: target.y },
+      url: target.url,
+      title: target.title,
+      page_version: collaborationPageVersion,
+    };
   }
   if (command === 'type') {
     requireCurrentPageVersion(payload);

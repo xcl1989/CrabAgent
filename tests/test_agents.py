@@ -294,6 +294,69 @@ class TestBuildMemoryPrompt:
 # ── spawn_sub_agent ───────────────────────────────────────────────────
 
 
+class TestSubAgentUsage:
+    @pytest.mark.asyncio
+    async def test_persists_each_child_llm_call(self, monkeypatch: pytest.MonkeyPatch):
+        captured = []
+
+        async def fake_batch_create(records):
+            captured.extend(records)
+
+        monkeypatch.setattr("crabagent.core.database.token_usage_batch_create", fake_batch_create)
+
+        parent = AgentContext(workspace=Path.cwd())
+        parent.metadata.update({"user_id": 7, "session_id": "sess-1", "branch_id": "feature"})
+        child = AgentContext(workspace=Path.cwd(), model="configured-model", provider_name="configured-provider")
+        child.metadata.update({"resolved_model": "actual-model", "resolved_provider": "actual-provider"})
+        child.usage_records = [
+            {
+                "iteration": 1,
+                "prompt_tokens": 100,
+                "cached_tokens": 25,
+                "non_cached_tokens": 75,
+                "completion_tokens": 20,
+                "reasoning_tokens": 5,
+            },
+            {
+                "iteration": 2,
+                "prompt_tokens": 80,
+                "cached_tokens": 0,
+                "non_cached_tokens": 80,
+                "completion_tokens": 10,
+                "reasoning_tokens": 0,
+            },
+        ]
+
+        await agents_module._persist_sub_agent_usage(child, parent, "coder")
+
+        assert len(captured) == 2
+        assert all(record["agent_name"] == "coder" for record in captured)
+        assert all(record["session_id"] == "sess-1" for record in captured)
+        assert all(record["branch_id"] == "feature" for record in captured)
+        assert all(record["model"] == "actual-model" for record in captured)
+        assert sum(record["prompt_tokens"] + record["completion_tokens"] for record in captured) == 210
+
+    @pytest.mark.asyncio
+    async def test_skips_usage_without_parent_identity(self, monkeypatch: pytest.MonkeyPatch):
+        called = False
+
+        async def fake_batch_create(records):
+            nonlocal called
+            called = True
+
+        monkeypatch.setattr("crabagent.core.database.token_usage_batch_create", fake_batch_create)
+        parent = AgentContext(workspace=Path.cwd())
+        child = AgentContext(workspace=Path.cwd())
+        child.usage_records = [{"prompt_tokens": 1, "completion_tokens": 1}]
+
+        await agents_module._persist_sub_agent_usage(child, parent, "coder")
+
+        assert called is False
+
+
+# ── spawn_sub_agent ───────────────────────────────────────────────────
+
+
 class TestSpawnSubAgent:
     @pytest.mark.asyncio
     async def test_returns_error_for_unknown_agent(self, monkeypatch: pytest.MonkeyPatch):
