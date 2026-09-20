@@ -29,6 +29,7 @@ import {
   Wrench,
   X,
   GitBranch,
+  ClipboardCheck,
 } from "lucide-react";
 import { RichMarkdown } from "./rich-content/RichMarkdown";
 import ToolResultRender from "./ToolResultRender";
@@ -71,6 +72,12 @@ export interface ChatMessage {
     message?: string;
     action?: string;
     retryable?: boolean;
+  };
+  task_card?: {
+    task_id: number;
+    title: string;
+    deadline?: string;
+    project?: string;
   };
   retry_info?: {
     phase: "retrying" | "countdown" | "exhausted";
@@ -451,6 +458,27 @@ const ErrorItem = memo(function ErrorItem({ msg }: { msg: ChatMessage }) {
   );
 });
 
+/** Trusted work system: compact "task accepted" card */
+const TaskCardItem = memo(function TaskCardItem({ msg }: { msg: ChatMessage }) {
+  const card = msg.task_card;
+  if (!card) return <NoticeItem msg={{ ...msg, role: "notice" }} />;
+  return (
+    <div className="mb-3">
+      <div className="flex items-start gap-3 px-4 py-3 rounded-xl text-sm bg-[var(--accent-2-bg,rgba(59,130,246,0.08))] border border-[var(--accent-2-border,rgba(59,130,246,0.2))]">
+        <ClipboardCheck size={16} className="mt-0.5 shrink-0 text-[var(--accent-2,#3b82f6)]" />
+        <div className="min-w-0 flex-1">
+          <div className="font-semibold text-[var(--text-primary)]">已接手：{card.title}</div>
+          <div className="mt-0.5 text-xs text-[var(--text-secondary)] flex items-center gap-2 flex-wrap">
+            {card.project ? <span>📁 {card.project}</span> : null}
+            {card.deadline ? <span>📅 {card.deadline}</span> : null}
+            <span>状态与成果可在任务面板查看</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+});
+
 /** Retry indicator */
 const RetryItem = memo(function RetryItem({ msg }: { msg: ChatMessage }) {
   if (!msg.retry_info) return null;
@@ -808,6 +836,9 @@ function MessageItemBase({
 
     case "error":
       return <ErrorItem msg={msg} />;
+
+    case "task_card":
+      return <TaskCardItem msg={msg} />;
 
     case "retry":
       return <RetryItem msg={msg} />;

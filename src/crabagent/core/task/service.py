@@ -14,6 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from crabagent.core.database import AgentRun, Task
+from crabagent.core.task.events import broadcast_task_event
 from crabagent.core.task.status import TaskStatus
 from crabagent.core.task.store import get_task as _get_task
 from crabagent.core.task.store import update_task as _update_task
@@ -81,6 +82,7 @@ async def start_agent_run(
 
     updated = await _get_task(db, task_id, user_id)
     assert updated is not None
+    broadcast_task_event("task_updated", {"task_id": task_id, "status": updated["status"], "run_id": run.id})
     return updated, run.id
 
 
@@ -145,7 +147,17 @@ async def finish_agent_run(
             await db.commit()
             verdict = await judge_task(db, run.task_id, user_id)
             logger.info("Task %s completion verdict: %s", run.task_id, verdict)
-            return await _get_task(db, run.task_id, user_id)
+            final_task = await _get_task(db, run.task_id, user_id)
+            broadcast_task_event(
+                "task_updated",
+                {
+                    "task_id": run.task_id,
+                    "status": verdict["status"],
+                    "run_id": run_id,
+                    "verification_status": verdict["verification_status"],
+                },
+            )
+            return final_task
     elif run_status == RUN_STATUS_FAILED:
         task_values["status"] = TaskStatus.FAILED.value
         task_values["completed_at"] = now
@@ -166,8 +178,10 @@ async def finish_agent_run(
         for k, v in task_values.items():
             setattr(task_row, k, v)
     await db.commit()
-
-    return await _get_task(db, run.task_id, user_id)
+    final_task = await _get_task(db, run.task_id, user_id)
+    if final_task:
+        broadcast_task_event("task_updated", {"task_id": run.task_id, "status": final_task["status"], "run_id": run_id})
+    return final_task
 
 
 async def cancel_task(
@@ -191,7 +205,10 @@ async def cancel_task(
             run.finished_at = now.timestamp()
             run.interrupted_reason = reason[:500] or "user cancelled"
 
-    return await _update_task(db, task_id, user_id, status=TaskStatus.CANCELLED.value)
+    updated = await _update_task(db, task_id, user_id, status=TaskStatus.CANCELLED.value)
+    if updated:
+        broadcast_task_event("task_updated", {"task_id": task_id, "status": updated["status"]})
+    return updated
 
 
 async def mark_result_viewed(db: AsyncSession, task_id: int, user_id: int) -> dict | None:

@@ -63,6 +63,10 @@ class EventType(StrEnum):
     # System notifications (calendar reminders, etc.)
     NOTIFICATION = "notification"
 
+    # Trusted work system domain events
+    TASK_CREATED = "task_created"
+    TASK_UPDATED = "task_updated"
+
 
 @dataclass
 class AgentEvent:

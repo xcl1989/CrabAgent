@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import type { AttentionSummary } from "../api/work";
 import { getAttentionSummary } from "../api/work";
+import { connectGlobalSSE } from "../api/monitor";
 
 /**
  * Global work-status provider (trusted work system §13).
@@ -52,9 +53,23 @@ export function WorkStatusProvider({ children }: { children: React.ReactNode }) 
     const interval = setInterval(refresh, RECONCILE_INTERVAL_MS);
     const onFocus = () => refresh();
     window.addEventListener("focus", onFocus);
+
+    // Live updates: task domain events arrive over the global SSE stream.
+    let debounce: number | null = null;
+    const es = connectGlobalSSE((event) => {
+      if (event.type !== "task_created" && event.type !== "task_updated") return;
+      if (debounce !== null) window.clearTimeout(debounce);
+      debounce = window.setTimeout(() => {
+        debounce = null;
+        refresh();
+      }, 500);
+    });
+
     return () => {
       clearInterval(interval);
       window.removeEventListener("focus", onFocus);
+      es.close();
+      if (debounce !== null) window.clearTimeout(debounce);
     };
   }, [refresh]);
 

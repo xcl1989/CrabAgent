@@ -116,6 +116,24 @@ export function sseEventToMessages(event: SSEEvent, messages: ChatMessage[]): Ch
     return updated;
   }
 
+  if (event.type === "task_created") {
+    const card = event.data as { task_id?: number; title?: string; deadline?: string; project?: string };
+    if (card.task_id && card.title) {
+      updated.push({
+        id: `task-${card.task_id}-${Date.now()}`,
+        role: "task_card",
+        content: card.title,
+        task_card: {
+          task_id: card.task_id,
+          title: card.title,
+          deadline: card.deadline || undefined,
+          project: card.project || undefined,
+        },
+      });
+    }
+    return updated;
+  }
+
   if (event.type === "agent_error") {
     const errorInfo = event.data.error_info as ChatMessage["error_info"] | undefined;
     const content = (event.data.error as string) || "Unknown error";

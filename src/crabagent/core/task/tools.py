@@ -82,6 +82,24 @@ def register_task_tools(registry):
                 project=project,
                 priority=priority,
             )
+
+        # Trusted work system: notify listeners (chat card + global SSE).
+        try:
+            from crabagent.core.event import AgentEvent, EventType
+            from crabagent.core.task.events import broadcast_task_event
+
+            payload = {
+                "task_id": t["id"],
+                "title": title,
+                "deadline": deadline or "",
+                "project": project,
+                "session_id": source_session,
+            }
+            broadcast_task_event("task_created", payload)
+            if context is not None and getattr(context, "event_bus", None) is not None:
+                await context.event_bus.emit(AgentEvent(type=EventType.TASK_CREATED, data=payload))
+        except Exception:
+            pass
         parts = [f"✅ Task created: **{title}** (id={t['id']})"]
         if assignee:
             parts.append(f"👤 {assignee}")

@@ -59,6 +59,27 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.exception("Startup recovery failed (non-fatal)")
 
+    # Trusted work system: wire task domain events into the global SSE
+    # queues so panels/pet/switcher refresh without polling.
+    def _broadcast_task_event(event_type: str, data: dict) -> None:
+        import asyncio
+
+        from crabagent.core.event import AgentEvent, EventType
+
+        event = AgentEvent(type=EventType(event_type), data=data)
+        dead_queues: list[str] = []
+        for qid, (q, _ts) in list(getattr(app.state, "global_event_queues", {}).items()):
+            try:
+                q.put_nowait(event)
+            except asyncio.QueueFull:
+                dead_queues.append(qid)
+        for qid in dead_queues:
+            app.state.global_event_queues.pop(qid, None)
+
+    from crabagent.core.task.events import set_task_event_broadcaster
+
+    set_task_event_broadcaster(_broadcast_task_event)
+
     monitor_task = asyncio.create_task(_loop_monitor())
 
     from crabagent.core.mcp.client import MCPClientManager
@@ -223,9 +244,9 @@ def create_app() -> FastAPI:
     from crabagent.serve.api.task import router as task_router
     from crabagent.serve.api.task_request import router as task_request_router
     from crabagent.serve.api.todo import router as todo_router
-    from crabagent.serve.api.work import router as work_router
     from crabagent.serve.api.token_usage import router as token_usage_router
     from crabagent.serve.api.wechat import router as wechat_router
+    from crabagent.serve.api.work import router as work_router
 
     app.include_router(agent_router, prefix="/api")
     app.include_router(auth_router, prefix="/api")
