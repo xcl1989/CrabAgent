@@ -1,15 +1,15 @@
 import { useCallback, useState } from "react";
 import { SSEEvent } from "../api/events";
-import { TaskInfo } from "../components/TaskBoard.types";
+import { TaskInfo } from "../components/AgentRunBoard.types";
 
-export function useTaskBoard() {
-  const [taskBoardTasks, setTaskBoardTasks] = useState<TaskInfo[]>([]);
+export function useAgentRunBoard() {
+  const [agentRunBoardRuns, setAgentRunBoardRuns] = useState<TaskInfo[]>([]);
 
-  const handleTaskBoardEvent = useCallback((event: SSEEvent) => {
+  const handleAgentRunBoardEvent = useCallback((event: SSEEvent) => {
     if (event.type === "sub_agent_start") {
       const subId = (event.data.sub_agent_id as string) || "";
       const name = (event.data.agent_name as string) || "";
-      setTaskBoardTasks((prev) => {
+      setAgentRunBoardRuns((prev) => {
         if (prev.some((t) => t.subId === subId)) return prev;
         return [
           ...prev,
@@ -30,12 +30,12 @@ export function useTaskBoard() {
 
     if (event.type === "sub_agent_tool_call") {
       const subId = (event.data.sub_agent_id as string) || "";
-      setTaskBoardTasks((prev) => prev.map((t) => (t.subId === subId ? { ...t, toolCalls: t.toolCalls + 1 } : t)));
+      setAgentRunBoardRuns((prev) => prev.map((t) => (t.subId === subId ? { ...t, toolCalls: t.toolCalls + 1 } : t)));
     }
 
     if (event.type === "sub_agent_end") {
       const subId = (event.data.sub_agent_id as string) || "";
-      setTaskBoardTasks((prev) =>
+      setAgentRunBoardRuns((prev) =>
         prev.map((t) =>
           t.subId === subId
             ? {
@@ -53,7 +53,7 @@ export function useTaskBoard() {
 
     if (event.type === "sub_agent_error") {
       const subId = (event.data.sub_agent_id as string) || "";
-      setTaskBoardTasks((prev) =>
+      setAgentRunBoardRuns((prev) =>
         prev.map((t) =>
           t.subId === subId ? { ...t, status: "error" as const, error: (event.data.error as string) || "Unknown error" } : t
         )
@@ -61,7 +61,7 @@ export function useTaskBoard() {
     }
   }, []);
 
-  const clearTaskBoard = useCallback(() => setTaskBoardTasks([]), []);
+  const clearAgentRunBoard = useCallback(() => setAgentRunBoardRuns([]), []);
 
-  return { taskBoardTasks, handleTaskBoardEvent, clearTaskBoard };
+  return { agentRunBoardRuns, handleAgentRunBoardEvent, clearAgentRunBoard };
 }

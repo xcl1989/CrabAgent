@@ -2,7 +2,7 @@ import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Download } from "lucide-react";
-import { TaskInfo } from "./TaskBoard.types";
+import { TaskInfo } from "./AgentRunBoard.types";
 import { Modal, Button } from "./ui";
 import { useTranslation } from "react-i18next";
 import { cn } from "../lib/cn";

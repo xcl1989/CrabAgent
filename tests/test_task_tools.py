@@ -35,11 +35,76 @@ async def test_task_add_parses_datetime_deadline(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr("crabagent.core.task.store.add_task", fake_add)
     monkeypatch.setattr("crabagent.core.database.async_session_factory", lambda: FakeSession())
 
-    result = await handler(title="写报告", deadline="2026-07-02 10:30", assignee="xcl", project="Crab", priority="high")
+    context = SimpleNamespace(metadata={"user_id": 7, "session_id": "sess-abc"})
+    result = await handler(
+        title="写报告",
+        deadline="2026-07-02 10:30",
+        assignee="xcl",
+        project="Crab",
+        priority="high",
+        context=context,
+    )
 
     assert captured["deadline"].hour == 10
     assert "id=12" in result
     assert "🏷️ high" in result
+
+
+@pytest.mark.asyncio
+async def test_task_add_records_source_session_and_agent_source(monkeypatch: pytest.MonkeyPatch):
+    registry = ToolRegistry()
+    task_tools.register_task_tools(registry)
+    handler = _get_tool(registry, "task_add")
+    captured = {}
+
+    async def fake_add(db, **kwargs):
+        captured.update(kwargs)
+        return {"id": 13, "title": kwargs["title"]}
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr("crabagent.core.task.store.add_task", fake_add)
+    monkeypatch.setattr("crabagent.core.database.async_session_factory", lambda: FakeSession())
+
+    context = SimpleNamespace(metadata={"user_id": 3, "session_id": "sess-xyz"})
+    await handler(title="跟进客户", context=context)
+
+    assert captured["source"] == "agent"
+    assert captured["source_session"] == "sess-xyz"
+    assert captured["user_id"] == 3
+
+
+@pytest.mark.asyncio
+async def test_task_add_defaults_source_session_without_context(monkeypatch: pytest.MonkeyPatch):
+    registry = ToolRegistry()
+    task_tools.register_task_tools(registry)
+    handler = _get_tool(registry, "task_add")
+    captured = {}
+
+    async def fake_add(db, **kwargs):
+        captured.update(kwargs)
+        return {"id": 14, "title": kwargs["title"]}
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr("crabagent.core.task.store.add_task", fake_add)
+    monkeypatch.setattr("crabagent.core.database.async_session_factory", lambda: FakeSession())
+
+    await handler(title="无上下文任务")
+
+    assert captured["source"] == "agent"
+    assert captured["source_session"] == ""
+    assert captured["user_id"] == 1
 
 
 @pytest.mark.asyncio
@@ -62,18 +127,20 @@ async def test_task_list_formats_empty_and_populated_results(monkeypatch: pytest
 
     monkeypatch.setattr(
         "crabagent.core.task.store.list_tasks",
-        _async_return([
-            {
-                "id": 1,
-                "status": "pending",
-                "priority": "high",
-                "title": "修 bug",
-                "deadline": "2026-07-02T00:00:00",
-                "project": "Crab",
-                "assignee": "xcl",
-                "description": "A" * 100,
-            }
-        ]),
+        _async_return(
+            [
+                {
+                    "id": 1,
+                    "status": "pending",
+                    "priority": "high",
+                    "title": "修 bug",
+                    "deadline": "2026-07-02T00:00:00",
+                    "project": "Crab",
+                    "assignee": "xcl",
+                    "description": "A" * 100,
+                }
+            ]
+        ),
     )
     filled = await handler(status="pending")
     assert "修 bug" in filled

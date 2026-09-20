@@ -1,14 +1,14 @@
 import { useState } from "react";
 import { ClipboardList, ChevronRight, X } from "lucide-react";
-import { TaskInfo } from "./TaskBoard.types";
-import { TaskCard } from "./TaskCard";
+import { TaskInfo } from "./AgentRunBoard.types";
+import { TaskCard } from "./AgentRunCard";
 
 interface Props {
   tasks: TaskInfo[];
   onTaskClick: (task: TaskInfo) => void;
 }
 
-function DesktopTaskBoard({ tasks, onTaskClick }: Props) {
+function DesktopAgentRunBoard({ tasks, onTaskClick }: Props) {
   const [collapsed, setCollapsed] = useState(false);
   const runningCount = tasks.filter((t) => t.status === "running").length;
 
@@ -26,7 +26,7 @@ function DesktopTaskBoard({ tasks, onTaskClick }: Props) {
           <>
             <span className="text-xs font-semibold text-[var(--text-primary)] flex items-center gap-1.5">
               <ClipboardList size={12} />
-              Tasks
+              Agents
             </span>
             {runningCount > 0 && (
               <span className="ml-2 text-[9px] px-1.5 py-0.5 rounded-full font-medium animate-pulse bg-[var(--accent-2-bg)] text-[var(--accent-2)]">
@@ -79,7 +79,7 @@ function MobileTaskDrawer({ tasks, onTaskClick }: Props) {
         className="fixed bottom-36 sm:bottom-32 left-3 z-40 flex items-center gap-1.5 h-9 px-3 rounded-full text-[11px] font-medium shadow-[var(--shadow-md)] bg-[var(--bg-secondary)] border border-[var(--border)] text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
       >
         <ClipboardList size={13} className="text-[var(--accent-2)]" />
-        Tasks
+        Agents
         {runningCount > 0 && (
           <span className="w-4 h-4 rounded-full text-[8px] font-bold flex items-center justify-center bg-[var(--accent-2)] text-[var(--text-on-accent)] animate-pulse">
             {runningCount}
@@ -97,7 +97,7 @@ function MobileTaskDrawer({ tasks, onTaskClick }: Props) {
             <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border-subtle)]">
               <span className="text-sm font-semibold text-[var(--text-primary)] flex items-center gap-2">
                 <ClipboardList size={14} className="text-[var(--accent-2)]" />
-                Tasks
+                Agents
                 {runningCount > 0 && (
                   <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium animate-pulse bg-[var(--accent-2-bg)] text-[var(--accent-2)]">
                     {runningCount} running
@@ -130,13 +130,13 @@ function MobileTaskDrawer({ tasks, onTaskClick }: Props) {
   );
 }
 
-export function TaskBoard(props: Props) {
+export function AgentRunBoard(props: Props) {
   if (props.tasks.length === 0) return null;
 
   return (
     <>
       <div className="hidden md:block">
-        <DesktopTaskBoard {...props} />
+        <DesktopAgentRunBoard {...props} />
       </div>
       <div className="md:hidden">
         <MobileTaskDrawer {...props} />

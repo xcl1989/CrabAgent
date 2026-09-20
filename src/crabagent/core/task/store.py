@@ -6,6 +6,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from crabagent.core.database import Task
+from crabagent.core.task.status import OPEN_TASK_STATUSES, TaskStatus, validate_task_status
 
 
 def _task_to_dict(t: Task) -> dict:
@@ -51,7 +52,7 @@ async def add_task(
         source_session=source_session,
         project=project,
         priority=priority,
-        status="pending",
+        status=TaskStatus.PENDING.value,
     )
     db.add(task)
     await db.commit()
@@ -67,13 +68,13 @@ async def list_tasks(
 ) -> list[dict]:
     stmt = select(Task).where(Task.user_id == user_id)
     if status_filter == "pending":
-        stmt = stmt.where(Task.status.in_(["pending", "in_progress"]))
+        stmt = stmt.where(Task.status.in_(OPEN_TASK_STATUSES))
     elif status_filter == "done":
-        stmt = stmt.where(Task.status == "done")
+        stmt = stmt.where(Task.status == TaskStatus.DONE.value)
     elif status_filter == "overdue":
         now = datetime.datetime.now()
         stmt = stmt.where(
-            Task.status.in_(["pending", "in_progress"]),
+            Task.status.in_(OPEN_TASK_STATUSES),
             Task.deadline < now,
             Task.deadline.isnot(None),
         )
@@ -96,7 +97,7 @@ async def list_tasks_due_soon(
         select(Task)
         .where(
             Task.user_id == user_id,
-            Task.status.in_(["pending", "in_progress"]),
+            Task.status.in_(OPEN_TASK_STATUSES),
             Task.deadline.isnot(None),
             Task.deadline >= now,
             Task.deadline <= deadline_end,
@@ -115,19 +116,17 @@ async def get_task_summary(
     from sqlalchemy import func
 
     now = datetime.datetime.now()
-    total = await db.execute(
-        select(func.count(Task.id)).where(Task.user_id == user_id)
-    )
+    total = await db.execute(select(func.count(Task.id)).where(Task.user_id == user_id))
     pending = await db.execute(
         select(func.count(Task.id)).where(
             Task.user_id == user_id,
-            Task.status.in_(["pending", "in_progress"]),
+            Task.status.in_(OPEN_TASK_STATUSES),
         )
     )
     overdue = await db.execute(
         select(func.count(Task.id)).where(
             Task.user_id == user_id,
-            Task.status.in_(["pending", "in_progress"]),
+            Task.status.in_(OPEN_TASK_STATUSES),
             Task.deadline.isnot(None),
             Task.deadline < now,
         )
@@ -135,7 +134,7 @@ async def get_task_summary(
     done_today = await db.execute(
         select(func.count(Task.id)).where(
             Task.user_id == user_id,
-            Task.status == "done",
+            Task.status == TaskStatus.DONE.value,
             Task.updated_at >= now - datetime.timedelta(days=1),
         )
     )
@@ -149,9 +148,7 @@ async def get_task_summary(
 
 
 async def get_task(db: AsyncSession, task_id: int, user_id: int) -> dict | None:
-    result = await db.execute(
-        select(Task).where(Task.id == task_id, Task.user_id == user_id)
-    )
+    result = await db.execute(select(Task).where(Task.id == task_id, Task.user_id == user_id))
     t = result.scalar_one_or_none()
     return _task_to_dict(t) if t else None
 
@@ -162,17 +159,14 @@ async def update_task(
     user_id: int,
     **kwargs,
 ) -> dict | None:
-    allowed = {"title", "description", "assignee", "deadline", "status",
-                "priority", "project", "source", "source_ref"}
+    allowed = {"title", "description", "assignee", "deadline", "status", "priority", "project", "source", "source_ref"}
     updates = {k: v for k, v in kwargs.items() if k in allowed and v is not None}
+    if "status" in updates:
+        updates["status"] = validate_task_status(updates["status"])
     if not updates:
         return await get_task(db, task_id, user_id)
     updates["updated_at"] = datetime.datetime.now()
-    stmt = (
-        update(Task)
-        .where(Task.id == task_id, Task.user_id == user_id)
-        .values(**updates)
-    )
+    stmt = update(Task).where(Task.id == task_id, Task.user_id == user_id).values(**updates)
     result = await db.execute(stmt)
     if result.rowcount == 0:
         return None
@@ -181,9 +175,7 @@ async def update_task(
 
 
 async def delete_task(db: AsyncSession, task_id: int, user_id: int) -> bool:
-    result = await db.execute(
-        select(Task).where(Task.id == task_id, Task.user_id == user_id)
-    )
+    result = await db.execute(select(Task).where(Task.id == task_id, Task.user_id == user_id))
     t = result.scalar_one_or_none()
     if not t:
         return False
@@ -205,7 +197,7 @@ async def list_projects(db: AsyncSession, user_id: int) -> list[dict]:
         select(
             Task.project,
             func.count(Task.id).label("task_count"),
-            func.count(Task.id).filter(Task.status.in_(["pending", "in_progress"])).label("pending_count"),
+            func.count(Task.id).filter(Task.status.in_(OPEN_TASK_STATUSES)).label("pending_count"),
         )
         .where(Task.user_id == user_id, Task.project != "", Task.project.isnot(None))
         .group_by(Task.project)
@@ -217,21 +209,19 @@ async def list_projects(db: AsyncSession, user_id: int) -> list[dict]:
     # Get titles per project for keyword extraction
     projects = []
     for row in rows:
-        title_stmt = (
-            select(Task.title)
-            .where(Task.user_id == user_id, Task.project == row.project)
-            .limit(20)
-        )
+        title_stmt = select(Task.title).where(Task.user_id == user_id, Task.project == row.project).limit(20)
         title_result = await db.execute(title_stmt)
         titles = [t for (t,) in title_result.all()]
         keywords = _extract_keywords(titles)
 
-        projects.append({
-            "name": row.project,
-            "task_count": row.task_count,
-            "pending_count": row.pending_count,
-            "keywords": keywords,
-        })
+        projects.append(
+            {
+                "name": row.project,
+                "task_count": row.task_count,
+                "pending_count": row.pending_count,
+                "keywords": keywords,
+            }
+        )
 
     return projects
 
@@ -243,15 +233,85 @@ def _extract_keywords(titles: list[str], top_n: int = 5) -> list[str]:
 
     # Common stop words to ignore
     stop_words = {
-        "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
-        "have", "has", "had", "do", "does", "did", "will", "would", "could",
-        "should", "may", "might", "can", "shall", "to", "of", "in", "for",
-        "on", "with", "at", "by", "from", "as", "into", "about", "and",
-        "or", "but", "not", "no", "if", "so", "up", "out", "it", "its",
-        "this", "that", "these", "those", "my", "your", "his", "her",
-        "our", "their", "what", "which", "who", "when", "where", "how",
-        "all", "each", "every", "both", "few", "more", "most", "other",
-        "some", "such", "than", "too", "very", "just", "also", "then",
+        "the",
+        "a",
+        "an",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "been",
+        "being",
+        "have",
+        "has",
+        "had",
+        "do",
+        "does",
+        "did",
+        "will",
+        "would",
+        "could",
+        "should",
+        "may",
+        "might",
+        "can",
+        "shall",
+        "to",
+        "of",
+        "in",
+        "for",
+        "on",
+        "with",
+        "at",
+        "by",
+        "from",
+        "as",
+        "into",
+        "about",
+        "and",
+        "or",
+        "but",
+        "not",
+        "no",
+        "if",
+        "so",
+        "up",
+        "out",
+        "it",
+        "its",
+        "this",
+        "that",
+        "these",
+        "those",
+        "my",
+        "your",
+        "his",
+        "her",
+        "our",
+        "their",
+        "what",
+        "which",
+        "who",
+        "when",
+        "where",
+        "how",
+        "all",
+        "each",
+        "every",
+        "both",
+        "few",
+        "more",
+        "most",
+        "other",
+        "some",
+        "such",
+        "than",
+        "too",
+        "very",
+        "just",
+        "also",
+        "then",
     }
 
     words = Counter()

@@ -46,7 +46,7 @@ import { ScheduledTaskPanel } from "../components/ScheduledTaskPanel";
 import TaskPanel from "../components/TaskPanel";
 import EmailPanel from "../components/EmailPanel";
 import SkillsPanel from "../components/SkillsPanel";
-import { TaskBoard } from "../components/TaskBoard";
+import { AgentRunBoard } from "../components/AgentRunBoard";
 import { AgentBar } from "../components/AgentBar";
 import { DelegateModal } from "../components/DelegateModal";
 import { ResultCompare } from "../components/ResultCompare";
@@ -54,7 +54,7 @@ import WorkspaceSwitcher from "../components/WorkspaceSwitcher";
 import ModelSelector from "../components/ModelSelector";
 import { Modal, Button } from "../components/ui";
 import { useChatState } from "../hooks/useChatState";
-import { useTaskBoard } from "../hooks/useTaskBoard";
+import { useAgentRunBoard } from "../hooks/useAgentRunBoard";
 import { useModelSelector } from "../hooks/useModelSelector";
 import { cn } from "../lib/cn";
 import { dbMessagesToChat } from "../lib/messageTransforms";
@@ -88,8 +88,8 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
   const [selectedProvider, setSelectedProvider] = useState<string | null>(null);
   const [reasoningEffort, setReasoningEffort] = useState("medium");
   const [selectedAgent, setSelectedAgent] = useState("default");
-  const { taskBoardTasks, handleTaskBoardEvent, clearTaskBoard } =
-    useTaskBoard();
+  const { agentRunBoardRuns, handleAgentRunBoardEvent, clearAgentRunBoard } =
+    useAgentRunBoard();
 
   const {
     providers,
@@ -281,9 +281,9 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
     if (event.type.startsWith("doc_op_")) {
       handleDocEvent(event);
     } else {
-      handleTaskBoardEvent(event);
+      handleAgentRunBoardEvent(event);
     }
-  }, [handleTaskBoardEvent, handleDocEvent]);
+  }, [handleAgentRunBoardEvent, handleDocEvent]);
 
   const {
     sessions,
@@ -568,17 +568,17 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
           }
         }
       }
-      clearTaskBoard();
+      clearAgentRunBoard();
     },
-    [selectSession, selectedModel, models, setSelectedModel, providerModels, clearTaskBoard],
+    [selectSession, selectedModel, models, setSelectedModel, providerModels, clearAgentRunBoard],
   );
 
   const onNewSession = useCallback(async () => {
     const model = await newSession(selectedModel, models);
     setSelectedModel(model);
     setSelectedAgent("default");
-    clearTaskBoard();
-  }, [newSession, selectedModel, models, setSelectedModel, clearTaskBoard]);
+    clearAgentRunBoard();
+  }, [newSession, selectedModel, models, setSelectedModel, clearAgentRunBoard]);
 
   const handleToggleHistorySearchable = useCallback(async (session: Session) => {
     try {
@@ -970,7 +970,7 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
     }
   }, [activeSession, selectedModel, selectedAgent, reasoningEffort, selectedProvider, currentDocPath, mode, workspaceType, sending, setMessages, setSending]);
 
-  const completedTasks = taskBoardTasks.filter((t) => t.status === "done");
+  const completedTasks = agentRunBoardRuns.filter((t) => t.status === "done");
 
   const openCompression = () => {
     const matchedProvider = providerModels.find((item) =>
@@ -1928,8 +1928,8 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
         </>
       )}
 
-      <TaskBoard
-        tasks={taskBoardTasks}
+      <AgentRunBoard
+        tasks={agentRunBoardRuns}
         onTaskClick={(t) => setViewingSubAgent(t.subId)}
       />
 
@@ -2019,9 +2019,9 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
         />
       )}
 
-      {showResultCompare && taskBoardTasks.length > 0 && (
+      {showResultCompare && agentRunBoardRuns.length > 0 && (
         <ResultCompare
-          tasks={taskBoardTasks}
+          tasks={agentRunBoardRuns}
           onClose={() => setShowResultCompare(false)}
           onExport={handleExportReport}
         />

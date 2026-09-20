@@ -137,12 +137,14 @@ def build_project_context(
     project_tasks: list[dict],
 ) -> str:
     """Build a context block for a matched project."""
+    from crabagent.core.task.status import OPEN_TASK_STATUSES
+
     if not project_tasks:
         return f"📁 Project: **{project_name}** (no active tasks)"
 
     lines = [f"📁 Project: **{project_name}**", ""]
 
-    pending = [t for t in project_tasks if t["status"] in ("pending", "in_progress")]
+    pending = [t for t in project_tasks if t["status"] in OPEN_TASK_STATUSES]
     done_recent = [t for t in project_tasks if t["status"] == "done"][:3]
 
     if pending:

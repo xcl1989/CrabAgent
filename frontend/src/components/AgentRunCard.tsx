@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { TaskInfo, TaskStatus } from "./TaskBoard.types";
+import { TaskInfo, TaskStatus } from "./AgentRunBoard.types";
 
 const AGENT_ICONS: Record<string, string> = {
   researcher: "🔍", analyst: "📊", coder: "💻", writer: "📝",

@@ -186,6 +186,7 @@ async def list_events(
     # 2. Task-deadline pseudo-events (dynamic, not persisted)
     try:
         from crabagent.core.database import Task
+        from crabagent.core.task.status import OPEN_TASK_STATUSES
 
         task_stmt = (
             select(Task)
@@ -194,7 +195,7 @@ async def list_events(
                 Task.deadline.isnot(None),
                 Task.deadline >= start,
                 Task.deadline < end,
-                Task.status.in_(["pending", "in_progress"]),
+                Task.status.in_(OPEN_TASK_STATUSES),
             )
             .order_by(Task.deadline)
         )

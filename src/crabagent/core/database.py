@@ -657,6 +657,20 @@ def _migrate_db_to_home():
         logger.info("Migrated database from %s to %s", cwd_db, home_db)
 
 
+async def ensure_column(conn, table: str, column: str, definition: str) -> bool:
+    """Add ``column`` to ``table`` if it does not exist yet (SQLite).
+
+    ``definition`` is the raw SQL column definition, e.g.
+    ``"VARCHAR(32) DEFAULT ''"``. Returns True when the column was added.
+    """
+    result = await conn.execute(text(f"PRAGMA table_info({table})"))
+    existing = [row[1] for row in result.fetchall()]
+    if column in existing:
+        return False
+    await conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {definition}"))
+    return True
+
+
 async def init_db() -> None:
     _ensure_workspace_dirs()
     _migrate_db_to_home()
@@ -673,35 +687,19 @@ async def init_db() -> None:
             "ON user_preferences(user_id, key)"
         ))
 
-        result = await conn.execute(text("PRAGMA table_info(users)"))
-        columns = [row[1] for row in result.fetchall()]
-        if "locale" not in columns:
-            await conn.execute(text("ALTER TABLE users ADD COLUMN locale VARCHAR(10) DEFAULT 'en'"))
+        await ensure_column(conn, "users", "locale", "VARCHAR(10) DEFAULT 'en'")
 
-        result = await conn.execute(text("PRAGMA table_info(conversations)"))
-        columns = [row[1] for row in result.fetchall()]
-        if "tokens" not in columns:
-            await conn.execute(text("ALTER TABLE conversations ADD COLUMN tokens INTEGER DEFAULT 0"))
-        if "active_branch" not in columns:
-            await conn.execute(text("ALTER TABLE conversations ADD COLUMN active_branch VARCHAR(32) DEFAULT 'main'"))
-        if "agent" not in columns:
-            await conn.execute(text("ALTER TABLE conversations ADD COLUMN agent VARCHAR(100) DEFAULT 'default'"))
-        if "auto_titled" not in columns:
-            await conn.execute(text("ALTER TABLE conversations ADD COLUMN auto_titled BOOLEAN DEFAULT 0"))
-        if "provider" not in columns:
-            await conn.execute(text("ALTER TABLE conversations ADD COLUMN provider VARCHAR(100) DEFAULT ''"))
-        if "system_prompt" not in columns:
-            await conn.execute(text("ALTER TABLE conversations ADD COLUMN system_prompt TEXT DEFAULT ''"))
-        if "prompt_locale" not in columns:
-            await conn.execute(text("ALTER TABLE conversations ADD COLUMN prompt_locale VARCHAR(10) DEFAULT ''"))
-        if "source" not in columns:
-            await conn.execute(text("ALTER TABLE conversations ADD COLUMN source VARCHAR(20) DEFAULT 'chat'"))
-        if "current_file" not in columns:
-            await conn.execute(text("ALTER TABLE conversations ADD COLUMN current_file TEXT DEFAULT ''"))
-        if "workspace_type" not in columns:
-            await conn.execute(text("ALTER TABLE conversations ADD COLUMN workspace_type TEXT DEFAULT ''"))
-        if "history_searchable" not in columns:
-            await conn.execute(text("ALTER TABLE conversations ADD COLUMN history_searchable BOOLEAN DEFAULT 1"))
+        await ensure_column(conn, "conversations", "tokens", "INTEGER DEFAULT 0")
+        await ensure_column(conn, "conversations", "active_branch", "VARCHAR(32) DEFAULT 'main'")
+        await ensure_column(conn, "conversations", "agent", "VARCHAR(100) DEFAULT 'default'")
+        await ensure_column(conn, "conversations", "auto_titled", "BOOLEAN DEFAULT 0")
+        await ensure_column(conn, "conversations", "provider", "VARCHAR(100) DEFAULT ''")
+        await ensure_column(conn, "conversations", "system_prompt", "TEXT DEFAULT ''")
+        await ensure_column(conn, "conversations", "prompt_locale", "VARCHAR(10) DEFAULT ''")
+        await ensure_column(conn, "conversations", "source", "VARCHAR(20) DEFAULT 'chat'")
+        await ensure_column(conn, "conversations", "current_file", "TEXT DEFAULT ''")
+        await ensure_column(conn, "conversations", "workspace_type", "TEXT DEFAULT ''")
+        await ensure_column(conn, "conversations", "history_searchable", "BOOLEAN DEFAULT 1")
 
         # Goals are created by metadata for new databases. The tables below are
         # intentionally independent so existing user databases only gain data.
@@ -748,16 +746,10 @@ async def init_db() -> None:
             # email_configs table created by create_all
             pass
 
-        result = await conn.execute(text("PRAGMA table_info(messages)"))
-        columns = [row[1] for row in result.fetchall()]
-        if "parent_id" not in columns:
-            await conn.execute(text("ALTER TABLE messages ADD COLUMN parent_id INTEGER DEFAULT NULL"))
-        if "branch_id" not in columns:
-            await conn.execute(text("ALTER TABLE messages ADD COLUMN branch_id VARCHAR(32) DEFAULT 'main'"))
-        if "agent" not in columns:
-            await conn.execute(text("ALTER TABLE messages ADD COLUMN agent VARCHAR(100) DEFAULT 'default'"))
-        if "compressed" not in columns:
-            await conn.execute(text("ALTER TABLE messages ADD COLUMN compressed BOOLEAN DEFAULT 0"))
+        await ensure_column(conn, "messages", "parent_id", "INTEGER DEFAULT NULL")
+        await ensure_column(conn, "messages", "branch_id", "VARCHAR(32) DEFAULT 'main'")
+        await ensure_column(conn, "messages", "agent", "VARCHAR(100) DEFAULT 'default'")
+        await ensure_column(conn, "messages", "compressed", "BOOLEAN DEFAULT 0")
 
         # ── FTS5 full-text search index for messages ─────────────
         try:
@@ -802,22 +794,13 @@ async def init_db() -> None:
         except Exception as e:
             logger.warning("FTS5-CJK table creation failed (non-fatal): %s", e)
 
-        result = await conn.execute(text("PRAGMA table_info(molts)"))
-        columns = [row[1] for row in result.fetchall()]
-        if "method" not in columns:
-            await conn.execute(text("ALTER TABLE molts ADD COLUMN method VARCHAR(10) DEFAULT 'git'"))
+        await ensure_column(conn, "molts", "method", "VARCHAR(10) DEFAULT 'git'")
         if "workspace" not in columns:
             await conn.execute(text("ALTER TABLE molts ADD COLUMN workspace TEXT DEFAULT ''"))
 
-        result = await conn.execute(text("PRAGMA table_info(todos)"))
-        columns = [row[1] for row in result.fetchall()]
-        if "task" not in columns:
-            await conn.execute(text("ALTER TABLE todos ADD COLUMN task TEXT NOT NULL DEFAULT ''"))
+        await ensure_column(conn, "todos", "task", "TEXT NOT NULL DEFAULT ''")
 
-        result = await conn.execute(text("PRAGMA table_info(agent_profiles)"))
-        columns = [row[1] for row in result.fetchall()]
-        if "icon" not in columns:
-            await conn.execute(text("ALTER TABLE agent_profiles ADD COLUMN icon VARCHAR(10) DEFAULT ''"))
+        await ensure_column(conn, "agent_profiles", "icon", "VARCHAR(10) DEFAULT ''")
         if "is_default" not in columns:
             await conn.execute(text("ALTER TABLE agent_profiles ADD COLUMN is_default BOOLEAN DEFAULT 0"))
         if "tools" not in columns:
@@ -825,10 +808,7 @@ async def init_db() -> None:
         if "tool_permissions" not in columns:
             await conn.execute(text("ALTER TABLE agent_profiles ADD COLUMN tool_permissions TEXT DEFAULT '{}'"))
 
-        result = await conn.execute(text("PRAGMA table_info(pet_packages)"))
-        columns = [row[1] for row in result.fetchall()]
-        if "config_json" not in columns:
-            await conn.execute(text("ALTER TABLE pet_packages ADD COLUMN config_json TEXT DEFAULT '{}'"))
+        await ensure_column(conn, "pet_packages", "config_json", "TEXT DEFAULT '{}'")
 
         result = await conn.execute(text("PRAGMA table_info(tasks)"))
         columns = [row[1] for row in result.fetchall()]
@@ -838,10 +818,7 @@ async def init_db() -> None:
         if "source_session" not in columns:
             await conn.execute(text("ALTER TABLE tasks ADD COLUMN source_session VARCHAR(32) DEFAULT ''"))
 
-        result = await conn.execute(text("PRAGMA table_info(agent_memory)"))
-        columns = [row[1] for row in result.fetchall()]
-        if "source" not in columns:
-            await conn.execute(text("ALTER TABLE agent_memory ADD COLUMN source VARCHAR(10) DEFAULT ''"))
+        await ensure_column(conn, "agent_memory", "source", "VARCHAR(10) DEFAULT ''")
         if "task_category" not in columns:
             await conn.execute(text("ALTER TABLE agent_memory ADD COLUMN task_category VARCHAR(50) DEFAULT ''"))
         if "scope" not in columns:
@@ -867,20 +844,9 @@ async def init_db() -> None:
 
         # --- Calendar tables migrations ---
         # calendar_ical_sources: add CalDAV fields if missing (for upgrades)
-        result = await conn.execute(text("PRAGMA table_info(calendar_ical_sources)"))
-        columns = [row[1] for row in result.fetchall()]
-        if "source_type" not in columns:
-            await conn.execute(text(
-                "ALTER TABLE calendar_ical_sources ADD COLUMN source_type VARCHAR(20) DEFAULT 'ical'"
-            ))
-        if "caldav_username" not in columns:
-            await conn.execute(text(
-                "ALTER TABLE calendar_ical_sources ADD COLUMN caldav_username TEXT DEFAULT ''"
-            ))
-        if "caldav_password" not in columns:
-            await conn.execute(text(
-                "ALTER TABLE calendar_ical_sources ADD COLUMN caldav_password TEXT DEFAULT ''"
-            ))
+        await ensure_column(conn, "calendar_ical_sources", "source_type", "VARCHAR(20) DEFAULT 'ical'")
+        await ensure_column(conn, "calendar_ical_sources", "caldav_username", "TEXT DEFAULT ''")
+        await ensure_column(conn, "calendar_ical_sources", "caldav_password", "TEXT DEFAULT ''")
 
         # Execution spans — table is created by create_all(); add indexes here.
         await conn.execute(text(
@@ -890,12 +856,7 @@ async def init_db() -> None:
             "CREATE INDEX IF NOT EXISTS ix_execution_spans_run_id ON execution_spans (run_id)"
         ))
         # Add provider column for existing databases
-        result = await conn.execute(text("PRAGMA table_info(execution_spans)"))
-        es_columns = [row[1] for row in result.fetchall()]
-        if "provider" not in es_columns:
-            await conn.execute(text(
-                "ALTER TABLE execution_spans ADD COLUMN provider VARCHAR(100) DEFAULT ''"
-            ))
+        await ensure_column(conn, "execution_spans", "provider", "VARCHAR(100) DEFAULT ''")
 
     from crabagent.core.provider_store import migrate_plaintext_keys
 

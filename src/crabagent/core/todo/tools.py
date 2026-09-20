@@ -5,8 +5,9 @@ def register_todo_tools(registry):
     @registry.register(
         name="todo_add",
         description=(
-            "Add a task to the todo list. Use when the user asks to "
-            "remember something, add a task, or create a todo item."
+            "Add a step to the current session's execution checklist. Use for short-lived steps "
+            "of the work being done right now. Do not use this for cross-session commitments, "
+            "deadlines, or deliverables the user wants tracked; use task_add instead."
         ),
         parameters={
             "type": "object",
@@ -28,7 +29,8 @@ def register_todo_tools(registry):
     @registry.register(
         name="todo_list",
         description=(
-            "List todo items. Use when the user asks 'what do I need to do', 'show my tasks', or 'what's pending'."
+            "List the current session's execution checklist steps. Use when the user asks "
+            "what's pending in the current work. For cross-session tracked tasks use task_list instead."
         ),
         parameters={
             "type": "object",

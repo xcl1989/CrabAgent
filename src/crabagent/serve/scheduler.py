@@ -1525,12 +1525,14 @@ async def _calendar_event_reminder_impl():
             cal_events = list(result.scalars().all())
 
             # ── 2. Task deadline reminders ──
+            from crabagent.core.task.status import OPEN_TASK_STATUSES
+
             task_result = await db.execute(
                 select(Task).where(
                     Task.deadline.isnot(None),
                     Task.deadline > now,
                     Task.deadline <= check_until,
-                    Task.status.in_(["pending", "in_progress"]),
+                    Task.status.in_(OPEN_TASK_STATUSES),
                 )
             )
             tasks = list(task_result.scalars().all())

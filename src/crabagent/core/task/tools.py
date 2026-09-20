@@ -5,8 +5,9 @@ def register_task_tools(registry):
     @registry.register(
         name="task_add",
         description=(
-            "Add a persistent task (cross-session). Use when the user asks to remember something, "
-            "add a task, or create a todo item that should persist beyond the current session. "
+            "Add a persistent cross-session work commitment. Use for deadlines, assigned work, "
+            "deliverables, background or multi-stage work, and anything the user explicitly asks "
+            "to track. Do not use this for short steps in the current execution; use todo_add instead. "
             "Supports assignee, deadline, project association, and priority."
         ),
         parameters={
@@ -58,17 +59,15 @@ def register_task_tools(registry):
                 deadline_dt = datetime.datetime.strptime(deadline, "%Y-%m-%d")
             except ValueError:
                 try:
-                    deadline_dt = datetime.datetime.strptime(
-                        deadline, "%Y-%m-%d %H:%M"
-                    )
+                    deadline_dt = datetime.datetime.strptime(deadline, "%Y-%m-%d %H:%M")
                 except ValueError:
                     pass
 
         user_id = 1
+        source_session = ""
         if context:
-            user_id = int(
-                context.metadata.get("user_id", context.metadata.get("uid", 1))
-            )
+            user_id = int(context.metadata.get("user_id", context.metadata.get("uid", 1)))
+            source_session = str(context.metadata.get("session_id") or "")
 
         async with async_session_factory() as db:
             t = await _add(
@@ -78,7 +77,8 @@ def register_task_tools(registry):
                 description=description,
                 assignee=assignee,
                 deadline=deadline_dt,
-                source="manual",
+                source="agent",
+                source_session=source_session,
                 project=project,
                 priority=priority,
             )
@@ -96,8 +96,9 @@ def register_task_tools(registry):
     @registry.register(
         name="task_list",
         description=(
-            "List persistent tasks. Use when the user asks 'what do I need to do', "
+            "List persistent cross-session tasks. Use when the user asks 'what do I need to do', "
             "'show my tasks', 'what's pending', or 'show overdue tasks'. "
+            "This lists tracked work commitments, not the current execution checklist (use todo_list for that). "
             "Supports filtering by status and project."
         ),
         parameters={
@@ -121,9 +122,7 @@ def register_task_tools(registry):
 
         user_id = 1
         if context:
-            user_id = int(
-                context.metadata.get("user_id", context.metadata.get("uid", 1))
-            )
+            user_id = int(context.metadata.get("user_id", context.metadata.get("uid", 1)))
 
         async with async_session_factory() as db:
             items = await _list(db, user_id, status, project)
@@ -142,9 +141,7 @@ def register_task_tools(registry):
             if t["deadline"]:
                 deadline = f" 📅{t['deadline'][:10]}"
             project_tag = f" [{t['project']}]" if t["project"] else ""
-            lines.append(
-                f"  {t['id']}. {mark} {pri} **{t['title']}**{project_tag}{deadline}"
-            )
+            lines.append(f"  {t['id']}. {mark} {pri} **{t['title']}**{project_tag}{deadline}")
             if t["assignee"]:
                 lines.append(f"     👤 {t['assignee']}")
             if t["description"]:
@@ -155,8 +152,7 @@ def register_task_tools(registry):
     @registry.register(
         name="task_done",
         description=(
-            "Mark a persistent task as completed. "
-            "Use when the user says something is done, completed, or finished."
+            "Mark a persistent task as completed. Use when the user says something is done, completed, or finished."
         ),
         parameters={
             "type": "object",
@@ -172,9 +168,7 @@ def register_task_tools(registry):
 
         user_id = 1
         if context:
-            user_id = int(
-                context.metadata.get("user_id", context.metadata.get("uid", 1))
-            )
+            user_id = int(context.metadata.get("user_id", context.metadata.get("uid", 1)))
 
         async with async_session_factory() as db:
             t = await _update(db, id, user_id, status="done")
@@ -186,7 +180,9 @@ def register_task_tools(registry):
         name="task_update",
         description=(
             "Update a persistent task's fields. "
-            "Use to change title, description, assignee, deadline, priority, status, or project."
+            "Use to change title, description, assignee, deadline, priority, status, or project. "
+            "Statuses: pending (not started), in_progress (working), waiting_user (needs the user), "
+            "done (finished), partial (usable result but incomplete), failed (no usable result), cancelled."
         ),
         parameters={
             "type": "object",
@@ -201,7 +197,7 @@ def register_task_tools(registry):
                 },
                 "status": {
                     "type": "string",
-                    "enum": ["pending", "in_progress", "done", "cancelled"],
+                    "enum": ["pending", "in_progress", "waiting_user", "done", "partial", "failed", "cancelled"],
                     "description": "New status",
                 },
                 "priority": {
@@ -232,9 +228,7 @@ def register_task_tools(registry):
 
         user_id = 1
         if context:
-            user_id = int(
-                context.metadata.get("user_id", context.metadata.get("uid", 1))
-            )
+            user_id = int(context.metadata.get("user_id", context.metadata.get("uid", 1)))
 
         kwargs = {}
         if title:
@@ -281,9 +275,7 @@ def register_task_tools(registry):
 
         user_id = 1
         if context:
-            user_id = int(
-                context.metadata.get("user_id", context.metadata.get("uid", 1))
-            )
+            user_id = int(context.metadata.get("user_id", context.metadata.get("uid", 1)))
 
         async with async_session_factory() as db:
             ok = await _delete(db, id, user_id)
