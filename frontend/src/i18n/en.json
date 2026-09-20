@@ -294,7 +294,7 @@
     "refresh": "Refresh"
   },
   "todo": {
-    "title": "Todo",
+    "title": "Checklist",
     "addPlaceholder": "Add task…",
     "empty": "No tasks",
     "pending": "pending",
@@ -603,7 +603,27 @@
     "updated": "Task updated",
     "deleted": "Task deleted",
     "operationFailed": "Operation failed",
-    "deleteConfirm": "Delete task?"
+    "deleteConfirm": "Delete task?",
+    "actionStart": "Start",
+    "actionStop": "Stop",
+    "actionRetry": "Retry",
+    "actionOpenResult": "Open result",
+    "actionHandle": "Review",
+    "warnings": "Warnings & limits",
+    "resultSummary": "Result",
+    "artifacts": "Artifacts",
+    "noArtifacts": "No artifacts yet",
+    "artifactMissing": "missing",
+    "runHistory": "Run history",
+    "noRuns": "No runs yet",
+    "activeRun": "active",
+    "openSession": "Source session",
+    "rollbackRun": "Undo this run",
+    "rollbackConflict": "Files changed after this run; overwriting is risky:",
+    "rollbackForce": "Force restore anyway",
+    "rollbackDone": "Restored {{count}} files",
+    "rollbackNoChange": "No changes to roll back",
+    "verifiedPassed": "verified"
   },
   "settingsPage": {
     "title": "Settings",

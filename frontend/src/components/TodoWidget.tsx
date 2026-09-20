@@ -138,7 +138,7 @@ export default function TodoWidget({ sessionId, refreshKey = 0 }: Props) {
       <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--border)]">
         <span className="flex items-center gap-1.5 text-sm font-semibold text-[var(--text-primary)]">
           <ListTodo size={14} className="text-[var(--accent)]" />
-          Todo {pendingCount > 0 && `(${pendingCount})`}
+          {t("todo.title")} {pendingCount > 0 && `(${pendingCount})`}
         </span>
         <button
           onClick={() => setExpanded(false)}

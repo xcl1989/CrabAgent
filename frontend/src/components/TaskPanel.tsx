@@ -18,6 +18,7 @@ import {
   deleteTask,
   type CreateTaskRequest,
 } from "../api/tasks";
+import TaskDetailDrawer from "./TaskDetailDrawer";
 import { Modal, Button, Input, Textarea, ConfirmDialog } from "./ui";
 import { toast } from "./ui/Toast";
 import { cn } from "../lib/cn";
@@ -40,6 +41,47 @@ const PRIORITY_LABELS: Record<string, string> = {
 };
 
 const STATUS_ORDER = ["pending", "in_progress", "done"];
+
+const STATUS_META: Record<string, { label: string; className: string }> = {
+  pending: { label: "待开始", className: "bg-[var(--bg-tertiary)] text-[var(--text-secondary)]" },
+  in_progress: { label: "进行中", className: "bg-blue-500/10 text-blue-500" },
+  waiting_user: { label: "等待你", className: "bg-orange-500/10 text-orange-500" },
+  done: { label: "已完成", className: "bg-green-500/10 text-green-500" },
+  partial: { label: "部分完成", className: "bg-amber-500/10 text-amber-500" },
+  failed: { label: "失败", className: "bg-red-500/10 text-red-500" },
+  cancelled: { label: "已取消", className: "bg-[var(--bg-tertiary)] text-[var(--text-tertiary)]" },
+};
+
+type TaskGroup = { key: string; label: string; match: (t: Task) => boolean };
+
+const ACTION_GROUPS: TaskGroup[] = [
+  { key: "waiting", label: "等待你", match: (t) => t.status === "waiting_user" },
+  { key: "attention", label: "需要关注", match: (t) => t.status === "failed" || t.status === "partial" },
+  {
+    key: "agent",
+    label: "CrabAgent 正在处理",
+    match: (t) => t.status === "in_progress" && (t.owner_type ?? "human") === "agent",
+  },
+  {
+    key: "mine",
+    label: "由我处理",
+    match: (t) =>
+      (t.status === "pending" || t.status === "in_progress") && (t.owner_type ?? "human") === "human",
+  },
+  { key: "recent_done", label: "最近完成", match: (t) => t.status === "done" },
+];
+
+function groupTasks(tasks: Task[]): { group: TaskGroup; items: Task[] }[] {
+  const rest = [...tasks];
+  const result: { group: TaskGroup; items: Task[] }[] = [];
+  for (const group of ACTION_GROUPS) {
+    const items = rest.filter(group.match);
+    for (const item of items) rest.splice(rest.indexOf(item), 1);
+    if (items.length) result.push({ group, items });
+  }
+  if (rest.length) result.push({ group: { key: "other", label: "其他", match: () => false }, items: rest });
+  return result;
+}
 
 function isOverdue(task: Task): boolean {
   if (task.status === "done") return false;
@@ -73,6 +115,7 @@ export default function TaskPanel({ onClose, onSwitchSession }: Props) {
   const [newProject, setNewProject] = useState("");
   const [newPriority, setNewPriority] = useState("medium");
   const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
+  const [detailTaskId, setDetailTaskId] = useState<number | null>(null);
 
   const loadTasks = async () => {
     try {
@@ -206,10 +249,18 @@ export default function TaskPanel({ onClose, onSwitchSession }: Props) {
                   : t("task.noTasks")}
             </div>
           ) : (
-            <div className="space-y-1">
-              {tasks.map((task) => (
+            <div className="space-y-3">
+              {groupTasks(tasks).map(({ group, items }) => (
+              <div key={group.key}>
+              <div className="flex items-center gap-1.5 px-1 pb-1 pt-1 text-[11px] font-semibold text-[var(--text-secondary)]">
+                {group.label}
+                <span className="text-[10px] font-normal text-[var(--text-tertiary)]">{items.length}</span>
+              </div>
+              <div className="space-y-1">
+              {items.map((task) => (
                 <div
                   key={task.id}
+                  onClick={() => setDetailTaskId(task.id)}
                   className={cn(
                     "group flex items-start gap-2.5 px-3 py-2.5 rounded-lg transition-colors",
                     task.status === "done"
@@ -260,6 +311,13 @@ export default function TaskPanel({ onClose, onSwitchSession }: Props) {
                       {task.project && (
                         <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-[var(--bg-tertiary)] text-[var(--text-tertiary)]">
                           {task.project}
+                        </span>
+                      )}
+
+                      {/* Status chip */}
+                      {task.status !== "done" && task.status !== "pending" && STATUS_META[task.status] && (
+                        <span className={cn("px-1.5 py-0.5 rounded text-[10px] font-medium", STATUS_META[task.status].className)}>
+                          {STATUS_META[task.status].label}
                         </span>
                       )}
 
@@ -329,10 +387,21 @@ export default function TaskPanel({ onClose, onSwitchSession }: Props) {
                   </button>
                 </div>
               ))}
+              </div>
+              </div>
+              ))}
             </div>
           )}
         </div>
       </div>
+
+      {/* Detail drawer */}
+      <TaskDetailDrawer
+        taskId={detailTaskId}
+        onClose={() => setDetailTaskId(null)}
+        onSwitchSession={onSwitchSession}
+        onTaskChanged={loadTasks}
+      />
 
       {/* Create modal */}
       <Modal

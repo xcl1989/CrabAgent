@@ -7,12 +7,15 @@ import App from "./App";
 import { ThemeProvider } from "./lib/theme";
 import { Toaster } from "./components/ui/Toast";
 import { AppErrorBoundary } from "./components/AppErrorBoundary";
+import { WorkStatusProvider } from "./hooks/useWorkStatus";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <ThemeProvider>
       <AppErrorBoundary>
-        <App />
+        <WorkStatusProvider>
+          <App />
+        </WorkStatusProvider>
       </AppErrorBoundary>
       <Toaster />
     </ThemeProvider>

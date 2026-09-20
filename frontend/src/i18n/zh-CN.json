@@ -294,7 +294,7 @@
     "refresh": "刷新"
   },
   "todo": {
-    "title": "待办",
+    "title": "执行清单",
     "addPlaceholder": "添加任务…",
     "empty": "暂无待办",
     "pending": "待办",
@@ -603,7 +603,27 @@
     "updated": "任务已更新",
     "deleted": "任务已删除",
     "operationFailed": "操作失败",
-    "deleteConfirm": "删除此任务？"
+    "deleteConfirm": "删除此任务？",
+    "actionStart": "开始执行",
+    "actionStop": "停止",
+    "actionRetry": "从失败重试",
+    "actionOpenResult": "打开成果",
+    "actionHandle": "查看并处理",
+    "warnings": "警告与限制",
+    "resultSummary": "结果",
+    "artifacts": "成果",
+    "noArtifacts": "暂无成果文件",
+    "artifactMissing": "文件缺失",
+    "runHistory": "执行历史",
+    "noRuns": "暂无执行记录",
+    "activeRun": "当前执行",
+    "openSession": "来源会话",
+    "rollbackRun": "撤销此执行",
+    "rollbackConflict": "以下文件在本次执行后又被修改，直接覆盖有风险：",
+    "rollbackForce": "仍要强制恢复",
+    "rollbackDone": "已恢复 {{count}} 个文件",
+    "rollbackNoChange": "文件无变化，未执行回滚",
+    "verifiedPassed": "已验证"
   },
   "settingsPage": {
     "title": "设置",
