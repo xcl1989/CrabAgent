@@ -5,6 +5,12 @@ import time as _time
 
 from crabagent.core.event import AgentEvent, EventType
 
+# Tools whose successful results automatically become task artifacts.
+try:
+    from crabagent.core.task.artifact_service import TOOL_ARTIFACT_MAP
+except Exception:  # pragma: no cover - import guard for standalone use
+    TOOL_ARTIFACT_MAP = {}
+
 logger = logging.getLogger(__name__)
 
 
@@ -39,7 +45,8 @@ class RunRecorder:
         elif t == EventType.TOOL_CALL and self._main_run_id:
             self._on_tool_call(d, self._main_tool_buf)
         elif t == EventType.TOOL_RESULT and self._main_run_id:
-            self._on_tool_result(d, self._main_tool_buf)
+            entry = self._on_tool_result(d, self._main_tool_buf)
+            await self._capture_artifact(d, entry, self._main_run_id)
         elif t == EventType.AGENT_END:
             await self._on_agent_end(d)
         elif t == EventType.AGENT_ERROR:
@@ -51,7 +58,11 @@ class RunRecorder:
         elif t == EventType.SUB_AGENT_TOOL_CALL:
             self._on_sub_tool_call(d)
         elif t == EventType.SUB_AGENT_TOOL_RESULT:
-            self._on_sub_tool_result(d)
+            sub_id = d.get("sub_agent_id", "")
+            entry = self._sub_runs.get(sub_id)
+            if entry:
+                matched = self._on_tool_result(d, entry["tool_buf"])
+                await self._capture_artifact(d, matched, entry.get("run_id"))
         elif t == EventType.SUB_AGENT_END:
             await self._on_sub_end(d)
         elif t == EventType.SUB_AGENT_ERROR:
@@ -90,7 +101,7 @@ class RunRecorder:
             }
         )
 
-    def _on_tool_result(self, data: dict, buf: list) -> None:
+    def _on_tool_result(self, data: dict, buf: list) -> dict | None:
         name = data.get("name", "")
         result = data.get("result", "")
         finished_at = _time.time()
@@ -98,7 +109,22 @@ class RunRecorder:
             if tool["name"] == name and tool["result_summary"] is None:
                 tool["result_summary"] = str(result)[:500]
                 tool["elapsed"] = round(finished_at - tool["started_at"], 3)
-                break
+                return tool
+        return None
+
+    async def _capture_artifact(self, data: dict, entry: dict | None, run_id: int | None) -> None:
+        """Auto-register task artifacts from successful file-producing tools."""
+        if not run_id or not entry:
+            return
+        tool_name = entry.get("name", "")
+        if tool_name not in TOOL_ARTIFACT_MAP:
+            return
+        try:
+            from crabagent.core.task.artifact_service import register_artifact_from_tool
+
+            await register_artifact_from_tool(run_id, tool_name, entry.get("args") or {}, data.get("result"))
+        except Exception:
+            logger.exception("RunRecorder: artifact capture failed for tool %s", tool_name)
 
     async def _on_agent_end(self, data: dict) -> None:
         if not self._main_run_id:
@@ -172,13 +198,6 @@ class RunRecorder:
         if not entry:
             return
         self._on_tool_call(data, entry["tool_buf"])
-
-    def _on_sub_tool_result(self, data: dict) -> None:
-        sub_id = data.get("sub_agent_id", "")
-        entry = self._sub_runs.get(sub_id)
-        if not entry:
-            return
-        self._on_tool_result(data, entry["tool_buf"])
 
     async def _on_sub_end(self, data: dict) -> None:
         sub_id = data.get("sub_agent_id", "")

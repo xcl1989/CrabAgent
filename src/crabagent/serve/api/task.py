@@ -208,6 +208,7 @@ async def get_task_detail(
 ):
     """One-shot payload for the task detail drawer."""
     from crabagent.core.task import service as task_service
+    from crabagent.core.task.artifact_service import list_artifacts
     from crabagent.core.task.store import get_task as _get
 
     task = await _get(db, task_id, user.id)
@@ -216,8 +217,57 @@ async def get_task_detail(
 
     runs = await task_service.list_task_runs(db, task_id, user.id)
     active_run = next((r for r in runs if r["id"] == task.get("active_run_id")), None)
+    artifacts = await list_artifacts(db, task_id, user.id)
     return {
         "task": task,
         "active_run": active_run,
         "runs": runs,
+        "artifacts": artifacts,
     }
+
+
+@router.get("/{task_id}/artifacts")
+async def list_task_artifacts(
+    task_id: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from crabagent.core.task.artifact_service import list_artifacts
+    from crabagent.core.task.store import get_task as _get
+
+    task = await _get(db, task_id, user.id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return await list_artifacts(db, task_id, user.id)
+
+
+@router.get("/{task_id}/checks")
+async def list_task_checks(
+    task_id: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from sqlalchemy import select
+
+    from crabagent.core.database import TaskCheck
+    from crabagent.core.task.store import get_task as _get
+
+    task = await _get(db, task_id, user.id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    result = await db.execute(
+        select(TaskCheck).where(TaskCheck.task_id == task_id, TaskCheck.user_id == user.id).order_by(TaskCheck.position)
+    )
+    return [
+        {
+            "id": c.id,
+            "task_id": c.task_id,
+            "run_id": c.run_id,
+            "title": c.title,
+            "required": c.required,
+            "status": c.status,
+            "evidence": c.evidence,
+            "verified_at": c.verified_at.isoformat() if c.verified_at else None,
+        }
+        for c in result.scalars().all()
+    ]

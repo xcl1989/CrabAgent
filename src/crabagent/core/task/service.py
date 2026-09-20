@@ -130,10 +130,22 @@ async def finish_agent_run(
     task_values: dict = {"active_run_id": None, "updated_at": now}
 
     if run_status == RUN_STATUS_COMPLETED:
-        task_values["status"] = TaskStatus.DONE.value
-        task_values["completed_at"] = now
-        if result_summary:
-            task_values["result_summary"] = result_summary
+        # Trusted completion: verify artifacts + checks, then judge the
+        # final task status (never trust "run ended" as "task done").
+        task_row_result = await db.execute(select(Task).where(Task.id == run.task_id))
+        task_row = task_row_result.scalar_one_or_none()
+        if task_row:
+            from crabagent.core.task.completion import judge_task, refresh_auto_checks
+
+            await refresh_auto_checks(db, run.task_id, user_id, workspace=task_row.workspace, run_id=run_id)
+            task_row.active_run_id = None
+            task_row.updated_at = now
+            if result_summary and not task_row.result_summary:
+                task_row.result_summary = result_summary
+            await db.commit()
+            verdict = await judge_task(db, run.task_id, user_id)
+            logger.info("Task %s completion verdict: %s", run.task_id, verdict)
+            return await _get_task(db, run.task_id, user_id)
     elif run_status == RUN_STATUS_FAILED:
         task_values["status"] = TaskStatus.FAILED.value
         task_values["completed_at"] = now

@@ -449,6 +449,56 @@ class BrowserTask(Base):
     completed_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
 
 
+class TaskArtifact(Base):
+    """A deliverable produced or modified by a task run.
+
+    Paths and actions must come from real tool results — never fabricated
+    by the model. ``version`` supports authorization invalidation: a new
+    version of the same path supersedes earlier approvals.
+    """
+
+    __tablename__ = "task_artifacts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    task_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    run_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    artifact_type: Mapped[str] = mapped_column(String(30), default="file")
+    # file | draft | message | result | external_result
+    name: Mapped[str] = mapped_column(String(500), default="")
+    path: Mapped[str] = mapped_column(Text, default="")
+    mime_type: Mapped[str] = mapped_column(String(100), default="")
+    action: Mapped[str] = mapped_column(String(20), default="created")
+    # input | created | modified | sent | analyzed
+    status: Mapped[str] = mapped_column(String(20), default="available")
+    # available | missing | superseded
+    external_id: Mapped[str] = mapped_column(String(500), default="")
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    metadata_: Mapped[dict | None] = mapped_column("metadata", JSON, nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class TaskCheck(Base):
+    """An acceptance criterion for a task, with real verification evidence."""
+
+    __tablename__ = "task_checks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    task_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    run_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    title: Mapped[str] = mapped_column(Text, default="")
+    required: Mapped[bool] = mapped_column(Boolean, default=True)
+    status: Mapped[str] = mapped_column(String(20), default="pending")
+    # pending | passed | failed | warning | skipped
+    evidence: Mapped[str] = mapped_column(Text, default="")
+    evidence_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    verified_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
+
+
 class TaskRequest(Base):
     """A persistent user-participation request (input/choice/approval/human_step/review).
 
@@ -898,6 +948,14 @@ async def init_db() -> None:
         ))
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_task_requests_task_status ON task_requests(task_id, status)"
+        ))
+
+        # ── Trusted work system: task_artifacts / task_checks 索引 ──
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_task_artifacts_task_run ON task_artifacts(task_id, run_id)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_task_checks_task_position ON task_checks(task_id, position)"
         ))
 
         await ensure_column(conn, "agent_memory", "source", "VARCHAR(10) DEFAULT ''")

@@ -93,7 +93,8 @@ async def test_finish_run_failed_marks_task_failed(db):
 async def test_finish_run_cancelled_after_done_keeps_done(db):
     task = await task_store.add_task(db, user_id=1, title="生成报告")
     _, run_id = await task_service.start_agent_run(db, task["id"], 1)
-    await task_service.finish_agent_run(db, run_id, 1, "completed")
+    # A summary-only task completes as done under trusted judgment.
+    await task_service.finish_agent_run(db, run_id, 1, "completed", result_summary="报告完成")
 
     # A late cancellation arriving after done must not downgrade the task.
     updated = await task_service.finish_agent_run(db, run_id, 1, "cancelled")
