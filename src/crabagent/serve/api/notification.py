@@ -17,6 +17,13 @@ class NotificationResponse(BaseModel):
     body: str
     conversation_id: str
     read: bool
+    category: str = ""
+    severity: str = "info"
+    target_type: str = ""
+    target_id: str = ""
+    task_id: int | None = None
+    action: str = ""
+    read_at: str | None = None
     created_at: str
 
 
@@ -27,6 +34,13 @@ def _to_response(n: Notification) -> NotificationResponse:
         body=n.body or "",
         conversation_id=n.conversation_id or "",
         read=n.read,
+        category=n.category or "",
+        severity=n.severity or "info",
+        target_type=n.target_type or "",
+        target_id=n.target_id or "",
+        task_id=n.task_id,
+        action=n.action or "",
+        read_at=n.read_at.isoformat() if n.read_at else None,
         created_at=n.created_at.isoformat() if n.created_at else "",
     )
 

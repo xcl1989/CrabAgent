@@ -298,6 +298,15 @@ class Notification(Base):
     body: Mapped[str] = mapped_column(Text, default="")
     conversation_id: Mapped[str] = mapped_column(String(32), default="")
     read: Mapped[bool] = mapped_column(Boolean, default=False)
+    # ── Trusted work system: navigation envelope ──────────────────
+    category: Mapped[str] = mapped_column(String(50), default="")  # task|request|run|chat|...
+    severity: Mapped[str] = mapped_column(String(20), default="info")  # info|warning|error
+    target_type: Mapped[str] = mapped_column(String(30), default="")  # session|task|task_request|artifact|run|task_list
+    target_id: Mapped[str] = mapped_column(String(100), default="")
+    task_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    action: Mapped[str] = mapped_column(String(50), default="")
+    metadata_: Mapped[dict | None] = mapped_column("metadata", JSON, nullable=True)
+    read_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
 
 
@@ -956,6 +965,22 @@ async def init_db() -> None:
         ))
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_task_checks_task_position ON task_checks(task_id, position)"
+        ))
+
+        # ── Trusted work system: notifications 导航信封列 ──
+        await ensure_column(conn, "notifications", "category", "VARCHAR(50) DEFAULT ''")
+        await ensure_column(conn, "notifications", "severity", "VARCHAR(20) DEFAULT 'info'")
+        await ensure_column(conn, "notifications", "target_type", "VARCHAR(30) DEFAULT ''")
+        await ensure_column(conn, "notifications", "target_id", "VARCHAR(100) DEFAULT ''")
+        await ensure_column(conn, "notifications", "task_id", "INTEGER DEFAULT NULL")
+        await ensure_column(conn, "notifications", "action", "VARCHAR(50) DEFAULT ''")
+        await ensure_column(conn, "notifications", "metadata", "JSON")
+        await ensure_column(conn, "notifications", "read_at", "DATETIME DEFAULT NULL")
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_notifications_user_read ON notifications(user_id, read)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_notifications_task_id ON notifications(task_id)"
         ))
 
         await ensure_column(conn, "agent_memory", "source", "VARCHAR(10) DEFAULT ''")
