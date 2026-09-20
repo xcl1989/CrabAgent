@@ -73,6 +73,10 @@ async def create_task(
         source_ref=req.source_ref,
         project=req.project,
         priority=req.priority,
+        workspace=req.workspace,
+        goal_id=req.goal_id,
+        owner_type=req.owner_type,
+        owner_name=req.owner_name,
     )
 
 
@@ -130,3 +134,90 @@ async def delete_task(
     if not ok:
         raise HTTPException(status_code=404, detail="Task not found")
     return {"status": "ok"}
+
+
+@router.post("/{task_id}/start")
+async def start_task(
+    task_id: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Mark a task in_progress and create a linked AgentRun."""
+    from crabagent.core.task import service as task_service
+
+    try:
+        task, run_id = await task_service.start_agent_run(
+            db,
+            task_id,
+            user.id,
+            agent_name="main",
+            session_id="",
+        )
+    except LookupError:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return {"task": task, "run_id": run_id}
+
+
+@router.post("/{task_id}/cancel")
+async def cancel_task(
+    task_id: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Cancel a task and finalize its active run as cancelled."""
+    from crabagent.core.task import service as task_service
+
+    task = await task_service.cancel_task(db, task_id, user.id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return task
+
+
+@router.post("/{task_id}/mark-result-viewed")
+async def mark_result_viewed(
+    task_id: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Record when the user actually opened the task result."""
+    from crabagent.core.task import service as task_service
+
+    task = await task_service.mark_result_viewed(db, task_id, user.id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return task
+
+
+@router.get("/{task_id}/runs")
+async def list_task_runs(
+    task_id: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """List all runs belonging to a task, newest first."""
+    from crabagent.core.task import service as task_service
+
+    return await task_service.list_task_runs(db, task_id, user.id)
+
+
+@router.get("/{task_id}/detail")
+async def get_task_detail(
+    task_id: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """One-shot payload for the task detail drawer."""
+    from crabagent.core.task import service as task_service
+    from crabagent.core.task.store import get_task as _get
+
+    task = await _get(db, task_id, user.id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    runs = await task_service.list_task_runs(db, task_id, user.id)
+    active_run = next((r for r in runs if r["id"] == task.get("active_run_id")), None)
+    return {
+        "task": task,
+        "active_run": active_run,
+        "runs": runs,
+    }

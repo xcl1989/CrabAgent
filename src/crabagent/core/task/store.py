@@ -23,9 +23,42 @@ def _task_to_dict(t: Task) -> dict:
         "project": t.project,
         "status": t.status,
         "priority": t.priority,
+        "owner_type": t.owner_type,
+        "owner_name": t.owner_name,
+        "workspace": t.workspace,
+        "goal_id": t.goal_id,
+        "result_summary": t.result_summary,
+        "warning_summary": t.warning_summary,
+        "verification_status": t.verification_status,
+        "active_run_id": t.active_run_id,
+        "last_run_id": t.last_run_id,
+        "started_at": t.started_at.isoformat() if t.started_at else None,
+        "completed_at": t.completed_at.isoformat() if t.completed_at else None,
+        "result_viewed_at": t.result_viewed_at.isoformat() if t.result_viewed_at else None,
         "created_at": t.created_at.isoformat() if t.created_at else None,
         "updated_at": t.updated_at.isoformat() if t.updated_at else None,
     }
+
+
+KNOWN_AGENT_NAMES = {"crabagent", "crab"}
+
+
+def classify_owner(assignee: str) -> tuple[str, str]:
+    """Map a legacy ``assignee`` value to (owner_type, owner_name).
+
+    Known agent names map to ``agent``; empty values default to the
+    CrabAgent main agent when the task originates from an agent tool,
+    otherwise to a human owner.
+    """
+    name = (assignee or "").strip()
+    if not name:
+        return ("human", "")
+    if name.lower() in KNOWN_AGENT_NAMES:
+        return ("agent", "CrabAgent")
+    # Chinese/English professional agent titles also count as agent owners
+    if any(marker in name.lower() for marker in ("agent", "分析师", "研究员", "撰写员", "专家", "计划")):
+        return ("agent", name)
+    return ("human", name)
 
 
 async def add_task(
@@ -40,7 +73,15 @@ async def add_task(
     source_session: str = "",
     project: str = "",
     priority: str = "medium",
+    workspace: str = "",
+    goal_id: int | None = None,
+    owner_type: str = "",
+    owner_name: str = "",
 ) -> dict:
+    if not owner_type or not owner_name:
+        inferred_type, inferred_name = classify_owner(assignee)
+        owner_type = owner_type or inferred_type
+        owner_name = owner_name or inferred_name
     task = Task(
         user_id=user_id,
         title=title,
@@ -53,6 +94,10 @@ async def add_task(
         project=project,
         priority=priority,
         status=TaskStatus.PENDING.value,
+        owner_type=owner_type,
+        owner_name=owner_name,
+        workspace=workspace,
+        goal_id=goal_id,
     )
     db.add(task)
     await db.commit()
@@ -159,13 +204,39 @@ async def update_task(
     user_id: int,
     **kwargs,
 ) -> dict | None:
-    allowed = {"title", "description", "assignee", "deadline", "status", "priority", "project", "source", "source_ref"}
+    allowed = {
+        "title",
+        "description",
+        "assignee",
+        "deadline",
+        "status",
+        "priority",
+        "project",
+        "source",
+        "source_ref",
+        "owner_type",
+        "owner_name",
+        "workspace",
+        "goal_id",
+        "result_summary",
+        "warning_summary",
+        "verification_status",
+    }
     updates = {k: v for k, v in kwargs.items() if k in allowed and v is not None}
     if "status" in updates:
         updates["status"] = validate_task_status(updates["status"])
     if not updates:
         return await get_task(db, task_id, user_id)
-    updates["updated_at"] = datetime.datetime.now()
+    now = datetime.datetime.now()
+    updates["updated_at"] = now
+    # Maintain lifecycle timestamps alongside status changes
+    if updates.get("status") in (TaskStatus.DONE.value, TaskStatus.PARTIAL.value):
+        updates.setdefault("completed_at", now)
+    if updates.get("status") == TaskStatus.IN_PROGRESS.value:
+        # only stamp started_at once; keep the original start time on retries
+        current = await get_task(db, task_id, user_id)
+        if current and not current.get("started_at"):
+            updates["started_at"] = now
     stmt = update(Task).where(Task.id == task_id, Task.user_id == user_id).values(**updates)
     result = await db.execute(stmt)
     if result.rowcount == 0:

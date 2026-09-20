@@ -225,6 +225,19 @@ class Task(Base):
     project: Mapped[str] = mapped_column(String(200), default="")
     status: Mapped[str] = mapped_column(String(20), default="pending")
     priority: Mapped[str] = mapped_column(String(10), default="medium")
+    # ── Trusted work system fields ──────────────────────────────
+    owner_type: Mapped[str] = mapped_column(String(20), default="human")  # human | agent
+    owner_name: Mapped[str] = mapped_column(String(100), default="")
+    workspace: Mapped[str] = mapped_column(Text, default="")
+    goal_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    result_summary: Mapped[str] = mapped_column(Text, default="")
+    warning_summary: Mapped[str] = mapped_column(Text, default="")
+    verification_status: Mapped[str] = mapped_column(String(20), default="unverified")
+    active_run_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_run_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    started_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
+    result_viewed_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
@@ -484,6 +497,13 @@ class AgentRun(Base):
     result_summary: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     error: Mapped[str | None] = mapped_column(String(500), nullable=True)
     metadata_: Mapped[str | None] = mapped_column("metadata", JSON, nullable=True)
+    # ── Trusted work system fields ──────────────────────────────
+    task_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    workspace: Mapped[str] = mapped_column(Text, default="")
+    phase: Mapped[str] = mapped_column(String(200), default="")
+    progress_current: Mapped[int] = mapped_column(Integer, default=0)
+    progress_total: Mapped[int] = mapped_column(Integer, default=0)
+    interrupted_reason: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
 
 
@@ -740,12 +760,6 @@ async def init_db() -> None:
         ))
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_goal_checkpoints_goal_id ON goal_checkpoints(goal_id)"))
 
-        result = await conn.execute(text("PRAGMA table_info(email_configs)"))
-        columns = [row[1] for row in result.fetchall()]
-        if "imap_host" not in columns:
-            # email_configs table created by create_all
-            pass
-
         await ensure_column(conn, "messages", "parent_id", "INTEGER DEFAULT NULL")
         await ensure_column(conn, "messages", "branch_id", "VARCHAR(32) DEFAULT 'main'")
         await ensure_column(conn, "messages", "agent", "VARCHAR(100) DEFAULT 'default'")
@@ -795,38 +809,55 @@ async def init_db() -> None:
             logger.warning("FTS5-CJK table creation failed (non-fatal): %s", e)
 
         await ensure_column(conn, "molts", "method", "VARCHAR(10) DEFAULT 'git'")
-        if "workspace" not in columns:
-            await conn.execute(text("ALTER TABLE molts ADD COLUMN workspace TEXT DEFAULT ''"))
+        await ensure_column(conn, "molts", "workspace", "TEXT DEFAULT ''")
 
         await ensure_column(conn, "todos", "task", "TEXT NOT NULL DEFAULT ''")
 
         await ensure_column(conn, "agent_profiles", "icon", "VARCHAR(10) DEFAULT ''")
-        if "is_default" not in columns:
-            await conn.execute(text("ALTER TABLE agent_profiles ADD COLUMN is_default BOOLEAN DEFAULT 0"))
-        if "tools" not in columns:
-            await conn.execute(text("ALTER TABLE agent_profiles ADD COLUMN tools TEXT DEFAULT ''"))
-        if "tool_permissions" not in columns:
-            await conn.execute(text("ALTER TABLE agent_profiles ADD COLUMN tool_permissions TEXT DEFAULT '{}'"))
+        await ensure_column(conn, "agent_profiles", "is_default", "BOOLEAN DEFAULT 0")
+        await ensure_column(conn, "agent_profiles", "tools", "TEXT DEFAULT ''")
+        await ensure_column(conn, "agent_profiles", "tool_permissions", "TEXT DEFAULT '{}'")
 
         await ensure_column(conn, "pet_packages", "config_json", "TEXT DEFAULT '{}'")
 
-        result = await conn.execute(text("PRAGMA table_info(tasks)"))
-        columns = [row[1] for row in result.fetchall()]
-        if "title" not in columns:
-            # tasks 表由 create_all 自动创建，无需 ALTER TABLE
-            pass
-        if "source_session" not in columns:
-            await conn.execute(text("ALTER TABLE tasks ADD COLUMN source_session VARCHAR(32) DEFAULT ''"))
+        # tasks 表由 create_all 自动创建；以下列供旧库升级
+        # ── Trusted work system: tasks 扩展列 ──
+        await ensure_column(conn, "tasks", "source_session", "VARCHAR(32) DEFAULT ''")
+        await ensure_column(conn, "tasks", "owner_type", "VARCHAR(20) DEFAULT 'human'")
+        await ensure_column(conn, "tasks", "owner_name", "VARCHAR(100) DEFAULT ''")
+        await ensure_column(conn, "tasks", "workspace", "TEXT DEFAULT ''")
+        await ensure_column(conn, "tasks", "goal_id", "INTEGER DEFAULT NULL")
+        await ensure_column(conn, "tasks", "result_summary", "TEXT DEFAULT ''")
+        await ensure_column(conn, "tasks", "warning_summary", "TEXT DEFAULT ''")
+        await ensure_column(conn, "tasks", "verification_status", "VARCHAR(20) DEFAULT 'unverified'")
+        await ensure_column(conn, "tasks", "active_run_id", "INTEGER DEFAULT NULL")
+        await ensure_column(conn, "tasks", "last_run_id", "INTEGER DEFAULT NULL")
+        await ensure_column(conn, "tasks", "started_at", "DATETIME DEFAULT NULL")
+        await ensure_column(conn, "tasks", "completed_at", "DATETIME DEFAULT NULL")
+        await ensure_column(conn, "tasks", "result_viewed_at", "DATETIME DEFAULT NULL")
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_tasks_user_status ON tasks(user_id, status)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_tasks_goal_id ON tasks(goal_id)"
+        ))
+
+        # ── Trusted work system: agent_runs 扩展列 ──
+        await ensure_column(conn, "agent_runs", "task_id", "INTEGER DEFAULT NULL")
+        await ensure_column(conn, "agent_runs", "workspace", "TEXT DEFAULT ''")
+        await ensure_column(conn, "agent_runs", "phase", "VARCHAR(200) DEFAULT ''")
+        await ensure_column(conn, "agent_runs", "progress_current", "INTEGER DEFAULT 0")
+        await ensure_column(conn, "agent_runs", "progress_total", "INTEGER DEFAULT 0")
+        await ensure_column(conn, "agent_runs", "interrupted_reason", "TEXT DEFAULT ''")
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_agent_runs_task_id ON agent_runs(task_id)"
+        ))
 
         await ensure_column(conn, "agent_memory", "source", "VARCHAR(10) DEFAULT ''")
-        if "task_category" not in columns:
-            await conn.execute(text("ALTER TABLE agent_memory ADD COLUMN task_category VARCHAR(50) DEFAULT ''"))
-        if "scope" not in columns:
-            await conn.execute(text("ALTER TABLE agent_memory ADD COLUMN scope VARCHAR(20) DEFAULT ''"))
-        if "workspace_path" not in columns:
-            await conn.execute(text("ALTER TABLE agent_memory ADD COLUMN workspace_path TEXT DEFAULT ''"))
-        if "recall_policy" not in columns:
-            await conn.execute(text("ALTER TABLE agent_memory ADD COLUMN recall_policy VARCHAR(20) DEFAULT ''"))
+        await ensure_column(conn, "agent_memory", "task_category", "VARCHAR(50) DEFAULT ''")
+        await ensure_column(conn, "agent_memory", "scope", "VARCHAR(20) DEFAULT ''")
+        await ensure_column(conn, "agent_memory", "workspace_path", "TEXT DEFAULT ''")
+        await ensure_column(conn, "agent_memory", "recall_policy", "VARCHAR(20) DEFAULT ''")
 
         # --- MemoryEmbedding table (vector search) ---
         await conn.execute(text("""
@@ -1724,6 +1755,9 @@ async def run_record_create(
     parent_run_id: int | None = None,
     task_summary: str = "",
     metadata: dict | None = None,
+    task_id: int | None = None,
+    workspace: str = "",
+    phase: str = "",
 ) -> int:
     async with async_session_factory() as db:
         run = AgentRun(
@@ -1735,6 +1769,9 @@ async def run_record_create(
             task_summary=task_summary[:200],
             metadata_=metadata,
             started_at=_time.time(),
+            task_id=task_id,
+            workspace=workspace,
+            phase=phase[:200],
         )
         db.add(run)
         await db.commit()
@@ -1917,6 +1954,12 @@ def _run_to_dict(run) -> dict:
         "result_summary": run.result_summary,
         "error": run.error,
         "metadata": run.metadata_,
+        "task_id": run.task_id,
+        "workspace": run.workspace,
+        "phase": run.phase,
+        "progress_current": run.progress_current,
+        "progress_total": run.progress_total,
+        "interrupted_reason": run.interrupted_reason,
         "created_at": run.created_at.isoformat() if run.created_at else "",
     }
 

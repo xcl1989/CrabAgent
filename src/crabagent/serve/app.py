@@ -46,6 +46,19 @@ async def lifespan(app: FastAPI):
     await init_db()
     logger.info("Database initialized")
 
+    # Trusted work system: repair zombie runs and lingering tasks left by
+    # a previous process. Failures must not block startup.
+    try:
+        from crabagent.core.database import async_session_factory
+        from crabagent.core.task.recovery import recover_interrupted_state
+
+        async with async_session_factory() as db:
+            summary = await recover_interrupted_state(db)
+        if any(summary.values()):
+            logger.info("Startup recovery: %s", summary)
+    except Exception:
+        logger.exception("Startup recovery failed (non-fatal)")
+
     monitor_task = asyncio.create_task(_loop_monitor())
 
     from crabagent.core.mcp.client import MCPClientManager
