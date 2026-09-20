@@ -428,12 +428,16 @@ class OfficeManager:
         cols: str = "",
         start: int = 0,
     ) -> OfficeResult:
-        """读取文档的纯文本内容。"""
+        """读取文档的纯文本内容。
+
+        注意：officecli 的 ``view text`` 没有 ``--sheet`` 选项（会报
+        unknown option），xlsx 输出自带 ``=== Sheet: X ===`` 分节，
+        sheet 过滤由调用方（office_read 工具层）完成，这里忽略 sheet。
+        """
+        del sheet  # CLI 不支持，见 docstring
         args = ["view", file_path, "text", "--max-lines", str(max_lines)]
         if start > 0:
             args.extend(["--start", str(start)])
-        if sheet:
-            args.extend(["--sheet", sheet])
         if cols:
             args.extend(["--cols", cols])
         return await self.exec(*args)
@@ -519,10 +523,25 @@ class OfficeManager:
         return await self.exec("remove", file_path, element_path)
 
     async def move_element(
-        self, file_path: str, element_path: str, to_parent: str, index: int = -1
+        self,
+        file_path: str,
+        element_path: str,
+        to_parent: str = "",
+        index: int = -1,
+        after: str = "",
+        before: str = "",
     ) -> OfficeResult:
-        """移动元素到新的父节点下。"""
-        cmd = ["move", file_path, element_path, "--to", to_parent]
+        """移动元素到新的父节点或指定位置。
+
+        to_parent / after / before 至少提供一个；index 为 0-based 插入位置。
+        """
+        cmd = ["move", file_path, element_path]
+        if to_parent:
+            cmd.extend(["--to", to_parent])
+        if after:
+            cmd.extend(["--after", after])
+        if before:
+            cmd.extend(["--before", before])
         if index >= 0:
             cmd.extend(["--index", str(index)])
         return await self.exec(*cmd)
@@ -546,19 +565,59 @@ class OfficeManager:
         selector : str
             选择器表达式，如 ``"shape:contains(TODO)"``
         """
-        cmd = ["query", file_path, selector]
+        cmd = ["query", file_path, selector, "--json"]
         return await self.exec(*cmd)
+
+    @staticmethod
+    def _normalize_batch_props(props: dict[str, Any]) -> dict[str, Any]:
+        """归一化 batch props，保证值都是 CLI 可接受的标量。
+
+        CLI 的 batch prop 值不接受数组（会报
+        ``Unexpected token StartArray for prop value 'data'``），
+        与 add_element 一致：data 二维数组转为 CSV 字符串（逗号分列、分号分行）。
+        """
+        normalized = dict(props)
+        for k, v in props.items():
+            if isinstance(v, list):
+                if v and isinstance(v[0], list):
+                    normalized[k] = ";".join(
+                        ",".join(str(c) for c in row) for row in v
+                    )
+                else:
+                    normalized[k] = ",".join(str(c) for c in v)
+            elif isinstance(v, (dict, bool)):
+                normalized[k] = json.dumps(v, ensure_ascii=False)
+        return normalized
 
     async def batch(
         self, file_path: str, commands: list[dict[str, Any]]
     ) -> OfficeResult:
         """在单次打开/保存周期内批量执行多个操作。"""
-        payload = json.dumps(commands)
+        safe_commands: list[dict[str, Any]] = []
+        for item in commands:
+            if not isinstance(item, dict):
+                safe_commands.append(item)
+                continue
+            entry = dict(item)
+            props = entry.get("props")
+            if isinstance(props, dict):
+                props = dict(props)
+                # add 的元素类型以命令层 type 为准；props 里误带的冗余
+                # "type" 会让 CLI 报无详情的错误，这里剥掉。
+                if entry.get("command") == "add" and "type" in props:
+                    props.pop("type")
+                entry["props"] = self._normalize_batch_props(props)
+            safe_commands.append(entry)
+        payload = json.dumps(safe_commands)
         return await self.exec("batch", file_path, "--commands", payload)
 
     async def help_for(self, fmt: str) -> OfficeResult:
-        """获取指定格式的帮助参考（属性列表等）。"""
-        return await self.exec("help", "--format", fmt)
+        """获取指定格式的帮助参考（属性列表等）。
+
+        officecli help 的格式是位置参数：``officecli help <format>``，
+        不支持 ``--format`` 标志。
+        """
+        return await self.exec("help", fmt)
 
     # ── internal ────────────────────────────────────────────────────────
 

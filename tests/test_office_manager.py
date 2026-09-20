@@ -35,6 +35,8 @@ async def test_view_text_builds_expected_args(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(manager, "exec", fake_exec)
     await manager.view_text("demo.xlsx", max_lines=10, sheet="Sheet1", cols="A:C", start=5)
 
+    # officecli 的 view text 不支持 --sheet（会报 unknown option），
+    # sheet 过滤在 office_read 工具层完成，这里不应出现 --sheet。
     assert captured["args"] == (
         "view",
         "demo.xlsx",
@@ -43,8 +45,6 @@ async def test_view_text_builds_expected_args(monkeypatch: pytest.MonkeyPatch):
         "10",
         "--start",
         "5",
-        "--sheet",
-        "Sheet1",
         "--cols",
         "A:C",
     )
@@ -140,6 +140,45 @@ async def test_batch_serializes_commands_to_json(monkeypatch: pytest.MonkeyPatch
         "--commands",
         json.dumps([{"command": "set", "path": "/Sheet1/A1", "props": {"text": "x"}}]),
     )
+
+
+@pytest.mark.asyncio
+async def test_batch_normalizes_props_arrays_and_redundant_type(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """batch props 必须全是标量：数组转 CSV，add 的冗余 props.type 剥掉。"""
+    manager = OfficeManager()
+    manager._available = True
+    manager._binary_path = "/fake/officecli"
+    captured = {}
+
+    async def fake_exec(*args: str, timeout: int = 60):
+        captured["args"] = args
+        return SimpleNamespace(success=True)
+
+    monkeypatch.setattr(manager, "exec", fake_exec)
+
+    await manager.batch("demo.docx", [
+        {
+            "command": "add",
+            "parent": "/body",
+            "type": "table",
+            "props": {"data": [["季度", "营收"], ["Q1", "1200"]], "style": "medium1"},
+        },
+        {
+            "command": "add",
+            "parent": "/body",
+            "type": "paragraph",
+            "props": {"type": "paragraph", "text": "标题"},
+        },
+    ])
+
+    payload = json.loads(captured["args"][3])
+    # data 二维数组 → CSV 字符串（CLI prop 值不接受数组）
+    assert payload[0]["props"]["data"] == "季度,营收;Q1,1200"
+    # 冗余的 props.type 被剥离，命令层 type 保留
+    assert "type" not in payload[1]["props"]
+    assert payload[1]["type"] == "paragraph"
 
 
 @pytest.mark.asyncio

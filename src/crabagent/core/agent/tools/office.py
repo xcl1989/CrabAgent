@@ -125,6 +125,15 @@ def _validate_batch_commands(commands: list[dict[str, Any]]) -> tuple[list[dict[
         path = item.get("path")
         parent = item.get("parent")
 
+        # 兼容别名：模型可能沿用 office_edit 单命令的 element_path / element_type
+        if path is None and isinstance(item.get("element_path"), str):
+            path = item["element_path"]
+        if parent is None and isinstance(item.get("element_path"), str):
+            parent = item["element_path"]
+        element_type = item.get("type")
+        if element_type is None and isinstance(item.get("element_type"), str):
+            element_type = item["element_type"]
+
         if command in {"set", "remove", "move", "swap"}:
             if not isinstance(path, str) or not path.strip():
                 return None, f"第 {idx} 条命令缺少 path"
@@ -132,10 +141,9 @@ def _validate_batch_commands(commands: list[dict[str, Any]]) -> tuple[list[dict[
 
         if command == "add":
             if not isinstance(parent, str) or not parent.strip():
-                return None, f"第 {idx} 条 add 命令缺少 parent"
-            element_type = item.get("type")
+                return None, f"第 {idx} 条 add 命令缺少 parent（父容器路径，如 /body、/slide[1]）"
             if not isinstance(element_type, str) or not element_type.strip():
-                return None, f"第 {idx} 条 add 命令缺少 type"
+                return None, f"第 {idx} 条 add 命令缺少 type（元素类型，如 paragraph、shape）"
             entry["parent"] = parent.strip()
             entry["type"] = element_type.strip()
 
@@ -147,9 +155,22 @@ def _validate_batch_commands(commands: list[dict[str, Any]]) -> tuple[list[dict[
 
         if command == "move":
             to_parent = item.get("to")
-            if not isinstance(to_parent, str) or not to_parent.strip():
-                return None, f"第 {idx} 条 move 命令缺少 to"
-            entry["to"] = to_parent.strip()
+            after = item.get("after")
+            before = item.get("before")
+            has_target = isinstance(to_parent, str) and to_parent.strip()
+            if not has_target and not (
+                isinstance(after, str) and after.strip()
+            ) and not (isinstance(before, str) and before.strip()):
+                return None, (
+                    f"第 {idx} 条 move 命令缺少目标：to（目标父路径）"
+                    "或 after/before（参考元素路径）"
+                )
+            if has_target:
+                entry["to"] = to_parent.strip()
+            for key in ("after", "before"):
+                v = item.get(key)
+                if isinstance(v, str) and v.strip():
+                    entry[key] = v.strip()
             if "index" in item:
                 try:
                     entry["index"] = int(item["index"])
@@ -279,6 +300,38 @@ async def office_read(
 
     content = result.data or ""
 
+    # xlsx: CLI 不支持 --sheet 过滤（会报 unknown option），输出自带
+    # "=== Sheet: X ===" 分节，这里在工具层按 sheet 切分。
+    if (
+        mode == "text"
+        and resolved.endswith(".xlsx")
+        and sheet
+        and "=== Sheet:" in str(content)
+    ):
+        sections: dict[str, str] = {}
+        current = ""
+        buf: list[str] = []
+        for line in str(content).splitlines():
+            stripped = line.strip()
+            if stripped.startswith("=== Sheet:") and stripped.endswith("==="):
+                if current:
+                    sections[current] = "\n".join(buf)
+                current = stripped[len("=== Sheet:"):-len("===")].strip()
+                buf = []
+            else:
+                buf.append(line)
+        if current:
+            sections[current] = "\n".join(buf)
+
+        if sheet in sections:
+            content = f"=== Sheet: {sheet} ===\n{sections[sheet]}"
+        else:
+            available = ", ".join(sections) if sections else "(未知)"
+            content = (
+                f"{content}\n\n"
+                f"⚠️ 未找到工作表 '{sheet}'，已返回全部内容。可用工作表: {available}"
+            )
+
     # 对 xlsx 文件，在 text 模式下追加公式信息
     if mode == "text" and resolved.endswith(".xlsx"):
         try:
@@ -359,9 +412,30 @@ async def office_help(file_format: str = "", context: Any = None) -> str:
             },
             "commands": {
                 "type": "array",
-                "description": "批量命令列表。每条命令都是对象，支持 command=set/add/remove/move/swap。",
+                "description": "批量命令列表，每条命令是一个对象。字段与 office_edit 单命令不同，⚠️ 注意：\n"
+                "- set/remove/move/swap 用 \"path\"（元素路径）\n"
+                "- add 用 \"parent\"（父容器路径）+ \"type\"（元素类型），不是 element_path/element_type\n"
+                "- move 需 \"to\"（目标父路径），可选 \"index\"；swap 需 \"with\"（另一路径）\n"
+                "- 可选 \"props\" 对象传样式/文本，add 可用 \"after\"/\"before\" 指定插入参考元素\n"
+                "示例：\n"
+                '[{"command":"add","parent":"/body","type":"paragraph","props":{"text":"标题","size":22,"bold":true}},\n'
+                ' {"command":"set","path":"/body/p[1]","props":{"color":"#FF0000"}},\n'
+                ' {"command":"remove","path":"/body/p[3]"}]',
                 "items": {
                     "type": "object",
+                    "properties": {
+                        "command": {
+                            "type": "string",
+                            "enum": ["set", "add", "remove", "move", "swap"],
+                        },
+                        "path": {"type": "string", "description": "set/remove/move/swap 的元素路径"},
+                        "parent": {"type": "string", "description": "add 的父容器路径，如 /body、/slide[1]、/Sheet1"},
+                        "type": {"type": "string", "description": "add 的元素类型，如 paragraph、shape、slide、row"},
+                        "to": {"type": "string", "description": "move 的目标父路径"},
+                        "with": {"type": "string", "description": "swap 的另一个元素路径"},
+                        "props": {"type": "object", "description": "属性键值对，如 text、size、bold、color"},
+                    },
+                    "required": ["command"],
                 },
             },
         },
@@ -528,8 +602,9 @@ def _describe_op(
                 "       在 Word 添加段落 → element_path=/body（不是 /body/p[2]）\n"
                 "  如需在特定位置插入，用 props.after 或 props.before 指定参考元素。\n"
                 "- remove: 删除元素\n"
-                "- move: 移动元素到新位置\n"
-                "- swap: 交换两个元素的位置",
+                "- move: 移动元素。目标写在 props 里：props.to=目标父路径，"
+                "或 props.after=/props.before=参考元素路径，可选 props.index=插入位置\n"
+                "- swap: 交换两个元素，第二个元素路径写在 props.with",
             },
             "element_path": {
                 "type": "string",
@@ -658,6 +733,9 @@ async def office_edit(
         # parent and use --after to insert at the expected position.
         add_parent = element_path
         add_props = dict(props)
+        # 元素类型以 element_type 参数为准，props 里误带的冗余 "type" 剥掉，
+        # 避免 --prop type=... 干扰 CLI（与 batch 路径行为一致）。
+        add_props.pop("type", None)
         if "[" in element_path and element_path.count("/") >= 2:
             # e.g. /Sheet1/row[19] → parent=/Sheet1, after=/Sheet1/row[19]
             parts = element_path.rsplit("/", 1)
@@ -675,12 +753,17 @@ async def office_edit(
     elif command == "remove":
         result = await mgr.remove_element(resolved, element_path)
     elif command == "move":
-        to_parent = props.get("to", "")
+        to_parent = str(props.get("to", "") or "")
+        after = str(props.get("after", "") or "")
+        before = str(props.get("before", "") or "")
         index = props.get("index", -1)
-        if not to_parent:
-            return "move 操作需要指定目标路径（props.to）"
+        if not to_parent and not after and not before:
+            return (
+                "move 操作需要指定目标：props.to（目标父路径，如 /body），"
+                "或 props.after / props.before（参考元素路径）"
+            )
         result = await mgr.move_element(
-            resolved, element_path, to_parent, int(index)
+            resolved, element_path, to_parent, int(index), after=after, before=before
         )
     elif command == "swap":
         path2 = props.get("with", "")
