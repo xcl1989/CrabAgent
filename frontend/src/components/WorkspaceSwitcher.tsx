@@ -9,6 +9,7 @@ import {
   type WorkspaceInfo,
 } from "../api/sessions";
 import { getAgentMonitor } from "../api/monitor";
+import { getAttentionByWorkspace, type WorkspaceAttention } from "../api/work";
 import { cn } from "../lib/cn";
 import DirectoryPicker from "./DirectoryPicker";
 import { Modal } from "./ui/Modal";
@@ -31,6 +32,7 @@ export default function WorkspaceSwitcher({ current, onChange, onOverlayChange }
   const [showPicker, setShowPicker] = useState(false);
   const [showManager, setShowManager] = useState(false);
   const [activeByWorkspace, setActiveByWorkspace] = useState<Record<string, number>>({});
+  const [attentionByWorkspace, setAttentionByWorkspace] = useState<Record<string, WorkspaceAttention>>({});
   const [draggedWorkspace, setDraggedWorkspace] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -57,6 +59,24 @@ export default function WorkspaceSwitcher({ current, onChange, onOverlayChange }
     };
     poll();
     const interval = setInterval(poll, 5000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, []);
+
+  // Trusted work system: highest-priority attention per workspace
+  // (orange = waiting, red = failed, green pulse = working, blue = new result).
+  useEffect(() => {
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const { workspaces } = await getAttentionByWorkspace();
+        if (cancelled) return;
+        const map: Record<string, WorkspaceAttention> = {};
+        for (const item of workspaces) map[item.workspace] = item;
+        setAttentionByWorkspace(map);
+      } catch { /* Non-essential badge. */ }
+    };
+    poll();
+    const interval = setInterval(poll, 15000);
     return () => { cancelled = true; clearInterval(interval); };
   }, []);
 
@@ -109,6 +129,31 @@ export default function WorkspaceSwitcher({ current, onChange, onOverlayChange }
     loadWorkspaces();
   };
 
+  const ATTENTION_BADGE: Record<string, { style: React.CSSProperties; animate?: boolean; title: string }> = {
+    waiting: { style: { background: "#f97316", color: "#fff" }, title: "等待你的处理" },
+    failed: { style: { background: "#ef4444", color: "#fff" }, title: "有失败任务" },
+    due: { style: { background: "#f59e0b", color: "#fff" }, title: "任务临近截止" },
+    partial: { style: { background: "#f59e0b", color: "#fff" }, title: "有部分完成的任务" },
+    working: { style: { background: "var(--success)", color: "#fff" }, animate: true, title: "正在执行" },
+    completed_unread: { style: { background: "#3b82f6", color: "#fff" }, title: "有新成果" },
+  };
+
+  const attentionBadge = (workspacePath: string) => {
+    const attention = attentionByWorkspace[workspacePath];
+    if (!attention) return null;
+    const badge = ATTENTION_BADGE[attention.status];
+    if (!badge) return null;
+    return (
+      <span
+        title={badge.title}
+        className={cn("inline-flex items-center justify-center min-w-[16px] h-[16px] px-1 rounded-full text-[9px] font-bold leading-none", badge.animate && "animate-pulse")}
+        style={badge.style}
+      >
+        {attention.count}
+      </span>
+    );
+  };
+
   const workspaceRow = (workspace: WorkspaceInfo) => {
     const isActive = current === workspace.workspace;
     const activeCount = activeByWorkspace[workspace.workspace] || 0;
@@ -124,6 +169,7 @@ export default function WorkspaceSwitcher({ current, onChange, onOverlayChange }
         {workspace.pinned ? <Pin size={12} className="text-[var(--brand)]" /> : <FolderOpen size={12} />}
         <span className="flex-1 truncate" title={workspace.workspace}>{workspaceName(workspace.workspace)}</span>
         {activeCount > 0 && <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: "var(--success)", color: "#fff" }}><Activity size={8} />{activeCount}</span>}
+        {attentionBadge(workspace.workspace)}
         <span className={cn("inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-medium leading-none bg-[var(--bg-tertiary)] text-[var(--text-tertiary)]", isActive && "bg-[var(--brand)]/10 text-[var(--brand)]")}>{workspace.session_count}</span>
         {isActive && <Check size={12} />}
       </button>
@@ -135,7 +181,7 @@ export default function WorkspaceSwitcher({ current, onChange, onOverlayChange }
       <button onClick={() => setOpen(!open)} className={cn("flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium transition-colors", "bg-[var(--bg-tertiary)] border border-[var(--border)] hover:border-[var(--border-strong)] hover:text-[var(--text-primary)] text-[var(--text-secondary)]")}>
         <FolderOpen size={12} />
         <span className="truncate max-w-[120px]">{displayName}</span>
-        {totalActive > 0 && <span className="inline-flex items-center justify-center min-w-[16px] h-[16px] px-1 rounded-full text-[9px] font-bold leading-none animate-pulse" style={{ background: "var(--success)", color: "#fff" }} title={`${totalActive} 个活跃会话`}>{totalActive}</span>}
+        {attentionBadge(current || currentWorkspacePath) ?? (totalActive > 0 && <span className="inline-flex items-center justify-center min-w-[16px] h-[16px] px-1 rounded-full text-[9px] font-bold leading-none animate-pulse" style={{ background: "var(--success)", color: "#fff" }} title={`${totalActive} 个活跃会话`}>{totalActive}</span>)}
         <ChevronDown size={10} className={cn("transition-transform", open && "rotate-180")} />
       </button>
 

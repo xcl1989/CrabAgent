@@ -90,6 +90,97 @@ function inferToolFromMessage(message: string): string | undefined {
   return undefined;
 }
 
+// ── Trusted work system: persistent attention merge ─────────────────
+// Priority: waiting > failed > partial > working > thinking > unread > idle
+const PERSISTENT_KIND_PRIORITY: Record<string, number> = {
+  pending_requests: 0,
+  failed_tasks: 1,
+  partial_tasks: 1.9,
+  unread_results: 4.5,
+};
+
+interface PersistentAttention {
+  kind: string;
+  message: string;
+  sessionId: string | null;
+}
+
+interface AttentionSummaryShape {
+  status: string;
+  message: string;
+  priority: number;
+  count: number;
+  target: { type: string; session_id?: string; task_id?: number; request_id?: string } | null;
+  groups: Record<string, { message: string; detail: string; target: { session_id?: string } | null }[]>;
+}
+
+const MONITOR_PRIORITY: Record<string, number> = {
+  waiting: 0,
+  error: 1,
+  working: 2,
+  thinking: 3,
+  completed: 4,
+  idle: 5,
+};
+
+function topPersistentAttention(attention: AttentionSummaryShape | null): PersistentAttention | null {
+  if (!attention) return null;
+  let best: { kind: string; priority: number; message: string; sessionId: string | null } | null = null;
+  for (const [kind, items] of Object.entries(attention.groups ?? {})) {
+    const priority = PERSISTENT_KIND_PRIORITY[kind];
+    if (priority === undefined || !items?.length) continue;
+    if (!best || priority < best.priority) {
+      best = {
+        kind,
+        priority,
+        message: attention.message || items[0]?.message || "",
+        sessionId: items[0]?.target?.session_id || null,
+      };
+    }
+  }
+  return best ? { kind: best.kind, message: best.message, sessionId: best.sessionId } : null;
+}
+
+/**
+ * Merge the transient monitor summary with persistent work attention.
+ * Persistent states (waiting for the user, failures, unread results)
+ * survive restarts and page switches, so they outrank transient states
+ * of the same band per the trusted work system design.
+ */
+function mergeMonitorWithAttention(
+  summary: AgentMonitorSummary,
+  persistent: PersistentAttention | null,
+): AgentMonitorSummary {
+  if (!persistent) return summary;
+  const monitorPriority = MONITOR_PRIORITY[summary.status] ?? 5;
+  const persistentPriority = PERSISTENT_KIND_PRIORITY[persistent.kind] ?? 99;
+  if (monitorPriority <= persistentPriority) return summary;
+
+  switch (persistent.kind) {
+    case "pending_requests": {
+      const base = summary.target;
+      const target = base
+        ? {
+            ...base,
+            session_id: persistent.sessionId || base.session_id,
+          }
+        : {
+            session_id: persistent.sessionId || "",
+            title: persistent.message,
+            request_type: "confirm" as const,
+          };
+      return { ...summary, status: "waiting", message: persistent.message, target };
+    }
+    case "failed_tasks":
+    case "partial_tasks":
+      return { ...summary, status: "error", message: persistent.message, target: summary.target };
+    case "unread_results":
+      return { ...summary, status: "completed", message: persistent.message, target: summary.target };
+    default:
+      return summary;
+  }
+}
+
 function cardKind(state: PetState): "status" | "attention" | "complete" | "progress" {
   if (state.animation === "waiting" || state.animation === "failed") return "attention";
   if (state.animation === "celebrate" || state.animation === "review") return "complete";
@@ -247,7 +338,20 @@ export function DesktopPet() {
       const res = await fetch("/api/agents/monitor/summary", { headers });
       if (res.status === 401) return;
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const summary = (await res.json()) as AgentMonitorSummary;
+      let summary = (await res.json()) as AgentMonitorSummary;
+
+      // Trusted work system: persistent attention (waiting/failed/unread)
+      // outranks transient monitor states of the same band.
+      try {
+        const attentionRes = await fetch("/api/work/attention/summary", { headers });
+        if (attentionRes.ok) {
+          const attention = (await attentionRes.json()) as AttentionSummaryShape;
+          summary = mergeMonitorWithAttention(summary, topPersistentAttention(attention));
+        }
+      } catch {
+        // attention merge is best-effort; monitor summary is enough
+      }
+
       const nextTarget = summary.target?.session_id || null;
       targetSessionRef.current = nextTarget;
 
