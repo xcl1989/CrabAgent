@@ -95,6 +95,140 @@ async def lifespan(app: FastAPI):
             for qid in session_dead:
                 app.state.event_queues.pop(qid, None)
 
+            # Persist terminal result cards: the chat's deferred DB-refresh
+            # rebuilds the message list ~800ms after agent_end, which would
+            # wipe live-only card messages. Store the card so it survives
+            # refreshes and page reloads.
+            if data.get("status") in ("done", "partial", "failed", "cancelled"):
+                asyncio.create_task(_persist_result_card(session_id, data))
+
+    async def _persist_result_card(session_id: str, data: dict) -> None:
+        """Append (or enrich) a task_result message for the task's conversation.
+
+        The first broadcast (often from task_done tool) may carry sparse data;
+        the completion service broadcasts a richer verdict later. Instead of
+        dropping duplicates on (task_id, status), upgrade the stored card when
+        the new payload is richer. Failures are non-fatal — the SSE card still
+        reaches open clients even if persistence fails.
+        """
+        try:
+            import os
+
+            from sqlalchemy import func, select
+
+            from crabagent.core.database import (
+                Conversation,
+                Message,
+                TaskArtifact,
+                TaskCheck,
+                async_session_factory,
+            )
+
+            task_id = data.get("task_id")
+            if not task_id:
+                return
+            payload = {
+                k: data.get(k)
+                for k in ("task_id", "title", "status", "result_summary", "warning_summary", "verification_status")
+                if data.get(k) is not None
+            }
+            async with async_session_factory() as db:
+                conv = (
+                    await db.execute(select(Conversation).where(Conversation.session_id == session_id))
+                ).scalar_one_or_none()
+                if not conv:
+                    return
+
+                # Enrich from execution facts: artifact files and check counts.
+                artifacts = (
+                    await db.execute(
+                        select(TaskArtifact).where(
+                            TaskArtifact.task_id == task_id,
+                            TaskArtifact.status == "available",
+                        )
+                    )
+                ).scalars().all()
+                files = [a.name or os.path.basename(a.path) for a in artifacts if a.path]
+                checks = (
+                    await db.execute(select(TaskCheck).where(TaskCheck.task_id == task_id))
+                ).scalars().all()
+                required = [c for c in checks if c.required]
+                payload["files"] = files
+                if required:
+                    payload["checks"] = {
+                        "passed": sum(1 for c in required if c.status == "passed"),
+                        "total": len(required),
+                    }
+                    if payload.get("verification_status", "unverified") == "unverified":
+                        if all(c.status == "passed" for c in required):
+                            payload["verification_status"] = "passed"
+                        elif any(c.status == "failed" for c in required):
+                            payload["verification_status"] = "failed"
+                        else:
+                            payload["verification_status"] = "partial"
+
+                enriched = (
+                    bool(payload.get("files"))
+                    or bool(payload.get("result_summary"))
+                    or payload.get("verification_status", "unverified") not in (None, "unverified", "")
+                    or "checks" in payload
+                )
+
+                existing_rows = (
+                    await db.execute(
+                        select(Message).where(
+                            Message.conversation_id == conv.id,
+                            Message.role == "task_result",
+                            Message.compressed == False,  # noqa: E712
+                        )
+                    )
+                ).scalars().all()
+                for m in existing_rows:
+                    old = json_loads_safe(m.content)
+                    if old.get("task_id") != task_id or old.get("status") != payload.get("status"):
+                        continue
+                    stale = (
+                        not old.get("result_summary")
+                        and not old.get("files")
+                        and old.get("verification_status", "unverified") in (None, "unverified", "")
+                        and "checks" not in old
+                    )
+                    if stale and enriched:
+                        m.content = json_dumps(payload)  # upgrade in place
+                    await db.commit()
+                    return  # never duplicate cards for the same task+status
+
+                seq = (
+                    await db.execute(
+                        select(func.max(Message.sequence)).where(Message.conversation_id == conv.id)
+                    )
+                ).scalar()
+                db.add(
+                    Message(
+                        conversation_id=conv.id,
+                        sequence=int(seq or 0) + 1,
+                        role="task_result",
+                        branch_id=conv.active_branch or "main",
+                        content=json_dumps(payload),
+                    )
+                )
+                await db.commit()
+        except Exception:
+            logger.exception("persist task result card failed (non-fatal)")
+
+    import json as _json
+
+    def json_loads_safe(text: str) -> dict:
+        try:
+            parsed = _json.loads(text or "")
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            return {}
+
+    def json_dumps(payload: dict) -> str:
+        return _json.dumps(payload, ensure_ascii=False)
+
+
     from crabagent.core.task.events import set_task_event_broadcaster
 
     set_task_event_broadcaster(_broadcast_task_event)

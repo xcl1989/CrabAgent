@@ -33,7 +33,7 @@ import {
 } from "lucide-react";
 import { RichMarkdown } from "./rich-content/RichMarkdown";
 import ToolResultRender from "./ToolResultRender";
-import { markResultViewed } from "../api/tasks";
+import { markResultViewed, openTaskArtifact } from "../api/tasks";
 import { SubAgentCard } from "./SubAgentCard";
 import { cn } from "../lib/cn";
 
@@ -87,6 +87,8 @@ export interface ChatMessage {
     result_summary?: string;
     warning_summary?: string;
     verification_status?: string;
+    files?: string[];
+    checks?: { passed: number; total: number };
   };
   retry_info?: {
     phase: "retrying" | "countdown" | "exhausted";
@@ -529,6 +531,24 @@ const TaskResultItem = memo(function TaskResultItem({ msg }: { msg: ChatMessage 
                 {r.result_summary}
               </div>
             ) : null}
+            {r.files && r.files.length > 0 ? (
+              <div className="mt-1.5 flex flex-col gap-0.5">
+                {r.files.map((f, i) => (
+                  <button
+                    key={i}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void openTaskArtifact(r.task_id, f).catch(() => {});
+                    }}
+                    title={`在系统中打开：${f}`}
+                    className="text-left text-xs flex items-center gap-1.5 text-[var(--accent)] hover:underline cursor-pointer min-w-0"
+                  >
+                    <FileText size={12} className="shrink-0 opacity-70" />
+                    <span className="truncate">{f}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
             {r.warning_summary ? (
               <div className="mt-1 text-xs whitespace-pre-wrap break-words text-amber-600 dark:text-amber-400 line-clamp-4">
                 ⚠ {r.warning_summary}
@@ -536,7 +556,9 @@ const TaskResultItem = memo(function TaskResultItem({ msg }: { msg: ChatMessage 
             ) : null}
             <div className="mt-1.5 text-[10px] text-[var(--text-tertiary)]">
               {r.verification_status === "passed"
-                ? "✓ 已验证"
+                ? r.checks
+                  ? `✓ 已验证（${r.checks.passed}/${r.checks.total} 通过）`
+                  : "✓ 已验证"
                 : r.verification_status && r.verification_status !== "unverified"
                   ? `验证：${r.verification_status}`
                   : "未验证"}{" "}

@@ -78,6 +78,22 @@ def message_to_dict(msg: Message) -> dict:
     # agent_switch / compress / experience / workspace → user for the LLM
     if d["role"] in ("agent_switch", "compress", "experience", "workspace"):
         d["role"] = "user"
+    # Persisted result cards are a frontend concern; LLM context must stay
+    # valid (plain user text), so flatten them to a short user note.
+    if d["role"] == "task_result":
+        d["role"] = "user"
+        payload = _json_safe(msg.content)
+        if payload:
+            label = {
+                "done": "已完成",
+                "partial": "部分完成",
+                "failed": "失败",
+                "cancelled": "已取消",
+            }.get(str(payload.get("status")), str(payload.get("status") or "已结束"))
+            d["content"] = f"[任务结果卡片] {payload.get('title', '')}：{label}"
+        else:
+            d["content"] = "[任务结果卡片]"
+        return d
 
     if msg.content:
         if msg.content.startswith("["):
@@ -106,6 +122,14 @@ def message_to_dict(msg: Message) -> dict:
         d["reasoning_content"] = msg.reasoning_content
 
     return d
+
+
+def _json_safe(content: str) -> dict:
+    try:
+        parsed = json.loads(content or "")
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        return {}
 
 
 def _try_inline_image(path_str: str) -> str | None:

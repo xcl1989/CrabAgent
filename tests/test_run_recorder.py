@@ -1,4 +1,5 @@
 """Tests for RunRecorder event handling."""
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -24,9 +25,7 @@ async def test_on_event_handles_agent_start(recorder, monkeypatch: pytest.Monkey
 
     monkeypatch.setattr("crabagent.core.database.run_record_create", fake_create)
 
-    await recorder.on_event(
-        AgentEvent(type=EventType.AGENT_START, data={"model": "gpt-4o", "query": "hello"})
-    )
+    await recorder.on_event(AgentEvent(type=EventType.AGENT_START, data={"model": "gpt-4o", "query": "hello"}))
 
     assert recorder._main_run_id == 42
     assert called["agent_name"] == "main"
@@ -41,11 +40,10 @@ async def test_on_event_handles_tool_call(recorder, monkeypatch: pytest.MonkeyPa
 
     monkeypatch.setattr("crabagent.core.database.run_record_create", fake_create)
 
-    await recorder.on_event(
-        AgentEvent(type=EventType.TOOL_CALL, data={"name": "bash", "arguments": {"command": "ls"}})
-    )
+    await recorder.on_event(AgentEvent(type=EventType.TOOL_CALL, data={"name": "bash", "arguments": {"command": "ls"}}))
 
     assert len(recorder._main_tool_buf) == 1
+    assert recorder._main_tool_buf[0]["args"] == {"command": "ls"}
 
 
 @pytest.mark.asyncio
@@ -61,6 +59,33 @@ async def test_on_event_handles_tool_result(recorder, monkeypatch: pytest.Monkey
 
 
 @pytest.mark.asyncio
+async def test_tool_result_is_captured_for_linked_task_runs(recorder, monkeypatch: pytest.MonkeyPatch):
+    recorder._main_run_id = 1
+    recorder._main_tool_buf = [
+        {
+            "name": "write",
+            "args": {"file_path": "/tmp/result.md"},
+            "started_at": 0,
+            "result_summary": None,
+            "elapsed": 0,
+        }
+    ]
+    recorder.link_task_run(42)
+    captured: list[int] = []
+
+    async def fake_capture(data, entry, run_id):
+        captured.append(run_id)
+
+    monkeypatch.setattr(recorder, "_capture_artifact", fake_capture)
+
+    await recorder.on_event(AgentEvent(type=EventType.TOOL_RESULT, data={"name": "write", "result": "ok", "id": "tc1"}))
+
+    assert captured == [1, 42]
+    recorder.unlink_task_run(42)
+    assert recorder._linked_task_run_ids == set()
+
+
+@pytest.mark.asyncio
 async def test_on_event_swallows_exceptions(recorder, monkeypatch: pytest.MonkeyPatch):
     async def fake_create(**kwargs):
         raise RuntimeError("DB error")
@@ -68,9 +93,7 @@ async def test_on_event_swallows_exceptions(recorder, monkeypatch: pytest.Monkey
     monkeypatch.setattr("crabagent.core.database.run_record_create", fake_create)
 
     # Should not raise
-    await recorder.on_event(
-        AgentEvent(type=EventType.AGENT_START, data={"query": "test"})
-    )
+    await recorder.on_event(AgentEvent(type=EventType.AGENT_START, data={"query": "test"}))
 
 
 @pytest.mark.asyncio
@@ -122,9 +145,7 @@ async def test_on_event_marks_budget_exhausted(recorder, monkeypatch: pytest.Mon
 
     monkeypatch.setattr("crabagent.core.database.run_record_update", fake_update)
 
-    await recorder.on_event(
-        AgentEvent(type=EventType.BUDGET_EXHAUSTED, data={"reason": "too many tokens"})
-    )
+    await recorder.on_event(AgentEvent(type=EventType.BUDGET_EXHAUSTED, data={"reason": "too many tokens"}))
 
     assert captured == {
         "run_id": 12,
@@ -163,13 +184,17 @@ async def test_on_event_records_sub_agent_lifecycle(recorder, monkeypatch: pytes
         )
     )
     await recorder.on_event(
-        AgentEvent(type=EventType.SUB_AGENT_TOOL_CALL, data={"sub_agent_id": "sub-1", "name": "read", "args": {"file": "x"}})
+        AgentEvent(
+            type=EventType.SUB_AGENT_TOOL_CALL, data={"sub_agent_id": "sub-1", "name": "read", "args": {"file": "x"}}
+        )
     )
     await recorder.on_event(
         AgentEvent(type=EventType.SUB_AGENT_TOOL_RESULT, data={"sub_agent_id": "sub-1", "name": "read", "result": "ok"})
     )
     await recorder.on_event(
-        AgentEvent(type=EventType.SUB_AGENT_END, data={"sub_agent_id": "sub-1", "tokens": 8, "iterations": 1, "result": "done"})
+        AgentEvent(
+            type=EventType.SUB_AGENT_END, data={"sub_agent_id": "sub-1", "tokens": 8, "iterations": 1, "result": "done"}
+        )
     )
 
     assert created["agent_name"] == "coder"
@@ -211,12 +236,8 @@ async def test_on_event_creates_pipeline_run_and_marks_end(recorder, monkeypatch
             },
         )
     )
-    await recorder.on_event(
-        AgentEvent(type=EventType.PIPELINE_STEP_START, data={"step_id": "a", "started_at": 10.0})
-    )
-    await recorder.on_event(
-        AgentEvent(type=EventType.PIPELINE_STEP_END, data={"step_id": "a", "elapsed": 1.5})
-    )
+    await recorder.on_event(AgentEvent(type=EventType.PIPELINE_STEP_START, data={"step_id": "a", "started_at": 10.0}))
+    await recorder.on_event(AgentEvent(type=EventType.PIPELINE_STEP_END, data={"step_id": "a", "elapsed": 1.5}))
     await recorder.on_event(
         AgentEvent(type=EventType.PIPELINE_END, data={"total": 2, "completed": ["a"], "failed": ["b"]})
     )

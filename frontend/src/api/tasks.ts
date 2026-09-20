@@ -167,6 +167,10 @@ export function markResultViewed(id: number): Promise<Task> {
   return api.post(`/tasks/${id}/mark-result-viewed`, {});
 }
 
+export function openTaskArtifact(taskId: number, name: string): Promise<{ status: string; path: string }> {
+  return api.post(`/tasks/${taskId}/open-artifact`, { name });
+}
+
 export function listTaskChecks(id: number): Promise<TaskCheck[]> {
   return api.get(`/tasks/${id}/checks`);
 }

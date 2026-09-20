@@ -609,6 +609,27 @@ export function dbMessagesToChat(msgs: Message[]): ChatMessage[] {
       continue;
     }
 
+    if (m.role === "task_result") {
+      // Persisted terminal result card (JSON payload written by the backend).
+      let payload: unknown;
+      try {
+        payload = JSON.parse(m.content || "null");
+      } catch {
+        payload = null;
+      }
+      if (payload && typeof payload === "object" && (payload as { task_id?: number }).task_id) {
+        result.push({
+          id: `db-${m.id}`,
+          role: "task_result",
+          content: (payload as { title?: string }).title || "",
+          task_result: payload as ChatMessage["task_result"],
+        });
+      } else {
+        result.push({ id: `db-${m.id}`, role: m.role, content: m.content || "" });
+      }
+      continue;
+    }
+
     if (m.reasoning_content && m.role === "assistant") {
       result.push({ id: `db-${m.id}-think`, role: "thinking", content: m.reasoning_content });
     }

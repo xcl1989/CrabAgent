@@ -49,6 +49,8 @@ export interface ChatMessage {
     result_summary?: string;
     warning_summary?: string;
     verification_status?: string;
+    files?: string[];
+    checks?: { passed: number; total: number };
   };
   // LLM retry status
   retry_info?: {

@@ -173,6 +173,26 @@ async def finish_agent_run(
             verdict = await judge_task(db, run.task_id, user_id)
             logger.info("Task %s completion verdict: %s", run.task_id, verdict)
             final_task = await _get_task(db, run.task_id, user_id)
+
+            # Rich card payload: available artifact names + required check counts.
+            import os as _os
+
+            from crabagent.core.database import TaskArtifact, TaskCheck
+
+            artifacts = (
+                await db.execute(
+                    select(TaskArtifact).where(
+                        TaskArtifact.task_id == run.task_id,
+                        TaskArtifact.status == "available",
+                    )
+                )
+            ).scalars().all()
+            artifact_files = [a.name or _os.path.basename(a.path) for a in artifacts if a.path]
+            all_checks = (
+                await db.execute(select(TaskCheck).where(TaskCheck.task_id == run.task_id))
+            ).scalars().all()
+            required_checks = [c for c in all_checks if c.required]
+
             status_labels = {
                 "done": "完成",
                 "partial": "部分完成",
@@ -203,6 +223,15 @@ async def finish_agent_run(
                     "title": final_task["title"],
                     "result_summary": (final_task.get("result_summary") or "")[:300],
                     "warning_summary": (final_task.get("warning_summary") or "")[:300],
+                    "files": artifact_files,
+                    "checks": (
+                        {
+                            "passed": sum(1 for c in required_checks if c.status == "passed"),
+                            "total": len(required_checks),
+                        }
+                        if required_checks
+                        else None
+                    ),
                 },
             )
             return final_task
@@ -228,8 +257,146 @@ async def finish_agent_run(
     await db.commit()
     final_task = await _get_task(db, run.task_id, user_id)
     if final_task:
-        broadcast_task_event("task_updated", {"task_id": run.task_id, "status": final_task["status"], "run_id": run_id})
+        broadcast_task_event(
+            "task_updated",
+            {
+                "task_id": run.task_id,
+                "status": final_task["status"],
+                "run_id": run_id,
+                "session_id": run.session_id or final_task.get("source_session") or "",
+                "title": final_task["title"],
+                "result_summary": (final_task.get("result_summary") or "")[:300],
+                "warning_summary": (final_task.get("warning_summary") or "")[:300],
+                "verification_status": final_task.get("verification_status") or "unverified",
+            },
+        )
     return final_task
+
+
+class TaskLifecycleLinker:
+    """Drive linked task lifecycle from a conversation's execution events.
+
+    The linker watches the session's event bus: on AGENT_START it attaches
+    all open agent-owned tasks created in this session; on TASK_CREATED it
+    attaches the just-created task (the initial scan cannot see it because
+    task_add runs after AGENT_START); on terminal events it finalizes the
+    runs so completion judging and result cards fire. Artifact capture is
+    routed to the linked task runs via ``RunRecorder.link_task_run``.
+    """
+
+    def __init__(self, user_id: int, session_id: str) -> None:
+        self._user_id = user_id
+        self._session_id = session_id
+        self.run_ids: list[int] = []
+
+    async def _start_linked_run(self, task_id: int, title: str = "") -> None:
+        from crabagent.core.database import async_session_factory
+
+        async with async_session_factory() as db:
+            _, task_run_id = await start_agent_run(
+                db,
+                task_id,
+                self._user_id,
+                agent_name="main",
+                session_id=self._session_id,
+                task_summary=title,
+            )
+        self.run_ids.append(task_run_id)
+
+    async def handle_event(self, event, link_run=None, unlink_run=None) -> None:
+        from crabagent.core.event import EventType
+
+        if event.type == EventType.AGENT_START:
+            self.run_ids.clear()
+            try:
+                from crabagent.core.database import Task as TaskRow
+                from crabagent.core.database import async_session_factory
+                from crabagent.core.task.status import OPEN_TASK_STATUSES
+
+                async with async_session_factory() as db:
+                    rows = await db.execute(
+                        select(TaskRow)
+                        .where(
+                            TaskRow.user_id == self._user_id,
+                            TaskRow.source_session == self._session_id,
+                            TaskRow.status.in_(OPEN_TASK_STATUSES),
+                            TaskRow.owner_type == "agent",
+                            TaskRow.active_run_id.is_(None),
+                        )
+                        .order_by(TaskRow.id.desc())
+                    )
+                    open_tasks = [(task.id, task.title) for task in rows.scalars().all()]
+                for task_id, title in open_tasks:
+                    await self._start_linked_run(task_id, title)
+                    if link_run:
+                        link_run(self.run_ids[-1])
+            except Exception:
+                logger.warning("task lifecycle link failed (non-fatal)", exc_info=True)
+
+        elif event.type == EventType.TASK_CREATED:
+            # task_add normally runs after AGENT_START, so the initial scan
+            # cannot see it. Link it as soon as the tool emits TASK_CREATED.
+            try:
+                task_id = int(event.data.get("task_id") or 0)
+                if task_id:
+                    await self._start_linked_run(task_id, str(event.data.get("title") or ""))
+                    if link_run:
+                        link_run(self.run_ids[-1])
+            except Exception:
+                logger.warning("new task lifecycle link failed (non-fatal)", exc_info=True)
+
+        elif self.run_ids and event.type in (
+            EventType.AGENT_END,
+            EventType.AGENT_ERROR,
+            EventType.BUDGET_EXHAUSTED,
+        ):
+            run_ids = self.run_ids[:]
+            self.run_ids.clear()
+            for run_id in run_ids:
+                if unlink_run:
+                    unlink_run(run_id)
+            if event.type == EventType.AGENT_END:
+                run_status, err = "completed", ""
+                # AGENT_END carries stats only; the reply text is the last
+                # assistant message of this session — use it as the result.
+                summary = ""
+                try:
+                    from crabagent.core.database import Conversation, Message
+                    from crabagent.core.database import async_session_factory as _asf
+
+                    async with _asf() as sdb:
+                        row = await sdb.execute(
+                            select(Message.content)
+                            .join(Conversation, Conversation.id == Message.conversation_id)
+                            .where(Conversation.session_id == self._session_id, Message.role == "assistant")
+                            .order_by(Message.id.desc())
+                            .limit(1)
+                        )
+                        row = row.first()
+                        summary = (row[0] or "")[:1000] if row else ""
+                except Exception:
+                    logger.debug("failed to read last assistant reply", exc_info=True)
+            elif event.type == EventType.AGENT_ERROR:
+                run_status, summary, err = "failed", "", str(event.data.get("error", ""))
+            else:  # BUDGET_EXHAUSTED
+                run_status = "interrupted"
+                summary = ""
+                err = "budget exhausted: " + str(event.data.get("reason", ""))
+            try:
+                from crabagent.core.database import async_session_factory
+
+                async with async_session_factory() as db:
+                    for run_id in run_ids:
+                        await finish_agent_run(
+                            db,
+                            run_id=run_id,
+                            user_id=self._user_id,
+                            run_status=run_status,
+                            result_summary=summary[:1000],
+                            error=err[:500],
+                        )
+            except Exception:
+                logger.warning("task lifecycle finish failed (non-fatal)", exc_info=True)
 
 
 async def cancel_task(

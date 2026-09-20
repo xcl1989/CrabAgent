@@ -396,6 +396,13 @@ async def prompt_async(
                     session_id,
                     locale,
                 )
+        if _use_cache and "task_add" not in conv.system_prompt:
+            # Old cache without the proactive task-creation policy — refresh it.
+            _use_cache = False
+            logger.info(
+                "[CACHE] Session %s: MISS (old cache without task creation policy)",
+                session_id,
+            )
         if _use_cache:
             base_prompt = conv.system_prompt
             logger.info(
@@ -717,95 +724,16 @@ Use ordinary Markdown when a visualization is not helpful.
     # advanced by the conversation's execution: open tasks start with the
     # agent run and are judged (done/partial/failed) when it ends, so
     # task_updated events (with result cards) reach the chat and panels.
-    task_service_run_ids: list[int] = []
+    from crabagent.core.task.service import TaskLifecycleLinker
+
+    task_linker = TaskLifecycleLinker(user_id=user.id, session_id=session_id)
 
     async def _task_lifecycle_handler(event: AgentEvent):
-        if event.type == EventType.AGENT_START:
-            task_service_run_ids.clear()
-            try:
-                from sqlalchemy import select
-
-                from crabagent.core.database import Task as TaskRow
-                from crabagent.core.database import async_session_factory
-                from crabagent.core.task import service as task_service
-                from crabagent.core.task.status import OPEN_TASK_STATUSES
-
-                async with async_session_factory() as db:
-                    rows = await db.execute(
-                        select(TaskRow)
-                        .where(
-                            TaskRow.user_id == user.id,
-                            TaskRow.source_session == session_id,
-                            TaskRow.status.in_(OPEN_TASK_STATUSES),
-                            TaskRow.owner_type == "agent",
-                        )
-                        .order_by(TaskRow.id.desc())
-                    )
-                    for open_task in rows.scalars().all():
-                        _, task_run_id = await task_service.start_agent_run(
-                            db,
-                            open_task.id,
-                            user.id,
-                            agent_name="main",
-                            session_id=session_id,
-                            task_summary=open_task.title,
-                        )
-                        task_service_run_ids.append(task_run_id)
-            except Exception:
-                logger.warning("task lifecycle link failed (non-fatal)", exc_info=True)
-
-        elif task_service_run_ids and event.type in (
-            EventType.AGENT_END,
-            EventType.AGENT_ERROR,
-            EventType.BUDGET_EXHAUSTED,
-        ):
-            run_ids = task_service_run_ids[:]
-            task_service_run_ids.clear()
-            if event.type == EventType.AGENT_END:
-                run_status, err = "completed", ""
-                # AGENT_END carries stats only; the reply text is the last
-                # assistant message of this session — use it as the result.
-                summary = ""
-                try:
-                    from sqlalchemy import select
-
-                    from crabagent.core.database import Conversation, Message
-                    from crabagent.core.database import async_session_factory as _asf
-
-                    async with _asf() as sdb:
-                        row = await sdb.execute(
-                            select(Message.content)
-                            .join(Conversation, Conversation.id == Message.conversation_id)
-                            .where(Conversation.session_id == session_id, Message.role == "assistant")
-                            .order_by(Message.id.desc())
-                            .limit(1)
-                        )
-                        row = row.first()
-                        summary = (row[0] or "")[:1000] if row else ""
-                except Exception:
-                    logger.debug("failed to read last assistant reply", exc_info=True)
-            elif event.type == EventType.AGENT_ERROR:
-                run_status, summary, err = "failed", "", str(event.data.get("error", ""))
-            else:  # BUDGET_EXHAUSTED
-                run_status = "interrupted"
-                summary = ""
-                err = "budget exhausted: " + str(event.data.get("reason", ""))
-            try:
-                from crabagent.core.database import async_session_factory
-                from crabagent.core.task import service as task_service
-
-                async with async_session_factory() as db:
-                    for run_id in run_ids:
-                        await task_service.finish_agent_run(
-                            db,
-                            run_id=run_id,
-                            user_id=user.id,
-                            run_status=run_status,
-                            result_summary=summary[:1000],
-                            error=err[:500],
-                        )
-            except Exception:
-                logger.warning("task lifecycle finish failed (non-fatal)", exc_info=True)
+        await task_linker.handle_event(
+            event,
+            link_run=run_recorder.link_task_run,
+            unlink_run=run_recorder.unlink_task_run,
+        )
 
     context.event_bus.subscribe(_task_lifecycle_handler)
 

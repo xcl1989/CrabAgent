@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 import json
-from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import create_engine
-from sqlalchemy.orm import Session
 
 from crabagent.core.database import Base, Message
 from crabagent.serve.services import message as message_service
@@ -20,6 +18,33 @@ def test_message_to_dict_handles_compressed_role_and_json_content():
     d = message_service.message_to_dict(msg)
     assert d["role"] == "user"
     assert d["content"] == "summary text"
+
+
+def test_message_to_dict_flattens_task_result_card_for_llm():
+    payload = {
+        "task_id": 22,
+        "title": "预算报告",
+        "status": "done",
+        "verification_status": "passed",
+    }
+    msg = _make_msg(
+        conversation_id=1,
+        sequence=9,
+        role="task_result",
+        content=json.dumps(payload, ensure_ascii=False),
+    )
+    d = message_service.message_to_dict(msg)
+    assert d["role"] == "user"
+    assert "[任务结果卡片]" in d["content"]
+    assert "预算报告" in d["content"]
+    assert "已完成" in d["content"]
+
+
+def test_message_to_response_preserves_task_result_role():
+    payload = {"task_id": 1, "title": "T", "status": "failed"}
+    msg = _make_msg(conversation_id=1, sequence=10, role="task_result", content=json.dumps(payload))
+    d = message_service.message_to_response(msg)
+    assert d["role"] == "task_result"
 
 
 def test_message_to_dict_parses_list_content_json():

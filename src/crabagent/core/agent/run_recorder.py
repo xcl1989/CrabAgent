@@ -22,6 +22,7 @@ class RunRecorder:
         self._main_run_id: int | None = None
         self._main_started_at: float = 0
         self._main_tool_buf: list[dict] = []
+        self._linked_task_run_ids: set[int] = set()
         self._sub_runs: dict[str, dict] = {}
         self._pipeline_run_id: int | None = None
         self._pipeline_steps: dict[str, dict] = {}
@@ -29,6 +30,13 @@ class RunRecorder:
     @property
     def pipeline_run_id(self) -> int | None:
         return self._pipeline_run_id
+
+    def link_task_run(self, run_id: int) -> None:
+        """Attach a trusted-work run so its tool outputs become artifacts."""
+        self._linked_task_run_ids.add(run_id)
+
+    def unlink_task_run(self, run_id: int) -> None:
+        self._linked_task_run_ids.discard(run_id)
 
     async def on_event(self, event: AgentEvent) -> None:
         try:
@@ -47,6 +55,8 @@ class RunRecorder:
         elif t == EventType.TOOL_RESULT and self._main_run_id:
             entry = self._on_tool_result(d, self._main_tool_buf)
             await self._capture_artifact(d, entry, self._main_run_id)
+            for run_id in tuple(self._linked_task_run_ids):
+                await self._capture_artifact(d, entry, run_id)
         elif t == EventType.AGENT_END:
             await self._on_agent_end(d)
         elif t == EventType.AGENT_ERROR:
@@ -94,7 +104,7 @@ class RunRecorder:
         buf.append(
             {
                 "name": data.get("name", ""),
-                "args": data.get("args"),
+                "args": data.get("arguments") or data.get("args"),
                 "started_at": _time.time(),
                 "result_summary": None,
                 "elapsed": 0,

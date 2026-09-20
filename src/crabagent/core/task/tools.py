@@ -5,9 +5,11 @@ def register_task_tools(registry):
     @registry.register(
         name="task_add",
         description=(
-            "Add a persistent cross-session work commitment. Use for deadlines, assigned work, "
-            "deliverables, background or multi-stage work, and anything the user explicitly asks "
-            "to track. Do not use this for short steps in the current execution; use todo_add instead. "
+            "Add a persistent cross-session work commitment. PROACTIVELY create a task "
+            "(without being asked) whenever the work has a concrete deliverable, needs to "
+            "wait for the user, runs in the background or across sessions, or the user "
+            "explicitly asks to track it. Do not use this for short steps in the current "
+            "execution (use todo_add) or for simple Q&A / one-off queries. "
             "Supports assignee, deadline, project association, and priority."
         ),
         parameters={
@@ -81,6 +83,8 @@ def register_task_tools(registry):
                 source_session=source_session,
                 project=project,
                 priority=priority,
+                owner_type="agent",
+                owner_name=assignee or "CrabAgent",
             )
 
         # Trusted work system: notify listeners (chat card + global SSE).
@@ -191,6 +195,16 @@ def register_task_tools(registry):
         async with async_session_factory() as db:
             t = await _update(db, id, user_id, status="done")
         if t:
+            if t.get("active_run_id"):
+                # Trusted completion: the task is still being executed in this
+                # turn. A mid-work "done" must not show a premature unverified
+                # card — the completion service verifies artifacts/checks and
+                # judges the final status when the run ends.
+                return (
+                    f"✅ Completion request recorded for **{t['title']}** (id={id}). "
+                    "The task will be verified and finally judged when this run ends — "
+                    "finish all deliverables before ending your reply."
+                )
             try:
                 from crabagent.core.task.events import broadcast_task_event
 
@@ -200,7 +214,10 @@ def register_task_tools(registry):
                         "task_id": id,
                         "status": "done",
                         "title": t["title"],
-                        "session_id": (str(context.metadata.get("session_id") or "") if context else ""),
+                        "session_id": t.get("source_session") or "",
+                        "result_summary": t.get("result_summary") or "",
+                        "warning_summary": t.get("warning_summary") or "",
+                        "verification_status": t.get("verification_status") or "unverified",
                     },
                 )
             except Exception:
@@ -287,6 +304,14 @@ def register_task_tools(registry):
             t = await _update(db, id, user_id, **kwargs)
         if t:
             if kwargs.get("status"):
+                if t.get("active_run_id") and kwargs["status"] in ("done", "partial", "failed"):
+                    # Mid-run terminal status: defer card/judgment to run end
+                    # (the completion service verifies and broadcasts then).
+                    changed = ", ".join(kwargs.keys())
+                    return (
+                        f"✅ Task **{t['title']}** (id={id}) updated: {changed}. "
+                        "Status will be re-verified and finally judged when this run ends."
+                    )
                 try:
                     from crabagent.core.task.events import broadcast_task_event
 
@@ -296,7 +321,10 @@ def register_task_tools(registry):
                             "task_id": id,
                             "status": kwargs["status"],
                             "title": t["title"],
-                            "session_id": (str(context.metadata.get("session_id") or "") if context else ""),
+                            "session_id": t.get("source_session") or "",
+                            "result_summary": t.get("result_summary") or "",
+                            "warning_summary": t.get("warning_summary") or "",
+                            "verification_status": t.get("verification_status") or "unverified",
                         },
                     )
                 except Exception:

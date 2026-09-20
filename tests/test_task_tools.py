@@ -77,6 +77,8 @@ async def test_task_add_records_source_session_and_agent_source(monkeypatch: pyt
     assert captured["source"] == "agent"
     assert captured["source_session"] == "sess-xyz"
     assert captured["user_id"] == 3
+    assert captured["owner_type"] == "agent"
+    assert captured["owner_name"] == "CrabAgent"
 
 
 @pytest.mark.asyncio
@@ -105,6 +107,8 @@ async def test_task_add_defaults_source_session_without_context(monkeypatch: pyt
     assert captured["source"] == "agent"
     assert captured["source_session"] == ""
     assert captured["user_id"] == 1
+    assert captured["owner_type"] == "agent"
+    assert captured["owner_name"] == "CrabAgent"
 
 
 @pytest.mark.asyncio
@@ -216,6 +220,67 @@ async def test_task_update_reports_not_found(monkeypatch: pytest.MonkeyPatch):
     result = await handler(id=1, title="new")
 
     assert result == "❌ Task 1 not found."
+
+
+@pytest.mark.asyncio
+async def test_task_done_mid_run_defers_card(monkeypatch: pytest.MonkeyPatch):
+    """task_done during an active run must NOT broadcast a premature card."""
+    registry = ToolRegistry()
+    task_tools.register_task_tools(registry)
+    done_handler = _get_tool(registry, "task_done")
+    broadcasts: list[tuple] = []
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    async def fake_update(db, task_id, user_id, **kwargs):
+        return {"id": 1, "title": "写报告", "active_run_id": 42, "source_session": "s1"}
+
+    import crabagent.core.task.events as task_events
+
+    monkeypatch.setattr("crabagent.core.database.async_session_factory", lambda: FakeSession())
+    monkeypatch.setattr("crabagent.core.task.store.update_task", fake_update)
+    monkeypatch.setattr(task_events, "broadcast_task_event", lambda t, d: broadcasts.append((t, d)))
+
+    result = await done_handler(id=1)
+
+    assert "Completion request recorded" in result
+    assert broadcasts == []
+
+
+@pytest.mark.asyncio
+async def test_task_done_without_active_run_broadcasts(monkeypatch: pytest.MonkeyPatch):
+    registry = ToolRegistry()
+    task_tools.register_task_tools(registry)
+    done_handler = _get_tool(registry, "task_done")
+    broadcasts: list[tuple] = []
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    async def fake_update(db, task_id, user_id, **kwargs):
+        return {"id": 1, "title": "写报告", "active_run_id": None, "source_session": "s1"}
+
+    import crabagent.core.task.events as task_events
+
+    monkeypatch.setattr("crabagent.core.database.async_session_factory", lambda: FakeSession())
+    monkeypatch.setattr("crabagent.core.task.store.update_task", fake_update)
+    monkeypatch.setattr(task_events, "broadcast_task_event", lambda t, d: broadcasts.append((t, d)))
+
+    result = await done_handler(id=1)
+
+    assert "marked as done" in result
+    assert len(broadcasts) == 1
+    assert broadcasts[0][1]["status"] == "done"
+    assert broadcasts[0][1]["session_id"] == "s1"
 
 
 def _async_return(value):

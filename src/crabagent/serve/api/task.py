@@ -21,6 +21,11 @@ class CreateTaskRequest(BaseModel):
     source_ref: str = ""
     project: str = ""
     priority: str = "medium"
+    workspace: str = ""
+    goal_id: int | None = None
+    owner_type: str = ""
+    owner_name: str = ""
+    source_session: str = ""
 
 
 class UpdateTaskRequest(BaseModel):
@@ -71,6 +76,7 @@ async def create_task(
         deadline=deadline_dt,
         source=req.source,
         source_ref=req.source_ref,
+        source_session=req.source_session,
         project=req.project,
         priority=req.priority,
         workspace=req.workspace,
@@ -241,6 +247,64 @@ async def rollback_run(
     if result["status"] == "conflict":
         raise HTTPException(status_code=409, detail=result)
     return result
+
+
+class OpenArtifactRequest(BaseModel):
+    name: str
+
+
+@router.post("/{task_id}/open-artifact")
+async def open_task_artifact(
+    task_id: int,
+    req: OpenArtifactRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Open a registered artifact with the OS default application.
+
+    Only files registered as this task's artifacts (and owned by the user)
+    can be opened — the model cannot point the click at arbitrary paths.
+    """
+    import os as _os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    from sqlalchemy import select
+
+    from crabagent.core.database import TaskArtifact
+
+    rows = (
+        await db.execute(
+            select(TaskArtifact).where(
+                TaskArtifact.task_id == task_id,
+                TaskArtifact.user_id == user.id,
+                TaskArtifact.status == "available",
+            )
+        )
+    ).scalars().all()
+    match = None
+    for artifact in reversed(rows):
+        if artifact.path and _os.path.basename(artifact.path) == req.name:
+            match = artifact
+            break
+    if match is None or not match.path:
+        raise HTTPException(status_code=404, detail="成果文件不存在或未登记")
+
+    p = Path(match.path)
+    if not p.is_file():
+        raise HTTPException(status_code=404, detail="文件已不存在")
+
+    try:
+        if sys.platform == "darwin":
+            subprocess.Popen(["open", str(p)])
+        elif _os.name == "nt":
+            _os.startfile(str(p))  # type: ignore[attr-defined]  # noqa: S606
+        else:
+            subprocess.Popen(["xdg-open", str(p)])
+    except Exception as exc:  # pragma: no cover - environment specific
+        raise HTTPException(status_code=500, detail=f"无法打开文件: {exc}")
+    return {"status": "ok", "path": str(p)}
 
 
 @router.post("/{task_id}/retry")
