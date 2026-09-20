@@ -117,7 +117,14 @@ export function sseEventToMessages(event: SSEEvent, messages: ChatMessage[]): Ch
   }
 
   if (event.type === "agent_error") {
-    updated.push({ id: `e-${Date.now()}`, role: "error", content: (event.data.error as string) || "Unknown error" });
+    const errorInfo = event.data.error_info as ChatMessage["error_info"] | undefined;
+    const content = (event.data.error as string) || "Unknown error";
+    const existing = [...updated].reverse().find((m) => m.role === "error" && m.content === content);
+    if (existing) {
+      existing.error_info = errorInfo || existing.error_info;
+      return [...updated];
+    }
+    updated.push({ id: `e-${Date.now()}`, role: "error", content, error_info: errorInfo });
     return updated;
   }
 
@@ -134,6 +141,7 @@ export function sseEventToMessages(event: SSEEvent, messages: ChatMessage[]): Ch
         id: `e-${Date.now()}`,
         role: "error",
         content: msg,
+        error_info: event.data.error_info as ChatMessage["error_info"] | undefined,
       });
       return filtered;
     }

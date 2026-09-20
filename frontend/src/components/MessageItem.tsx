@@ -65,6 +65,13 @@ export interface ChatMessage {
   sub_agent_model?: string;
   sub_agent_pipeline_run_id?: number | null;
   sub_agent_pipeline_step_id?: string | null;
+  error_info?: {
+    code: string;
+    title: string;
+    message?: string;
+    action?: string;
+    retryable?: boolean;
+  };
   retry_info?: {
     phase: "retrying" | "countdown" | "exhausted";
     message: string;
@@ -425,11 +432,20 @@ const UserInputItem = memo(function UserInputItem({
 
 /** Error message */
 const ErrorItem = memo(function ErrorItem({ msg }: { msg: ChatMessage }) {
+  const info = msg.error_info;
   return (
     <div className="mb-3">
-      <div className="flex items-start gap-2 px-4 py-3 rounded-xl text-sm bg-[var(--danger-bg)] border border-[var(--danger-border)] text-[var(--danger)]">
-        <AlertTriangle size={14} className="mt-0.5 shrink-0" />
-        <div className="whitespace-pre-wrap break-words">{msg.content}</div>
+      <div className="flex items-start gap-3 px-4 py-3 rounded-xl text-sm bg-[var(--danger-bg)] border border-[var(--danger-border)] text-[var(--danger)]">
+        <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+        <div className="min-w-0">
+          <div className="font-semibold">{info?.title || "请求失败"}</div>
+          <div className="mt-1 whitespace-pre-wrap break-words text-[var(--text-primary)]">
+            {info?.message || msg.content}
+          </div>
+          {info?.action ? (
+            <div className="mt-2 text-xs leading-5 text-[var(--text-secondary)]">{info.action}</div>
+          ) : null}
+        </div>
       </div>
     </div>
   );

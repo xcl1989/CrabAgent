@@ -127,6 +127,64 @@ def _truncate_result(result: object, max_chars: int) -> object:
     return result
 
 
+def _classify_rate_limit_error(error: Exception) -> dict[str, object]:
+    """Turn provider-specific 429 responses into actionable user-facing errors."""
+    detail = str(error)
+    compact = detail.lower().replace("_", " ")
+
+    permission_markers = (
+        "暂未开放",
+        "没有权限",
+        "无权访问",
+        "permission denied",
+        "not authorized",
+        "not available for your plan",
+        "does not have access",
+    )
+    quota_markers = (
+        "使用上限",
+        "额度已用尽",
+        "余额不足",
+        "usage limit",
+        "quota exceeded",
+        "insufficient quota",
+        "credits exhausted",
+    )
+
+    if any(marker in compact for marker in permission_markers):
+        return {
+            "code": "model_access_denied",
+            "title": "当前套餐不支持此模型",
+            "message": _provider_error_message(detail),
+            "action": "请切换到当前套餐已开放的模型，或升级 Provider 套餐后重试。",
+            "retryable": False,
+        }
+    if any(marker in compact for marker in quota_markers):
+        return {
+            "code": "quota_exhausted",
+            "title": "API 使用额度已耗尽",
+            "message": _provider_error_message(detail),
+            "action": "请等待额度重置、充值，或切换到其他 Provider。",
+            "retryable": False,
+        }
+    return {
+        "code": "rate_limited",
+        "title": "API 请求过于频繁",
+        "message": "Provider 暂时限制了请求频率。",
+        "action": "系统将自动重试；若持续失败，请稍后再试或切换 Provider。",
+        "retryable": True,
+    }
+
+
+def _provider_error_message(detail: str) -> str:
+    """Keep the useful provider message without exposing LiteLLM's wrapper text."""
+    for separator in ("OpenAIException - ", "message': '", 'message": "', " - ", ": "):
+        if separator in detail:
+            message = detail.rsplit(separator, 1)[-1]
+            return message.split("'", 1)[0].split('"', 1)[0].strip()
+    return detail[:300]
+
+
 async def _emit_retry_with_countdown(
     context: AgentContext,
     message: str,
@@ -661,15 +719,18 @@ async def run_agent(
             # ── Determine retry strategy ──
             retryable = False
             user_message = ""
+            error_info: dict[str, object] | None = None
             backoff_delay = 0.0
 
             if isinstance(e, litellm.exceptions.RateLimitError):
-                retryable = True
-                backoff_delay = min(
-                    settings.llm_retry_base_delay * (2**_llm_retry_count),
-                    settings.llm_retry_max_delay,
-                )
-                user_message = "⚠️ API 速率已达上限"
+                error_info = _classify_rate_limit_error(e)
+                retryable = bool(error_info["retryable"])
+                if retryable:
+                    backoff_delay = min(
+                        settings.llm_retry_base_delay * (2**_llm_retry_count),
+                        settings.llm_retry_max_delay,
+                    )
+                user_message = str(error_info["title"])
 
             elif isinstance(e, (litellm.exceptions.Timeout, asyncio.TimeoutError)):
                 retryable = True
@@ -800,10 +861,19 @@ async def run_agent(
                         "message": final_msg,
                         "attempt": _llm_retry_count,
                         "max_attempts": _llm_retry_max,
+                        **({"error_info": error_info} if error_info else {}),
                     },
                 )
             )
-            await context.event_bus.emit(AgentEvent(type=EventType.AGENT_ERROR, data={"error": final_msg}))
+            await context.event_bus.emit(
+                AgentEvent(
+                    type=EventType.AGENT_ERROR,
+                    data={
+                        "error": final_msg,
+                        **({"error_info": error_info} if error_info else {}),
+                    },
+                )
+            )
             break
 
     if context.budget_exhausted:

@@ -29,6 +29,13 @@ export interface ChatMessage {
   sub_agent_pipeline_step_id?: string | null;
   // Streaming bash output attached to a tool_call message
   bashStream?: string;
+  error_info?: {
+    code: string;
+    title: string;
+    message?: string;
+    action?: string;
+    retryable?: boolean;
+  };
   // LLM retry status
   retry_info?: {
     phase: "retrying" | "countdown" | "exhausted";

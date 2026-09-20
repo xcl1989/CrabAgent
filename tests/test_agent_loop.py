@@ -391,6 +391,53 @@ async def test_run_agent_reads_usage_after_finish_chunk(monkeypatch: pytest.Monk
     ]
 
 
+def test_classify_rate_limit_distinguishes_model_permission_from_throttling():
+    denied = loop._classify_rate_limit_error(
+        RuntimeError("OpenAIException - 当前订阅套餐暂未开放GLM-5.3-FlashX权限")
+    )
+    throttled = loop._classify_rate_limit_error(RuntimeError("429 Too Many Requests"))
+
+    assert denied["code"] == "model_access_denied"
+    assert denied["retryable"] is False
+    assert denied["message"] == "当前订阅套餐暂未开放GLM-5.3-FlashX权限"
+    assert throttled["code"] == "rate_limited"
+    assert throttled["retryable"] is True
+
+
+@pytest.mark.asyncio
+async def test_run_agent_reports_model_access_denied_without_retry(monkeypatch: pytest.MonkeyPatch):
+    context = AgentContext(workspace=Path.cwd(), model="glm-5.3-flashx", max_iterations=2)
+    events = []
+    calls = 0
+    context.event_bus.subscribe(lambda event: events.append(event))
+
+    async def fake_provider(provider_name=None):
+        return SimpleNamespace(name="组织", provider_type="zhipu", api_key="k", base_url="", enabled=True)
+
+    async def fake_acompletion(**kwargs):
+        nonlocal calls
+        calls += 1
+        raise loop.litellm.exceptions.RateLimitError(
+            message="当前订阅套餐暂未开放GLM-5.3-FlashX权限",
+            llm_provider="openai",
+            model="glm-5.3-flashx",
+        )
+
+    monkeypatch.setattr(loop, "_resolve_provider", fake_provider)
+    monkeypatch.setattr(
+        loop, "litellm", SimpleNamespace(acompletion=fake_acompletion, exceptions=loop.litellm.exceptions)
+    )
+    monkeypatch.setattr("crabagent.core.proxy.resolve_llm_proxy", _async_return(""))
+
+    await loop.run_agent(context, "hello")
+
+    error_event = next(event for event in events if event.type == EventType.AGENT_ERROR)
+    assert calls == 1
+    assert error_event.data["error"] == "当前套餐不支持此模型"
+    assert error_event.data["error_info"]["code"] == "model_access_denied"
+    assert "切换" in error_event.data["error_info"]["action"]
+
+
 @pytest.mark.asyncio
 async def test_run_agent_emits_auth_error_and_stops(monkeypatch: pytest.MonkeyPatch):
     context = AgentContext(workspace=Path.cwd(), model="gpt-4o", max_iterations=1)

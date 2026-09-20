@@ -209,10 +209,7 @@ export default function BrowserCollaborationPage({ initialSessionId, onSessionCh
       setSending(false);
     } else if (event.type === "agent_error") {
       setSending(false);
-      setMessages((prev) => [
-        ...prev,
-        { id: `e-${Date.now()}`, role: "error", content: (event.data.error as string) || "Unknown error" },
-      ]);
+      setMessages((prev) => sseEventToMessages(event, prev));
     } else {
       setMessages((prev) => sseEventToMessages(event, prev));
     }
@@ -622,7 +619,19 @@ export default function BrowserCollaborationPage({ initialSessionId, onSessionCh
                   {m.role === "thinking" && (
                     <div className="mb-1 font-medium text-[var(--text-tertiary)]">🤔 思考中</div>
                   )}
-                  <div className="whitespace-pre-wrap break-words">{m.content}</div>
+                  {m.role === "error" && m.error_info ? (
+                    <div>
+                      <div className="font-semibold">{m.error_info.title}</div>
+                      <div className="mt-1 whitespace-pre-wrap break-words text-[var(--text-primary)]">
+                        {m.error_info.message || m.content}
+                      </div>
+                      {m.error_info.action && (
+                        <div className="mt-1 text-[11px] text-[var(--text-secondary)]">{m.error_info.action}</div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="whitespace-pre-wrap break-words">{m.content}</div>
+                  )}
                   {m.role === "tool_call" && m.content && (
                     <div className="mt-1 text-[10px] text-[var(--text-tertiary)]">
                       {(() => {
