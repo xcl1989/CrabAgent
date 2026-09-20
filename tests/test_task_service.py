@@ -162,4 +162,9 @@ async def test_recovery_is_idempotent(db):
     second = await recover_interrupted_state(db)
 
     assert any(first.values())
-    assert second == {"interrupted_runs": 0, "partial_tasks": 0, "failed_tasks": 0}
+    assert second == {
+        "interrupted_runs": 0,
+        "partial_tasks": 0,
+        "failed_tasks": 0,
+        "expired_requests": 0,
+    }

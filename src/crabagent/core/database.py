@@ -449,6 +449,42 @@ class BrowserTask(Base):
     completed_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
 
 
+class TaskRequest(Base):
+    """A persistent user-participation request (input/choice/approval/human_step/review).
+
+    Database is the source of truth; live in-process Futures are only a
+    bridge. Requests are one-shot, idempotent on decision, and can expire.
+    Secrets (passwords, tokens, OTP) must never be stored here.
+    """
+
+    __tablename__ = "task_requests"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    request_key: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    task_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    run_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    session_id: Mapped[str] = mapped_column(String(64), default="")
+    request_type: Mapped[str] = mapped_column(String(30), default="input")  # input|choice|approval|human_step|review
+    operation: Mapped[str] = mapped_column(String(100), default="")
+    title: Mapped[str] = mapped_column(String(500), default="")
+    description: Mapped[str] = mapped_column(Text, default="")
+    question: Mapped[str] = mapped_column(Text, default="")
+    options: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    risk_level: Mapped[str] = mapped_column(String(20), default="low")
+    display_payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    resume_action: Mapped[str] = mapped_column(String(100), default="")
+    resume_ref: Mapped[str] = mapped_column(String(500), default="")
+    resource_version: Mapped[str] = mapped_column(String(200), default="")
+    status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
+    decision_note: Mapped[str] = mapped_column(Text, default="")
+    expires_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
+    decided_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
+    consumed_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+
 class BrowserTaskEvent(Base):
     """A redacted task timeline event. Never use this for page text or typed values."""
 
@@ -851,6 +887,17 @@ async def init_db() -> None:
         await ensure_column(conn, "agent_runs", "interrupted_reason", "TEXT DEFAULT ''")
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_agent_runs_task_id ON agent_runs(task_id)"
+        ))
+
+        # ── Trusted work system: task_requests 表（create_all 建表 + 索引） ──
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ux_task_requests_key ON task_requests(request_key)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_task_requests_user_status ON task_requests(user_id, status)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_task_requests_task_status ON task_requests(task_id, status)"
         ))
 
         await ensure_column(conn, "agent_memory", "source", "VARCHAR(10) DEFAULT ''")

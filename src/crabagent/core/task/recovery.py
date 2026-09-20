@@ -73,10 +73,20 @@ async def recover_interrupted_state(db: AsyncSession) -> dict:
 
     await db.commit()
 
+    # 3. Expire stale pending TaskRequests (past their TTL).
+    expired_requests = 0
+    try:
+        from crabagent.core.task.request_service import expire_stale_requests
+
+        expired_requests = await expire_stale_requests(db)
+    except Exception:
+        logger.exception("TaskRequest expiry sweep failed (non-fatal)")
+
     summary = {
         "interrupted_runs": fixed_runs,
         "partial_tasks": partial_count,
         "failed_tasks": failed_count,
+        "expired_requests": expired_requests,
     }
     if fixed_runs or partial_count or failed_count:
         logger.info("Startup recovery: %s", summary)

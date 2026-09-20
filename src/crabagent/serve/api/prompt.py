@@ -971,7 +971,7 @@ Use ordinary Markdown when a visualization is not helpful.
     from crabagent.serve.api.confirm import request_confirmation
 
     async def _serve_confirm(tool_name: str, args: dict) -> bool:
-        future = await request_confirmation(context.event_bus, session_id, tool_name, args)
+        future = await request_confirmation(context.event_bus, session_id, tool_name, args, user_id=user.id)
         try:
             return await asyncio.wait_for(future, timeout=120.0)
         except TimeoutError:
@@ -982,7 +982,9 @@ Use ordinary Markdown when a visualization is not helpful.
     from crabagent.serve.api.input import request_user_input
 
     async def _serve_ask(question: str, options: list[str] | None = None) -> str:
-        future = await request_user_input(context.event_bus, session_id, question, options=options)
+        future = await request_user_input(
+            context.event_bus, session_id, question, options=options, user_id=user.id
+        )
         try:
             return await asyncio.wait_for(future, timeout=300.0)
         except TimeoutError:

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import datetime
 import json
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -12,6 +14,10 @@ from crabagent.serve.deps import get_current_user
 
 router = APIRouter(tags=["confirm"])
 
+logger = logging.getLogger(__name__)
+
+CONFIRM_TTL_SECONDS = 120
+
 _pending_confirms: dict[str, tuple[asyncio.Future[bool], str, str, str]] = {}
 # confirm_id → (future, session_id, tool_name, args_summary)
 
@@ -21,7 +27,9 @@ class ToolConfirmRequest(BaseModel):
     approved: bool
 
 
-async def request_confirmation(event_bus, session_id: str, tool_name: str, args: dict) -> asyncio.Future[bool]:
+async def request_confirmation(
+    event_bus, session_id: str, tool_name: str, args: dict, user_id: int = 1
+) -> asyncio.Future[bool]:
     from crabagent.core.event import AgentEvent, EventType
 
     confirm_id = uuid.uuid4().hex[:12]
@@ -34,6 +42,31 @@ async def request_confirmation(event_bus, session_id: str, tool_name: str, args:
 
     _pending_confirms[confirm_id] = (future, session_id, tool_name, args_summary)
     await _persist_confirmation(session_id, confirm_id, tool_name, args_summary)
+
+    # Trusted work system: also persist a TaskRequest so the approval
+    # survives restarts. The live Future above is only a bridge.
+    try:
+        from crabagent.core.database import async_session_factory
+        from crabagent.core.task.request_service import create_request, register_live_future
+
+        async with async_session_factory() as db:
+            await create_request(
+                db,
+                user_id=user_id,
+                request_type="approval",
+                request_key=confirm_id,
+                title=f"确认执行 {tool_name}",
+                session_id=session_id,
+                operation=f"tool:{tool_name}",
+                question="是否允许执行该操作？",
+                risk_level="high",
+                display_payload={"args_summary": args_summary},
+                resource_version=args_summary[:200],
+                expires_at=datetime.datetime.now() + datetime.timedelta(seconds=CONFIRM_TTL_SECONDS + 10),
+            )
+        register_live_future(confirm_id, future)
+    except Exception:
+        logger.exception("Failed to persist TaskRequest for confirm %s", confirm_id)
 
     await event_bus.emit(
         AgentEvent(
@@ -149,8 +182,28 @@ async def confirm_tool(
 
     future = pop_pending(req.confirm_id)
     if not future or future.done():
-        raise HTTPException(status_code=409, detail="Confirmation request expired; please rerun the operation")
+        # Fall back to the persistent TaskRequest (restart-safe decisions).
+        from crabagent.core.task.request_service import decide_request
+
+        try:
+            payload = await decide_request(db, req.confirm_id, user.id, "approve" if req.approved else "reject")
+        except LookupError:
+            raise HTTPException(status_code=409, detail="Confirmation request expired; please rerun the operation")
+        if payload["status"] == "expired":
+            raise HTTPException(status_code=409, detail="Confirmation request expired; please rerun the operation")
+        return {"status": "ok", "future_resolved": payload.get("future_resolved", False)}
+
+    # Live bridge: the persistent service records the decision exactly once
+    # and resolves the Future through the live-future registry.
+    from crabagent.core.task.request_service import decide_request
+
+    decided = None
+    try:
+        decided = await decide_request(db, req.confirm_id, user.id, "approve" if req.approved else "reject")
+    except LookupError:
+        pass  # no persistent row (legacy path); resolve the Future below
 
     await _resolve_persisted_confirmation(req.confirm_id, req.approved)
-    future.set_result(req.approved)
+    if not (decided and decided.get("future_resolved")) and not future.done():
+        future.set_result(req.approved)
     return {"status": "ok"}
