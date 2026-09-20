@@ -200,6 +200,67 @@ async def list_task_runs(
     return await task_service.list_task_runs(db, task_id, user.id)
 
 
+class RollbackRequest(BaseModel):
+    force: bool = False
+
+
+@router.get("/{task_id}/runs/{run_id}/changes")
+async def get_run_changes(
+    task_id: int,
+    run_id: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """File-level changes protected by this run's recovery points."""
+    from crabagent.core.task.run_recovery import list_run_changes
+
+    try:
+        return await list_run_changes(db, task_id, run_id, user.id)
+    except LookupError:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+
+@router.post("/{task_id}/runs/{run_id}/rollback")
+async def rollback_run(
+    task_id: int,
+    run_id: int,
+    req: RollbackRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Undo one run by restoring its pre-run snapshots.
+
+    Refuses (409) when files were modified after this run unless forced.
+    """
+    from crabagent.core.task.run_recovery import rollback_run as _rollback
+
+    try:
+        result = await _rollback(db, task_id, run_id, user.id, force=req.force)
+    except LookupError:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if result["status"] == "conflict":
+        raise HTTPException(status_code=409, detail=result)
+    return result
+
+
+@router.post("/{task_id}/retry")
+async def retry_task(
+    task_id: int,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Retry a failed/partial/cancelled task with a fresh run (history kept)."""
+    from crabagent.core.task.run_recovery import retry_task as _retry
+
+    try:
+        task, run_id = await _retry(db, task_id, user.id)
+    except LookupError:
+        raise HTTPException(status_code=404, detail="Task not found")
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    return {"task": task, "run_id": run_id}
+
+
 @router.get("/{task_id}/detail")
 async def get_task_detail(
     task_id: int,

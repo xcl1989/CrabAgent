@@ -87,6 +87,19 @@ async def take_snapshot(context, filepaths: list[str], description: str = "") ->
         shutil.rmtree(str(md), ignore_errors=True)
         return None
 
+    # Trusted work system: bind the recovery point to the session's active
+    # run so "undo this run" works without hand-picking molt ids.
+    try:
+        from crabagent.core.database import async_session_factory
+        from crabagent.core.task.run_recovery import link_active_run_molt
+
+        session_id = str((getattr(context, "metadata", None) or {}).get("session_id") or "")
+        if session_id:
+            async with async_session_factory() as db:
+                await link_active_run_molt(db, session_id, mid)
+    except Exception:
+        logger.debug("Molt-run link skipped (non-fatal)", exc_info=True)
+
     return {
         "molt_id": mid,
         "description": description or f"Before: {', '.join(saved_files)}",

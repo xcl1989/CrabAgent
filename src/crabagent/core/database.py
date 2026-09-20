@@ -440,6 +440,24 @@ class MemoryEmbedding(Base):
     updated_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
 
 
+class RunMolt(Base):
+    """Associates a recovery point (Molt) with the run that created it.
+
+    A run may have multiple molts (run start + per-stage). Version 1 only
+    exposes "undo the whole run", but the data model allows stage-level
+    rollback later.
+    """
+
+    __tablename__ = "run_molts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    molt_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    sequence: Mapped[int] = mapped_column(Integer, default=0)
+    scope: Mapped[str] = mapped_column(String(30), default="run")  # run | stage
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
+
+
 class BrowserTask(Base):
     """Persistent, non-sensitive lifecycle state for a collaboration browser task."""
 
@@ -453,6 +471,9 @@ class BrowserTask(Base):
     url: Mapped[str] = mapped_column(Text, default="")
     page_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
     summary: Mapped[str] = mapped_column(Text, default="")
+    # ── Trusted work system linkage ─────────────────────────────
+    trusted_task_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    run_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
     completed_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
@@ -965,6 +986,16 @@ async def init_db() -> None:
         ))
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_task_checks_task_position ON task_checks(task_id, position)"
+        ))
+
+        # ── Trusted work system: run_molts 索引 + browser_tasks 关联列 ──
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_run_molts_run_id ON run_molts(run_id)"
+        ))
+        await ensure_column(conn, "browser_tasks", "trusted_task_id", "INTEGER DEFAULT NULL")
+        await ensure_column(conn, "browser_tasks", "run_id", "INTEGER DEFAULT NULL")
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_browser_tasks_trusted_task_id ON browser_tasks(trusted_task_id)"
         ))
 
         # ── Trusted work system: notifications 导航信封列 ──
