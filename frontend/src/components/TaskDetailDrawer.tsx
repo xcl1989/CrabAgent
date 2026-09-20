@@ -72,7 +72,13 @@ export default function TaskDetailDrawer({ taskId, onClose, onSwitchSession, onT
     if (!taskId) return;
     setLoading(true);
     try {
-      setDetail(await getTaskDetail(taskId));
+      const d = await getTaskDetail(taskId);
+      setDetail(d);
+      // Opening the detail drawer counts as having seen the result:
+      // clears pet attention for done/partial tasks (best-effort).
+      if (d.task && ["done", "partial"].includes(d.task.status) && !d.task.result_viewed_at) {
+        void markResultViewed(taskId).catch(() => {});
+      }
     } catch {
       // ignore
     } finally {
