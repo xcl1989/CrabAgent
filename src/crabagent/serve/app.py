@@ -79,7 +79,9 @@ async def lifespan(app: FastAPI):
             app.state.global_event_queues.pop(qid, None)
 
         session_id = str(data.get("session_id") or "")
-        if session_id:
+        # task_created already reaches the session via the tool's own emit;
+        # duplicating it here would show duplicate cards.
+        if session_id and event_type == "task_updated":
             session_dead: list[str] = []
             for qid, entry in list(getattr(app.state, "event_queues", {}).items()):
                 sid, critical_q, stream_q, _ts = entry

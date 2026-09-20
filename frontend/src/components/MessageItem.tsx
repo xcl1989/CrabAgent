@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 import { RichMarkdown } from "./rich-content/RichMarkdown";
 import ToolResultRender from "./ToolResultRender";
+import { markResultViewed } from "../api/tasks";
 import { SubAgentCard } from "./SubAgentCard";
 import { cn } from "../lib/cn";
 
@@ -490,6 +491,11 @@ const TaskCardItem = memo(function TaskCardItem({ msg }: { msg: ChatMessage }) {
 /** Trusted work system: terminal result / failure card */
 const TaskResultItem = memo(function TaskResultItem({ msg }: { msg: ChatMessage }) {
   const r = msg.task_result;
+  // Seeing the result card in the conversation counts as having opened
+  // the result — clears pet "new result" celebration (best-effort).
+  useEffect(() => {
+    if (r?.task_id) void markResultViewed(r.task_id).catch(() => {});
+  }, [r?.task_id]);
   if (!r) return <NoticeItem msg={{ ...msg, role: "notice" }} />;
   const failed = r.status === "failed";
   const partial = r.status === "partial";

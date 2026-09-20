@@ -191,6 +191,20 @@ def register_task_tools(registry):
         async with async_session_factory() as db:
             t = await _update(db, id, user_id, status="done")
         if t:
+            try:
+                from crabagent.core.task.events import broadcast_task_event
+
+                broadcast_task_event(
+                    "task_updated",
+                    {
+                        "task_id": id,
+                        "status": "done",
+                        "title": t["title"],
+                        "session_id": (str(context.metadata.get("session_id") or "") if context else ""),
+                    },
+                )
+            except Exception:
+                pass
             return f"✅ Task **{t['title']}** (id={id}) marked as done."
         return f"❌ Task {id} not found."
 
@@ -272,6 +286,21 @@ def register_task_tools(registry):
         async with async_session_factory() as db:
             t = await _update(db, id, user_id, **kwargs)
         if t:
+            if kwargs.get("status"):
+                try:
+                    from crabagent.core.task.events import broadcast_task_event
+
+                    broadcast_task_event(
+                        "task_updated",
+                        {
+                            "task_id": id,
+                            "status": kwargs["status"],
+                            "title": t["title"],
+                            "session_id": (str(context.metadata.get("session_id") or "") if context else ""),
+                        },
+                    )
+                except Exception:
+                    pass
             changed = ", ".join(kwargs.keys())
             return f"✅ Task **{t['title']}** (id={id}) updated: {changed}."
         return f"❌ Task {id} not found."

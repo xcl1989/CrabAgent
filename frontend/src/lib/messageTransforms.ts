@@ -119,6 +119,16 @@ export function sseEventToMessages(event: SSEEvent, messages: ChatMessage[]): Ch
   if (event.type === "task_created") {
     const card = event.data as { task_id?: number; title?: string; deadline?: string; project?: string };
     if (card.task_id && card.title) {
+      const existingCard = updated.find((m) => m.task_card && m.task_card.task_id === card.task_id);
+      if (existingCard && existingCard.task_card) {
+        existingCard.task_card = {
+          ...existingCard.task_card,
+          title: card.title,
+          deadline: card.deadline || existingCard.task_card.deadline,
+          project: card.project || existingCard.task_card.project,
+        };
+        return [...updated];
+      }
       updated.push({
         id: `task-${card.task_id}-${Date.now()}`,
         role: "task_card",
