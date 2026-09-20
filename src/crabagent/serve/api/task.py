@@ -279,11 +279,13 @@ async def get_task_detail(
     runs = await task_service.list_task_runs(db, task_id, user.id)
     active_run = next((r for r in runs if r["id"] == task.get("active_run_id")), None)
     artifacts = await list_artifacts(db, task_id, user.id)
+    events = await task_service.list_task_events(db, task_id, user.id)
     return {
         "task": task,
         "active_run": active_run,
         "runs": runs,
         "artifacts": artifacts,
+        "recent_events": events,
     }
 
 

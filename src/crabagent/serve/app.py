@@ -60,7 +60,9 @@ async def lifespan(app: FastAPI):
         logger.exception("Startup recovery failed (non-fatal)")
 
     # Trusted work system: wire task domain events into the global SSE
-    # queues so panels/pet/switcher refresh without polling.
+    # queues so panels/pet/switcher refresh without polling. Events that
+    # carry a session_id are also delivered to that session's stream so
+    # the creating conversation can show result cards.
     def _broadcast_task_event(event_type: str, data: dict) -> None:
         import asyncio
 
@@ -75,6 +77,21 @@ async def lifespan(app: FastAPI):
                 dead_queues.append(qid)
         for qid in dead_queues:
             app.state.global_event_queues.pop(qid, None)
+
+        session_id = str(data.get("session_id") or "")
+        if session_id:
+            session_dead: list[str] = []
+            for qid, entry in list(getattr(app.state, "event_queues", {}).items()):
+                sid, critical_q, stream_q, _ts = entry
+                if sid != session_id:
+                    continue
+                for q in (critical_q, stream_q):
+                    try:
+                        q.put_nowait(event)
+                    except asyncio.QueueFull:
+                        session_dead.append(qid)
+            for qid in session_dead:
+                app.state.event_queues.pop(qid, None)
 
     from crabagent.core.task.events import set_task_event_broadcaster
 

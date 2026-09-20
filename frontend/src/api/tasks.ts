@@ -104,11 +104,21 @@ export interface TaskCheck {
   verified_at: string | null;
 }
 
+export interface TaskEventEntry {
+  id: number;
+  event_type: string;
+  title: string;
+  detail: string;
+  run_id: number | null;
+  created_at: string | null;
+}
+
 export interface TaskDetail {
   task: Task;
   active_run: AgentRunInfo | null;
   runs: AgentRunInfo[];
   artifacts: TaskArtifact[];
+  recent_events?: TaskEventEntry[];
 }
 
 export function listTasks(status = "pending", project = ""): Promise<Task[]> {

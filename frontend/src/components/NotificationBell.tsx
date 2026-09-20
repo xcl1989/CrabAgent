@@ -9,6 +9,7 @@ import {
   Notification,
 } from "../api/notifications";
 import { cn } from "../lib/cn";
+import { useWorkStatus } from "../hooks/useWorkStatus";
 
 interface Props {
   onSwitchSession: (sessionId: string) => void;
@@ -152,6 +153,7 @@ export default function NotificationBell({ onSwitchSession, onNotificationAction
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<Tab>("unread");
+  const { waitingCount } = useWorkStatus();
   const ref = useRef<HTMLDivElement>(null);
 
   const fetchUnread = async () => {
@@ -227,6 +229,15 @@ export default function NotificationBell({ onSwitchSession, onNotificationAction
         aria-label={`${t("notification.title")}${count > 0 ? ` (${count} ${t("notification.unread").toLowerCase()})` : ""}`}
       >
         <Bell size={15} />
+        {/* Trusted work system: persistent waiting marker (independent of
+            notification read-state — clearing notifications must not hide
+            that something still waits for the user). */}
+        {waitingCount > 0 && (
+          <span
+            className="absolute -bottom-0.5 -left-0.5 w-2 h-2 rounded-full bg-orange-500 animate-pulse"
+            title={`${waitingCount} 项等待你的处理`}
+          />
+        )}
         {count > 0 && (
           <span
             className="absolute -top-0.5 -right-0.5 text-[9px] font-bold min-w-[16px] h-4 px-1 rounded-full flex items-center justify-center bg-[var(--danger)] text-white animate-scale-in">

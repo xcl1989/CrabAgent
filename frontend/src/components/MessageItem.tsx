@@ -79,6 +79,14 @@ export interface ChatMessage {
     deadline?: string;
     project?: string;
   };
+  task_result?: {
+    task_id: number;
+    title: string;
+    status: string;
+    result_summary?: string;
+    warning_summary?: string;
+    verification_status?: string;
+  };
   retry_info?: {
     phase: "retrying" | "countdown" | "exhausted";
     message: string;
@@ -479,6 +487,62 @@ const TaskCardItem = memo(function TaskCardItem({ msg }: { msg: ChatMessage }) {
   );
 });
 
+/** Trusted work system: terminal result / failure card */
+const TaskResultItem = memo(function TaskResultItem({ msg }: { msg: ChatMessage }) {
+  const r = msg.task_result;
+  if (!r) return <NoticeItem msg={{ ...msg, role: "notice" }} />;
+  const failed = r.status === "failed";
+  const partial = r.status === "partial";
+  return (
+    <div className="mb-3">
+      <div
+        className={
+          "px-4 py-3 rounded-xl text-sm border " +
+          (failed
+            ? "bg-[var(--danger-bg)] border-[var(--danger-border)]"
+            : partial
+              ? "bg-amber-500/5 border-amber-500/20"
+              : "bg-green-500/5 border-green-500/20")
+        }
+      >
+        <div className="flex items-start gap-3">
+          {failed ? (
+            <XCircle size={16} className="mt-0.5 shrink-0 text-red-500" />
+          ) : partial ? (
+            <AlertTriangle size={16} className="mt-0.5 shrink-0 text-amber-500" />
+          ) : (
+            <CheckCircle2 size={16} className="mt-0.5 shrink-0 text-green-500" />
+          )}
+          <div className="min-w-0 flex-1">
+            <div className="font-semibold text-[var(--text-primary)]">
+              {failed ? "未完成" : partial ? "部分完成" : r.status === "cancelled" ? "已取消" : "已完成"}
+              {r.title ? `：${r.title}` : ""}
+            </div>
+            {r.result_summary ? (
+              <div className="mt-1 text-xs whitespace-pre-wrap break-words text-[var(--text-secondary)] line-clamp-6">
+                {r.result_summary}
+              </div>
+            ) : null}
+            {r.warning_summary ? (
+              <div className="mt-1 text-xs whitespace-pre-wrap break-words text-amber-600 dark:text-amber-400 line-clamp-4">
+                ⚠ {r.warning_summary}
+              </div>
+            ) : null}
+            <div className="mt-1.5 text-[10px] text-[var(--text-tertiary)]">
+              {r.verification_status === "passed"
+                ? "✓ 已验证"
+                : r.verification_status && r.verification_status !== "unverified"
+                  ? `验证：${r.verification_status}`
+                  : "未验证"}{" "}
+              · 详情见任务面板
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+});
+
 /** Retry indicator */
 const RetryItem = memo(function RetryItem({ msg }: { msg: ChatMessage }) {
   if (!msg.retry_info) return null;
@@ -839,6 +903,9 @@ function MessageItemBase({
 
     case "task_card":
       return <TaskCardItem msg={msg} />;
+
+    case "task_result":
+      return <TaskResultItem msg={msg} />;
 
     case "retry":
       return <RetryItem msg={msg} />;

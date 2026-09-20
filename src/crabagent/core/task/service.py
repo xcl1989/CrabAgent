@@ -13,11 +13,36 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from crabagent.core.database import AgentRun, Task
+from crabagent.core.database import AgentRun, Task, TaskEventLog
 from crabagent.core.task.events import broadcast_task_event
 from crabagent.core.task.status import TaskStatus
 from crabagent.core.task.store import get_task as _get_task
 from crabagent.core.task.store import update_task as _update_task
+
+
+async def record_task_event(
+    db: AsyncSession,
+    user_id: int,
+    task_id: int,
+    event_type: str,
+    title: str,
+    detail: str = "",
+    run_id: int | None = None,
+    data: dict | None = None,
+) -> None:
+    """Append a user-readable milestone to the task timeline (design 2.7)."""
+    db.add(
+        TaskEventLog(
+            user_id=user_id,
+            task_id=task_id,
+            run_id=run_id,
+            event_type=event_type,
+            title=title[:500],
+            detail=detail,
+            data=data,
+        )
+    )
+    await db.commit()
 
 logger = logging.getLogger(__name__)
 
@@ -148,13 +173,36 @@ async def finish_agent_run(
             verdict = await judge_task(db, run.task_id, user_id)
             logger.info("Task %s completion verdict: %s", run.task_id, verdict)
             final_task = await _get_task(db, run.task_id, user_id)
+            status_labels = {
+                "done": "完成",
+                "partial": "部分完成",
+                "failed": "失败",
+                "waiting_user": "等待用户",
+            }
+            await record_task_event(
+                db,
+                user_id,
+                run.task_id,
+                verdict["status"],
+                f"任务{status_labels.get(verdict['status'], verdict['status'])}",
+                detail=(final_task.get("result_summary") or final_task.get("warning_summary") or "")[:500],
+                run_id=run_id,
+                data={
+                    "verification_status": verdict["verification_status"],
+                    "artifacts": verdict["available_artifacts"],
+                },
+            )
             broadcast_task_event(
                 "task_updated",
                 {
                     "task_id": run.task_id,
                     "status": verdict["status"],
                     "run_id": run_id,
+                    "session_id": run.session_id or "",
                     "verification_status": verdict["verification_status"],
+                    "title": final_task["title"],
+                    "result_summary": (final_task.get("result_summary") or "")[:300],
+                    "warning_summary": (final_task.get("warning_summary") or "")[:300],
                 },
             )
             return final_task
@@ -207,7 +255,16 @@ async def cancel_task(
 
     updated = await _update_task(db, task_id, user_id, status=TaskStatus.CANCELLED.value)
     if updated:
-        broadcast_task_event("task_updated", {"task_id": task_id, "status": updated["status"]})
+        await record_task_event(db, user_id, task_id, "cancelled", "任务已取消", detail=reason[:500])
+        broadcast_task_event(
+            "task_updated",
+            {
+                "task_id": task_id,
+                "status": updated["status"],
+                "title": updated["title"],
+                "session_id": updated.get("source_session") or "",
+            },
+        )
     return updated
 
 
@@ -222,6 +279,27 @@ async def mark_result_viewed(db: AsyncSession, task_id: int, user_id: int) -> di
     from crabagent.core.task.store import _task_to_dict
 
     return _task_to_dict(task)
+
+
+async def list_task_events(db: AsyncSession, task_id: int, user_id: int, limit: int = 50) -> list[dict]:
+    """User-readable task timeline, newest first."""
+    result = await db.execute(
+        select(TaskEventLog)
+        .where(TaskEventLog.task_id == task_id, TaskEventLog.user_id == user_id)
+        .order_by(TaskEventLog.id.desc())
+        .limit(limit)
+    )
+    return [
+        {
+            "id": e.id,
+            "event_type": e.event_type,
+            "title": e.title,
+            "detail": e.detail,
+            "run_id": e.run_id,
+            "created_at": e.created_at.isoformat() if e.created_at else None,
+        }
+        for e in result.scalars().all()
+    ]
 
 
 async def list_task_runs(db: AsyncSession, task_id: int, user_id: int) -> list[dict]:

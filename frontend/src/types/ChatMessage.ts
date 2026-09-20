@@ -42,6 +42,14 @@ export interface ChatMessage {
     deadline?: string;
     project?: string;
   };
+  task_result?: {
+    task_id: number;
+    title: string;
+    status: string;
+    result_summary?: string;
+    warning_summary?: string;
+    verification_status?: string;
+  };
   // LLM retry status
   retry_info?: {
     phase: "retrying" | "countdown" | "exhausted";

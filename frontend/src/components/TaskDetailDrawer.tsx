@@ -278,6 +278,30 @@ export default function TaskDetailDrawer({ taskId, onClose, onSwitchSession, onT
                 )}
               </section>
 
+              {/* Timeline */}
+              <section>
+                <SectionTitle icon={<History size={12} />} label={t("task.timeline")} />
+                {detail?.recent_events?.length ? (
+                  <div className="mt-1.5 space-y-1">
+                    {detail.recent_events.map((e) => (
+                      <div key={e.id} className="flex items-start gap-2 text-xs">
+                        <span className="text-[10px] text-[var(--text-tertiary)] shrink-0 w-12">
+                          {e.created_at ? e.created_at.slice(5, 16).replace("T", " ") : ""}
+                        </span>
+                        <span className="text-[var(--text-secondary)] flex-1">
+                          {e.title}
+                          {e.detail ? (
+                            <span className="block text-[10px] text-[var(--text-tertiary)] line-clamp-2">{e.detail}</span>
+                          ) : null}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <EmptyHint text={t("task.noTimeline")} />
+                )}
+              </section>
+
               {/* Runs */}
               <section>
                 <SectionTitle icon={<History size={12} />} label={t("task.runHistory")} />

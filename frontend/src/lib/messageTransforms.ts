@@ -134,6 +134,45 @@ export function sseEventToMessages(event: SSEEvent, messages: ChatMessage[]): Ch
     return updated;
   }
 
+  if (event.type === "task_updated") {
+    const d = event.data as {
+      task_id?: number;
+      status?: string;
+      title?: string;
+      result_summary?: string;
+      warning_summary?: string;
+      verification_status?: string;
+    };
+    if (d.task_id && d.status) {
+      const terminal = ["done", "partial", "failed", "cancelled"].includes(d.status);
+      const existing = updated.find((m) => m.task_result && m.task_result.task_id === d.task_id);
+      if (existing && existing.task_result) {
+        existing.task_result.status = d.status!;
+        existing.task_result.title = d.title || existing.task_result.title;
+        existing.task_result.result_summary = d.result_summary || existing.task_result.result_summary;
+        existing.task_result.warning_summary = d.warning_summary || existing.task_result.warning_summary;
+        existing.task_result.verification_status = d.verification_status || existing.task_result.verification_status;
+        return [...updated];
+      }
+      if (terminal) {
+        updated.push({
+          id: `task-result-${d.task_id}-${Date.now()}`,
+          role: "task_result",
+          content: d.title || "",
+          task_result: {
+            task_id: d.task_id,
+            title: d.title || "",
+            status: d.status,
+            result_summary: d.result_summary,
+            warning_summary: d.warning_summary,
+            verification_status: d.verification_status,
+          },
+        });
+      }
+    }
+    return updated;
+  }
+
   if (event.type === "agent_error") {
     const errorInfo = event.data.error_info as ChatMessage["error_info"] | undefined;
     const content = (event.data.error as string) || "Unknown error";

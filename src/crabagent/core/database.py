@@ -440,6 +440,26 @@ class MemoryEmbedding(Base):
     updated_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
 
 
+class TaskEventLog(Base):
+    """User-readable timeline of key task transitions (design doc 2.7).
+
+    Only business milestones — never tool logs. Powers the detail drawer
+    timeline and future daily digests.
+    """
+
+    __tablename__ = "task_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    task_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    run_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    event_type: Mapped[str] = mapped_column(String(50), default="")
+    title: Mapped[str] = mapped_column(String(500), default="")
+    detail: Mapped[str] = mapped_column(Text, default="")
+    data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
+
+
 class RunMolt(Base):
     """Associates a recovery point (Molt) with the run that created it.
 
@@ -996,6 +1016,11 @@ async def init_db() -> None:
         await ensure_column(conn, "browser_tasks", "run_id", "INTEGER DEFAULT NULL")
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_browser_tasks_trusted_task_id ON browser_tasks(trusted_task_id)"
+        ))
+
+        # ── Trusted work system: task_events 时间线 ──
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_task_events_task_created ON task_events(task_id, created_at)"
         ))
 
         # ── Trusted work system: notifications 导航信封列 ──

@@ -623,7 +623,9 @@
     "rollbackForce": "仍要强制恢复",
     "rollbackDone": "已恢复 {{count}} 个文件",
     "rollbackNoChange": "文件无变化，未执行回滚",
-    "verifiedPassed": "已验证"
+    "verifiedPassed": "已验证",
+    "timeline": "时间线",
+    "noTimeline": "暂无时间线记录"
   },
   "settingsPage": {
     "title": "设置",

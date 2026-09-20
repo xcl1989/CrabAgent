@@ -623,7 +623,9 @@
     "rollbackForce": "Force restore anyway",
     "rollbackDone": "Restored {{count}} files",
     "rollbackNoChange": "No changes to roll back",
-    "verifiedPassed": "verified"
+    "verifiedPassed": "verified",
+    "timeline": "Timeline",
+    "noTimeline": "No timeline entries yet"
   },
   "settingsPage": {
     "title": "Settings",
