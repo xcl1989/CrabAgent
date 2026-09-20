@@ -712,6 +712,84 @@ Use ordinary Markdown when a visualization is not helpful.
     run_recorder = RunRecorder(user_id=user.id, session_id=session_id, model=resolved_model)
     context.event_bus.subscribe(run_recorder.on_event)
 
+    # ── Trusted work system: drive linked task lifecycle from this session ──
+    # Tasks created in this conversation (source_session) are automatically
+    # advanced by the conversation's execution: open tasks start with the
+    # agent run and are judged (done/partial/failed) when it ends, so
+    # task_updated events (with result cards) reach the chat and panels.
+    task_service_run_ids: list[int] = []
+
+    async def _task_lifecycle_handler(event: AgentEvent):
+        if event.type == EventType.AGENT_START:
+            task_service_run_ids.clear()
+            try:
+                from sqlalchemy import select
+
+                from crabagent.core.database import Task as TaskRow
+                from crabagent.core.database import async_session_factory
+                from crabagent.core.task import service as task_service
+                from crabagent.core.task.status import OPEN_TASK_STATUSES
+
+                async with async_session_factory() as db:
+                    rows = await db.execute(
+                        select(TaskRow)
+                        .where(
+                            TaskRow.user_id == user.id,
+                            TaskRow.source_session == session_id,
+                            TaskRow.status.in_(OPEN_TASK_STATUSES),
+                            TaskRow.owner_type == "agent",
+                        )
+                        .order_by(TaskRow.id.desc())
+                    )
+                    for open_task in rows.scalars().all():
+                        _, task_run_id = await task_service.start_agent_run(
+                            db,
+                            open_task.id,
+                            user.id,
+                            agent_name="main",
+                            session_id=session_id,
+                            task_summary=open_task.title,
+                        )
+                        task_service_run_ids.append(task_run_id)
+            except Exception:
+                logger.warning("task lifecycle link failed (non-fatal)", exc_info=True)
+
+        elif task_service_run_ids and event.type in (
+            EventType.AGENT_END,
+            EventType.AGENT_ERROR,
+            EventType.BUDGET_EXHAUSTED,
+        ):
+            run_ids = task_service_run_ids[:]
+            task_service_run_ids.clear()
+            if event.type == EventType.AGENT_END:
+                run_status, summary = "completed", str(event.data.get("result", ""))
+                err = ""
+            elif event.type == EventType.AGENT_ERROR:
+                run_status, summary, err = "failed", "", str(event.data.get("error", ""))
+            else:  # BUDGET_EXHAUSTED
+                run_status = "interrupted"
+                summary = ""
+                err = "budget exhausted: " + str(event.data.get("reason", ""))
+            try:
+                from crabagent.core.database import async_session_factory
+                from crabagent.core.task import service as task_service
+
+                async with async_session_factory() as db:
+                    for run_id in run_ids:
+                        await task_service.finish_agent_run(
+                            db,
+                            run_id=run_id,
+                            user_id=user.id,
+                            run_status=run_status,
+                            result_summary=summary[:1000],
+                            error=err[:500],
+                        )
+            except Exception:
+                logger.warning("task lifecycle finish failed (non-fatal)", exc_info=True)
+
+    context.event_bus.subscribe(_task_lifecycle_handler)
+
+
     queues = request.app.state.event_queues
 
     _fwd_count = 0
