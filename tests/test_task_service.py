@@ -155,6 +155,34 @@ async def test_recovery_with_partial_result_marks_partial(db):
 
 
 @pytest.mark.asyncio
+async def test_finish_run_broadcasts_task_updated_with_session(db, monkeypatch):
+    """The result-card chain: finish must broadcast task_updated carrying
+    the session_id so the creating conversation receives a card."""
+    events: list[tuple[str, dict]] = []
+    monkeypatch.setattr(
+        "crabagent.core.task.service.broadcast_task_event",
+        lambda t, d: events.append((t, d)),
+    )
+
+    task = await task_store.add_task(db, user_id=1, title="生成报告")
+    _, run_id = await task_service.start_agent_run(db, task["id"], 1, session_id="sess-1")
+
+    # start broadcast
+    assert any(t == "task_updated" and d["status"] == "in_progress" for t, d in events)
+
+    await task_service.finish_agent_run(db, run_id, 1, "completed", result_summary="报告完成")
+
+    # terminal broadcast with card payload
+    updates = [d for t, d in events if t == "task_updated"]
+    final = updates[-1]
+    assert final["task_id"] == task["id"]
+    assert final["status"] == "done"
+    assert final["session_id"] == "sess-1"
+    assert final["title"] == "生成报告"
+    assert final["result_summary"] == "报告完成"
+
+
+@pytest.mark.asyncio
 async def test_recovery_is_idempotent(db):
     task = await task_store.add_task(db, user_id=1, title="生成报告")
     await task_service.start_agent_run(db, task["id"], 1)
