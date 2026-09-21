@@ -1089,6 +1089,10 @@ Use ordinary Markdown when a visualization is not helpful.
                 agent_query = req.message
             await run_agent(context, agent_query)
         except asyncio.CancelledError:
+            # The finally block still emits AGENT_END for cleanup and stats.
+            # Preserve the abort outcome so lifecycle listeners do not mistake
+            # that terminal event for a successful completion.
+            context.metadata["_run_cancelled"] = True
             logger.info("Agent task cancelled for session %s", session_id)
         except Exception:
             context.metadata["_run_error"] = True
@@ -1141,7 +1145,10 @@ Use ordinary Markdown when a visualization is not helpful.
                 await context.event_bus.emit(
                     AgentEvent(
                         type=EventType.AGENT_END,
-                        data=stats_data,
+                        data={
+                            **stats_data,
+                            "cancelled": bool(context.metadata.get("_run_cancelled")),
+                        },
                     )
                 )
             except Exception:
@@ -1263,7 +1270,11 @@ Use ordinary Markdown when a visualization is not helpful.
             except Exception:
                 logger.exception("Failed to update goal usage for session %s", session_id)
             request.app.state.active_agents.pop(session_id, None)
-            if not context.metadata.get("_run_error") and not context.metadata.get("_agent_error"):
+            if (
+                not context.metadata.get("_run_error")
+                and not context.metadata.get("_agent_error")
+                and not context.metadata.get("_run_cancelled")
+            ):
                 request.app.state.agent_attention[session_id] = {
                     "user_id": user.id,
                     "status": "completed",

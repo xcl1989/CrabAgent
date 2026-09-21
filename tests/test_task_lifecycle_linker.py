@@ -107,6 +107,38 @@ async def test_agent_end_finishes_linked_runs(linker, monkeypatch: pytest.Monkey
 
 
 @pytest.mark.asyncio
+async def test_cancelled_agent_end_cancels_linked_runs(linker, monkeypatch: pytest.MonkeyPatch):
+    finished: list[dict] = []
+
+    async def fake_finish(db, run_id, user_id, run_status, result_summary="", error=""):
+        finished.append(
+            {
+                "run_id": run_id,
+                "run_status": run_status,
+                "result_summary": result_summary,
+                "error": error,
+            }
+        )
+        return {"id": 1}
+
+    monkeypatch.setattr(task_service, "finish_agent_run", fake_finish)
+    monkeypatch.setattr("crabagent.core.database.async_session_factory", lambda: _FakeDB())
+
+    linker.run_ids = [9]
+    await linker.handle_event(AgentEvent(type=EventType.AGENT_END, data={"cancelled": True}))
+
+    assert finished == [
+        {
+            "run_id": 9,
+            "run_status": "cancelled",
+            "result_summary": "",
+            "error": "user stopped the session",
+        }
+    ]
+    assert linker.run_ids == []
+
+
+@pytest.mark.asyncio
 async def test_agent_error_finishes_runs_as_failed(linker, monkeypatch: pytest.MonkeyPatch):
     finished: list[dict] = []
 

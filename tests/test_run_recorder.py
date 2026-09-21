@@ -136,6 +136,28 @@ async def test_on_event_finalizes_agent_end(recorder, monkeypatch: pytest.Monkey
 
 
 @pytest.mark.asyncio
+async def test_on_event_finalizes_cancelled_agent_end(recorder, monkeypatch: pytest.MonkeyPatch):
+    captured = {}
+    recorder._main_run_id = 8
+    recorder._main_started_at = 100.0
+
+    monkeypatch.setattr("crabagent.core.agent.run_recorder._time", SimpleNamespace(time=lambda: 101.0))
+
+    async def fake_finalize(**kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr("crabagent.core.database.run_record_finalize", fake_finalize)
+
+    await recorder.on_event(
+        AgentEvent(type=EventType.AGENT_END, data={"cancelled": True, "tokens": 4, "iterations": 1})
+    )
+
+    assert captured["status"] == "cancelled"
+    assert captured["run_id"] == 8
+    assert recorder._main_run_id is None
+
+
+@pytest.mark.asyncio
 async def test_on_event_marks_budget_exhausted(recorder, monkeypatch: pytest.MonkeyPatch):
     recorder._main_run_id = 12
     captured = {}

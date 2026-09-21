@@ -306,7 +306,24 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(
         }
         result.push(msg);
       }
-      return result;
+      // Completion events can arrive as soon as task_done finishes, before the
+      // assistant's final response. Defer each result card to the end of its
+      // turn, but keep it before the next user message in historical chats.
+      const ordered: (ChatMessage | ChatMessage[])[] = [];
+      let pendingResults: ChatMessage[] = [];
+      for (const item of result) {
+        if (!Array.isArray(item) && item.role === "task_result") {
+          pendingResults.push(item);
+          continue;
+        }
+        if (!Array.isArray(item) && item.role === "user" && pendingResults.length > 0) {
+          ordered.push(...pendingResults);
+          pendingResults = [];
+        }
+        ordered.push(item);
+      }
+      ordered.push(...pendingResults);
+      return ordered;
     }, [messages]);
 
     return (

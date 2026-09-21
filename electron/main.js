@@ -390,13 +390,58 @@ function schedulePetStateSave() {
 }
 
 // ── Logging ──
-function log(msg) {
-  console.log(`[CrabAgent] ${msg}`);
+// Async write stream + size-based rotation. The previous appendFileSync
+// per line on an unbounded file (grew to 7.5GB) stalled the main process.
+const LOG_PATH = path.join(require('os').homedir(), '.crabagent', 'electron.log');
+const LOG_MAX_BYTES = 20 * 1024 * 1024; // 20MB per file, 5 files max
+let logStream = null;
+let logBytes = 0;
+
+function rotateLogFiles() {
   try {
-    const logPath = require('path').join(require('os').homedir(), '.crabagent', 'electron.log');
-    const line = new Date().toISOString() + ' ' + msg + '\n';
-    require('fs').appendFileSync(logPath, line);
+    for (let i = 4; i >= 1; i--) {
+      const from = `${LOG_PATH}.${i}`;
+      const to = `${LOG_PATH}.${i + 1}`;
+      if (fs.existsSync(from)) {
+        if (i === 4) fs.rmSync(from, { force: true });
+        else fs.renameSync(from, to);
+      }
+    }
+    if (fs.existsSync(LOG_PATH)) fs.renameSync(LOG_PATH, `${LOG_PATH}.1`);
   } catch {}
+}
+
+function ensureLogStream() {
+  if (logStream) return logStream;
+  try {
+    fs.mkdirSync(path.dirname(LOG_PATH), { recursive: true });
+    try { logBytes = fs.statSync(LOG_PATH).size; } catch { logBytes = 0; }
+    if (logBytes > LOG_MAX_BYTES) { rotateLogFiles(); logBytes = 0; }
+    logStream = fs.createWriteStream(LOG_PATH, { flags: 'a' });
+    logStream.on('error', () => { logStream = null; });
+  } catch { logStream = null; }
+  return logStream;
+}
+
+function log(msg) {
+  // Drop high-frequency health-probe access logs; they dominated the file.
+  if (/\[py\] INFO:\s+.*"GET \/health HTTP/.test(msg)) return;
+  console.log(`[CrabAgent] ${msg}`);
+  const stream = ensureLogStream();
+  if (!stream) return;
+  const line = new Date().toISOString() + ' ' + msg + '\n';
+  logBytes += Buffer.byteLength(line);
+  if (logBytes > LOG_MAX_BYTES) {
+    const old = stream;
+    logStream = null;
+    try { old.end(); } catch {}
+    rotateLogFiles();
+    logBytes = 0;
+    const next = ensureLogStream();
+    if (next) next.write(line);
+    return;
+  }
+  stream.write(line);
 }
 
 // ── Loading screen (shown while backend starts up) ──

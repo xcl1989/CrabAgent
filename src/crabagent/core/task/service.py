@@ -356,26 +356,29 @@ class TaskLifecycleLinker:
                 if unlink_run:
                     unlink_run(run_id)
             if event.type == EventType.AGENT_END:
-                run_status, err = "completed", ""
-                # AGENT_END carries stats only; the reply text is the last
-                # assistant message of this session — use it as the result.
+                cancelled = bool(event.data.get("cancelled"))
+                run_status = RUN_STATUS_CANCELLED if cancelled else RUN_STATUS_COMPLETED
+                err = "user stopped the session" if cancelled else ""
                 summary = ""
-                try:
-                    from crabagent.core.database import Conversation, Message
-                    from crabagent.core.database import async_session_factory as _asf
+                if not cancelled:
+                    # AGENT_END carries stats only; the reply text is the last
+                    # assistant message of this session — use it as the result.
+                    try:
+                        from crabagent.core.database import Conversation, Message
+                        from crabagent.core.database import async_session_factory as _asf
 
-                    async with _asf() as sdb:
-                        row = await sdb.execute(
-                            select(Message.content)
-                            .join(Conversation, Conversation.id == Message.conversation_id)
-                            .where(Conversation.session_id == self._session_id, Message.role == "assistant")
-                            .order_by(Message.id.desc())
-                            .limit(1)
-                        )
-                        row = row.first()
-                        summary = (row[0] or "")[:1000] if row else ""
-                except Exception:
-                    logger.debug("failed to read last assistant reply", exc_info=True)
+                        async with _asf() as sdb:
+                            row = await sdb.execute(
+                                select(Message.content)
+                                .join(Conversation, Conversation.id == Message.conversation_id)
+                                .where(Conversation.session_id == self._session_id, Message.role == "assistant")
+                                .order_by(Message.id.desc())
+                                .limit(1)
+                            )
+                            row = row.first()
+                            summary = (row[0] or "")[:1000] if row else ""
+                    except Exception:
+                        logger.debug("failed to read last assistant reply", exc_info=True)
             elif event.type == EventType.AGENT_ERROR:
                 run_status, summary, err = "failed", "", str(event.data.get("error", ""))
             else:  # BUDGET_EXHAUSTED

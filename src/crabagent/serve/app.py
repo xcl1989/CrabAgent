@@ -5,6 +5,7 @@ import importlib.resources
 import logging
 import time
 from contextlib import asynccontextmanager
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -15,9 +16,15 @@ from crabagent.core import configure_litellm
 
 configure_litellm()
 
-# Log to file in crabagent config directory
+# Log to file in crabagent config directory.
+# Rotating: serve.log used to grow unbounded (>100MB) on long-lived desktop
+# instances, adding disk pressure during every request write.
 _log_file = Path.home() / ".crabagent" / "serve.log"
-_fh = logging.FileHandler(str(_log_file))
+_fh = RotatingFileHandler(
+    str(_log_file),
+    maxBytes=20 * 1024 * 1024,
+    backupCount=3,
+)
 _fh.setLevel(logging.INFO)
 _fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
 logging.getLogger().addHandler(_fh)
@@ -299,13 +306,47 @@ async def lifespan(app: FastAPI):
         pass
 
 
+class InteractiveWriteTrackerMiddleware:
+    """Pure ASGI middleware counting in-flight interactive write requests.
+
+    Background maintenance (FTS indexing) reads ``state.interactive_busy`` and
+    pauses between batches while user-initiated writes are in flight. Pure ASGI
+    avoids BaseHTTPMiddleware, which buffers SSE streams — this app streams
+    agent events over SSE.
+    """
+
+    def __init__(self, app, state_holder) -> None:
+        self.next_app = app
+        self.state = state_holder
+
+    async def __call__(self, scope, receive, send):
+        if (
+            scope.get("type") == "http"
+            and scope.get("method") in ("POST", "PUT", "PATCH", "DELETE")
+            and scope.get("path", "").startswith("/api/")
+        ):
+            self.state.interactive_busy += 1
+            try:
+                await self.next_app(scope, receive, send)
+            finally:
+                self.state.interactive_busy -= 1
+            return
+        await self.next_app(scope, receive, send)
+
+
 async def _background_fts_sync(app: FastAPI) -> None:
     """Start resumable search indexing after the UI and services are available."""
     try:
-        await asyncio.sleep(5)
+        # Wait for first paint + initial session/message loads before touching SQLite.
+        await asyncio.sleep(10)
+
+        def _is_busy() -> bool:
+            # Active agents OR any in-flight interactive write request.
+            return bool(getattr(app.state, "active_agents", None)) or getattr(app.state, "interactive_busy", 0) > 0
+
         from crabagent.core.fts import sync_index
 
-        await sync_index(is_busy=lambda: bool(app.state.active_agents))
+        await sync_index(is_busy=_is_busy)
     except asyncio.CancelledError:
         raise
     except Exception as e:
@@ -365,6 +406,12 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # Interactive-write priority: background maintenance (FTS indexing) reads
+    # this counter and pauses between batches while user-initiated writes
+    # (new session, send message, updates) are in flight.
+    app.state.interactive_busy = 0
+    app.add_middleware(InteractiveWriteTrackerMiddleware, state_holder=app.state)
 
     from crabagent.serve.api.agent import router as agent_router
     from crabagent.serve.api.auth import router as auth_router

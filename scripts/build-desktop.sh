@@ -7,13 +7,25 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 echo "=== Building CrabAgent Desktop App ==="
 echo ""
 
-# Some bundled environments only expose Node under /usr/local/bin. Keep the
-# build script usable there while preserving the caller's PATH precedence.
-if ! command -v node >/dev/null 2>&1 && [ -x /usr/local/bin/node ]; then
-  export PATH="/usr/local/bin:$PATH"
-fi
-if ! command -v npm >/dev/null 2>&1 && [ -f /usr/local/lib/node_modules/npm/bin/npm-cli.js ]; then
-  npm() { node /usr/local/lib/node_modules/npm/bin/npm-cli.js "$@"; }
+# Keep user-local and Homebrew Node installations available in non-login shells.
+for node_dir in "$HOME/.local/bin" /usr/local/bin /opt/homebrew/bin; do
+  if [ -x "$node_dir/node" ]; then
+    export PATH="$node_dir:$PATH"
+    break
+  fi
+done
+
+# Some standalone Node installs omit the npm shim from PATH even though npm is installed.
+if ! command -v npm >/dev/null 2>&1; then
+  for npm_cli in \
+    "$HOME/.local/lib/node_modules/npm/bin/npm-cli.js" \
+    /usr/local/lib/node_modules/npm/bin/npm-cli.js \
+    /opt/homebrew/lib/node_modules/npm/bin/npm-cli.js; do
+    if [ -f "$npm_cli" ]; then
+      npm() { node "$npm_cli" "$@"; }
+      break
+    fi
+  done
 fi
 if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
   echo "Error: Node.js and npm are required to build the desktop app."

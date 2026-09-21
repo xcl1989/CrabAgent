@@ -78,6 +78,25 @@ def _segment_batch_sync(rows: list[tuple[int, str]]) -> list[dict]:
     return batch
 
 
+async def _upsert_setting(db, key: str, value: str) -> None:
+    """Persist an ``app_settings`` row via raw SQL.
+
+    ``app_settings.updated_at`` is NOT NULL; every raw write must set it.
+    CURRENT_TIMESTAMP is UTC, matching the ORM's ``utcnow`` default.
+    """
+    from sqlalchemy import text as sa_text
+
+    await db.execute(
+        sa_text(
+            "INSERT INTO app_settings (key, value, updated_at) "
+            "VALUES (:key, :value, CURRENT_TIMESTAMP) "
+            "ON CONFLICT(key) DO UPDATE SET "
+            "value = excluded.value, updated_at = CURRENT_TIMESTAMP"
+        ),
+        {"key": key, "value": value},
+    )
+
+
 async def index_message(message_id: int, content: str) -> None:
     """Index one newly persisted message without retaining image data."""
     from sqlalchemy import text as sa_text
@@ -105,13 +124,27 @@ async def sync_index(
     batch_size: int = 50,
     idle_delay: float = 0.15,
     is_busy=None,
+    purge_chunk: int = 500,
 ) -> int:
-    """Resume CJK indexing from a durable cursor instead of rebuilding on startup."""
+    """Resume CJK indexing from a durable cursor instead of rebuilding on startup.
+
+    Lock-safety rules (a startup rebuild must never block interactive writes):
+      - Every write transaction is short (one batch) and commits immediately.
+      - The legacy-index purge (on version change) deletes in small chunks,
+        never one giant transaction that would roll back and retry forever.
+      - Between transactions we yield to interactive requests via ``idle_delay``
+        and the ``is_busy`` callback.
+    """
     global _rebuild_in_progress, _rebuild_total, _rebuild_done
 
     from sqlalchemy import text as sa_text
 
     from crabagent.core.database import async_session_factory
+
+    async def _yield_to_interactive():
+        while is_busy and is_busy():
+            await asyncio.sleep(1)
+        await asyncio.sleep(idle_delay)
 
     await asyncio.to_thread(_ensure_jieba)
     async with async_session_factory() as db:
@@ -122,16 +155,13 @@ async def sync_index(
             )
         ).fetchall()
         state = {row[0]: row[1] for row in rows}
-        if state.get(_VERSION_KEY) != _INDEX_VERSION:
-            # One-time migration removes legacy entries that include tool output/base64.
-            await db.execute(sa_text("DELETE FROM messages_fts_cjk"))
-            await db.execute(
-                sa_text("INSERT OR REPLACE INTO app_settings (key, value) VALUES (:key, :value)"),
-                {"key": _VERSION_KEY, "value": _INDEX_VERSION},
-            )
-            await db.execute(
-                sa_text("INSERT OR REPLACE INTO app_settings (key, value) VALUES (:key, '0')"), {"key": _CURSOR_KEY}
-            )
+        purge_legacy = state.get(_VERSION_KEY) != _INDEX_VERSION
+        if purge_legacy:
+            # Mark the migration in a SHORT transaction first: legacy rows are
+            # purged chunk-by-chunk below, so a crash mid-purge no longer rolls
+            # back (and repeats) a multi-second full-table DELETE.
+            await _upsert_setting(db, _VERSION_KEY, _INDEX_VERSION)
+            await _upsert_setting(db, _CURSOR_KEY, "0")
             await db.commit()
             cursor = 0
         else:
@@ -149,6 +179,28 @@ async def sync_index(
                 {"cursor": cursor},
             )
         ).scalar() or 0
+
+    if purge_legacy:
+        # One-time migration removes legacy entries that include tool
+        # output/base64. Done in committed chunks so each holds the SQLite
+        # write lock for only a few ms; rows are rebuilt from cursor 0 below.
+        purged = 0
+        while True:
+            await _yield_to_interactive()
+            async with async_session_factory() as db:
+                result = await db.execute(
+                    sa_text(
+                        "DELETE FROM messages_fts_cjk WHERE rowid IN (SELECT rowid FROM messages_fts_cjk LIMIT :chunk)"
+                    ),
+                    {"chunk": purge_chunk},
+                )
+                await db.commit()
+                deleted = result.rowcount or 0
+            if not deleted:
+                break
+            purged += deleted
+        if purged:
+            logger.info("[FTS] Purged %d legacy CJK rows in chunks", purged)
 
     _rebuild_in_progress = pending > 0
     _rebuild_total = pending
@@ -180,10 +232,7 @@ async def sync_index(
                 await db.execute(sa_text("DELETE FROM messages_fts_cjk WHERE rowid = :id"), {"id": message_id})
             if batch:
                 await db.execute(sa_text("INSERT INTO messages_fts_cjk(rowid, content) VALUES (:id, :content)"), batch)
-            await db.execute(
-                sa_text("INSERT OR REPLACE INTO app_settings (key, value) VALUES (:key, :value)"),
-                {"key": _CURSOR_KEY, "value": str(last_id)},
-            )
+            await _upsert_setting(db, _CURSOR_KEY, str(last_id))
             await db.commit()
         cursor = last_id
         processed += len(rows)

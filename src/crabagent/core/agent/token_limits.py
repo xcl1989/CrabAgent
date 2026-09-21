@@ -66,6 +66,19 @@ DEFAULT_MODEL_TOKEN_LIMITS: dict[str, int] = {
     "kimi-k2.7-code": 256_000,
     "kimi-k2.7-code-highspeed": 256_000,
     "kimi-for-coding": 256_000,
+    # StepFun (阶跃星辰)。旧模型名自带窗口标识（8k/16k/32k/128k）；
+    # step-5-preview 官方口径 1M 上下文；step-3.7-flash 官方口径 256k 上下文。
+    "step-5-preview": 1_000_000,
+    "step-3.7-flash": 256_000,
+    "step-1-8k": 8_000,
+    "step-1-32k": 32_000,
+    "step-1-128k": 128_000,
+    "step-2-16k": 16_000,
+    "step-1v-8k": 8_000,
+    "step-1v-32k": 32_000,
+    "step-1o-8k": 8_000,
+    "step-1o-32k": 32_000,
+    "step-1o-128k": 128_000,
 }
 
 _PREFIX_MATCH_ORDER = [

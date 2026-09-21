@@ -30,6 +30,8 @@ import {
   X,
   GitBranch,
   ClipboardCheck,
+  BadgeCheck,
+  PackageOpen,
 } from "lucide-react";
 import { RichMarkdown } from "./rich-content/RichMarkdown";
 import ToolResultRender from "./ToolResultRender";
@@ -499,75 +501,101 @@ const TaskResultItem = memo(function TaskResultItem({ msg }: { msg: ChatMessage 
     if (r?.task_id) void markResultViewed(r.task_id).catch(() => {});
   }, [r?.task_id]);
   if (!r) return <NoticeItem msg={{ ...msg, role: "notice" }} />;
+
   const failed = r.status === "failed";
   const partial = r.status === "partial";
-  return (
-    <div className="mb-3">
-      <div
-        className={
-          "px-4 py-3 rounded-xl text-sm border " +
-          (failed
-            ? "bg-[var(--danger-bg)] border-[var(--danger-border)]"
-            : partial
-              ? "bg-amber-500/5 border-amber-500/20"
-              : "bg-green-500/5 border-green-500/20")
+  const cancelled = r.status === "cancelled";
+  const tone = failed || cancelled
+    ? {
+        shell: "border-[var(--danger-border)] bg-[var(--danger-bg)]",
+        icon: "bg-red-500/10 text-red-500 ring-red-500/15",
+        eyebrow: "text-red-600 dark:text-red-400",
+        label: cancelled ? "任务已取消" : "任务未完成",
+      }
+    : partial
+      ? {
+          shell: "border-amber-500/25 bg-amber-500/[0.06]",
+          icon: "bg-amber-500/10 text-amber-500 ring-amber-500/15",
+          eyebrow: "text-amber-700 dark:text-amber-400",
+          label: "阶段性成果",
         }
-      >
-        <div className="flex items-start gap-3">
-          {failed ? (
-            <XCircle size={16} className="mt-0.5 shrink-0 text-red-500" />
-          ) : partial ? (
-            <AlertTriangle size={16} className="mt-0.5 shrink-0 text-amber-500" />
-          ) : (
-            <CheckCircle2 size={16} className="mt-0.5 shrink-0 text-green-500" />
-          )}
+      : {
+          shell: "border-emerald-500/25 bg-emerald-500/[0.06]",
+          icon: "bg-emerald-500/10 text-emerald-600 ring-emerald-500/15",
+          eyebrow: "text-emerald-700 dark:text-emerald-400",
+          label: "成果已交付",
+        };
+  const verificationLabel = r.verification_status === "passed"
+    ? r.checks
+      ? `${r.checks.passed}/${r.checks.total} 项验证通过`
+      : "已通过验证"
+    : r.verification_status && r.verification_status !== "unverified"
+      ? `验证状态：${r.verification_status}`
+      : "尚未验证";
+
+  return (
+    <section className={cn("relative mb-5 mt-4 overflow-hidden rounded-2xl border shadow-[0_14px_38px_rgba(15,23,42,0.07)]", tone.shell)}>
+      <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-current to-transparent opacity-30" />
+      <div className="px-4 py-4 sm:px-5">
+        <div className="flex items-start gap-3.5">
+          <div className={cn("mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ring-1", tone.icon)}>
+            {failed || cancelled ? <XCircle size={20} /> : partial ? <AlertTriangle size={20} /> : <PackageOpen size={20} />}
+          </div>
           <div className="min-w-0 flex-1">
-            <div className="font-semibold text-[var(--text-primary)]">
-              {failed ? "未完成" : partial ? "部分完成" : r.status === "cancelled" ? "已取消" : "已完成"}
-              {r.title ? `：${r.title}` : ""}
+            <div className={cn("text-[10px] font-bold uppercase tracking-[0.18em]", tone.eyebrow)}>
+              {tone.label}
             </div>
+            <h3 className="mt-1 text-[15px] font-semibold leading-6 text-[var(--text-primary)] sm:text-base">
+              {r.title || (failed ? "任务执行失败" : "任务执行完成")}
+            </h3>
             {r.result_summary ? (
-              <div className="mt-1 text-xs whitespace-pre-wrap break-words text-[var(--text-secondary)] line-clamp-6">
+              <p className="mt-2 max-w-3xl whitespace-pre-wrap break-words text-xs leading-5 text-[var(--text-secondary)] line-clamp-6">
                 {r.result_summary}
-              </div>
+              </p>
             ) : null}
+
             {r.files && r.files.length > 0 ? (
-              <div className="mt-1.5 flex flex-col gap-0.5">
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
                 {r.files.map((f, i) => (
                   <button
-                    key={i}
+                    key={`${f}-${i}`}
                     onClick={(e) => {
                       e.stopPropagation();
                       void openTaskArtifact(r.task_id, f).catch(() => {});
                     }}
                     title={`在系统中打开：${f}`}
-                    className="text-left text-xs flex items-center gap-1.5 text-[var(--accent)] hover:underline cursor-pointer min-w-0"
+                    className="group flex min-w-0 items-center gap-2.5 rounded-xl border border-[var(--border)] bg-[var(--bg-primary)]/75 px-3 py-2.5 text-left transition-colors hover:border-[var(--brand)]"
                   >
-                    <FileText size={12} className="shrink-0 opacity-70" />
-                    <span className="truncate">{f}</span>
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[var(--brand-bg)] text-[var(--brand)]">
+                      <FileText size={14} />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-xs font-medium text-[var(--text-primary)]">{f}</span>
+                      <span className="mt-0.5 block text-[10px] text-[var(--text-tertiary)] group-hover:text-[var(--brand)]">点击打开成果</span>
+                    </span>
                   </button>
                 ))}
               </div>
             ) : null}
+
             {r.warning_summary ? (
-              <div className="mt-1 text-xs whitespace-pre-wrap break-words text-amber-600 dark:text-amber-400 line-clamp-4">
-                ⚠ {r.warning_summary}
+              <div className="mt-3 rounded-lg bg-amber-500/10 px-3 py-2 text-xs leading-5 text-amber-700 dark:text-amber-400">
+                {r.warning_summary}
               </div>
             ) : null}
-            <div className="mt-1.5 text-[10px] text-[var(--text-tertiary)]">
-              {r.verification_status === "passed"
-                ? r.checks
-                  ? `✓ 已验证（${r.checks.passed}/${r.checks.total} 通过）`
-                  : "✓ 已验证"
-                : r.verification_status && r.verification_status !== "unverified"
-                  ? `验证：${r.verification_status}`
-                  : "未验证"}{" "}
-              · 详情见任务面板
+
+            <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-[var(--border)] pt-3 text-[10px] text-[var(--text-tertiary)]">
+              <span className="inline-flex items-center gap-1.5">
+                <BadgeCheck size={12} className={r.verification_status === "passed" ? "text-emerald-500" : ""} />
+                {verificationLabel}
+              </span>
+              <span>任务 #{r.task_id}</span>
+              <span>完整记录可在任务面板查看</span>
             </div>
           </div>
         </div>
       </div>
-    </div>
+    </section>
   );
 });
 

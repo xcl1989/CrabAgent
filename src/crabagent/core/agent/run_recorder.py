@@ -144,7 +144,7 @@ class RunRecorder:
         elapsed = round(_time.time() - self._main_started_at, 1)
         await run_record_finalize(
             run_id=self._main_run_id,
-            status="completed",
+            status="cancelled" if data.get("cancelled") else "completed",
             elapsed=elapsed,
             tokens_used=data.get("tokens", 0),
             iterations=data.get("iterations", 0),

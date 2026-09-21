@@ -148,6 +148,24 @@ PROVIDER_CATALOG: dict[str, dict] = {
             {"id": "coding", "display_name": "Kimi Code Plan", "base_url": "https://api.kimi.com/coding/v1"},
         ],
     },
+    "stepfun": {
+        "base_url": "https://api.stepfun.com/v1",
+        "display_name": "阶跃星辰 StepFun",
+        "variants": [
+            {"id": "cn", "display_name": "国内版", "base_url": "https://api.stepfun.com/v1"},
+            {"id": "global", "display_name": "国际版", "base_url": "https://api.stepfun.ai/v1"},
+            {
+                "id": "plan_cn",
+                "display_name": "Step Plan 订阅 (国内)",
+                "base_url": "https://api.stepfun.com/step_plan/v1",
+            },
+            {
+                "id": "plan_global",
+                "display_name": "Step Plan 订阅 (国际)",
+                "base_url": "https://api.stepfun.ai/step_plan/v1",
+            },
+        ],
+    },
 }
 
 

@@ -152,6 +152,8 @@ export function sseEventToMessages(event: SSEEvent, messages: ChatMessage[]): Ch
       result_summary?: string;
       warning_summary?: string;
       verification_status?: string;
+      files?: string[];
+      checks?: { passed: number; total: number };
     };
     if (d.task_id && d.status) {
       const terminal = ["done", "partial", "failed", "cancelled"].includes(d.status);
@@ -162,6 +164,8 @@ export function sseEventToMessages(event: SSEEvent, messages: ChatMessage[]): Ch
         existing.task_result.result_summary = d.result_summary || existing.task_result.result_summary;
         existing.task_result.warning_summary = d.warning_summary || existing.task_result.warning_summary;
         existing.task_result.verification_status = d.verification_status || existing.task_result.verification_status;
+        existing.task_result.files = d.files || existing.task_result.files;
+        existing.task_result.checks = d.checks || existing.task_result.checks;
         return [...updated];
       }
       if (terminal) {
@@ -176,6 +180,8 @@ export function sseEventToMessages(event: SSEEvent, messages: ChatMessage[]): Ch
             result_summary: d.result_summary,
             warning_summary: d.warning_summary,
             verification_status: d.verification_status,
+            files: d.files,
+            checks: d.checks,
           },
         });
       }

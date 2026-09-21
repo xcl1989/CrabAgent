@@ -66,11 +66,14 @@ class SchedulerService:
             async with async_session_factory() as db:
                 # Atomic upsert: only overwrite if WE hold the lock
                 # or if the existing lock has expired.
+                # app_settings.updated_at is NOT NULL — every raw write must set it.
                 await db.execute(
                     text("""
-                        INSERT INTO app_settings (key, value)
-                        VALUES (:key, :value)
-                        ON CONFLICT(key) DO UPDATE SET value = :value2
+                        INSERT INTO app_settings (key, value, updated_at)
+                        VALUES (:key, :value, CURRENT_TIMESTAMP)
+                        ON CONFLICT(key) DO UPDATE SET
+                            value = :value2,
+                            updated_at = CURRENT_TIMESTAMP
                         WHERE app_settings.value LIKE :pid_prefix
                            OR CAST(
                                 SUBSTR(app_settings.value, INSTR(app_settings.value, ':') + 1)
