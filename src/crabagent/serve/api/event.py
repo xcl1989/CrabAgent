@@ -130,6 +130,22 @@ async def event_stream(
                             try:
                                 event = critical_queue.get_nowait()
                             except asyncio.QueueEmpty:
+                                # Refresh this queue's liveness timestamp. SSE
+                                # forwarders (prompt._sse_forward) garbage-collect
+                                # entries idle for >60s, and keepalives are emitted
+                                # here rather than through the forwarder — so a
+                                # live-but-idle connection would otherwise be
+                                # unsubscribed while staying open: the client
+                                # looks connected yet receives no events until
+                                # the run ends and a DB reload repaints it.
+                                queues = getattr(request.app.state, "event_queues", {})
+                                if queue_id in queues:
+                                    queues[queue_id] = (
+                                        session_id,
+                                        critical_queue,
+                                        stream_queue,
+                                        time.time(),
+                                    )
                                 yield f"event: keepalive\ndata: {json.dumps({'ts': time.time()})}\n\n"
                 if isinstance(event, AgentEvent):
                     try:
@@ -210,6 +226,13 @@ async def global_event_stream(
                     event = await asyncio.wait_for(queue.get(), timeout=30.0)
                     yield event.to_sse()
                 except TimeoutError:
+                    # Refresh liveness timestamp: forwarders GC global entries
+                    # idle for >120s, and these keepalives never pass through
+                    # them — without the refresh a live connection would be
+                    # unsubscribed while staying open.
+                    gqueues = getattr(request.app.state, "global_event_queues", {})
+                    if queue_id in gqueues:
+                        gqueues[queue_id] = (queue, time.time())
                     yield f"event: keepalive\ndata: {json.dumps({'ts': time.time()})}\n\n"
         finally:
             queues = getattr(request.app.state, "global_event_queues", {})

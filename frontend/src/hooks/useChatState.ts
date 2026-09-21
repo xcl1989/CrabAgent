@@ -18,6 +18,15 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
   const [todoRefreshKey, setTodoRefreshKey] = useState(0);
   const [activeMonitors, setActiveMonitors] = useState<AgentMonitorInfo[]>([]);
   const activeSessionRef = useRef<Session | null>(null);
+  // Monotonic token for the most recent message-load request. A response whose
+  // token is stale must be discarded. This replaces the previous identity check
+  // against `activeSessionRef` — which other effects (the workspace auto-load,
+  // the ref-sync effect) could clobber, silently dropping a legitimate load and
+  // leaving the chat area blank until the user clicked the session again.
+  const loadSeqRef = useRef(0);
+  // True once the user manually picks a session, so the workspace auto-loader
+  // cannot override that choice when its slower response arrives.
+  const manualSelectRef = useRef(false);
   const pendingSubEventsRef = useRef<SSEEvent[]>([]);
   const subFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const subAgentContents = useRef<Map<string, string>>(new Map());
@@ -119,6 +128,36 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
     [],
   );
 
+  // Load and apply a session's messages with two guarantees:
+  //   1. A response is only applied while its token is still current AND the
+  //      session is still the active one — a late response must never repaint a
+  //      different conversation.
+  //   2. One automatic retry on failure: a transient error (e.g. SQLite busy
+  //      during a long agent run) must not leave the chat area blank until the
+  //      user re-clicks the session.
+  const loadSessionMessages = useCallback(
+    async (sessionId: string, seq: number) => {
+      const apply = (msgs: Message[]) => {
+        const chatMsgs = dbMessagesToChat(msgs);
+        populateSubAgentContents(chatMsgs);
+        setMessages((prev) => preserveLiveInteractions(chatMsgs, prev));
+        lazyLoadImages(chatMsgs, sessionId);
+      };
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        if (seq !== loadSeqRef.current) return;
+        try {
+          const msgs = await sessionsApi.getMessages(sessionId);
+          if (seq !== loadSeqRef.current || activeSessionRef.current?.session_id !== sessionId) return;
+          apply(msgs);
+          return;
+        } catch {
+          if (attempt === 0) await new Promise((resolve) => setTimeout(resolve, 400));
+        }
+      }
+    },
+    [populateSubAgentContents, preserveLiveInteractions, lazyLoadImages],
+  );
+
   useEffect(() => {
     return () => {
       if (subFlushTimerRef.current) clearTimeout(subFlushTimerRef.current);
@@ -130,33 +169,38 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
   }, [activeSession]);
 
   useEffect(() => {
-    let cancelled = false;
+    // Invalidate any in-flight load from the previous workspace so its late
+    // response cannot repaint the new view.
+    const seq = ++loadSeqRef.current;
+    manualSelectRef.current = false;
     // Clear immediately for responsive workspace switch
     activeSessionRef.current = null;
     setActiveSession(null);
     setMessages([]);
     
     sessionsApi.listSessions(workspace).then((result) => {
-      if (cancelled) return;
+      if (seq !== loadSeqRef.current) return;
       setSessions(result);
       setSending(false);
+      // If the user already picked a session while the list was loading, keep
+      // their choice: overriding it here left the picked session blank until it
+      // was clicked a second time.
+      if (manualSelectRef.current) return;
       if (result.length > 0) {
         const latest = result[0];
+        const latestSeq = ++loadSeqRef.current;
+        activeSessionRef.current = latest;
         setActiveSession(latest);
         setActiveBranch(latest.active_branch || "main");
         if (latest.model) onAutoLoadSession?.(latest);
-        sessionsApi.getMessages(latest.session_id).then((msgs) => {
-          if (!cancelled) {
-            const chatMsgs = dbMessagesToChat(msgs);
-            populateSubAgentContents(chatMsgs);
-            setMessages((prev) => preserveLiveInteractions(chatMsgs, prev));
-            lazyLoadImages(chatMsgs, latest.session_id);
-          }
-        });
+        void loadSessionMessages(latest.session_id, latestSeq);
       }
     });
-    return () => { cancelled = true; };
-  }, [workspace, populateSubAgentContents, onAutoLoadSession]);
+    return () => {
+      // Drop late responses after unmount / workspace change.
+      if (seq === loadSeqRef.current) loadSeqRef.current += 1;
+    };
+  }, [workspace, onAutoLoadSession, loadSessionMessages]);
 
   // Stash onEvent and workspace in refs so handleSSEEvent identity stays stable
   // (prevents SSE reconnect churn when parent re-renders)
@@ -212,8 +256,17 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
         }, 500);
         const sid = activeSessionRef.current?.session_id;
         if (sid) {
+          const reloadSeq = loadSeqRef.current;
           setTimeout(async () => {
-            const msgs = await sessionsApi.getMessages(sid);
+            let msgs: Message[];
+            try {
+              msgs = await sessionsApi.getMessages(sid);
+            } catch {
+              return; // transient failure — the next load will retry
+            }
+            // A session switch (or a newer load) supersedes this delayed reload.
+            // Applying it anyway painted another conversation's messages.
+            if (reloadSeq !== loadSeqRef.current || activeSessionRef.current?.session_id !== sid) return;
             const dbMsgs = dbMessagesToChat(msgs);
             populateSubAgentContents(dbMsgs);
             setMessages((prev) => {
@@ -280,6 +333,10 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
 
   const selectSession = useCallback(
     async (session: Session, selectedModel: string, models: { id: string }[]) => {
+      // A deliberate user choice: invalidate any in-flight auto-load so it can
+      // neither discard this load nor overwrite the newly selected view.
+      manualSelectRef.current = true;
+      const seq = ++loadSeqRef.current;
       // Update the ref synchronously: the pending confirmation may be replayed
       // by SSE before React has committed the new activeSession state.
       activeSessionRef.current = session;
@@ -288,22 +345,19 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
       // Show empty messages immediately to avoid stale content flash
       setMessages([]);
 
-      // Fetch messages and monitor in parallel
-      const msgsPromise = sessionsApi.getMessages(session.session_id);
+      // Monitor lookup is best-effort and must never abort the messages fetch.
       const monitorPromise = import("../api/monitor")
         .then(({ getAgentMonitor }) => getAgentMonitor())
         .catch(() => []);
 
-      const [msgs, monitors] = await Promise.all([msgsPromise, monitorPromise]);
+      const [, monitors] = await Promise.all([
+        loadSessionMessages(session.session_id, seq),
+        monitorPromise,
+      ]);
       // Ignore a late response from a session the user has already left.
-      if (activeSessionRef.current?.session_id !== session.session_id) {
+      if (seq !== loadSeqRef.current) {
         return session.model || (models.length > 0 ? models[0].id : selectedModel);
       }
-      const chatMsgs = dbMessagesToChat(msgs);
-      populateSubAgentContents(chatMsgs);
-      setMessages((prev) => preserveLiveInteractions(chatMsgs, prev));
-      lazyLoadImages(chatMsgs, session.session_id);
-
       const hasRunning = (monitors as { session_id: string; status: string }[]).some(
         (m) => m.session_id === session.session_id && m.status === "running"
       );
@@ -311,13 +365,17 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
 
       return session.model || (models.length > 0 ? models[0].id : selectedModel);
     },
-    [populateSubAgentContents, preserveLiveInteractions]
+    [loadSessionMessages]
   );
 
   const newSession = useCallback(async (selectedModel: string, _models: { id: string }[]) => {
     setSending(false);
     const s = await sessionsApi.createSession(undefined, workspace);
     setSessions((prev) => [s, ...prev]);
+    // A brand-new session is an explicit draft: stop any in-flight load from
+    // repainting it with the previous session's messages.
+    manualSelectRef.current = true;
+    loadSeqRef.current += 1;
     activeSessionRef.current = s;
     setActiveSession(s);
     setMessages([]);
@@ -354,29 +412,33 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
         const activeSid = activeSessionRef.current?.session_id;
         if (activeSid && finished.includes(activeSid)) {
           setSending(false);
-          const msgs = await sessionsApi.getMessages(activeSid);
-          const chatMsgs = dbMessagesToChat(msgs);
-          populateSubAgentContents(chatMsgs);
-          setMessages((prev) => {
-            // Skip replacement if shape is identical to avoid unnecessary churn
-            const sameShape =
-              chatMsgs.length === prev.length &&
-              chatMsgs.every(
-                (m, idx) =>
-                  m.role === prev[idx]?.role &&
-                  (m.content?.length || 0) === (prev[idx]?.content?.length || 0),
-              );
-            if (sameShape) return prev;
+          const msgs = await sessionsApi.getMessages(activeSid).catch(() => null);
+          // Drop the reload if it failed, or if the user switched sessions while
+          // it was in flight (it would otherwise repaint another conversation).
+          if (msgs && activeSessionRef.current?.session_id === activeSid) {
+            const chatMsgs = dbMessagesToChat(msgs);
+            populateSubAgentContents(chatMsgs);
+            setMessages((prev) => {
+              // Skip replacement if shape is identical to avoid unnecessary churn
+              const sameShape =
+                chatMsgs.length === prev.length &&
+                chatMsgs.every(
+                  (m, idx) =>
+                    m.role === prev[idx]?.role &&
+                    (m.content?.length || 0) === (prev[idx]?.content?.length || 0),
+                );
+              if (sameShape) return prev;
 
-            const dbTotal = chatMsgs.reduce((s, m) => s + (m.content?.length || 0), 0);
-            const prevTotal = prev.reduce((s, m) => s + (m.content?.length || 0), 0);
-            const dbHasScreenshots = chatMsgs.some((m) => m.role === "screenshot");
-            const liveOnly = dbHasScreenshots
-              ? []
-              : prev.filter((m) => m.role === "screenshot" && m.images?.length);
-            return dbTotal >= prevTotal ? [...chatMsgs, ...liveOnly] : prev;
-          });
-          lazyLoadImages(chatMsgs, activeSid);
+              const dbTotal = chatMsgs.reduce((s, m) => s + (m.content?.length || 0), 0);
+              const prevTotal = prev.reduce((s, m) => s + (m.content?.length || 0), 0);
+              const dbHasScreenshots = chatMsgs.some((m) => m.role === "screenshot");
+              const liveOnly = dbHasScreenshots
+                ? []
+                : prev.filter((m) => m.role === "screenshot" && m.images?.length);
+              return dbTotal >= prevTotal ? [...chatMsgs, ...liveOnly] : prev;
+            });
+            lazyLoadImages(chatMsgs, activeSid);
+          }
         }
 
         prevRunningRef.current = nowRunning;

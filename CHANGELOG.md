@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.15.2] — Reliable Live Streaming and Message Loading
+
+### Fixed
+- **Live updates stopped arriving after ~60s of idle ("zombie" SSE connections)** — The SSE forwarder garbage-collected per-connection queues that had been idle for more than 60 seconds, but the liveness timestamp was only refreshed when an event was actually forwarded. Keepalives are emitted by each connection's own consumer loop and never pass through the forwarder, so an open-but-idle connection was silently unsubscribed while staying connected: the client looked online, received no `text_delta`/`tool_call` events, and the chat appeared frozen until the run ended and a database reload repainted the whole conversation at once. The consumer loop now refreshes its queue timestamp whenever it emits a keepalive, so active connections are never collected. The global event stream (`/events/global`, used by the desktop pet and notifications) had the same flaw with a 120s threshold and is fixed the same way.
+- **Conversation content occasionally blank until the session was re-selected** — The frontend message-loading pipeline silently discarded valid loads when the mutable active-session reference was clobbered by concurrent effects (workspace auto-load, ref-sync), the workspace auto-loader could override a manual session selection when its slower response arrived, and delayed reloads (`agent_end`, monitor) could paint another session's messages after a switch. Message loads are now arbitrated by a monotonic load token plus an active-session check, manual selections can no longer be overridden, and message fetches retry once on transient failure (e.g. SQLite busy during a long agent run).
+
+### Changed
+- Context for the above: removing the idle reconnect loop ("重新连接中" every ~40s) unmasked the zombie-connection bug — the frequent reconnects had been accidentally re-registering queues and restoring event delivery. Both sides are now correct: reconnects only happen for genuinely dead connections, and the GC only collects genuinely dead queues.
+
+## [0.15.1] — Startup Freeze Fix
+
+### Fixed
+- Post-launch freeze eliminated (Electron startup path, FTS query hardening, scheduler and provider-store robustness).
+
+## [0.15.0] — Trusted Work System
+
+### Added
+- Persistent cross-session work tracking: task domain events, chat result cards, task timeline and detail drawer, notification-bell waiting marker.
+- Run-level recovery and retry for agent runs; desktop pet and workspace switcher consume persistent attention state.
+
+---
+
 ## [0.14.0] — Resilient ChatGPT Image Editing
 
 ### Fixed
