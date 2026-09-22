@@ -44,6 +44,7 @@ async def record_task_event(
     )
     await db.commit()
 
+
 logger = logging.getLogger(__name__)
 
 # AgentRun terminal statuses recognized by this service
@@ -180,17 +181,19 @@ async def finish_agent_run(
             from crabagent.core.database import TaskArtifact, TaskCheck
 
             artifacts = (
-                await db.execute(
-                    select(TaskArtifact).where(
-                        TaskArtifact.task_id == run.task_id,
-                        TaskArtifact.status == "available",
+                (
+                    await db.execute(
+                        select(TaskArtifact).where(
+                            TaskArtifact.task_id == run.task_id,
+                            TaskArtifact.status == "available",
+                        )
                     )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             artifact_files = [a.name or _os.path.basename(a.path) for a in artifacts if a.path]
-            all_checks = (
-                await db.execute(select(TaskCheck).where(TaskCheck.task_id == run.task_id))
-            ).scalars().all()
+            all_checks = (await db.execute(select(TaskCheck).where(TaskCheck.task_id == run.task_id))).scalars().all()
             required_checks = [c for c in all_checks if c.required]
 
             status_labels = {
@@ -278,9 +281,9 @@ class TaskLifecycleLinker:
 
     The linker watches the session's event bus: on AGENT_START it attaches
     all open agent-owned tasks created in this session; on TASK_CREATED it
-    attaches the just-created task (the initial scan cannot see it because
-    task_add runs after AGENT_START); on terminal events it finalizes the
-    runs so completion judging and result cards fire. Artifact capture is
+    attaches the just-created task; on TASK_UPDATED it attaches a completed
+    task that the agent reopens for revision. On terminal events it finalizes
+    the runs so completion judging and result cards fire. Artifact capture is
     routed to the linked task runs via ``RunRecorder.link_task_run``.
     """
 
@@ -344,6 +347,19 @@ class TaskLifecycleLinker:
                         link_run(self.run_ids[-1])
             except Exception:
                 logger.warning("new task lifecycle link failed (non-fatal)", exc_info=True)
+
+        elif event.type == EventType.TASK_UPDATED and event.data.get("status") == TaskStatus.IN_PROGRESS.value:
+            # A completed task may be reopened for a revision after AGENT_START.
+            # task_update emits this event; create a fresh run so subsequent
+            # file edits are versioned and the turn ends with a new result card.
+            try:
+                task_id = int(event.data.get("task_id") or 0)
+                if task_id and not event.data.get("run_id"):
+                    await self._start_linked_run(task_id, str(event.data.get("title") or ""))
+                    if link_run:
+                        link_run(self.run_ids[-1])
+            except Exception:
+                logger.warning("reopened task lifecycle link failed (non-fatal)", exc_info=True)
 
         elif self.run_ids and event.type in (
             EventType.AGENT_END,

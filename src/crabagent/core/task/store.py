@@ -232,6 +232,9 @@ async def update_task(
     # Maintain lifecycle timestamps alongside status changes
     if updates.get("status") in (TaskStatus.DONE.value, TaskStatus.PARTIAL.value):
         updates.setdefault("completed_at", now)
+        # A (re-)completion produces a fresh unread result: re-arm the
+        # "新成果" attention notification even if an earlier result was seen.
+        updates["result_viewed_at"] = None
     if updates.get("status") == TaskStatus.IN_PROGRESS.value:
         # only stamp started_at once; keep the original start time on retries
         current = await get_task(db, task_id, user_id)

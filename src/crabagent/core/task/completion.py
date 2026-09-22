@@ -192,6 +192,10 @@ async def judge_task(db: AsyncSession, task_id: int, user_id: int) -> dict:
     task.updated_at = now
     if final_status in (TaskStatus.DONE.value, TaskStatus.PARTIAL.value, TaskStatus.FAILED.value):
         task.completed_at = task.completed_at or now
+    if final_status in (TaskStatus.DONE.value, TaskStatus.PARTIAL.value):
+        # Fresh verdict = fresh unread result: re-arm the "新成果" notification
+        # on re-completion (harmless no-op on first completion).
+        task.result_viewed_at = None
     await db.commit()
 
     return {

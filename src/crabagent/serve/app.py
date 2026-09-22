@@ -161,6 +161,7 @@ async def lifespan(app: FastAPI):
                 ).scalars().all()
                 required = [c for c in checks if c.required]
                 payload["files"] = files
+                payload["run_id"] = data.get("run_id")
                 if required:
                     payload["checks"] = {
                         "passed": sum(1 for c in required if c.status == "passed"),
@@ -174,13 +175,6 @@ async def lifespan(app: FastAPI):
                         else:
                             payload["verification_status"] = "partial"
 
-                enriched = (
-                    bool(payload.get("files"))
-                    or bool(payload.get("result_summary"))
-                    or payload.get("verification_status", "unverified") not in (None, "unverified", "")
-                    or "checks" in payload
-                )
-
                 existing_rows = (
                     await db.execute(
                         select(Message).where(
@@ -190,20 +184,21 @@ async def lifespan(app: FastAPI):
                         )
                     )
                 ).scalars().all()
+                incoming_run = payload.get("run_id") or None
                 for m in existing_rows:
                     old = json_loads_safe(m.content)
                     if old.get("task_id") != task_id or old.get("status") != payload.get("status"):
                         continue
-                    stale = (
-                        not old.get("result_summary")
-                        and not old.get("files")
-                        and old.get("verification_status", "unverified") in (None, "unverified", "")
-                        and "checks" not in old
-                    )
-                    if stale and enriched:
+                    old_run = old.get("run_id") or None
+                    # Cards with a run_id are completion episodes. Never
+                    # merge them with a legacy/sparse card because that would
+                    # overwrite the previous result during re-completion.
+                    if incoming_run != old_run:
+                        continue
+                    if payload != old:
                         m.content = json_dumps(payload)  # upgrade in place
                     await db.commit()
-                    return  # never duplicate cards for the same task+status
+                    return  # same completion episode → never duplicate
 
                 seq = (
                     await db.execute(

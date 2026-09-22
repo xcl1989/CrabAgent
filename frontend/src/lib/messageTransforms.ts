@@ -149,6 +149,7 @@ export function sseEventToMessages(event: SSEEvent, messages: ChatMessage[]): Ch
       task_id?: number;
       status?: string;
       title?: string;
+      run_id?: number;
       result_summary?: string;
       warning_summary?: string;
       verification_status?: string;
@@ -157,10 +158,16 @@ export function sseEventToMessages(event: SSEEvent, messages: ChatMessage[]): Ch
     };
     if (d.task_id && d.status) {
       const terminal = ["done", "partial", "failed", "cancelled"].includes(d.status);
-      const existing = updated.find((m) => m.task_result && m.task_result.task_id === d.task_id);
+      const matchingResults = updated.filter((m) => m.task_result?.task_id === d.task_id);
+      // Match cards by run. Looking up only by task would repeatedly select
+      // the first historical card and duplicate later updates for a new run.
+      const existing = d.run_id
+        ? matchingResults.find((m) => m.task_result?.run_id === d.run_id)
+        : matchingResults.slice().reverse().find((m) => !m.task_result?.run_id);
       if (existing && existing.task_result) {
         existing.task_result.status = d.status!;
         existing.task_result.title = d.title || existing.task_result.title;
+        existing.task_result.run_id = d.run_id ?? existing.task_result.run_id;
         existing.task_result.result_summary = d.result_summary || existing.task_result.result_summary;
         existing.task_result.warning_summary = d.warning_summary || existing.task_result.warning_summary;
         existing.task_result.verification_status = d.verification_status || existing.task_result.verification_status;
@@ -177,6 +184,7 @@ export function sseEventToMessages(event: SSEEvent, messages: ChatMessage[]): Ch
             task_id: d.task_id,
             title: d.title || "",
             status: d.status,
+            run_id: d.run_id,
             result_summary: d.result_summary,
             warning_summary: d.warning_summary,
             verification_status: d.verification_status,

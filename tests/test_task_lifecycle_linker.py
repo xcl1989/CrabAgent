@@ -1,4 +1,5 @@
 """Tests for TaskLifecycleLinker (conversation ↔ task lifecycle)."""
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -69,6 +70,61 @@ async def test_task_created_event_starts_linked_run(linker, monkeypatch: pytest.
     assert linker.run_ids == [101]
     assert linked == [101]
     assert unlinked == []
+
+
+@pytest.mark.asyncio
+async def test_reopened_task_event_starts_fresh_linked_run(linker, monkeypatch: pytest.MonkeyPatch):
+    started: list[dict] = []
+
+    async def fake_start(db, task_id, user_id, **kwargs):
+        started.append({"task_id": task_id, "user_id": user_id, **kwargs})
+        return ({"id": task_id}, 202)
+
+    monkeypatch.setattr(task_service, "start_agent_run", fake_start)
+    monkeypatch.setattr("crabagent.core.database.async_session_factory", lambda: _FakeDB())
+
+    linked: list[int] = []
+    await linker.handle_event(
+        AgentEvent(
+            type=EventType.TASK_UPDATED,
+            data={"task_id": 9, "title": "生成报告", "status": "in_progress"},
+        ),
+        link_run=linked.append,
+    )
+
+    assert started == [
+        {
+            "task_id": 9,
+            "user_id": 1,
+            "agent_name": "main",
+            "session_id": "sess-1",
+            "task_summary": "生成报告",
+        }
+    ]
+    assert linker.run_ids == [202]
+    assert linked == [202]
+
+
+@pytest.mark.asyncio
+async def test_task_updated_with_run_id_does_not_duplicate_linked_run(linker, monkeypatch: pytest.MonkeyPatch):
+    started: list[int] = []
+
+    async def fake_start(*_a, **_k):
+        started.append(1)
+        return ({"id": 9}, 203)
+
+    monkeypatch.setattr(task_service, "start_agent_run", fake_start)
+    monkeypatch.setattr("crabagent.core.database.async_session_factory", lambda: _FakeDB())
+
+    await linker.handle_event(
+        AgentEvent(
+            type=EventType.TASK_UPDATED,
+            data={"task_id": 9, "status": "in_progress", "run_id": 88},
+        )
+    )
+
+    assert started == []
+    assert linker.run_ids == []
 
 
 @pytest.mark.asyncio

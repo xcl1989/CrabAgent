@@ -197,3 +197,67 @@ async def test_recovery_is_idempotent(db):
         "failed_tasks": 0,
         "expired_requests": 0,
     }
+
+
+@pytest.mark.asyncio
+async def test_recompletion_rearms_unread_result(db):
+    """第二次 done 必须重新产生"新成果"：result_viewed_at 被重置为未读。"""
+    import datetime
+
+    from sqlalchemy import select
+
+    from crabagent.core.database import Task
+
+    task = await task_store.add_task(db, user_id=1, title="生成报告")
+    tid = task["id"]
+
+    # 第一次完成 → 用户查看成果（已读）
+    await task_store.update_task(db, tid, 1, status="done", result_summary="V1")
+    row = (await db.execute(select(Task).where(Task.id == tid))).scalar_one()
+    row.result_viewed_at = datetime.datetime.now()
+    await db.commit()
+    viewed = await task_store.get_task(db, tid, 1)
+    assert viewed["result_viewed_at"] is not None
+
+    # 非终态更新不应打扰已读状态
+    await task_store.update_task(db, tid, 1, priority="high")
+    still_viewed = await task_store.get_task(db, tid, 1)
+    assert still_viewed["result_viewed_at"] is not None
+
+    # 第二次完成（重做）→ 成果重新变为未读
+    await task_store.update_task(db, tid, 1, status="done", result_summary="V2 深度版")
+    refreshed = await task_store.get_task(db, tid, 1)
+    assert refreshed["result_viewed_at"] is None
+    assert refreshed["result_summary"] == "V2 深度版"
+
+
+@pytest.mark.asyncio
+async def test_judge_task_recompletion_rearms_unread_result(db):
+    """completion.judge_task 对再次完成的任务同样重置已读状态。"""
+    import datetime
+
+    from sqlalchemy import select
+
+    from crabagent.core.database import Task
+    from crabagent.core.task.completion import judge_task
+
+    task = await task_store.add_task(db, user_id=1, title="生成报告")
+    tid = task["id"]
+
+    # 首次判定为 done，用户已读
+    verdict1 = await judge_task(db, tid, 1)
+    assert verdict1["status"] == "failed"  # 无产物无摘要 → failed，先铺垫状态
+    row = (await db.execute(select(Task).where(Task.id == tid))).scalar_one()
+    row.status = "done"
+    row.result_summary = "V1"
+    row.result_viewed_at = datetime.datetime.now()
+    await db.commit()
+
+    # 第二轮：写入了 result_summary（重做的深度版）后重新判定
+    row.result_summary = "V2 深度版"
+    await db.commit()
+    verdict2 = await judge_task(db, tid, 1)
+    assert verdict2["status"] == "done"
+
+    refreshed = (await db.execute(select(Task).where(Task.id == tid))).scalar_one()
+    assert refreshed.result_viewed_at is None

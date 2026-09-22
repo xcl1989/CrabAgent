@@ -46,6 +46,7 @@ export interface ChatMessage {
     task_id: number;
     title: string;
     status: string;
+    run_id?: number;
     result_summary?: string;
     warning_summary?: string;
     verification_status?: string;

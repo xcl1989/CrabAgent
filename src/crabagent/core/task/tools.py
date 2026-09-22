@@ -230,6 +230,8 @@ def register_task_tools(registry):
         description=(
             "Update a persistent task's fields. "
             "Use to change title, description, assignee, deadline, priority, status, or project. "
+            "When the user requests a revision to a deliverable from an existing completed task, "
+            "reuse that task and set it to in_progress before editing; do not create a duplicate task. "
             "Statuses: pending (not started), in_progress (working), waiting_user (needs the user), "
             "done (finished), partial (usable result but incomplete), failed (no usable result), cancelled."
         ),
@@ -313,20 +315,21 @@ def register_task_tools(registry):
                         "Status will be re-verified and finally judged when this run ends."
                     )
                 try:
+                    from crabagent.core.event import AgentEvent, EventType
                     from crabagent.core.task.events import broadcast_task_event
 
-                    broadcast_task_event(
-                        "task_updated",
-                        {
-                            "task_id": id,
-                            "status": kwargs["status"],
-                            "title": t["title"],
-                            "session_id": t.get("source_session") or "",
-                            "result_summary": t.get("result_summary") or "",
-                            "warning_summary": t.get("warning_summary") or "",
-                            "verification_status": t.get("verification_status") or "unverified",
-                        },
-                    )
+                    payload = {
+                        "task_id": id,
+                        "status": kwargs["status"],
+                        "title": t["title"],
+                        "session_id": t.get("source_session") or "",
+                        "result_summary": t.get("result_summary") or "",
+                        "warning_summary": t.get("warning_summary") or "",
+                        "verification_status": t.get("verification_status") or "unverified",
+                    }
+                    broadcast_task_event("task_updated", payload)
+                    if context is not None and getattr(context, "event_bus", None) is not None:
+                        await context.event_bus.emit(AgentEvent(type=EventType.TASK_UPDATED, data=payload))
                 except Exception:
                     pass
             changed = ", ".join(kwargs.keys())
