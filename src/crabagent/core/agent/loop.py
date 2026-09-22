@@ -443,7 +443,8 @@ async def run_agent(
 
             # Some providers stream a user-facing reply only as reasoning_content.
             # Preserve it as the response instead of leaving the CLI with no answer.
-            if not full_text and reasoning_text:
+            reasoning_only_reply = not full_text and bool(reasoning_text)
+            if reasoning_only_reply:
                 full_text = reasoning_text
 
             assistant_msg: dict = {
@@ -476,14 +477,17 @@ async def run_agent(
 
             if tool_calls_list:
                 assistant_msg["tool_calls"] = tool_calls_list
-            if reasoning_text:
+            if reasoning_text and not reasoning_only_reply:
+                # When the reply IS the reasoning text (reasoning_only_reply),
+                # keeping reasoning_content too would render the same text
+                # twice in the UI: once as a thinking block, once as the reply.
                 assistant_msg["reasoning_content"] = reasoning_text
 
             assistant_msg["agent"] = context.current_agent
 
-            if reasoning_text:
+            if reasoning_text and not reasoning_only_reply:
                 await context.event_bus.emit(AgentEvent(type=EventType.THINKING_DONE, data={"text": reasoning_text}))
-            elif reasoning_tokens > 0:
+            elif not reasoning_text and reasoning_tokens > 0:
                 # ChatGPT subscription returns encrypted reasoning (no plaintext).
                 # Emit a placeholder so the user sees that thinking happened.
                 placeholder = f"🧠 模型使用了 {reasoning_tokens} tokens 进行推理（内容已加密，不公开）"

@@ -291,6 +291,7 @@ class TaskLifecycleLinker:
         self._user_id = user_id
         self._session_id = session_id
         self.run_ids: list[int] = []
+        self._last_reply: str = ""
 
     async def _start_linked_run(self, task_id: int, title: str = "") -> None:
         from crabagent.core.database import async_session_factory
@@ -309,7 +310,15 @@ class TaskLifecycleLinker:
     async def handle_event(self, event, link_run=None, unlink_run=None) -> None:
         from crabagent.core.event import EventType
 
-        if event.type == EventType.AGENT_START:
+        if event.type == EventType.TEXT_DONE:
+            # Capture the final reply text directly from the event stream.
+            # Reading it from the DB at AGENT_END races with the persistence
+            # listener's 0.3s flush buffer, which left result_summary empty
+            # and made no-file tasks judge as failed.
+            self._last_reply = str(event.data.get("text") or "")
+
+        elif event.type == EventType.AGENT_START:
+            self._last_reply = ""
             self.run_ids.clear()
             try:
                 from crabagent.core.database import Task as TaskRow
@@ -375,10 +384,10 @@ class TaskLifecycleLinker:
                 cancelled = bool(event.data.get("cancelled"))
                 run_status = RUN_STATUS_CANCELLED if cancelled else RUN_STATUS_COMPLETED
                 err = "user stopped the session" if cancelled else ""
-                summary = ""
-                if not cancelled:
-                    # AGENT_END carries stats only; the reply text is the last
-                    # assistant message of this session — use it as the result.
+                # Prefer the reply text captured from TEXT_DONE events (no
+                # persistence race); fall back to the DB's last assistant row.
+                summary = self._last_reply
+                if not summary and not cancelled:
                     try:
                         from crabagent.core.database import Conversation, Message
                         from crabagent.core.database import async_session_factory as _asf
@@ -392,7 +401,7 @@ class TaskLifecycleLinker:
                                 .limit(1)
                             )
                             row = row.first()
-                            summary = (row[0] or "")[:1000] if row else ""
+                            summary = (row[0] or "") if row else ""
                     except Exception:
                         logger.debug("failed to read last assistant reply", exc_info=True)
             elif event.type == EventType.AGENT_ERROR:
@@ -416,6 +425,7 @@ class TaskLifecycleLinker:
                         )
             except Exception:
                 logger.warning("task lifecycle finish failed (non-fatal)", exc_info=True)
+            self._last_reply = ""
 
 
 async def cancel_task(

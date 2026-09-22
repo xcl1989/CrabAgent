@@ -391,10 +391,37 @@ async def test_run_agent_reads_usage_after_finish_chunk(monkeypatch: pytest.Monk
     ]
 
 
-def test_classify_rate_limit_distinguishes_model_permission_from_throttling():
-    denied = loop._classify_rate_limit_error(
-        RuntimeError("OpenAIException - 当前订阅套餐暂未开放GLM-5.3-FlashX权限")
+@pytest.mark.asyncio
+async def test_run_agent_reasoning_only_reply_not_duplicated(monkeypatch: pytest.MonkeyPatch):
+    """Providers that stream the reply only as reasoning_content must not
+    produce the same text twice (thinking block + assistant message)."""
+    context = AgentContext(workspace=Path.cwd(), model="glm-5.3-flash", max_iterations=2)
+    events = []
+    context.event_bus.subscribe(lambda event: events.append(event))
+
+    async def fake_provider(provider_name=None):
+        return SimpleNamespace(name="mock", provider_type="openai", api_key="k", base_url="", enabled=True)
+
+    async def fake_acompletion(**kwargs):
+        return _stream([_chunk(delta=_delta(reasoning_content="final answer text"), finish_reason="stop")])
+
+    monkeypatch.setattr(loop, "_resolve_provider", fake_provider)
+    monkeypatch.setattr(
+        loop, "litellm", SimpleNamespace(acompletion=fake_acompletion, exceptions=loop.litellm.exceptions)
     )
+    monkeypatch.setattr("crabagent.core.proxy.resolve_llm_proxy", _async_return(""))
+
+    messages = await loop.run_agent(context, "hello")
+
+    assistant = messages[-1]
+    assert assistant["content"] == "final answer text"
+    # The reply is the reasoning text itself — no duplicate reasoning copy.
+    assert "reasoning_content" not in assistant
+    assert not any(event.type == EventType.THINKING_DONE for event in events)
+
+
+def test_classify_rate_limit_distinguishes_model_permission_from_throttling():
+    denied = loop._classify_rate_limit_error(RuntimeError("OpenAIException - 当前订阅套餐暂未开放GLM-5.3-FlashX权限"))
     throttled = loop._classify_rate_limit_error(RuntimeError("429 Too Many Requests"))
 
     assert denied["code"] == "model_access_denied"

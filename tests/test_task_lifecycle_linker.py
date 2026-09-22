@@ -213,6 +213,34 @@ async def test_agent_error_finishes_runs_as_failed(linker, monkeypatch: pytest.M
 
 
 @pytest.mark.asyncio
+async def test_text_done_captured_as_result_summary(linker, monkeypatch: pytest.MonkeyPatch):
+    """The final reply must come from TEXT_DONE, not the DB read at AGENT_END
+    (which races with the persistence flush and left empty summaries)."""
+    finished: list[dict] = []
+
+    async def fake_finish(db, run_id, user_id, run_status, result_summary="", error=""):
+        finished.append({"run_id": run_id, "run_status": run_status, "result_summary": result_summary})
+        return {"id": 1}
+
+    monkeypatch.setattr(task_service, "finish_agent_run", fake_finish)
+    monkeypatch.setattr("crabagent.core.database.async_session_factory", lambda: _FakeDB())
+
+    linker.run_ids = [11]
+    await linker.handle_event(AgentEvent(type=EventType.TEXT_DONE, data={"text": "已推送 GitHub 并发布 PyPI 0.15.3"}))
+    await linker.handle_event(AgentEvent(type=EventType.AGENT_END, data={}))
+
+    assert finished == [
+        {
+            "run_id": 11,
+            "run_status": "completed",
+            "result_summary": "已推送 GitHub 并发布 PyPI 0.15.3",
+        }
+    ]
+    # The captured reply is cleared for the next run.
+    assert linker._last_reply == ""
+
+
+@pytest.mark.asyncio
 async def test_unrelated_events_are_ignored(linker):
     await linker.handle_event(AgentEvent(type=EventType.TEXT_DELTA, data={"text": "hi"}))
     await linker.handle_event(AgentEvent(type=EventType.TOOL_RESULT, data={"name": "bash"}))
