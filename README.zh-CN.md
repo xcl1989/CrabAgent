@@ -287,6 +287,8 @@ playwright install chromium
 ### 🖥️ macOS 计算机控制
 让 AI 观察和操作**本机 macOS 应用**——而不只是浏览器。基于签名的 Swift helper（一次性进程），全部强制逻辑在原生代码中实现。
 
+> helper 已预编译打包在桌面应用内；下面的命令仅**从源码构建桌面应用**的开发者需要执行一次。
+
 ```bash
 cd src/crabagent/electron && npm run build-helper   # 编译并签名 helper
 ```

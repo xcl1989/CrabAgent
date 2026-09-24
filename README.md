@@ -291,6 +291,9 @@ playwright install chromium
 ### 🖥️ macOS Computer Use
 Let the AI observe and operate **native macOS applications** — not just the browser. Built on a signed one-shot Swift helper; all enforcement lives in native code, not prompts.
 
+> The helper ships pre-built in the packaged app — the step below is only for
+> developers building the desktop app from source.
+
 ```bash
 cd src/crabagent/electron && npm run build-helper   # compile + sign the helper
 ```
