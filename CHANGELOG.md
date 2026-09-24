@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.16.0] — macOS Computer Use and Collaboration Browser Hardening
+
+### Added
+- **macOS computer use (opt-in)** — A native Swift helper gives the agent the ability to observe and operate native macOS applications: AX-tree observation (roles, labels, values, frames, up to 300 nodes), per-window capture via ScreenCaptureKit, and CGEvent input (click, Unicode text typing including CJK and emoji, named keys and modifier combos, scroll). Apps can be activated and auto-launched by bundle ID; windowless apps get a window created automatically (Cmd+N convention).
+- **Four-layer input safety** — Input is gated by an explicit opt-in toggle (Settings → macOS 控制), a per-app allowlist, frontmost-app verification before every action, and Secure Input / lock-screen refusal. Escape paths (`Cmd+Q`, `Cmd+Tab`) are denied. All enforcement lives in the helper and Electron main process, not in prompts.
+- **Dynamic app allow flow** — When the agent targets an app that is not allowlisted, the user receives a confirmation card ("AI 请求获得对该应用窗口的键鼠控制权限"); approval persists the app to the allowlist and retries the action once. Denial blocks without retry.
+- **Python tool layer** — `macos_activate/windows/observe/capture/click/type/key/scroll` tools with the same budget and audit pipeline as the browser tools (60 actions / 20 observations / 15 min / 3 consecutive failures).
+- **Settings → macOS 控制** — Live TCC permission status (Accessibility, Screen Recording) with deep links into System Settings, the input opt-in toggle, and allowlist management.
+- **Stable TCC identity** — The helper runs from `~/.crabagent/bin` (outside the app bundle) signed with a code-signing certificate, so Accessibility and Screen Recording grants persist across repacks. `npm run build-helper` compiles and signs.
+- **Collaboration browser hardening** — The collaboration browser now routes all traffic through a per-launch authenticated local proxy with DNS-rebinding protection (validated IP pinned at connect time), system-proxy chaining (`PROXY`/`SOCKS5`), and rewritten private-network checks for IPv4/IPv6. Chromium error pages no longer wedge the observe loop; clicks on buttons covered by overlays are refused by hit-testing.
+- **Collaboration browser pause/resume** — The browser toolbar gains pause/resume controls for AI actions, surfaced via `collaboration-browser-state`.
+
+### Fixed
+- **`net.BlockList` false positives** — Adding the IPv4-mapped IPv6 range (`::ffff:0:0/96`) to a `net.BlockList` made every plain IPv4 address match, blocking all websites. Private-network checks are now implemented explicitly for v4 and v6.
+- **System proxy was bypassed** — The collaboration browser forced direct connections, breaking sites behind Clash/Corporate proxies. `resolveProxy` is now honored per-URL with two-token parsing (`PROXY host:port`), falling back to pinned direct connections.
+- **Chromium error pages wedged the observe loop** — A failed navigation (e.g. offline start page) made `location.href` (`chrome-error://…`) disagree with `webContents.getURL()` forever, so every observation failed and the 3-strike budget locked the whole feature. Error pages are now recognized as observable state and the AI can navigate away.
+- **Collaboration browser tab/UX** — Settings tabs no longer wrap character-by-character (nowrap + horizontal scroll, container widened to `max-w-5xl`); the browser toolbar gains a paused indicator; the "去授权" deep link raises System Settings to the front.
+- **`electron.log` could grow unbounded** (reached 7.6 GB) — the log now rotates at launch and every 2,000 lines once it exceeds 50 MB.
+
+---
+
 ## [0.15.2] — Reliable Live Streaming and Message Loading
 
 ### Fixed

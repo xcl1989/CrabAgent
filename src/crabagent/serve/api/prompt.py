@@ -32,6 +32,8 @@ except Exception:
 
 try:
     import crabagent.core.agent.tools.collaboration_browser  # noqa: F401
+    import crabagent.core.agent.tools.computer  # noqa: F401
+    import crabagent.core.agent.tools.macos_computer  # noqa: F401
 except Exception:
     pass
 

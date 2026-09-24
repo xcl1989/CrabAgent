@@ -10,6 +10,8 @@ import {
   Check,
   Globe2,
   Loader2,
+  Pause,
+  Play,
   RefreshCw,
   SendHorizontal,
   ShieldCheck,
@@ -24,7 +26,7 @@ import {
 } from "lucide-react";
 import WorkspaceSwitcher from "../components/WorkspaceSwitcher";
 
-type BrowserAction = "back" | "forward" | "reload" | "stop";
+type BrowserAction = "back" | "forward" | "reload" | "stop" | "computer-stop" | "computer-resume";
 type SessionScope = "browser" | "workspace" | "all";
 
 interface BrowserState {
@@ -33,6 +35,7 @@ interface BrowserState {
   canGoBack: boolean;
   canGoForward: boolean;
   loading: boolean;
+  paused?: boolean;
 }
 
 const START_URL = "https://www.google.com/";
@@ -167,13 +170,12 @@ export default function BrowserCollaborationPage({ initialSessionId, onSessionCh
     const currentSessionId = sessionIdRef.current;
     if (taskRecord && currentSessionId && (event.type === "tool_call" || event.type === "tool_result" || event.type === "agent_end" || event.type === "agent_error")) {
       const name = String(event.data.name || "");
-      const result = String(event.data.result || "");
-      const isBrowserAction = name.startsWith("collab_browser_");
+      const isBrowserAction = name.startsWith("collab_browser_") || name.startsWith("computer_");
       if (isBrowserAction || event.type === "agent_end" || event.type === "agent_error") {
-        const risk = result.includes("confirmation_required") || /payment|delete|send|支付|删除|发送/i.test(name) ? "high" : "low";
+        const risk = "low";
         void sessionsApi.createBrowserTaskEvent(currentSessionId, taskRecord.id, {
           event_type: event.type,
-          detail: name || (event.type === "agent_error" ? String(event.data.error || "Agent failed") : "Agent completed"),
+          detail: name || (event.type === "agent_error" ? "Agent failed" : "Agent completed"),
           risk,
           data: isBrowserAction ? { tool: name } : {},
         });
@@ -189,6 +191,12 @@ export default function BrowserCollaborationPage({ initialSessionId, onSessionCh
       }
     }
     if (event.type === "tool_confirm_request") {
+      if (taskRecord && currentSessionId) {
+        void sessionsApi.createBrowserTaskEvent(currentSessionId, taskRecord.id, {
+          event_type: "confirmation_requested", detail: "computer_act",
+          risk: "low", data: {},
+        });
+      }
       setPendingConfirm({
         id: `cf-${Date.now()}`,
         role: "tool_confirm",
@@ -369,9 +377,10 @@ export default function BrowserCollaborationPage({ initialSessionId, onSessionCh
         event_type: "prompt_sent",
         detail: "AI browser instruction sent",
       });
+      await window.electronAPI?.collaborationBrowserAction?.("computer-resume");
       await sessionsApi.sendPrompt(sessionId, `${text}
 
-请使用 collab_browser 工具在协作浏览器中完成此任务。每次 observe 后使用返回的 page_version；页面版本过期时必须重新 observe。遇到登录、验证码、二维码、MFA 或敏感数据输入时，必须调用 collab_browser_wait_for_user 并等待用户。禁止绕过人机验证。`);
+请优先使用 computer_observe 和 computer_act 在协作浏览器中完成此任务；每次可变更操作后重新观察。遇到登录、验证码、二维码、MFA 或敏感数据输入时，必须调用 collab_browser_wait_for_user 并等待用户。禁止绕过人机验证。`);
       setTask("");
       setNotice("AI 正在处理，回复会显示在这里。");
     } catch (reason) {
@@ -417,6 +426,7 @@ export default function BrowserCollaborationPage({ initialSessionId, onSessionCh
   const handleAbort = useCallback(async () => {
     if (!sessionId) return;
     try {
+      await window.electronAPI?.collaborationBrowserAction?.("computer-stop");
       await sessionsApi.abortSession(sessionId);
       setSending(false);
     } catch (reason) {
@@ -466,6 +476,11 @@ export default function BrowserCollaborationPage({ initialSessionId, onSessionCh
         <form className="mt-2 flex items-center gap-1.5" onSubmit={(event) => { event.preventDefault(); void navigate(); }}>
           <button type="button" onClick={() => action("back")} disabled={!browserState.canGoBack} className="browser-control" title="后退"><ArrowLeft size={15} /></button>
           <button type="button" onClick={() => action("forward")} disabled={!browserState.canGoForward} className="browser-control" title="前进"><ArrowRight size={15} /></button>
+          {browserState.paused ? (
+            <button type="button" onClick={() => action("computer-resume")} className="browser-control" title="浏览器任务已暂停，点击恢复 AI 操作" style={{ color: "var(--warning, #d97706)" }}><Play size={15} /></button>
+          ) : (
+            <button type="button" onClick={() => action("computer-stop")} className="browser-control" title="暂停 AI 对浏览器的操作"><Pause size={15} /></button>
+          )}
           <button type="button" onClick={() => action(browserState.loading ? "stop" : "reload")} className="browser-control" title={browserState.loading ? "停止" : "刷新"}>
             {browserState.loading ? <Square size={13} /> : <RefreshCw size={14} />}
           </button>
@@ -651,7 +666,7 @@ export default function BrowserCollaborationPage({ initialSessionId, onSessionCh
 
             {pendingConfirm && (
               <div ref={actionRequiredRef} className="rounded-xl border border-[var(--warning-border)] bg-[var(--warning-bg)] p-3">
-                <p className="text-xs font-semibold text-[var(--text-primary)]">AI 请求执行工具</p>
+                <p className="text-xs font-semibold text-[var(--text-primary)]">AI 请求确认本次操作</p>
                 <p className="mt-1 text-xs text-[var(--text-secondary)]">{pendingConfirm.tool_name}</p>
                 <p className="mt-1 text-[11px] leading-4 text-[var(--text-tertiary)] break-all">{pendingConfirm.args_summary}</p>
                 <div className="mt-2 flex gap-2">

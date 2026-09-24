@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { useState, useEffect } from "react";
-import { Save, FlaskConical, Search, Check, Smartphone, SlidersHorizontal, Globe, Wifi, Cat, ShieldCheck } from "lucide-react";
+import { Save, FlaskConical, Search, Check, Smartphone, SlidersHorizontal, Globe, Wifi, Cat, ShieldCheck, MonitorSmartphone } from "lucide-react";
 import { Input, Button } from "../components/ui";
 import { toast } from "../components/ui/Toast";
 import { cn } from "../lib/cn";
@@ -9,9 +9,10 @@ import ModelSelector from "../components/ModelSelector";
 import { SubAgentModelMapEditor, parseModelMap, serializeModelMap, type ModelMapRow } from "../components/SubAgentModelMapEditor";
 import WeChatPanel from "../components/WeChatPanel";
 import { PetsSettingsPanel } from "../components/PetsSettingsPanel";
+import MacosComputerPanel from "../components/MacosComputerPanel";
 import { useSettingsData } from "../hooks/useSettingsData";
 
-type SettingsTab = "general" | "search" | "privacy" | "network" | "wechat" | "pets";
+type SettingsTab = "general" | "search" | "privacy" | "network" | "wechat" | "pets" | "macos";
 
 export default function SettingsPage() {
   const { t } = useTranslation();
@@ -177,24 +178,25 @@ export default function SettingsPage() {
     { id: "network", label: t("settingsPage.sectionNetwork"), icon: <Globe size={14} /> },
     { id: "pets", label: t("settingsPage.sectionPets"), icon: <Cat size={14} /> },
     { id: "wechat", label: "微信渠道", icon: <Smartphone size={14} /> },
+    { id: "macos", label: "macOS 控制", icon: <MonitorSmartphone size={14} /> },
   ];
 
   const showSaveButton = activeTab === "general" || activeTab === "search" || activeTab === "privacy" || activeTab === "network";
 
   return (
-    <div className="h-full flex flex-col p-6 sm:p-8 max-w-2xl mx-auto">
+    <div className="h-full flex flex-col p-6 sm:p-8 max-w-5xl mx-auto w-full">
       <h1 className="text-xl font-semibold text-[var(--text-primary)] mb-4">
         {t("settingsPage.title")}
       </h1>
 
-      {/* Tab Bar */}
-      <div className="flex gap-0.5 mb-6 border-b border-[var(--border)]">
+      {/* Tab Bar — nowrap labels; scrolls horizontally instead of wrapping characters */}
+      <div className="flex gap-0.5 mb-6 border-b border-[var(--border)] overflow-x-auto">
         {tabs.map((tab) => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
             className={cn(
-              "flex items-center gap-1.5 px-4 py-2 text-sm font-medium transition-all",
+              "flex items-center gap-1.5 px-4 py-2 text-sm font-medium transition-all whitespace-nowrap shrink-0",
               "border-b-2 -mb-px rounded-t-lg",
               activeTab === tab.id
                 ? "border-[var(--brand)] text-[var(--brand)]"
@@ -416,6 +418,12 @@ export default function SettingsPage() {
         {activeTab === "pets" && (
           <div className="bg-[var(--bg-secondary)] border border-[var(--border)] rounded-xl p-5">
             <PetsSettingsPanel />
+          </div>
+        )}
+
+        {activeTab === "macos" && (
+          <div className="bg-[var(--bg-secondary)] border border-[var(--border)] rounded-xl p-5">
+            <MacosComputerPanel />
           </div>
         )}
       </div>

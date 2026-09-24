@@ -1,6 +1,6 @@
 {
   "name": "crabagent-desktop",
-  "version": "0.15.4",
+  "version": "0.16.0",
   "description": "CrabAgent Desktop - AI Agent Platform",
   "main": "main.js",
   "author": "Xie Congling",
@@ -10,7 +10,8 @@
     "build": "electron-builder",
     "build:mac": "electron-builder --mac",
     "build:win": "electron-builder --win",
-    "postinstall": "electron-builder install-app-deps"
+    "postinstall": "electron-builder install-app-deps",
+    "build-helper": "swiftc -O -o helper/macos-helper helper/macos-helper.swift && codesign --force --sign 20965776A614DC76B57124899FA5017AE827659F helper/macos-helper"
   },
   "devDependencies": {
     "electron": "^35.7.5",
@@ -28,11 +29,15 @@
     },
     "files": [
       "main.js",
+      "computer-url-policy.js",
+      "computer-network-proxy.js",
       "preload.js",
       "build/icon.png",
       "build/trayTemplate.png",
       "package.json",
-      "node_modules/**/*"
+      "node_modules/**/*",
+      "helper/macos-helper",
+      "helper/macos-helper.swift"
     ],
     "extraResources": [
       {
@@ -90,6 +95,9 @@
         "en_US"
       ],
       "language": "2052"
-    }
+    },
+    "asarUnpack": [
+      "helper/**"
+    ]
   }
 }

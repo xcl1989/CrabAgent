@@ -30,6 +30,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   collaborationBrowserNavigate: (url) => ipcRenderer.invoke('collaboration-browser-navigate', url),
   collaborationBrowserAction: (action) => ipcRenderer.invoke('collaboration-browser-action', action),
   onCollaborationBrowserState: (callback) => ipcRenderer.on('collaboration-browser-state', (_event, state) => callback(state)),
+  macosComputerGetStatus: () => ipcRenderer.invoke('macos-computer-get-status'),
+  macosComputerOpenSettings: (kind) => ipcRenderer.invoke('macos-computer-open-settings', kind),
+  macosComputerSetConfig: (config) => ipcRenderer.invoke('macos-computer-set-config', config),
   onOpenSession: (callback) => ipcRenderer.on('open-session', (_event, sessionId) => callback(sessionId)),
   onPetDragDirection: (callback) => ipcRenderer.on('pet-drag-direction', (_event, data) => callback(data)),
 });

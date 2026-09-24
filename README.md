@@ -67,6 +67,7 @@ When the AI creates or opens a file, the interface splits: AI chat shrinks to a 
 | 🔬 **Prototype** | Split-pane: source code on left, live preview on right | AI builds an HTML/JS prototype |
 | 📝 **Meeting** | Structured meeting notes panel with action item extraction | You click "Start Meeting" |
 | 🌐 **Browser** | Real embedded browser with shared login state; AI navigates and interacts while you handle CAPTCHA and MFA | You click "Collaboration Browser" |
+| 🖥️ **macOS Computer Use** | AI observes and operates native macOS apps — accessibility tree, window capture, keyboard/mouse input. Opt-in, allowlisted apps only | Settings → macOS 控制 |
 
 ### Work Mode features
 
@@ -286,6 +287,24 @@ Work across multiple projects simultaneously. The workspace switcher shows a **l
 pip install 'crabagent[browser]'
 playwright install chromium
 ```
+
+### 🖥️ macOS Computer Use
+Let the AI observe and operate **native macOS applications** — not just the browser. Built on a signed one-shot Swift helper; all enforcement lives in native code, not prompts.
+
+```bash
+cd src/crabagent/electron && npm run build-helper   # compile + sign the helper
+```
+
+**Capabilities**
+- **AX-tree observation** — roles, labels, values and frames of every control (up to 300 nodes, values truncated)
+- **Per-window capture** — ScreenCaptureKit JPEG of a single window, never the whole screen
+- **Input** — CGEvent click, Unicode text (CJK + emoji), named keys, modifier combos (`cmd+s`), scroll
+
+**Safety model** — input is opt-in and gated by four independent layers: the macOS 控制 toggle in Settings, a per-app allowlist (unknown apps trigger a confirmation card; approval persists), frontmost-app verification before every action, and Secure Input / lock-screen refusal. `Cmd+Q` / `Cmd+Tab` are denied. Budgeted (60 actions / 20 observations / 15 min) and audited.
+
+**TCC stability** — the helper runs from `~/.crabagent/bin` (outside the app bundle) under a stable code-signing identity, so Accessibility and Screen Recording grants survive repacks.
+
+Requires macOS 13+; grant **Accessibility** and **Screen Recording** to CrabAgent in System Settings on first use.
 
 ### 🔌 MCP Client
 Connect external MCP servers (stdio + HTTP). Tools auto-discover and get prefixed.

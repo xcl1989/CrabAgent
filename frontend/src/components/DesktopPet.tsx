@@ -27,8 +27,21 @@ declare global {
       onPetDragDirection?: (callback: (data: { direction: string | null }) => void) => void;
       collaborationBrowserLayout?: (bounds: { x: number; y: number; width: number; height: number } | null, visible: boolean) => Promise<boolean>;
       collaborationBrowserNavigate?: (url: string) => Promise<void>;
-      collaborationBrowserAction?: (action: "back" | "forward" | "reload" | "stop") => Promise<void>;
-      onCollaborationBrowserState?: (callback: (state: { url: string; title: string; canGoBack: boolean; canGoForward: boolean; loading: boolean }) => void) => void;
+      collaborationBrowserAction?: (action: "back" | "forward" | "reload" | "stop" | "computer-stop" | "computer-resume") => Promise<void>;
+      onCollaborationBrowserState?: (callback: (state: { url: string; title: string; canGoBack: boolean; canGoForward: boolean; loading: boolean; paused?: boolean }) => void) => void;
+      macosComputerGetStatus?: () => Promise<{
+        config: { inputEnabled: boolean; allowlist: string[] };
+        permissions: { accessibility: boolean; screenRecording: boolean; secureInput: boolean; osVersion: string } | null;
+        helperAvailable: boolean;
+        error: string | null;
+      }>;
+      macosComputerSetConfig?: (config: { inputEnabled: boolean; allowlist: string[] }) => Promise<{
+        config: { inputEnabled: boolean; allowlist: string[] };
+        permissions: { accessibility: boolean; screenRecording: boolean; secureInput: boolean; osVersion: string } | null;
+        helperAvailable: boolean;
+        error: string | null;
+      }>;
+      macosComputerOpenSettings?: (kind: "accessibility" | "screenRecording") => Promise<boolean>;
     };
   }
 }

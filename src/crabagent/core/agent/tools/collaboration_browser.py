@@ -3,16 +3,20 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import time
+import uuid
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from crabagent.core.agent.tools.registry import registry
+from crabagent.core.computer.audit import record_browser_event
+from crabagent.core.computer.session import get_session
 
 _MAX_RESULT_CHARS = 12_000
 
 
-def _bridge_request(command: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+def _bridge_request(command: str, payload: dict[str, Any] | None = None, *, context: Any = None) -> dict[str, Any]:
     """Send one authenticated command to the local Electron browser bridge."""
     port = os.environ.get("CRAB_COLLAB_BROWSER_PORT", "")
     token = os.environ.get("CRAB_COLLAB_BROWSER_TOKEN", "")
@@ -22,7 +26,20 @@ def _bridge_request(command: str, payload: dict[str, Any] | None = None) -> dict
             "Open the Collaboration Browser page first."
         )
 
-    body = json.dumps({"command": command, "payload": payload or {}}).encode("utf-8")
+    action_payload = dict(payload or {})
+    mutating_commands = {
+        "navigate", "click", "commit_click", "point", "commit_point", "type", "scroll", "select", "press_key",
+    }
+    if command in mutating_commands:
+        action_payload.setdefault("action_id", str(uuid.uuid4()))
+    metadata = context.metadata if context is not None else {}
+    # The binding is derived from trusted Agent context, never a model argument.
+    task_id = str(metadata.get("_run_id") or metadata.setdefault("_computer_task_id", str(uuid.uuid4())))
+    body = json.dumps({
+        "protocol_version": 1, "runtime_id": "browser:collaboration",
+        "task_id": task_id, "trace_id": str(uuid.uuid4()),
+        "command": command, "payload": action_payload,
+    }).encode("utf-8")
     request = Request(
         f"http://127.0.0.1:{port}/",
         data=body,
@@ -57,12 +74,36 @@ def _remember_page_version(context: Any, value: dict[str, Any]) -> dict[str, Any
     """Keep the latest Bridge page version for safe follow-up tool calls."""
     if context is not None and isinstance(value.get("page_version"), int):
         context.metadata["_collab_browser_page_version"] = value["page_version"]
+        if "observation_id" in value:
+            context.metadata["_collab_browser_observation_id"] = value["observation_id"]
     return value
 
 
 async def _call(command: str, payload: dict[str, Any] | None, context: Any) -> str:
-    value = await asyncio.to_thread(lambda: _bridge_request(command, payload))
-    return _result(_remember_page_version(context, value))
+    session = get_session(context)
+    observing = command == "observe"
+    session.check(observe=observing)
+    started = time.monotonic()
+    try:
+        value = await asyncio.to_thread(lambda: _bridge_request(command, payload, context=context))
+    except Exception:
+        session.failures += 1
+        await record_browser_event(context, "action_result", action=command, decision="failed", started=started)
+        raise
+    session.record(value, observe=observing)
+    if not observing and command not in {"wait_for"} and context is not None:
+        context.metadata.pop("_collab_browser_observation_id", None)
+    _remember_page_version(context, value)
+    await record_browser_event(
+        context,
+        "observed" if command == "observe" else "action_result",
+        action=command,
+        decision="executed",
+        observation_id=value.get("observation_id", ""),
+        url=value.get("url", ""),
+        started=started,
+    )
+    return _result(value)
 
 
 def _versioned_payload(payload: dict[str, Any], page_version: int | None, context: Any) -> dict[str, Any]:
@@ -71,7 +112,13 @@ def _versioned_payload(payload: dict[str, Any], page_version: int | None, contex
         version = context.metadata.get("_collab_browser_page_version")
     if not isinstance(version, int):
         raise RuntimeError("STALE_PAGE: call collab_browser_observe before interacting with the page")
-    return {**payload, "page_version": version}
+    observation_id = context.metadata.get("_collab_browser_observation_id") if context is not None else None
+    if not observation_id:
+        raise RuntimeError("STALE_PAGE: call collab_browser_observe before interacting with the page")
+    current_version = context.metadata.get("_collab_browser_page_version")
+    if version != current_version:
+        raise RuntimeError("STALE_PAGE: supplied page version does not match the latest observation")
+    return {**payload, "page_version": version, "observation_id": observation_id}
 
 
 @registry.register(
@@ -114,9 +161,16 @@ async def collab_browser_observe(context=None) -> str:
     metadata={"source": "builtin", "category": "collaboration_browser"},
 )
 async def collab_browser_screenshot(context=None) -> str | list[dict[str, Any]]:
-    value = await asyncio.to_thread(lambda: _bridge_request("screenshot"))
+    session = get_session(context)
+    session.check(observe=True)
+    try:
+        value = await asyncio.to_thread(lambda: _bridge_request("computer_observe", context=context))
+    except Exception:
+        session.failures += 1
+        raise
     value = _remember_page_version(context, value)
     data_url = value.pop("data_url", "")
+    session.record(value, observe=True)
     if not data_url:
         return _result(value)
     return [
@@ -143,7 +197,81 @@ async def collab_browser_screenshot(context=None) -> str | list[dict[str, Any]]:
     metadata={"source": "builtin", "category": "collaboration_browser"},
 )
 async def collab_browser_click(index: int, page_version: int | None = None, context=None) -> str:
-    return await _call("click", _versioned_payload({"index": index}, page_version, context), context)
+    session = get_session(context)
+    session.check()
+    payload = _versioned_payload({"index": index}, page_version, context)
+    started = time.monotonic()
+    value = await asyncio.to_thread(lambda: _bridge_request("click", payload, context=context))
+    _remember_page_version(context, value)
+    if value.get("confirmation_required"):
+        await record_browser_event(
+            context,
+            "approval_requested",
+            action="click",
+            decision="confirmation_required",
+            observation_id=payload["observation_id"],
+            url=value.get("url", ""),
+            started=started,
+        )
+    if not value.get("confirmation_required"):
+        session.record(value)
+        context.metadata.pop("_collab_browser_observation_id", None)
+        await record_browser_event(
+            context,
+            "action_result",
+            action="click",
+            decision="executed",
+            observation_id=payload["observation_id"],
+            url=value.get("url", ""),
+            started=started,
+        )
+        return _result(value)
+    pending_id = value.get("pending_action_id")
+    if context is None or context.confirm_callback is None:
+        await record_browser_event(
+            context,
+            "action_result",
+            action="click",
+            decision="denied",
+            observation_id=payload["observation_id"],
+            started=started,
+        )
+        return _result({"status": "denied", "reason": "An interactive user confirmation is required."})
+    try:
+        approved = await context.confirm_callback(
+            "collab_browser_click",
+            {
+                "action": "click",
+                "label": value.get("label", ""),
+                "url": value.get("url", ""),
+            },
+        )
+    except Exception:
+        approved = False
+    if not approved:
+        await record_browser_event(
+            context,
+            "action_result",
+            action="click",
+            decision="denied",
+            observation_id=payload["observation_id"],
+            started=started,
+        )
+        return _result({"status": "denied", "reason": "The user did not approve the action."})
+    commit_payload = {**payload, "pending_action_id": pending_id}
+    result = await asyncio.to_thread(lambda: _bridge_request("commit_click", commit_payload, context=context))
+    session.record(result)
+    context.metadata.pop("_collab_browser_observation_id", None)
+    await record_browser_event(
+        context,
+        "action_result",
+        action="click",
+        decision="executed",
+        observation_id=payload["observation_id"],
+        url=result.get("url", ""),
+        started=started,
+    )
+    return _result(_remember_page_version(context, result))
 
 
 @registry.register(
@@ -266,5 +394,5 @@ async def collab_browser_wait_for_user(reason: str, context=None) -> str:
     answer = await context.ask_callback(question, ["我已完成，继续", "取消此浏览器任务"])
     if "取消" in answer:
         return "The user cancelled the browser task. Stop browser actions and explain the cancellation."
-    status = await asyncio.to_thread(lambda: _bridge_request("status"))
+    status = await asyncio.to_thread(lambda: _bridge_request("status", context=context))
     return "The user completed the human-only step. Re-observe the page before continuing.\n" + _result(status)

@@ -8,6 +8,27 @@ English version: [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
+## [0.16.0] — macOS Computer Use 与协作浏览器加固
+
+### 新增
+- **macOS 计算机使用（opt-in）** — 原生 Swift helper 让 AI 能够观察和操作本机 macOS 应用：AX 树观察（角色/标签/值/坐标，上限 300 节点）、ScreenCaptureKit 按窗口截图、CGEvent 输入（点击、含中日韩与 emoji 的 Unicode 文本输入、命名键与修饰键组合、滚动）。支持按 bundle ID 激活与自动启动应用；无窗口应用自动建窗（Cmd+N 惯例）。
+- **四层输入安全** — 输入由显式 opt-in 开关（设置 → macOS 控制）、按应用允许列表、每次动作前的前台应用校验、Secure Input / 锁屏拒绝四层门禁把关。`Cmd+Q`、`Cmd+Tab` 等逃逸路径被拒绝。全部强制逻辑位于 helper 与 Electron 主进程，不依赖提示词。
+- **动态应用允许流** — AI 目标应用不在允许列表时，用户收到确认卡片（"AI 请求获得对该应用窗口的键鼠控制权限"）；批准后应用自动入列并重试一次。拒绝则直接阻止、不重试。
+- **Python 工具层** — `macos_activate/windows/observe/capture/click/type/key/scroll` 八个工具，复用浏览器工具的预算与审计管线（60 动作 / 20 观察 / 15 分钟 / 连续 3 次失败）。
+- **设置 → macOS 控制** — 实时 TCC 权限状态（辅助功能、屏幕录制）带系统设置深链、输入 opt-in 开关、允许列表管理。
+- **稳定 TCC 身份** — helper 运行于 `~/.crabagent/bin`（app bundle 之外），使用代码签名证书签名，辅助功能与屏幕录制授权跨重打包保留。`npm run build-helper` 一键编译并签名。
+- **协作浏览器加固** — 所有流量经过每次启动随机密钥认证的本地代理，具备 DNS 重绑定防护（连接时校验并固定 IP）、系统代理串联（`PROXY`/`SOCKS5`）、重写的 IPv4/IPv6 私网判定。Chromium 错误页不再卡死观察循环；被遮挡按钮的点击会被命中测试拒绝。
+- **协作浏览器暂停/恢复** — 浏览器工具栏新增 AI 操作暂停/恢复控件，通过 `collaboration-browser-state` 呈现。
+
+### 修复
+- **`net.BlockList` 误判** — 向 `net.BlockList` 添加 IPv4-mapped IPv6 段（`::ffff:0:0/96`）后所有纯 IPv4 地址都会命中，导致全部网站无法打开。私网判定改为显式实现（v4/v6 分开）。
+- **系统代理被绕过** — 协作浏览器此前强制直连，Clash/企业代理用户无法打开被墙站点。现在按 URL 解析并遵循 `resolveProxy`（两段式 `PROXY host:port` 解析），无代理时回退到校验固定 IP 的直连。
+- **Chromium 错误页卡死观察循环** — 导航失败（如离线起始页）后 `location.href`（`chrome-error://…`）与 `webContents.getURL()` 永远不一致，每次观察必失败，3 次熔断后整个功能锁死。错误页现在被识别为可观察状态，AI 可以自行导航离开。
+- **设置页签与浏览器 UX** — 设置页签不再逐字换行（nowrap + 横向滚动，容器放宽至 `max-w-5xl`）；浏览器工具栏新增暂停指示；"去授权"深链会把系统设置调到前台。
+- **`electron.log` 无限增长**（曾达 7.6 GB）— 启动时与每 2000 行检查一次，超过 50 MB 自动滚动。
+
+---
+
 ## [0.15.2] — 稳定的实时流与消息加载
 
 ### 修复
