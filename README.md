@@ -291,12 +291,16 @@ playwright install chromium
 ### 🖥️ macOS Computer Use
 Let the AI observe and operate **native macOS applications** — not just the browser. Built on a signed one-shot Swift helper; all enforcement lives in native code, not prompts.
 
-> The helper ships pre-built in the packaged app — the step below is only for
-> developers building the desktop app from source.
+The helper ships **pre-built inside the `crabagent` wheel** — no manual build needed.
+After `pip install crabagent`, build the desktop app yourself:
 
 ```bash
-cd src/crabagent/electron && npm run build-helper   # compile + sign the helper
+crabagent --build-desktop        # builds the .app / .dmg (helper included)
 ```
+
+The `npm run build-helper` step below is only for developers who modify the
+helper's Swift source:
+
 
 **Capabilities**
 - **AX-tree observation** — roles, labels, values and frames of every control (up to 300 nodes, values truncated)

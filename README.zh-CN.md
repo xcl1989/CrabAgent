@@ -287,11 +287,14 @@ playwright install chromium
 ### 🖥️ macOS 计算机控制
 让 AI 观察和操作**本机 macOS 应用**——而不只是浏览器。基于签名的 Swift helper（一次性进程），全部强制逻辑在原生代码中实现。
 
-> helper 已预编译打包在桌面应用内；下面的命令仅**从源码构建桌面应用**的开发者需要执行一次。
+helper 已**预编译打包在 `crabagent` wheel 内**，无需手动构建。`pip install crabagent` 后即可自行打包桌面应用：
 
 ```bash
-cd src/crabagent/electron && npm run build-helper   # 编译并签名 helper
+crabagent --build-desktop        # 构建 .app / .dmg（helper 已包含）
 ```
+
+下面的 `npm run build-helper` 仅在**修改 helper Swift 源码**后需要执行：
+
 
 **能力**
 - **AX 树观察** — 每个控件的角色、标签、值与坐标（上限 300 节点，值截断）
