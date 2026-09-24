@@ -1,6 +1,6 @@
 # 🦀 CrabAgent
 
-> **AI Knowledge Work Platform** — Chat when you need answers, Work when you need results. Two modes, one seamless experience. Runs in terminal, browser, or desktop.
+> **AI Knowledge Work Platform** — Chat when you need answers, Work when you need results, Computer Use when the task is on your desktop. One agent across terminal, browser, and native macOS apps.
 
 CrabAgent is a local-first AI platform with **two working modes** that adapt to what you're doing:
 
