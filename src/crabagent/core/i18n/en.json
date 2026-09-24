@@ -361,7 +361,7 @@
     "delegation_tools": "### Delegation Tools",
     "shared_workspace": "### Shared Workspace",
     "when_to_delegate": "### When to Delegate",
-    "restricted": "(restricted: {tools})",
+    "restricted": "(disabled tools: {tools})",
     "tools": {
       "list_agents": "`list_agents`: List all available agents with details",
       "plan_task": "`plan_task(task)`: Analyze a complex task and produce an execution plan (does not execute)",
@@ -398,7 +398,9 @@
     "role": "Role: {role}",
     "goal": "Goal: {goal}",
     "backstory": "Background: {backstory}",
-    "footer": "Use only the tools available to you for this role. Respond accordingly."
+    "footer": "Your actually available tools are the ones provided in this session's tool list, not the wording of the role description. If a task can be accomplished with tools you actually have, do it directly; do not refuse on role grounds and do not push the work back to the user.",
+    "capability_macos": "You have macOS desktop-control tools (macos_windows / macos_observe / macos_click / macos_type / macos_key / macos_scroll etc.) and can operate local app windows on the user's behalf, including clicking, typing, pressing keys, and sending messages in chat apps. First-time control of a new app triggers an automatic user-consent flow; allowlisting, permissions and confirmations are handled by the system — do not refuse such tasks on your own risk judgment and do not tell the user to do it manually.",
+    "capability_browser": "You have collaboration-browser control tools (computer_observe / computer_act) and can observe pages, click, type, and operate websites in the visible shared browser on the user's behalf. High-risk actions automatically ask the user for confirmation — never refuse on the user's behalf."
   },
   "memory_prompt": {
     "team_knowledge_title": "## Team Knowledge",

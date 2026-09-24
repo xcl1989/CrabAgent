@@ -46,8 +46,10 @@ pytest tests
 
 ## macOS Computer Use（M0/M1）
 - **项目里有两个 electron 目录**：根目录 `electron/` 是陈旧遗留，**当前开发在 `src/crabagent/electron/`**（打包产物确认来自这里）。构建/打包一律用后者。
-- Swift helper：`src/crabagent/electron/helper/macos-helper.swift`，`npm run build-helper`（在 src/crabagent/electron 下）编译。
+- Swift helper：`src/crabagent/electron/helper/macos-helper.swift`，`npm run build-helper`（在 src/crabagent/electron 下）编译（bash 里需先 `export PATH="/usr/local/bin:$PATH"` 才有 npm/swiftc）。
 - **helper 传输是一次性调用**（请求临时文件 + `--secret` nonce，stdout 单行 JSON，进程即退）。**不要改回交互式 stdio**——Swift readLine/手写 read(0) 在 macOS 26 长驻进程 + 交互管道下都会永久阻塞（EOF 才恢复），已实测。
+- **改 helper 后必须重新打包 app 才对打包版生效**：打包版每次 helper 调用会按 mtime/size 对比，把 `~/.crabagent/bin/macos-helper` 稳定副本**回滚成包内旧版**，仅手动替换稳定副本无效。开发期可用命令行直调 helper 验证只读命令（capture/windows/permissions）：`--request-file` + `--secret` 自洽校验，capture 不需要 CRAB_MACOS_INPUT。
+- **坐标系统一约定（2026-09 修复）**：`macos_capture` 按 SCWindow 点尺寸 1:1 截图（1 像素 == 1 逻辑点），响应带 `windowFrame`；`macos_click` 用全局屏幕点坐标，换算 `global = windowFrame.origin + 像素坐标`。**不要**设 scalesToFit=false 且不设 width/height——ScreenCaptureKit 会返回任意画布（如 1920x1080 黑边信箱），坐标无法映射。
 - macOS 26 上 Electron `resolveProxy` 需用 `session.defaultSession.resolveProxy(url)`（`app.session` 不存在），且 url 必须带协议；返回格式是 `PROXY host:port` 两段式（不是三段）。
 - `net.BlockList` 在加入 IPv4-mapped IPv6 段（`::ffff:0:0/96`）后会误判纯 IPv4——私网判定已改为手写，勿改回。
 - Chrome 等真实页面上：无 `type` 属性、不在表单内的按钮可能被误判高风险 submit——submit 判定必须同时要求 `Boolean(form)`。

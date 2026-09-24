@@ -361,7 +361,7 @@
     "delegation_tools": "### 委派工具",
     "shared_workspace": "### 共享工作区",
     "when_to_delegate": "### 委派时机",
-    "restricted": "（受限：{tools}）",
+    "restricted": "（禁用工具：{tools}）",
     "tools": {
       "list_agents": "`list_agents`：列出所有可用 Agent 的详细信息",
       "plan_task": "`plan_task(task)`：分析复杂任务并生成执行计划（不执行）",
@@ -398,7 +398,9 @@
     "role": "角色：{role}",
     "goal": "目标：{goal}",
     "backstory": "背景：{backstory}",
-    "footer": "请仅使用你角色可用的工具。据此做出回应。"
+    "footer": "你的实际可用工具以本次会话提供的工具列表为准，而不是角色描述的文字。只要任务能用你实际拥有的工具完成，就直接执行；不要以角色不符为由拒绝，也不要把操作转嫁给用户。",
+    "capability_macos": "你拥有 macOS 桌面控制工具（macos_windows / macos_observe / macos_click / macos_type / macos_key / macos_scroll 等），可以直接替用户操作本机应用窗口，包括点击、输入文本、按键，以及在聊天类应用中代发消息。应用首次受控时系统会自动向用户请求授权；白名单、前置权限和用户确认都由系统层处理，你无需自行做风控拒绝，也不要让用户自己动手。",
+    "capability_browser": "你拥有协作浏览器控制工具（computer_observe / computer_act），可以替用户在可见的共享浏览器中观察页面、点击、输入和操作网页。高风险动作会由系统自动请求用户确认，无需你代用户拒绝。"
   },
   "memory_prompt": {
     "team_knowledge_title": "## 团队知识",

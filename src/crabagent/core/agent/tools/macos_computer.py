@@ -24,9 +24,9 @@ async def _call_bridge(command: str, payload: dict[str, Any], context: Any) -> d
 
 @registry.register(
     name="macos_activate",
-    description="Activate (bring to front) or launch a macOS app by bundle ID. Launching and "
-    "activation both require the app to be in the allowlist; the user is asked to confirm "
-    "new apps. Use macos_windows afterwards to find the window.",
+    description="Bring a local macOS app to the front or launch it by bundle ID, so its windows "
+    "can be inspected and operated on the user's behalf. First-time control of a new app asks "
+    "the user for consent automatically. Use macos_windows afterwards to find the window.",
     parameters={
         "type": "object",
         "properties": {"bundle_id": {"type": "string"}},
@@ -56,7 +56,8 @@ async def macos_activate(bundle_id: str, context=None) -> str:
 @registry.register(
     name="macos_windows",
     description="List on-screen macOS app windows (windowId, pid, bundleId, title, bounds). "
-    "Use a windowId with macos_observe before acting.",
+    "Start here to operate a local app on the user's behalf: pick a window, then macos_observe "
+    "it before acting.",
     parameters={"type": "object", "properties": {}},
     metadata={"source": "builtin", "category": "computer"},
 )
@@ -72,8 +73,9 @@ async def macos_windows(context=None) -> str:
 
 @registry.register(
     name="macos_observe",
-    description="Observe an allowlisted macOS app window: accessibility tree with roles, labels, "
-    "values and frames. Requires macOS input to be enabled and permissions granted.",
+    description="Inspect a local macOS app window's accessibility tree (roles, labels, values, "
+    "frames) to plan clicks or typing on the user's behalf. Returns structured elements; macOS "
+    "accessibility permission must be granted on this machine.",
     parameters={
         "type": "object",
         "properties": {
@@ -103,8 +105,8 @@ async def macos_observe(window_id: int, pid: int, context=None) -> str:
 
 @registry.register(
     name="macos_capture",
-    description="Capture a screenshot of one macOS app window (JPEG). Requires Screen Recording "
-    "permission.",
+    description="Screenshot one local macOS app window (JPEG) to check UI state before or after "
+    "acting on the user's behalf. Requires Screen Recording permission.",
     parameters={
         "type": "object",
         "properties": {"window_id": {"type": "integer"}},
@@ -127,6 +129,13 @@ async def macos_capture(window_id: int, context=None) -> list[dict[str, Any]]:
     await record_browser_event(context, "observed", action="macos_capture", decision="executed", url="")
     data_url = value.pop("dataUrl", "")
     text = _result(value)
+    if isinstance(value, dict) and "windowFrame" in value:
+        frame = value["windowFrame"] or {}
+        ox, oy = frame.get("x", 0), frame.get("y", 0)
+        text += (
+            "\n\n[坐标换算] 截图 1 像素 == 窗口 1 逻辑点。macos_click 需要全局屏幕坐标："
+            f"global_x = {ox} + 像素x，global_y = {oy} + 像素y。"
+        )
     if not data_url:
         return [{"type": "text", "text": text}]
     return [
@@ -177,8 +186,12 @@ async def _input_with_allow_flow(
 
 @registry.register(
     name="macos_click",
-    description="Click at coordinates inside a macOS app window (global screen coordinates from "
-    "the window frame). The target app must be allowlisted and frontmost.",
+    description="Click inside a local macOS app window (buttons, links, list rows) to carry out "
+    "actions the user requested, e.g. operating a chat app to send a message. Coordinates are "
+    "GLOBAL screen points (origin = top-left of the main display). To convert from a "
+    "macos_capture image: capture is 1 pixel == 1 window point, so global = windowFrame.x/y + "
+    "pixel. The app must be allowlisted and frontmost — first-time control of a new app asks "
+    "the user to confirm automatically.",
     parameters={
         "type": "object",
         "properties": {
@@ -209,7 +222,9 @@ async def macos_click(window_id: int, pid: int, x: int, y: int, context=None) ->
 
 @registry.register(
     name="macos_type",
-    description="Type Unicode text into the focused macOS app window (max 10000 bytes).",
+    description="Type Unicode text into a local macOS app window on the user's behalf, e.g. "
+    "composing a message in a chat app (max 10000 bytes). Observe the window first with "
+    "macos_observe or macos_capture.",
     parameters={
         "type": "object",
         "properties": {
@@ -238,8 +253,9 @@ async def macos_type(window_id: int, text: str, context=None) -> str:
 
 @registry.register(
     name="macos_key",
-    description="Press a named key (return/escape/tab/space/delete/up/down/left/right) in the "
-    "focused macOS app window.",
+    description="Press a named key (return/escape/tab/space/delete/up/down/left/right) in a "
+    "local macOS app window on the user's behalf, e.g. pressing return to send a composed "
+    "message.",
     parameters={
         "type": "object",
         "properties": {
@@ -268,7 +284,8 @@ async def macos_key(window_id: int, key: str, context=None) -> str:
 
 @registry.register(
     name="macos_scroll",
-    description="Scroll inside a macOS app window. Positive scrolls down (-2000..2000 pixels).",
+    description="Scroll inside a local macOS app window on the user's behalf. Positive scrolls "
+    "down (-2000..2000 pixels).",
     parameters={
         "type": "object",
         "properties": {

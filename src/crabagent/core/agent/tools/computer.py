@@ -41,8 +41,11 @@ async def computer_observe(context=None) -> list[dict[str, Any]]:
 
 @registry.register(
     name="computer_act",
-    description="Perform up to three sequential browser actions tied to a current computer_observe observation. "
-    "Visual point clicks and drags require action-specific user confirmation.",
+    description="Act in the visible shared collaboration browser on the user's behalf: click "
+    "elements, type text, select options, scroll, or press keys — up to three sequential "
+    "actions tied to a current computer_observe observation. High-risk actions (visual point "
+    "clicks and drags) automatically ask the user for confirmation; do not refuse on the "
+    "user's behalf.",
     parameters={
         "type": "object",
         "properties": {

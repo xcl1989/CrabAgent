@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from crabagent.core.database import AgentRun, Task, TaskEventLog
 from crabagent.core.task.events import broadcast_task_event
-from crabagent.core.task.status import TaskStatus
+from crabagent.core.task.status import CLOSED_TASK_STATUSES, TaskStatus
 from crabagent.core.task.store import get_task as _get_task
 from crabagent.core.task.store import update_task as _update_task
 
@@ -168,12 +168,25 @@ async def finish_agent_run(
             await refresh_auto_checks(db, run.task_id, user_id, workspace=task_row.workspace, run_id=run_id)
             task_row.active_run_id = None
             task_row.updated_at = now
-            if result_summary and not task_row.result_summary:
+            summary_fresh = bool(result_summary) and not task_row.result_summary
+            if summary_fresh:
                 task_row.result_summary = result_summary
             await db.commit()
             verdict = await judge_task(db, run.task_id, user_id)
             logger.info("Task %s completion verdict: %s", run.task_id, verdict)
             final_task = await _get_task(db, run.task_id, user_id)
+
+            # Duplicate-card guard: when this run changed nothing (the task
+            # already sat in the same closed state before it started — e.g. a
+            # follow-up Q&A run linked to a finished task), re-judging yields
+            # an identical verdict. Broadcasting again would emit a second
+            # identical result card for the same completion episode.
+            if (
+                task.get("status") == final_task["status"]
+                and not summary_fresh
+                and final_task["status"] in CLOSED_TASK_STATUSES
+            ):
+                return final_task
 
             # Rich card payload: available artifact names + required check counts.
             import os as _os
@@ -260,19 +273,26 @@ async def finish_agent_run(
     await db.commit()
     final_task = await _get_task(db, run.task_id, user_id)
     if final_task:
-        broadcast_task_event(
-            "task_updated",
-            {
-                "task_id": run.task_id,
-                "status": final_task["status"],
-                "run_id": run_id,
-                "session_id": run.session_id or final_task.get("source_session") or "",
-                "title": final_task["title"],
-                "result_summary": (final_task.get("result_summary") or "")[:300],
-                "warning_summary": (final_task.get("warning_summary") or "")[:300],
-                "verification_status": final_task.get("verification_status") or "unverified",
-            },
+        # Same duplicate-card guard as the verdict path: skip the broadcast
+        # when the run left an already-closed task unchanged.
+        unchanged_closed = (
+            final_task["status"] == task.get("status")
+            and final_task["status"] in CLOSED_TASK_STATUSES
         )
+        if not unchanged_closed:
+            broadcast_task_event(
+                "task_updated",
+                {
+                    "task_id": run.task_id,
+                    "status": final_task["status"],
+                    "run_id": run_id,
+                    "session_id": run.session_id or final_task.get("source_session") or "",
+                    "title": final_task["title"],
+                    "result_summary": (final_task.get("result_summary") or "")[:300],
+                    "warning_summary": (final_task.get("warning_summary") or "")[:300],
+                    "verification_status": final_task.get("verification_status") or "unverified",
+                },
+            )
     return final_task
 
 

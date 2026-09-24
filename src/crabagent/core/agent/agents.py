@@ -177,7 +177,9 @@ def _translate_agent_field(agent_name: str, field: str, original: str, locale: s
     return translated or original
 
 
-def build_agent_switch_msg(agent_def: dict, locale: str = "en") -> dict:
+def build_agent_switch_msg(
+    agent_def: dict, locale: str = "en", extra_lines: list[str] | None = None
+) -> dict:
     from crabagent.core.i18n import t
 
     agent_name = agent_def["name"]
@@ -193,8 +195,37 @@ def build_agent_switch_msg(agent_def: dict, locale: str = "en") -> dict:
     ]
     if _b:
         lines.append(t("agent_switch.backstory", locale, backstory=_b))
+    # Dynamic capability hints (desktop control, browser control) so the model
+    # knows its real toolset instead of inferring it from the role wording.
+    lines.extend(extra_lines or [])
     lines.append(t("agent_switch.footer", locale))
     return {"role": "user", "content": "\n".join(lines), "agent": agent_name}
+
+
+# Tool-name prefixes that indicate desktop/GUI control capability.
+_MACOS_TOOL_PREFIX = "macos_"
+_BROWSER_COMPUTER_TOOLS = {"computer_observe", "computer_act"}
+
+
+def capability_hint_lines(tool_names, locale: str = "en") -> list[str]:
+    """Return localized capability hints for the desktop-control tools present
+    in ``tool_names``.
+
+    Injected into agent-switch messages and sub-agent system prompts so the
+    model is told what it can actually do (e.g. operate local app windows),
+    instead of having to guess from a long tool list plus a narrow role text.
+    Without this, models tend to refuse GUI tasks ("not my role") even when
+    the tools are available.
+    """
+    from crabagent.core.i18n import t
+
+    names = set(tool_names or [])
+    lines: list[str] = []
+    if any(n.startswith(_MACOS_TOOL_PREFIX) for n in names):
+        lines.append(t("agent_switch.capability_macos", locale))
+    if _BROWSER_COMPUTER_TOOLS & names:
+        lines.append(t("agent_switch.capability_browser", locale))
+    return lines
 
 
 def _build_system_prompt(
@@ -202,6 +233,7 @@ def _build_system_prompt(
     has_shared: bool = False,
     can_request_help: bool = False,
     locale: str = "en",
+    extra_lines: list[str] | None = None,
 ) -> str:
     from crabagent.core.i18n import t
 
@@ -215,6 +247,8 @@ def _build_system_prompt(
     ]
     if _b:
         parts.append(t("agent_system.backstory", locale, backstory=_b))
+    # Capability hints keep the model aligned with its real toolset.
+    parts.extend(extra_lines or [])
     parts.append(t("agent_system.task_instruction", locale))
     if has_shared:
         parts.append(t("agent_system.shared_instruction", locale))
@@ -641,6 +675,7 @@ async def spawn_sub_agent(
             has_shared=has_shared,
             can_request_help=can_request_help,
             locale=sub_locale,
+            extra_lines=capability_hint_lines(set(sub_registry._tools.keys()), sub_locale),
         ),
     )
 

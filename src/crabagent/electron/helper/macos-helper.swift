@@ -204,7 +204,14 @@ func capturePayload(_ request: [String: Any]) async -> Result<[String: Any], Hel
         }
         let filter = SCContentFilter(desktopIndependentWindow: scWindow)
         let config = SCStreamConfiguration()
-        config.scalesToFit = false
+        // 1 image pixel == 1 window point. Unset width/height made ScreenCaptureKit
+        // return an arbitrary canvas (e.g. 1920x1080 with the window letterboxed into
+        // it), so image pixels could not be mapped to click coordinates. Capturing at
+        // the window's point size makes conversion exact: global = windowFrame.origin + pixel.
+        let frame = scWindow.frame
+        config.width = max(1, Int(frame.width))
+        config.height = max(1, Int(frame.height))
+        config.scalesToFit = true
         config.capturesAudio = false
         config.showsCursor = false
         let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
@@ -220,6 +227,10 @@ func capturePayload(_ request: [String: Any]) async -> Result<[String: Any], Hel
         return .success([
             "windowId": windowId,
             "width": cgImage.width, "height": cgImage.height,
+            "windowFrame": [
+                "x": Int(frame.origin.x), "y": Int(frame.origin.y),
+                "width": Int(frame.width), "height": Int(frame.height),
+            ],
             "mime": "image/jpeg", "dataUrl": "data:image/jpeg;base64,\(jpeg.base64EncodedString())",
         ])
     } catch {

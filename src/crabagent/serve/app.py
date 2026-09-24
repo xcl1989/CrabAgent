@@ -194,6 +194,16 @@ async def lifespan(app: FastAPI):
                     # merge them with a legacy/sparse card because that would
                     # overwrite the previous result during re-completion.
                     if incoming_run != old_run:
+                        # Identical re-broadcast of an unchanged closed task
+                        # (e.g. a follow-up run linked to a finished task) is
+                        # not a new episode: skip instead of duplicating.
+                        same_content = all(
+                            old.get(k) == v
+                            for k, v in payload.items()
+                            if k not in ("run_id", "files", "checks")
+                        )
+                        if same_content:
+                            return
                         continue
                     if payload != old:
                         m.content = json_dumps(payload)  # upgrade in place

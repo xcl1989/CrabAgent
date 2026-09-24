@@ -229,11 +229,15 @@ async def prompt_async(
 
     # If agent changed, persist agent_switch BEFORE the user message
     if agent_changed and effective_agent != "default":
-        from crabagent.core.agent.agents import build_agent_switch_msg, get_agent
+        from crabagent.core.agent.agents import build_agent_switch_msg, capability_hint_lines, get_agent
 
         agent_profile = await get_agent(effective_agent)
         if agent_profile:
-            switch_msg = build_agent_switch_msg(agent_profile, locale=locale)
+            switch_msg = build_agent_switch_msg(
+                agent_profile,
+                locale=locale,
+                extra_lines=capability_hint_lines(registry._tools.keys(), locale),
+            )
             switch_seq = user_msg_seq
             await save_message(
                 db,
@@ -247,11 +251,15 @@ async def prompt_async(
             user_msg_seq += 1  # make room for the user message
     elif agent_changed and effective_agent == "default":
         # Switching from a specific agent back to default
-        from crabagent.core.agent.agents import build_agent_switch_msg, get_agent
+        from crabagent.core.agent.agents import build_agent_switch_msg, capability_hint_lines, get_agent
 
         default_profile = await get_agent("__default__")
         if default_profile:
-            switch_msg = build_agent_switch_msg(default_profile, locale=locale)
+            switch_msg = build_agent_switch_msg(
+                default_profile,
+                locale=locale,
+                extra_lines=capability_hint_lines(registry._tools.keys(), locale),
+            )
             switch_seq = user_msg_seq
             await save_message(
                 db,
@@ -685,14 +693,22 @@ Use ordinary Markdown when a visualization is not helpful.
     # Add agent_switch message AFTER history, RIGHT BEFORE the user message
     # so the LLM sees the role switch as the most recent context before responding
     if agent_changed:
+        from crabagent.core.agent.agents import capability_hint_lines
+
+        # Capability hints must reflect the FILTERED registry (after deny rules).
+        _cap_lines = capability_hint_lines(context.tool_registry._tools.keys(), locale)
         if effective_agent == "default":
             default_profile = await get_agent("__default__")
             if default_profile:
-                context.messages.append(build_agent_switch_msg(default_profile, locale=locale))
+                context.messages.append(
+                    build_agent_switch_msg(default_profile, locale=locale, extra_lines=_cap_lines)
+                )
         else:
             agent_def = await get_agent(effective_agent)
             if agent_def:
-                context.messages.append(build_agent_switch_msg(agent_def, locale=locale))
+                context.messages.append(
+                    build_agent_switch_msg(agent_def, locale=locale, extra_lines=_cap_lines)
+                )
 
         # Inject per-agent lessons (not cached in system prompt)
         try:
