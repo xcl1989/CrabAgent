@@ -13,6 +13,7 @@ from crabagent.core.goals.service import (
     checkpoint_goal,
     create_goal,
     get_current_goal,
+    get_latest_goal,
     goal_to_dict,
     update_goal,
 )
@@ -55,6 +56,10 @@ class UpdateGoalRequest(BaseModel):
     evidence: str | None = Field(default=None, max_length=4000)
     blocker: str | None = Field(default=None, max_length=4000)
     stop_reason: str | None = Field(default=None, max_length=200)
+    execution_model: str | None = Field(default=None, max_length=200)
+    execution_provider: str | None = Field(default=None, max_length=100)
+    execution_agent: str | None = Field(default=None, max_length=100)
+    reasoning_effort: str | None = Field(default=None, max_length=50)
 
 
 class CheckpointRequest(BaseModel):

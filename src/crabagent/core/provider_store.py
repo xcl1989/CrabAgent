@@ -81,7 +81,10 @@ class ProviderInfo:
 
 CHATGPT_MODELS = [
     # Current generation (verified on Plus 2026-09 via GET /codex/models)
+    # GPT-6 family reports max_context_window = 872_000.
     "gpt-6-astra",
+    "gpt-6-sol",
+    "gpt-6-luna",
     "gpt-reserve",
     "gpt-5.6-sol",
     "gpt-5.6-terra",

@@ -157,6 +157,10 @@ async def update_goal(
     evidence: str | None = None,
     blocker: str | None = None,
     stop_reason: str | None = None,
+    execution_model: str | None = None,
+    execution_provider: str | None = None,
+    execution_agent: str | None = None,
+    reasoning_effort: str | None = None,
 ) -> Goal:
     if status is not None:
         if status not in VALID_STATUSES:
@@ -186,8 +190,33 @@ async def update_goal(
         goal.blocker = blocker.strip()
     if stop_reason is not None:
         goal.stop_reason = stop_reason.strip()
+    # Sync execution settings (e.g. user switched model in the selector):
+    # keep the goal's frozen execution config aligned with the session UI,
+    # otherwise prompt.py keeps overriding context.model with stale values.
+    execution_changed = False
+    if execution_model is not None and execution_model.strip() != goal.execution_model:
+        goal.execution_model = execution_model.strip()
+        execution_changed = True
+    if execution_provider is not None and execution_provider.strip() != goal.execution_provider:
+        goal.execution_provider = execution_provider.strip()
+        execution_changed = True
+    if execution_agent is not None and execution_agent.strip() != goal.execution_agent:
+        goal.execution_agent = execution_agent.strip()
+        execution_changed = True
+    if reasoning_effort is not None and reasoning_effort.strip() != goal.reasoning_effort:
+        goal.reasoning_effort = reasoning_effort.strip()
+        execution_changed = True
     goal.updated_at = datetime.now()
-    await record_event(db, goal, "updated", f"Goal status: {goal.status}")
+    if execution_changed:
+        await record_event(
+            db,
+            goal,
+            "updated",
+            "Execution settings synced: "
+            f"model={goal.execution_model} provider={goal.execution_provider} effort={goal.reasoning_effort}",
+        )
+    else:
+        await record_event(db, goal, "updated", f"Goal status: {goal.status}")
     return goal
 
 

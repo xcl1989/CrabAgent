@@ -1637,7 +1637,14 @@ def _run_build_desktop():
     print(f"Target platform: {platform.system()}")
 
     try:
-        shutil.copytree(electron_src, work_dir / "electron")
+        # Copy the electron template WITHOUT node_modules / lock files:
+        # npm install below needs a fresh install, and copying the template's
+        # node_modules would turn .bin symlinks into real files (copytree
+        # follows symlinks by default), breaking electron-builder's shim.
+        shutil.copytree(
+            electron_src, work_dir / "electron",
+            ignore=shutil.ignore_patterns("node_modules", "package-lock.json", "dist-electron"),
+        )
         shutil.copy2(spec_src, work_dir / "crabagent.spec")
         # Fix spec paths for pip-installed layout (no src/ directory)
         _fix_spec_paths(work_dir / "crabagent.spec", pkg_dir)
@@ -1657,9 +1664,25 @@ def _run_build_desktop():
                     print(f"   Warning: could not generate icon.ico ({e})")
 
         print("\n[1/4] Installing Electron dependencies...")
-        npm_result = subprocess.run(["npm", "install", "--silent"], cwd=str(work_dir / "electron"),
+        # Ensure npm is reachable even when the default PATH lacks the common
+        # install locations (e.g. a ~/.local node without npm shadows them).
+        build_env = dict(os.environ)
+        if not shutil.which("npm", path=build_env.get("PATH", "")):
+            for _cand in ("/usr/local/bin", "/opt/homebrew/bin"):
+                if Path(_cand, "npm").exists():
+                    build_env["PATH"] = _cand + os.pathsep + build_env.get("PATH", "")
+                    break
+        npm_cmd = ["npm", "install", "--silent"]
+        npm_result = subprocess.run(npm_cmd, cwd=str(work_dir / "electron"),
                                    capture_output=True, encoding='utf-8', errors='replace', timeout=600,
-                                   shell=is_windows)
+                                   env=build_env, shell=is_windows)
+        if npm_result.returncode != 0:
+            # Retry once: concurrent bin-linking can rarely leave broken .bin
+            # shims; a fresh install pass fixes them.
+            print("   npm install failed once, retrying...")
+            npm_result = subprocess.run(npm_cmd, cwd=str(work_dir / "electron"),
+                                        capture_output=True, encoding='utf-8', errors='replace', timeout=600,
+                                        env=build_env, shell=is_windows)
         if npm_result.returncode != 0:
             print("npm install failed:", npm_result.stderr[-300:])
             sys.exit(1)
@@ -1734,10 +1757,10 @@ def _run_build_desktop():
                 except Exception as e:
                     print(f"   Warning: Could not fix Python.framework structure: {e}")
             eb_args.append("--config.mac.identity=null")
-        env = {**dict(os.environ), "CSC_IDENTITY_AUTO_DISCOVERY": "false"}
+        env = {**build_env, "CSC_IDENTITY_AUTO_DISCOVERY": "false"}
         electron_result = subprocess.run(
             eb_args,
-            cwd=str(work_dir / "electron"), capture_output=True, encoding='utf-8', errors='replace', timeout=300,
+            cwd=str(work_dir / "electron"), capture_output=True, encoding='utf-8', errors='replace', timeout=900,
             env=env, shell=is_windows,
         )
         if is_windows:

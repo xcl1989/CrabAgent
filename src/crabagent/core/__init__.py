@@ -19,15 +19,21 @@ def configure_litellm() -> None:
     # Register ChatGPT subscription models in litellm's model_cost dict.
     # These models have no per-token cost (they use subscription quota), but litellm
     # requires them to be registered or it raises "model not mapped" errors.
+    # GPT-6 family: 872K context (per GET /codex/models, 2026-09), 128K max output.
     # GPT-5.6 family: 1.05M context, 128K max output.
     # Legacy models: 270K context, 128K max output.
-    _CHATGPT_LARGE_CTX = {"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"}
+    _CHATGPT_CTX_OVERRIDES = {
+        "gpt-6-astra": 872_000,
+        "gpt-6-sol": 872_000,
+        "gpt-6-luna": 872_000,
+        "gpt-reserve": 872_000,
+        "gpt-5.6-sol": 1_050_000,
+        "gpt-5.6-terra": 1_050_000,
+        "gpt-5.6-luna": 1_050_000,
+    }
     for m in CHATGPT_MODELS:
         key = f"chatgpt/{m}"
-        if m in _CHATGPT_LARGE_CTX:
-            max_input = 1_050_000
-        else:
-            max_input = 270_000
+        max_input = _CHATGPT_CTX_OVERRIDES.get(m, 270_000)
         # Always set to ensure correct values even if litellm has built-in entries
         litellm.model_cost[key] = {
             "max_tokens": 128_000,

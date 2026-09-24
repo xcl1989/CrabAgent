@@ -60,6 +60,49 @@ async def test_update_goal_requires_blocker_for_unmet_status():
 
 
 @pytest.mark.asyncio
+async def test_update_goal_syncs_execution_settings_and_records_event(monkeypatch: pytest.MonkeyPatch):
+    events = []
+
+    async def fake_event(_db, _goal, event_type, detail, data=None):
+        events.append((event_type, detail, data))
+
+    goal = _goal(execution_model="gpt-6-sol", execution_provider="chatgpt", reasoning_effort="medium")
+    monkeypatch.setattr(service, "record_event", fake_event)
+
+    updated = await service.update_goal(
+        SimpleNamespace(),
+        goal,
+        execution_model="glm-5.2",
+        execution_provider="zhipu",
+        reasoning_effort="high",
+    )
+
+    assert updated is goal
+    assert goal.execution_model == "glm-5.2"
+    assert goal.execution_provider == "zhipu"
+    assert goal.reasoning_effort == "high"
+    assert len(events) == 1
+    assert events[0][0] == "updated"
+    assert "model=glm-5.2" in events[0][1]
+
+
+@pytest.mark.asyncio
+async def test_update_goal_skips_execution_event_when_unchanged(monkeypatch: pytest.MonkeyPatch):
+    events = []
+
+    async def fake_event(_db, _goal, event_type, detail, data=None):
+        events.append((event_type, detail, data))
+
+    goal = _goal(execution_model="gpt-6-sol")
+    monkeypatch.setattr(service, "record_event", fake_event)
+
+    await service.update_goal(SimpleNamespace(), goal, execution_model="gpt-6-sol")
+
+    assert goal.execution_model == "gpt-6-sol"
+    assert events == [("updated", "Goal status: active", None)]
+
+
+@pytest.mark.asyncio
 async def test_checkpoint_updates_goal_and_records_checkpoint_event(monkeypatch: pytest.MonkeyPatch):
     events = []
 

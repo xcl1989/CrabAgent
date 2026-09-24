@@ -449,6 +449,54 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
     }
   }, [activeSession]);
 
+  // Sync user-driven model/provider/effort changes into the active goal.
+  // Without this, prompt.py keeps overriding context.model with the goal's
+  // frozen execution_model, so switching the selector had no effect while a
+  // goal was running.
+  const syncGoalExecution = useCallback(
+    async (patch: { execution_model?: string; execution_provider?: string; reasoning_effort?: string }) => {
+      if (!activeSession || !goal) return;
+      if (goal.status && ["complete", "cleared"].includes(goal.status)) return;
+      const unchanged =
+        (patch.execution_model === undefined || patch.execution_model === goal.execution_model)
+        && (patch.execution_provider === undefined || patch.execution_provider === goal.execution_provider)
+        && (patch.reasoning_effort === undefined || patch.reasoning_effort === goal.reasoning_effort);
+      if (unchanged) return;
+      try {
+        const { goal: updated } = await goalsApi.updateGoal(activeSession.session_id, patch);
+        setGoal(updated);
+      } catch {
+        // Non-fatal: goal update is best-effort; the run still uses the selector value via req.model.
+      }
+    },
+    [activeSession, goal],
+  );
+
+  const handleModelChange = useCallback(
+    (modelId: string, providerName: string | null) => {
+      setSelectedModel(modelId);
+      setSelectedProvider(providerName);
+      void syncGoalExecution({ execution_model: modelId, execution_provider: providerName ?? "" });
+    },
+    [syncGoalExecution],
+  );
+
+  const handleModelInput = useCallback(
+    (modelId: string) => {
+      setSelectedModel(modelId);
+      void syncGoalExecution({ execution_model: modelId });
+    },
+    [syncGoalExecution],
+  );
+
+  const handleEffortChange = useCallback(
+    (effort: string) => {
+      setReasoningEffort(effort);
+      void syncGoalExecution({ reasoning_effort: effort });
+    },
+    [syncGoalExecution],
+  );
+
   const [showProviders, setShowProviders] = useState(false);
   const [showCompression, setShowCompression] = useState(false);
   const [compressionModel, setCompressionModel] = useState("");
@@ -1151,10 +1199,7 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
                             providerModels={providerModels}
                             selectedModel={selectedModel}
                             selectedProvider={selectedProvider}
-                            onChange={(modelId, providerName) => {
-                              setSelectedModel(modelId);
-                              setSelectedProvider(providerName);
-                            }}
+                            onChange={handleModelChange}
                             disabled={modelsLoading}
                           />
                         </div>
@@ -1166,7 +1211,7 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
                           <input
                             type="text"
                             value={selectedModel}
-                            onChange={(e) => setSelectedModel(e.target.value)}
+                            onChange={(e) => handleModelInput(e.target.value)}
                             placeholder={t("chatPage.modelPlaceholder")}
                             className="text-xs h-7 px-2 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border)] text-[var(--text-primary)] font-mono focus:outline-none focus:border-[var(--brand)] focus:ring-2 focus:ring-[var(--brand)]/30 w-24 placeholder:text-[var(--text-tertiary)]"
                           />
@@ -1202,7 +1247,7 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
                                 <button
                                   key={effort}
                                   onClick={() => {
-                                    setReasoningEffort(effort);
+                                    handleEffortChange(effort);
                                     setEffortOpen(false);
                                   }}
                                   className={cn(
@@ -1654,10 +1699,7 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
                       providerModels={providerModels}
                       selectedModel={selectedModel}
                       selectedProvider={selectedProvider}
-                      onChange={(modelId, providerName) => {
-                        setSelectedModel(modelId);
-                        setSelectedProvider(providerName);
-                      }}
+                      onChange={handleModelChange}
                       disabled={modelsLoading}
                     />
                   </div>
@@ -1669,7 +1711,7 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
                     <input
                       type="text"
                       value={selectedModel}
-                      onChange={(e) => setSelectedModel(e.target.value)}
+                      onChange={(e) => handleModelInput(e.target.value)}
                       placeholder={t("chatPage.modelPlaceholder")}
                       className="text-xs h-7 px-2 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border)] text-[var(--text-primary)] font-mono focus:outline-none focus:border-[var(--brand)] focus:ring-2 focus:ring-[var(--brand)]/30 w-28 sm:w-40 placeholder:text-[var(--text-tertiary)]"
                     />
@@ -1705,7 +1747,7 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
                           <button
                             key={effort}
                             onClick={() => {
-                              setReasoningEffort(effort);
+                              handleEffortChange(effort);
                               setEffortOpen(false);
                             }}
                             className={cn(

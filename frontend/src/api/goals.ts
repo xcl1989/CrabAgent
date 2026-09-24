@@ -19,7 +19,16 @@ export function createGoal(
 
 export function updateGoal(
   sessionId: string,
-  update: Partial<GoalDraft> & { status?: GoalStatus; evidence?: string; blocker?: string; stop_reason?: string },
+  update: Partial<GoalDraft> & {
+    status?: GoalStatus;
+    evidence?: string;
+    blocker?: string;
+    stop_reason?: string;
+    execution_model?: string;
+    execution_provider?: string;
+    execution_agent?: string;
+    reasoning_effort?: string;
+  },
 ): Promise<{ goal: Goal }> {
   return api.patch(`/sessions/${sessionId}/goal`, update);
 }
