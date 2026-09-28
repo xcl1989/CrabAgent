@@ -66,8 +66,9 @@ async def macos_windows(context=None) -> str:
     session.check(observe=True)
     value = await _call_bridge("macos_windows", {}, context)
     session.record(value, observe=True)
-    await record_browser_event(context, "observed", action="macos_windows", decision="executed",
-                               url="", observation_id="")
+    await record_browser_event(
+        context, "observed", action="macos_windows", decision="executed", url="", observation_id=""
+    )
     return _result(value)
 
 
@@ -175,8 +176,13 @@ async def _input_with_allow_flow(
             approved = False
     if not approved:
         await record_browser_event(
-            context, "action_result", action=action, decision="blocked",
-            observation_id="", url="", started=started,
+            context,
+            "action_result",
+            action=action,
+            decision="blocked",
+            observation_id="",
+            url="",
+            started=started,
         )
         return {"ok": False, "error": f"用户未允许控制 {bundle_id}", "status": "blocked"}
     await _call_bridge("macos_allow_app", {"bundleId": bundle_id}, context)
@@ -220,6 +226,129 @@ async def macos_click(window_id: int, pid: int, x: int, y: int, context=None) ->
     return _result(value)
 
 
+def _register_input_tool(
+    name: str,
+    description: str,
+    properties: dict[str, Any],
+    required: list[str],
+    payload_builder,
+) -> None:
+    """Register a mouse/keyboard input tool sharing the standard macos flow.
+
+    payload_builder(params, context) returns the bridge payload (windowId included
+    by the caller's _input_preconditions call inside the builder).
+    """
+
+    async def _tool(context=None, **params: Any) -> str:
+        session = get_session(context)
+        started = time.monotonic()
+        payload = payload_builder(params, context)
+        try:
+            value = await _input_with_allow_flow(name, payload, context, name, started)
+        except Exception as exc:
+            session.failures += 1
+            await record_browser_event(context, "action_result", action=name, decision="failed", started=started)
+            raise RuntimeError(str(exc)) from exc
+        session.record(value)
+        await record_browser_event(context, "action_result", action=name, decision="executed", url="")
+        return _result(value)
+
+    _tool.__name__ = name
+    registry.register(
+        name=name,
+        description=description,
+        parameters={"type": "object", "properties": properties, "required": required},
+        metadata={"source": "builtin", "category": "computer"},
+    )(_tool)
+
+
+_COORD_POINT = {
+    "window_id": {"type": "integer"},
+    "pid": {"type": "integer"},
+    "x": {"type": "integer"},
+    "y": {"type": "integer"},
+}
+_POINT_REQUIRED = ["window_id", "pid", "x", "y"]
+
+_GLOBAL_POINTS_NOTE = (
+    " Coordinates are GLOBAL screen points (origin = top-left of the main display). "
+    "To convert from a macos_capture image: capture is 1 pixel == 1 window point, so "
+    "global = windowFrame.x/y + pixel. The app must be allowlisted and frontmost — "
+    "first-time control of a new app asks the user to confirm automatically."
+)
+
+
+def _point_payload_builder():
+    def build(params: dict[str, Any], context: Any) -> dict[str, Any]:
+        payload = _input_preconditions(context, params["window_id"])
+        payload.update(pid=params["pid"], x=params["x"], y=params["y"])
+        return payload
+
+    return build
+
+
+def _drag_payload_builder():
+    def build(params: dict[str, Any], context: Any) -> dict[str, Any]:
+        payload = _input_preconditions(context, params["window_id"])
+        payload.update(
+            pid=params["pid"],
+            x=params["x"],
+            y=params["y"],
+            x2=params["x2"],
+            y2=params["y2"],
+        )
+        if params.get("button") and params["button"] != "left":
+            payload["button"] = params["button"]
+        return payload
+
+    return build
+
+
+_register_input_tool(
+    "macos_double_click",
+    "Double-click inside a local macOS app window (open files, select words, zoom) to "
+    "carry out actions the user requested." + _GLOBAL_POINTS_NOTE,
+    _COORD_POINT,
+    _POINT_REQUIRED,
+    _point_payload_builder(),
+)
+
+_register_input_tool(
+    "macos_right_click",
+    "Right-click inside a local macOS app window to open context menus on the user's behalf." + _GLOBAL_POINTS_NOTE,
+    _COORD_POINT,
+    _POINT_REQUIRED,
+    _point_payload_builder(),
+)
+
+_register_input_tool(
+    "macos_move",
+    "Move the mouse cursor inside a local macOS app window without clicking, to trigger "
+    "hover states, tooltips or menus on the user's behalf." + _GLOBAL_POINTS_NOTE,
+    _COORD_POINT,
+    _POINT_REQUIRED,
+    _point_payload_builder(),
+)
+
+_register_input_tool(
+    "macos_drag",
+    "Drag inside a local macOS app window: press at (x, y), move along an interpolated "
+    "path and release at (x2, y2) — for moving windows/items, selecting text, sliders "
+    "and canvas drawing." + _GLOBAL_POINTS_NOTE,
+    {
+        "window_id": {"type": "integer"},
+        "pid": {"type": "integer"},
+        "x": {"type": "integer"},
+        "y": {"type": "integer"},
+        "x2": {"type": "integer"},
+        "y2": {"type": "integer"},
+        "button": {"type": "string", "enum": ["left", "right", "middle"]},
+    },
+    ["window_id", "pid", "x", "y", "x2", "y2"],
+    _drag_payload_builder(),
+)
+
+
 @registry.register(
     name="macos_type",
     description="Type Unicode text into a local macOS app window on the user's behalf, e.g. "
@@ -253,9 +382,10 @@ async def macos_type(window_id: int, text: str, context=None) -> str:
 
 @registry.register(
     name="macos_key",
-    description="Press a named key (return/escape/tab/space/delete/up/down/left/right) in a "
-    "local macOS app window on the user's behalf, e.g. pressing return to send a composed "
-    "message.",
+    description="Press a named key or modifier combo in a local macOS app window on the "
+    'user\'s behalf, e.g. "return" to send a composed message, "cmd+c"/"cmd+v" for '
+    'copy/paste, "shift+down" to extend a text selection. Supported modifiers: cmd, '
+    "ctrl, alt, shift. Cmd+Tab and Cmd+Q are refused by design.",
     parameters={
         "type": "object",
         "properties": {

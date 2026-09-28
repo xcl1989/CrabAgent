@@ -79,6 +79,14 @@ def main() -> int:
     # M1 input commands are opt-in gated inside the helper itself.
     r8 = run_request({"command": "click", "x": 10, "y": 10})
     check("click without opt-in refused", r8.get("ok") is False and "opt-in" in r8.get("error", ""), r8)
+    for cmd, payload in [
+        ("double_click", {"x": 10, "y": 10}),
+        ("right_click", {"x": 10, "y": 10}),
+        ("move", {"x": 10, "y": 10}),
+        ("drag", {"x": 10, "y": 10, "x2": 60, "y2": 80}),
+    ]:
+        rn = run_request({"command": cmd, **payload})
+        check(f"{cmd} without opt-in refused", rn.get("ok") is False and "opt-in" in rn.get("error", ""), rn)
     r9 = run_request({"command": "type", "text": "hi"})
     check("type without opt-in refused", r9.get("ok") is False and "opt-in" in r9.get("error", ""), r9)
     r10 = run_request({"command": "capture"})

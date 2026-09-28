@@ -678,7 +678,8 @@ async function startCollaborationBridge() {
         const commands = new Set(['status', 'stop', 'resume', 'navigate', 'observe', 'computer_observe', 'screenshot',
           'click', 'commit_click', 'point', 'commit_point', 'type', 'scroll', 'select', 'press_key', 'wait_for',
           'macos_permissions', 'macos_windows', 'macos_allow_app',
-          'macos_observe', 'macos_capture', 'macos_click', 'macos_type', 'macos_key', 'macos_scroll',
+          'macos_observe', 'macos_capture', 'macos_click', 'macos_double_click', 'macos_right_click',
+          'macos_move', 'macos_drag', 'macos_type', 'macos_key', 'macos_scroll',
           'macos_activate']);
         if (!commands.has(command) || !body.payload || typeof body.payload !== 'object' || Array.isArray(body.payload)) {
           throw new Error('Invalid bridge command or payload');

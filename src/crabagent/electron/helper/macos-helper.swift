@@ -347,7 +347,47 @@ func performActivate(_ request: [String: Any]) async -> Result<[String: Any], He
     return .success(response)
 }
 
+// Post one mouse down/up pair. clickState matters for double-click recognition
+// (1 = first click, 2 = second click of a double click).
+func postMouseButton(_ point: CGPoint, down: CGEventType, up: CGEventType,
+                     button: CGMouseButton, clickState: Int64) {
+    for type in [down, up] {
+        let event = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: point, mouseButton: button)
+        event?.setIntegerValueField(.mouseEventClickState, value: clickState)
+        event?.post(tap: .cghidEventTap)
+        usleep(30_000)
+    }
+}
+
+func parseMouseButton(_ request: [String: Any]) -> Result<CGMouseButton, HelperError> {
+    switch request["button"] as? String {
+    case nil, "", "left": return .success(.left)
+    case "right": return .success(.right)
+    case "middle": return .success(.center)
+    case .some(let other): return .failure(.badRequest("unsupported button: \(other)"))
+    }
+}
+
 func performClick(_ request: [String: Any]) -> Result<[String: Any], HelperError> {
+    guard case .success(let x) = intField(request, "x"), case .success(let y) = intField(request, "y") else {
+        return .failure(.badRequest("x and y are required"))
+    }
+    guard case .success(let button) = parseMouseButton(request) else {
+        return .failure(.badRequest("unsupported button"))
+    }
+    switch inputPreconditions(request) {
+    case .success: break
+    case .failure(let error): return .failure(error)
+    }
+    let point = CGPoint(x: x, y: y)
+    _ = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: button)
+    postMouseButton(point, down: button == .left ? .leftMouseDown : button == .right ? .rightMouseDown : .otherMouseDown,
+                    up: button == .left ? .leftMouseUp : button == .right ? .rightMouseUp : .otherMouseUp,
+                    button: button, clickState: 1)
+    return .success(["clicked": ["x": x, "y": y]])
+}
+
+func performDoubleClick(_ request: [String: Any]) -> Result<[String: Any], HelperError> {
     guard case .success(let x) = intField(request, "x"), case .success(let y) = intField(request, "y") else {
         return .failure(.badRequest("x and y are required"))
     }
@@ -356,12 +396,68 @@ func performClick(_ request: [String: Any]) -> Result<[String: Any], HelperError
     case .failure(let error): return .failure(error)
     }
     let point = CGPoint(x: x, y: y)
-    for type in [CGEventType.mouseMoved, .leftMouseDown, .leftMouseUp] {
-        let event = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: point, mouseButton: .left)
-        event?.post(tap: .cghidEventTap)
-        usleep(30_000)
+    _ = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left)
+    // Two down/up pairs with clickState 1 then 2, well inside the system double-click interval.
+    postMouseButton(point, down: .leftMouseDown, up: .leftMouseUp, button: .left, clickState: 1)
+    postMouseButton(point, down: .leftMouseDown, up: .leftMouseUp, button: .left, clickState: 2)
+    return .success(["doubleClicked": ["x": x, "y": y]])
+}
+
+func performMove(_ request: [String: Any]) -> Result<[String: Any], HelperError> {
+    guard case .success(let x) = intField(request, "x"), case .success(let y) = intField(request, "y") else {
+        return .failure(.badRequest("x and y are required"))
     }
-    return .success(["clicked": ["x": x, "y": y]])
+    switch inputPreconditions(request) {
+    case .success: break
+    case .failure(let error): return .failure(error)
+    }
+    let point = CGPoint(x: x, y: y)
+    let event = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left)
+    event?.post(tap: .cghidEventTap)
+    usleep(30_000)
+    return .success(["moved": ["x": x, "y": y]])
+}
+
+func performDrag(_ request: [String: Any]) -> Result<[String: Any], HelperError> {
+    guard case .success(let x) = intField(request, "x"), case .success(let y) = intField(request, "y"),
+          case .success(let x2) = intField(request, "x2"), case .success(let y2) = intField(request, "y2") else {
+        return .failure(.badRequest("x, y, x2 and y2 are required"))
+    }
+    guard case .success(let button) = parseMouseButton(request) else {
+        return .failure(.badRequest("unsupported button"))
+    }
+    switch inputPreconditions(request) {
+    case .success: break
+    case .failure(let error): return .failure(error)
+    }
+    let start = CGPoint(x: x, y: y)
+    let end = CGPoint(x: x2, y: y2)
+    let down: CGEventType = button == .left ? .leftMouseDown : button == .right ? .rightMouseDown : .otherMouseDown
+    let drag: CGEventType = button == .left ? .leftMouseDragged : button == .right ? .rightMouseDragged : .otherMouseDragged
+    let up: CGEventType = button == .left ? .leftMouseUp : button == .right ? .rightMouseUp : .otherMouseUp
+    // Move onto the target first, press, then interpolate dragged points so apps
+    // that sample intermediate positions (selection, sliders, canvas drawing) see a
+    // natural path, and release at the destination.
+    _ = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: start, mouseButton: button)
+    let downEvent = CGEvent(mouseEventSource: nil, mouseType: down, mouseCursorPosition: start, mouseButton: button)
+    downEvent?.setIntegerValueField(.mouseEventClickState, value: 1)
+    downEvent?.post(tap: .cghidEventTap)
+    usleep(50_000)
+    let distance = hypot(end.x - start.x, end.y - start.y)
+    let steps = max(8, min(120, Int(distance / 15)))
+    for i in 1...steps {
+        let t = Double(i) / Double(steps)
+        let point = CGPoint(x: start.x + (end.x - start.x) * t, y: start.y + (end.y - start.y) * t)
+        let event = CGEvent(mouseEventSource: nil, mouseType: drag, mouseCursorPosition: point, mouseButton: button)
+        event?.setIntegerValueField(.mouseEventClickState, value: 1)
+        event?.post(tap: .cghidEventTap)
+        usleep(16_000)
+    }
+    let upEvent = CGEvent(mouseEventSource: nil, mouseType: up, mouseCursorPosition: end, mouseButton: button)
+    upEvent?.setIntegerValueField(.mouseEventClickState, value: 1)
+    upEvent?.post(tap: .cghidEventTap)
+    usleep(30_000)
+    return .success(["dragged": ["from": ["x": x, "y": y], "to": ["x": x2, "y": y2], "steps": steps]])
 }
 
 func performType(_ request: [String: Any]) -> Result<[String: Any], HelperError> {
@@ -483,6 +579,16 @@ func handleRequest(_ request: [String: Any]) async -> Result<[String: Any], Help
         return await performActivate(request)
     case "click":
         return performClick(request)
+    case "double_click":
+        return performDoubleClick(request)
+    case "right_click":
+        var clickRequest = request
+        clickRequest["button"] = "right"
+        return performClick(clickRequest)
+    case "move":
+        return performMove(request)
+    case "drag":
+        return performDrag(request)
     case "type":
         return performType(request)
     case "key":
@@ -531,7 +637,7 @@ guard let request = try? JSONSerialization.jsonObject(with: requestData) as? [St
 
 // Input commands require explicit opt-in per Electron config; the helper double-checks a
 // marker so an allowlist can never authorize input while macOS input is disabled.
-let inputCommands: Set<String> = ["activate", "click", "type", "key", "scroll"]
+let inputCommands: Set<String> = ["activate", "click", "double_click", "right_click", "move", "drag", "type", "key", "scroll"]
 if inputCommands.contains(request["command"] as? String ?? "")
     && ProcessInfo.processInfo.environment["CRAB_MACOS_INPUT"] != "1" {
     respond(["ok": false, "error": "macos input is disabled (opt-in required)"]); exit(1)
