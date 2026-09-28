@@ -159,34 +159,59 @@ def _input_preconditions(context: Any, window_id: int) -> dict[str, Any]:
 async def _input_with_allow_flow(
     command: str, payload: dict[str, Any], context: Any, action: str, started: float
 ) -> dict[str, Any]:
-    """Run one input action; on APP_NOT_ALLOWLISTED ask the user to allow the app once."""
+    """Run one input action with automatic soft-failure recovery.
+
+    - APP_NOT_ALLOWLISTED: ask the user to allow the app once, then retry.
+    - WINDOW_NOT_FRONTMOST: the target app lost focus between observation and
+      action (common — the host app or a browser steals it back). Auto-activate
+      the target app and retry once instead of failing the agent's turn and
+      forcing a manual activate → capture → click cycle.
+    """
     value = await _call_bridge(command, payload, context)
     error = str(value.get("error", "")) if isinstance(value, dict) else ""
-    if "APP_NOT_ALLOWLISTED:" not in error:
-        return value
-    bundle_id = error.split("APP_NOT_ALLOWLISTED:")[-1].strip().split()[0]
-    approved = False
-    if getattr(context, "confirm_callback", None):
-        try:
-            approved = await context.confirm_callback(
-                "macos_allow_app",
-                {"bundleId": bundle_id, "intent": "AI 请求获得对该应用窗口的键鼠控制权限"},
+
+    if "APP_NOT_ALLOWLISTED:" in error:
+        bundle_id = error.split("APP_NOT_ALLOWLISTED:")[-1].strip().split()[0]
+        approved = False
+        if getattr(context, "confirm_callback", None):
+            try:
+                approved = await context.confirm_callback(
+                    "macos_allow_app",
+                    {"bundleId": bundle_id, "intent": "AI 请求获得对该应用窗口的键鼠控制权限"},
+                )
+            except Exception:
+                approved = False
+        if not approved:
+            await record_browser_event(
+                context,
+                "action_result",
+                action=action,
+                decision="blocked",
+                observation_id="",
+                url="",
+                started=started,
             )
-        except Exception:
-            approved = False
-    if not approved:
-        await record_browser_event(
-            context,
-            "action_result",
-            action=action,
-            decision="blocked",
-            observation_id="",
-            url="",
-            started=started,
+            return {"ok": False, "error": f"用户未允许控制 {bundle_id}", "status": "blocked"}
+        await _call_bridge("macos_allow_app", {"bundleId": bundle_id}, context)
+        return await _call_bridge(command, payload, context)
+
+    if "WINDOW_NOT_FRONTMOST:" in error and command != "macos_activate":
+        bundle_id = (
+            error.split("WINDOW_NOT_FRONTMOST:")[-1].strip().split()[0]
+            if (error.split("WINDOW_NOT_FRONTMOST:")[-1].strip())
+            else ""
         )
-        return {"ok": False, "error": f"用户未允许控制 {bundle_id}", "status": "blocked"}
-    await _call_bridge("macos_allow_app", {"bundleId": bundle_id}, context)
-    value = await _call_bridge(command, payload, context)
+        if bundle_id:
+            # Activation goes through the same gated flow (consent applies if the
+            # bundle was never allowlisted). performActivate also restores/minimizes
+            # window creation, so a miniaturized window comes back on screen.
+            activated = await _input_with_allow_flow(
+                "macos_activate", {"bundleId": bundle_id}, context, "macos_activate", started
+            )
+            if isinstance(activated, dict) and activated.get("ok"):
+                await asyncio.sleep(0.3)  # let focus settle before retrying
+                value = await _call_bridge(command, payload, context)
+
     return value
 
 
@@ -414,23 +439,30 @@ async def macos_key(window_id: int, key: str, context=None) -> str:
 
 @registry.register(
     name="macos_scroll",
-    description="Scroll inside a local macOS app window on the user's behalf. Positive scrolls "
-    "down (-2000..2000 pixels).",
+    description="Scroll inside a local macOS app window on the user's behalf. Positive amounts "
+    "scroll down (-2000..2000 pixels). By default the scroll happens at the window center; "
+    "pass x/y (GLOBAL screen points, same conversion as macos_click) to scroll at a specific "
+    "spot, e.g. inside a nested scrollable area.",
     parameters={
         "type": "object",
         "properties": {
             "window_id": {"type": "integer"},
             "amount": {"type": "integer"},
+            "x": {"type": "integer"},
+            "y": {"type": "integer"},
         },
         "required": ["window_id", "amount"],
     },
     metadata={"source": "builtin", "category": "computer"},
 )
-async def macos_scroll(window_id: int, amount: int, context=None) -> str:
+async def macos_scroll(window_id: int, amount: int, context=None, x: int | None = None, y: int | None = None) -> str:
     session = get_session(context)
     started = time.monotonic()
     payload = _input_preconditions(context, window_id)
     payload["amount"] = max(-2000, min(2000, amount))
+    if x is not None and y is not None:
+        payload["x"] = x
+        payload["y"] = y
     try:
         value = await _input_with_allow_flow("macos_scroll", payload, context, "macos_scroll", started)
     except Exception as exc:

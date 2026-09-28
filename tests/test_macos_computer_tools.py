@@ -100,6 +100,19 @@ async def test_type_truncates_and_scroll_clamps(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_scroll_passes_optional_spot(monkeypatch):
+    captured = {}
+
+    async def bridge(command, payload, context=None):
+        captured.update(command=command, payload=payload)
+        return {"ok": True}
+
+    monkeypatch.setattr(macos_computer, "_call_bridge", bridge)
+    await macos_computer.macos_scroll(7, -300, context=context(), x=500, y=600)
+    assert captured["payload"] == {"windowId": 7, "amount": -300, "x": 500, "y": 600}
+
+
+@pytest.mark.asyncio
 async def test_failure_counts_budget_and_reraises(monkeypatch):
     async def bridge(command, payload, context=None):
         raise RuntimeError("permission denied: accessibility not granted")
@@ -182,6 +195,55 @@ async def test_observe_sets_input_precondition(monkeypatch):
     ctx = fresh_context()
     await macos_computer.macos_observe(7, 42, context=ctx)
     assert ctx.metadata["_macos_input_confirmed"] is True
+
+
+@pytest.mark.asyncio
+async def test_frontmost_flow_activates_and_retries(monkeypatch):
+    """Lost-focus between observe and click: auto-activate the target, retry once."""
+    calls = []
+
+    async def bridge(command, payload, context=None):
+        calls.append((command, payload))
+        if command == "macos_click":
+            click_count = len([c for c in calls if c[0] == "macos_click"])
+            if click_count == 1:
+                return {
+                    "ok": False,
+                    "error": "precondition failed: WINDOW_NOT_FRONTMOST: com.tencent.xinWeChat",
+                }
+            return {"ok": True, "clicked": {"x": 10, "y": 10}}
+        return {"ok": True}
+
+    monkeypatch.setattr(macos_computer, "_call_bridge", bridge)
+    ctx = context()
+    result = json.loads(await macos_computer.macos_click(7, 42, 10, 10, context=ctx))
+    assert result["clicked"] == {"x": 10, "y": 10}
+    assert [c for c, _ in calls] == ["macos_click", "macos_activate", "macos_click"]
+    assert calls[1][1] == {"bundleId": "com.tencent.xinWeChat"}
+
+
+@pytest.mark.asyncio
+async def test_frontmost_flow_surfaces_persistent_failure(monkeypatch):
+    """If the retry still fails, the error is returned instead of looping."""
+    calls = []
+
+    async def bridge(command, payload, context=None):
+        calls.append(command)
+        if command == "macos_click":
+            return {
+                "ok": False,
+                "error": "precondition failed: WINDOW_NOT_FRONTMOST: com.tencent.xinWeChat",
+            }
+        if command == "macos_activate":
+            return {"ok": False, "error": "activation refused"}  # activation fails
+        return {"ok": True}
+
+    monkeypatch.setattr(macos_computer, "_call_bridge", bridge)
+    result = json.loads(await macos_computer.macos_click(7, 42, 10, 10, context=context()))
+    assert result["ok"] is False
+    assert "WINDOW_NOT_FRONTMOST" in result["error"]
+    assert calls.count("macos_click") == 1  # no second attempt when activation failed
+    assert calls == ["macos_click", "macos_activate"]
 
 
 @pytest.mark.asyncio

@@ -266,9 +266,18 @@ func inputPreconditions(_ request: [String: Any]) -> Result<Void, HelperError> {
         return .failure(.preconditionFailed("APP_NOT_ALLOWLISTED: \(bundleId)"))
     }
     if let windowId = request["windowId"] as? Int {
-        guard let entry = windowEntries().first(where: { $0["windowId"] as? Int == windowId }),
-              entry["bundleId"] as? String == bundleId else {
-            return .failure(.preconditionFailed("target window is no longer frontmost for this app"))
+        let entry = windowEntries().first(where: { $0["windowId"] as? Int == windowId })
+        if entry?["bundleId"] as? String != bundleId {
+            // Soft failure with the target bundle so the caller can auto-activate and
+            // retry once instead of bouncing the agent through a manual
+            // activate → capture → click cycle. Resolve the bundle from the window
+            // entry; if the window is off-screen (miniaturized), fall back to pid.
+            var target = entry?["bundleId"] as? String ?? ""
+            if target.isEmpty, let pid = request["pid"] as? Int,
+               let app = NSRunningApplication(processIdentifier: pid_t(pid)) {
+                target = app.bundleIdentifier ?? ""
+            }
+            return .failure(.preconditionFailed("WINDOW_NOT_FRONTMOST: \(target)"))
         }
     }
     return .success(())
@@ -281,6 +290,28 @@ func intField(_ request: [String: Any], _ key: String) -> Result<Int, HelperErro
 
 // Explicit surface activation: part of the design (switching surfaces needs explicit
 // activation), gated like input — opt-in + allowlist.
+// Un-minimize an app's windows via the accessibility API. windowEntries() only sees
+// on-screen windows, so an app whose only window is minimized (or parked on another
+// Space) looks "windowless" and activation used to give up. Flipping AXMinimized
+// restores the window into the current Space.
+func restoreMinimizedWindows(pidValue: Int) -> Bool {
+    let appElement = AXUIElementCreateApplication(pid_t(pidValue))
+    var value: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &value) == .success,
+          let axWindows = value as? [AXUIElement] else { return false }
+    var restored = false
+    for window in axWindows {
+        var minimizedValue: CFTypeRef?
+        if AXUIElementCopyAttributeValue(window, kAXMinimizedAttribute as CFString, &minimizedValue) == .success,
+           (minimizedValue as? Bool) == true {
+            AXUIElementSetAttributeValue(window, kAXMinimizedAttribute as CFString, kCFBooleanFalse)
+            AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+            restored = true
+        }
+    }
+    return restored
+}
+
 func performActivate(_ request: [String: Any]) async -> Result<[String: Any], HelperError> {
     guard let bundleId = request["bundleId"] as? String, !bundleId.isEmpty else {
         return .failure(.badRequest("bundleId is required"))
@@ -323,8 +354,31 @@ func performActivate(_ request: [String: Any]) async -> Result<[String: Any], He
     let pidValue = Int(app!.processIdentifier)
     var windowsNow = windowEntries().filter { $0["pid"] as? Int == pidValue }
     if windowsNow.isEmpty {
-        // Windowless-but-running apps (common after relaunch): give the app a moment, then
-        // synthesize the platform-convention Cmd+N to create a window.
+        // Minimized/off-Space windows are invisible to windowEntries(): restore them
+        // via AX before resorting to synthesizing Cmd+N.
+        for _ in 0..<3 {
+            if restoreMinimizedWindows(pidValue: pidValue) { break }
+            usleep(200_000)
+        }
+        windowsNow = windowEntries().filter { $0["pid"] as? Int == pidValue }
+    }
+    if windowsNow.isEmpty {
+        // Truly windowless (user closed the last window; apps like WeChat keep
+        // running in the background with zero AX windows): send a reopen Apple
+        // event — the same thing a Dock-icon click does — to ask the app to
+        // re-create its main window. openApplication on a running app is exactly
+        // that reopen; it does not spawn a second instance.
+        if let appUrl = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) {
+            _ = try? await NSWorkspace.shared.openApplication(at: appUrl, configuration: NSWorkspace.OpenConfiguration())
+        }
+        for _ in 0..<10 {
+            usleep(200_000)
+            windowsNow = windowEntries().filter { $0["pid"] as? Int == pidValue }
+            if !windowsNow.isEmpty { break }
+        }
+    }
+    if windowsNow.isEmpty {
+        // Last resort: synthesize the platform-convention Cmd+N to create a window.
         for _ in 0..<6 {
             usleep(200_000)
             windowsNow = windowEntries().filter { $0["pid"] as? Int == pidValue }
@@ -546,9 +600,38 @@ func performScroll(_ request: [String: Any]) -> Result<[String: Any], HelperErro
     case .success: break
     case .failure(let error): return .failure(error)
     }
-    let event = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1,
-                        wheel1: Int32(-amount), wheel2: 0, wheel3: 0)
-    event?.post(tap: .cghidEventTap)
+    // Scroll events are routed by macOS to the window under the *current cursor*
+    // location — CGEvent scroll wheels carry no target position. Without moving
+    // the cursor first, the scroll silently lands on whatever window the pointer
+    // happens to hover, not the requested windowId. Park it: explicit x/y if the
+    // caller provides them (global points), otherwise the target window center.
+    var point = CGPoint.zero
+    if let x = request["x"] as? Int, let y = request["y"] as? Int {
+        point = CGPoint(x: CGFloat(x), y: CGFloat(y))
+    } else if let windowId = request["windowId"] as? Int,
+              let entry = windowEntries().first(where: { $0["windowId"] as? Int == windowId }),
+              let bounds = entry["bounds"] as? [String: Any],
+              let bx = bounds["x"] as? Int, let by = bounds["y"] as? Int,
+              let bw = bounds["width"] as? Int, let bh = bounds["height"] as? Int, bw > 0, bh > 0 {
+        point = CGPoint(x: CGFloat(bx + bw / 2), y: CGFloat(by + bh / 2))
+    }
+    if point != .zero {
+        if let move = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left) {
+            move.post(tap: .cghidEventTap)
+            usleep(30_000)
+        }
+    }
+    // Deliver in <=400px chunks with a short pause: some apps clip or ignore huge
+    // single-event pixel deltas. CG convention: negative wheel1 scrolls down.
+    var remaining = -amount
+    while remaining != 0 {
+        let step = max(-400, min(400, remaining))
+        let event = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1,
+                            wheel1: Int32(step), wheel2: 0, wheel3: 0)
+        event?.post(tap: .cghidEventTap)
+        remaining -= step
+        if remaining != 0 { usleep(30_000) }
+    }
     return .success(["scrolled": amount])
 }
 
