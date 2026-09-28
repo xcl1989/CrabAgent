@@ -72,6 +72,11 @@ function bubbleLabelForPet(name: string, label: string): string {
 const TOOL_ANIMATION_MINIMUM_MS = 900;
 const IDLE_SLEEP_DELAY_MS = 60_000;
 const LONG_PRESS_DELAY_MS = 600;
+// Celebrate only for a moment: after this the pet calms down to idle
+// (the completion bubble text stays). Monitor summaries keep reporting
+// "completed" / persistent unread results indefinitely, so without this
+// the celebrate animation would loop forever.
+const CELEBRATE_DURATION_MS = 6_000;
 
 function stateFromSummary(summary: AgentMonitorSummary): SvgPetState {
   switch (summary.status) {
@@ -271,6 +276,7 @@ export function DesktopPet() {
   const isDraggingRef = useRef(false);
   const toolAnimationHoldUntilRef = useRef(0);
   const toolAnimationTimerRef = useRef<number | null>(null);
+  const celebrateDeadlineRef = useRef(0);
   const idleSleepTimerRef = useRef<number | null>(null);
   const longPressTimerRef = useRef<number | null>(null);
   const longPressHandledRef = useRef(false);
@@ -368,8 +374,22 @@ export function DesktopPet() {
       const nextTarget = summary.target?.session_id || null;
       targetSessionRef.current = nextTarget;
 
+      // Celebration window: celebrate while the deadline is live, then calm
+      // down to idle (bubble text kept). The deadline re-arms whenever the
+      // status leaves "completed", so a new completion celebrates again.
+      const celebrating = summary.status === "completed";
+      if (celebrating && celebrateDeadlineRef.current === 0) {
+        celebrateDeadlineRef.current = Date.now() + CELEBRATE_DURATION_MS;
+      } else if (!celebrating) {
+        celebrateDeadlineRef.current = 0;
+      }
+      const celebrateOver = celebrating && Date.now() >= celebrateDeadlineRef.current;
+
       // Update SVG state (legacy path)
       const nextSvg = stateFromSummary(summary);
+      if (celebrateOver && nextSvg.mood === "celebrating") {
+        nextSvg.mood = "idle";
+      }
       const svgKey = svgStateKey(nextSvg);
       if (svgKey !== svgStateKeyRef.current) {
         svgStateKeyRef.current = svgKey;
@@ -377,12 +397,16 @@ export function DesktopPet() {
       }
 
       // Update unified state machine state.
-      const nextState = derivePetState({
+      const derived = derivePetState({
         status: (summary.status as AgentStatus) || "idle",
         message: summary.message,
         toolName: summary.target?.tool_name || inferToolFromMessage(summary.message),
         targetSessionId: nextTarget,
       });
+      const nextState =
+        celebrateOver && derived.animation === "celebrate"
+          ? { ...derived, animation: "idle" as const, baseAfter: "idle" as const }
+          : derived;
       const key = petStateKey(nextState);
       if (key !== stateKeyRef.current) {
         stateKeyRef.current = key;
