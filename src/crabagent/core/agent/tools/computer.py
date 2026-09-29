@@ -27,7 +27,10 @@ async def computer_observe(context=None) -> list[dict[str, Any]]:
         session.failures += 1
         raise
     _remember_page_version(context, value)
-    url = value.pop("data_url")
+    url = value.pop("data_url", "")
+    if not url or (url.startswith("data:") and not url.partition(",")[2].strip()):
+        session.failures += 1
+        raise RuntimeError("CAPTURE_FAILED: collaboration browser returned an empty screenshot")
     mime = value.pop("mime", "image/jpeg")
     session.record(value, observe=True)
     await record_browser_event(

@@ -9,6 +9,24 @@ from crabagent.core.agent.tools import collaboration_browser as browser
 
 
 @pytest.mark.asyncio
+async def test_screenshot_rejects_empty_data_url(monkeypatch):
+    monkeypatch.setattr(
+        browser,
+        "_bridge_request",
+        lambda *_, **__: {
+            "page_version": 1,
+            "observation_id": "obs",
+            "mime": "image/jpeg",
+            "data_url": "data:image/jpeg;base64,",
+        },
+    )
+    context = SimpleNamespace(metadata={})
+
+    with pytest.raises(RuntimeError, match="CAPTURE_FAILED"):
+        await browser.collab_browser_screenshot(context=context)
+
+
+@pytest.mark.asyncio
 async def test_high_risk_click_requires_specific_approval(monkeypatch):
     calls = []
 

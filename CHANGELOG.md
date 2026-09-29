@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.16.4] — Collaboration Browser Screenshots Work Outside the Browser Page
+
+### Fixed
+- **`collab_browser_screenshot` returned an empty image** — When the chat ran outside the Collaboration Browser page, the shared `WebContentsView` was detached from the main window; `capturePage()` then returned an empty `NativeImage`, `toJPEG()` produced a zero-byte buffer, and the tool happily persisted `data:image/jpeg;base64,` into conversation history. On the next turn, LiteLLM converted the invalid image into a `file` content block without `file_data` and the request was rejected (`messages[0].content[0].file 必须传入 file_id、file_url、file_data 至少之一`), bricking the session.
+- **Screenshots now work while the browser page is not visible** — When the view is detached, the bridge temporarily composites it into a hidden `BrowserWindow` (`backgroundThrottling: false`, `paintWhenInitiallyHidden: true`), captures, restores the original bounds and detaches again. Login state and page state are untouched.
+- **Empty captures are rejected at three layers** — Electron checks view attachment, `NativeImage.isEmpty()`, dimensions and JPEG byte length; the Python screenshot tools (`collab_browser_screenshot`, `computer_observe`) refuse empty data URLs; message-history serialization drops invalid image blocks so already-polluted sessions keep working.
+
+### Changed
+- Electron integration test now asserts non-empty Base64 payloads and covers detached-view capture; the test sandbox provides `__dirname` for the full main-process script.
+
+---
+
 ## [0.16.0] — macOS Computer Use and Collaboration Browser Hardening
 
 ### Added

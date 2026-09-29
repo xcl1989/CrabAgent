@@ -129,6 +129,8 @@ function ensureCollaborationView() {
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: true,
+      backgroundThrottling: false,
+      paintWhenInitiallyHidden: true,
     },
   });
   collaborationView.webContents.setWindowOpenHandler(({ url }) => {
@@ -174,6 +176,47 @@ function ensureCollaborationView() {
     log(`Collaboration browser initial navigation failed: ${error.message}`);
   });
   return collaborationView;
+}
+
+function isCollaborationViewAttached() {
+  if (!win || win.isDestroyed() || !collaborationView || collaborationView.webContents.isDestroyed()) return false;
+  try {
+    return Boolean(win.contentView?.children?.includes(collaborationView));
+  } catch {
+    return false;
+  }
+}
+
+async function captureCollaborationPage(view) {
+  if (isCollaborationViewAttached()) return view.webContents.capturePage();
+
+  // A detached WebContentsView keeps its DOM alive but capturePage returns an
+  // empty NativeImage. Temporarily composite it in a hidden window so chats
+  // outside the browser page can still inspect the shared browser.
+  const previousBounds = view.getBounds();
+  const width = Math.max(1, previousBounds.width);
+  const height = Math.max(1, previousBounds.height);
+  const captureWindow = new BrowserWindow({
+    show: false,
+    frame: false,
+    skipTaskbar: true,
+    width,
+    height,
+    webPreferences: {
+      backgroundThrottling: false,
+      paintWhenInitiallyHidden: true,
+    },
+  });
+  try {
+    captureWindow.contentView.addChildView(view);
+    view.setBounds({ x: 0, y: 0, width, height });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    return await view.webContents.capturePage();
+  } finally {
+    try { captureWindow.contentView.removeChildView(view); } catch {}
+    try { view.setBounds(previousBounds); } catch {}
+    captureWindow.destroy();
+  }
 }
 
 function setCollaborationViewBounds(bounds, visible) {
@@ -376,9 +419,13 @@ async function handleCollaborationBridge(command, payload) {
     const snapshot = await handleCollaborationBridge('observe', {});
     const observation = collaborationObservation;
     const bounds = view.getBounds();
-    const image = await contents.capturePage();
+    const image = await captureCollaborationPage(view);
     const dimensions = image.getSize();
-    if (image.toJPEG(75).length > 2_000_000) throw new Error('CAPTURE_FAILED: screenshot exceeds size limit');
+    const jpeg = image.toJPEG(75);
+    if (image.isEmpty() || dimensions.width <= 0 || dimensions.height <= 0 || jpeg.length === 0) {
+      throw new Error('CAPTURE_FAILED: Electron returned an empty screenshot');
+    }
+    if (jpeg.length > 2_000_000) throw new Error('CAPTURE_FAILED: screenshot exceeds size limit');
     const after = await contents.executeJavaScript(`(() => ({url: location.href, width: innerWidth, height: innerHeight, scrollY}))()`, true);
     const beforeUrl = snapshot.url.startsWith('chrome-error://') ? contents.getURL() : snapshot.url;
     const afterUrl = after.url.startsWith('chrome-error://') ? contents.getURL() : after.url;
@@ -390,7 +437,7 @@ async function handleCollaborationBridge(command, payload) {
     }
     return { ...snapshot, screenshot: { width: dimensions.width, height: dimensions.height,
       scale_x: dimensions.width / bounds.width, scale_y: dimensions.height / bounds.height },
-      mime: 'image/jpeg', data_url: `data:image/jpeg;base64,${image.toJPEG(75).toString('base64')}` };
+      mime: 'image/jpeg', data_url: `data:image/jpeg;base64,${jpeg.toString('base64')}` };
   }
   if (command === 'screenshot') return handleCollaborationBridge('computer_observe', payload);
   if (command === 'click' || command === 'commit_click') {

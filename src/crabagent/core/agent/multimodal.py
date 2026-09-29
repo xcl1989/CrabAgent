@@ -112,6 +112,22 @@ def stringify_tool_result(result: object) -> str:
     return str(result)
 
 
+def has_usable_image_url(block: object) -> bool:
+    """Return whether an image block contains data a provider can consume."""
+    if not isinstance(block, dict) or block.get("type") != "image_url":
+        return False
+    image_url = block.get("image_url")
+    if not isinstance(image_url, dict):
+        return False
+    url = image_url.get("url")
+    if not isinstance(url, str) or not url.strip():
+        return False
+    if url.startswith("data:"):
+        _, separator, payload = url.partition(",")
+        return bool(separator and payload.strip())
+    return url.startswith(("http://", "https://"))
+
+
 def split_multimodal_tool_result(result: object) -> tuple[str, list[dict[str, Any]]]:
     """Keep tool protocol text-only and return image blocks for a user-role follow-up."""
     if not isinstance(result, list):
@@ -124,10 +140,8 @@ def split_multimodal_tool_result(result: object) -> tuple[str, list[dict[str, An
             text_parts.append(block)
         elif isinstance(block, dict) and block.get("type") == "text":
             text_parts.append(str(block.get("text", "")))
-        elif isinstance(block, dict) and block.get("type") == "image_url":
-            image_url = block.get("image_url")
-            if isinstance(image_url, dict) and image_url.get("url"):
-                images.append(block)
+        elif has_usable_image_url(block):
+            images.append(block)
 
     text = "\n".join(part for part in text_parts if part).strip()
     if images and not text:

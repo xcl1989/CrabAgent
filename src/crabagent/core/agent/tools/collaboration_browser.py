@@ -171,8 +171,8 @@ async def collab_browser_screenshot(context=None) -> str | list[dict[str, Any]]:
     value = _remember_page_version(context, value)
     data_url = value.pop("data_url", "")
     session.record(value, observe=True)
-    if not data_url:
-        return _result(value)
+    if not data_url or (data_url.startswith("data:") and not data_url.partition(",")[2].strip()):
+        raise RuntimeError("CAPTURE_FAILED: collaboration browser returned an empty screenshot")
     return [
         {"type": "text", "text": _result(value)},
         {"type": "image_url", "image_url": {"url": data_url}, "mime": value.get("mime", "image/png")},

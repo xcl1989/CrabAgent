@@ -163,6 +163,18 @@ def test_split_multimodal_tool_result_moves_images_out_of_tool_content():
     assert images[0]["type"] == "image_url"
 
 
+def test_split_multimodal_tool_result_drops_empty_data_url():
+    result, images = loop.split_multimodal_tool_result(
+        [
+            {"type": "text", "text": "screenshot unavailable"},
+            {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,"}},
+        ]
+    )
+
+    assert result == "screenshot unavailable"
+    assert images == []
+
+
 def test_truncate_result_truncates_text_blocks_only():
     out = loop._truncate_result(
         [
@@ -243,6 +255,26 @@ def test_build_messages_keeps_multimodal_content_for_vision_model():
     assert messages[0]["content"][0] == {"type": "text", "text": "prefix"}
     assert messages[0]["content"][2] == {"type": "image_url", "image_url": {"url": "https://example.com/a.png"}}
     assert messages[1] == {"role": "user", "content": ""}
+
+
+def test_build_messages_drops_empty_persisted_image_for_vision_model():
+    context = AgentContext(
+        workspace=Path.cwd(),
+        model="glm-5.3-flash",
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "screenshot"},
+                    {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,"}},
+                ],
+            }
+        ],
+    )
+
+    messages = loop._build_messages(context)
+
+    assert messages == [{"role": "user", "content": [{"type": "text", "text": "screenshot"}]}]
 
 
 def test_validate_tool_calls_keeps_assistant_when_tool_response_exists():

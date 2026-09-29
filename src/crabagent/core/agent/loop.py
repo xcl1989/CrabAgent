@@ -12,6 +12,7 @@ from crabagent.core.agent.compress import compress_context
 from crabagent.core.agent.context import AgentContext
 from crabagent.core.agent.multimodal import (
     attach_images_from_tool_result,
+    has_usable_image_url,
     split_multimodal_tool_result,
     stringify_tool_result,
 )
@@ -965,7 +966,10 @@ def _build_messages(context: AgentContext, text_only: bool = False) -> list[dict
                     if block.get("type") == "text":
                         clean_blocks.append({"type": "text", "text": block.get("text", "")})
                     elif block.get("type") == "image_url":
-                        clean_blocks.append({"type": "image_url", "image_url": {"url": block["image_url"]["url"]}})
+                        if has_usable_image_url(block):
+                            clean_blocks.append({"type": "image_url", "image_url": {"url": block["image_url"]["url"]}})
+                        else:
+                            logger.warning("Dropping image block with an empty or invalid URL from message history")
                 messages.append({**msg, "content": clean_blocks})
             else:
                 text_parts = []

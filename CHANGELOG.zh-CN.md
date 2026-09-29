@@ -8,6 +8,18 @@ English version: [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
+## [0.16.4] — 协作浏览器在非浏览器页面也能截图
+
+### 修复
+- **`collab_browser_screenshot` 返回空图片** — 在协作浏览器页面之外的聊天里，共享 `WebContentsView` 处于未挂载状态；此时 `capturePage()` 返回空的 `NativeImage`，`toJPEG()` 产出零字节缓冲，工具照常把 `data:image/jpeg;base64,` 写入会话历史。下一轮对话时 LiteLLM 把这个无效图片转换成缺少 `file_data` 的 `file` 内容块，请求被拒绝（`messages[0].content[0].file 必须传入 file_id、file_url、file_data 至少之一`），会话从此无法继续。
+- **浏览器页面不可见时也能截图** — 视图未挂载时，桥接层会临时把它挂载到一个隐藏 `BrowserWindow`（`backgroundThrottling: false`、`paintWhenInitiallyHidden: true`）完成截图，然后恢复原尺寸并卸载。登录状态与页面状态不受影响。
+- **空截图在三层被拒绝** — Electron 层检查视图挂载状态、`NativeImage.isEmpty()`、尺寸与 JPEG 字节数；Python 两个截图工具（`collab_browser_screenshot`、`computer_observe`）拒绝空 data URL；消息历史序列化会丢弃无效图片块，已污染的旧会话也能继续使用。
+
+### 变更
+- Electron 集成测试改为断言非空 Base64 载荷，并覆盖视图卸载后的截图场景；测试沙箱为完整主进程脚本提供 `__dirname`。
+
+---
+
 ## [0.16.0] — macOS Computer Use 与协作浏览器加固
 
 ### 新增

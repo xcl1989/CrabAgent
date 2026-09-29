@@ -35,6 +35,24 @@ async def test_observe_returns_image_and_metadata(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_observe_rejects_empty_data_url(monkeypatch):
+    monkeypatch.setattr(
+        computer,
+        "_bridge_request",
+        lambda *_, **kwargs: {
+            "observation_id": "new",
+            "page_version": 2,
+            "data_url": "data:image/jpeg;base64,",
+            "mime": "image/jpeg",
+        },
+    )
+    ctx = context()
+
+    with pytest.raises(RuntimeError, match="CAPTURE_FAILED"):
+        await computer.computer_observe(context=ctx)
+
+
+@pytest.mark.asyncio
 async def test_point_click_confirmation_is_per_action(monkeypatch):
     commands = []
 

@@ -34,7 +34,7 @@ async function run() {
     .replace("const COLLABORATION_START_URL = 'https://www.google.com/';", `const COLLABORATION_START_URL = '${url}';`);
   const mainRequire = (name) => name === './computer-url-policy' ? require('../computer-url-policy') : name === './computer-network-proxy' ? require('../computer-network-proxy') : require(name);
   const sandbox = { require: mainRequire, process, console, Buffer, URL, setTimeout, clearTimeout,
-    log: () => {}, window: null };
+    __dirname: path.join(__dirname, '..'), log: () => {}, window: null };
   vm.createContext(sandbox);
   vm.runInContext(prelude + '\nthis.bridge = handleCollaborationBridge; this.setWindow = (value) => { win = value; }; this.pending = collaborationPending; this.startBridge = startCollaborationBridge; this.token = collaborationBridgeToken;', sandbox);
   // Off-screen + no background throttling: renders fully but never appears on the user's display.
@@ -76,9 +76,14 @@ async function run() {
 
     await assert.rejects(bridge('navigate', { url: 'data:text/html,<h1>injected</h1>' }), /Only http and https/);
     await assert.rejects(bridge('navigate', { url: `javascript:location.href='${url}'` }), /Only http and https/);
-    assert.match(first.data_url, /^data:image\/jpeg;base64,/);
+    assert.match(first.data_url, /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/);
     assert.equal(first.viewport.width, 600);
     assert.ok(first.screenshot.width > 0);
+    window.contentView.removeChildView(view);
+    const detached = await bridge('computer_observe', {});
+    assert.match(detached.data_url, /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/);
+    window.contentView.addChildView(view);
+    view.setBounds({ x: 0, y: 0, width: 600, height: 500 });
     assert.equal(first.screenshot.scale_x, first.screenshot.width / first.viewport.width);
     assert.equal(first.screenshot.scale_y, first.screenshot.height / first.viewport.height);
     assert.ok(!first.text.includes('secret123'));
