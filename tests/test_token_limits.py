@@ -28,7 +28,20 @@ class TestTokenLimits:
         assert get_model_token_limit("gpt-4o") == 999
 
     def test_unknown_model_fallback(self):
-        assert get_model_token_limit("totally-unknown-model") == 128_000
+        assert get_model_token_limit("totally-unknown-model") == 1_000_000
+
+    def test_gpt_61_sol_context(self):
+        assert get_model_token_limit("gpt-6.1-sol") == 1_000_000
+        assert get_model_token_limit("chatgpt/gpt-6.1-sol") == 1_000_000
+
+    def test_future_model_fallback(self):
+        assert get_model_token_limit("chatgpt/gpt-6.2-sol") == 1_000_000
+        assert get_model_token_limit("openai/new-model") == 1_000_000
+
+    def test_new_model_custom_override(self, monkeypatch):
+        monkeypatch.setattr(token_limits, "settings", SimpleNamespace(model_token_limits={"gpt-6.1-sol": 500_000}))
+
+        assert get_model_token_limit("chatgpt/gpt-6.1-sol") == 500_000
 
     def test_all_models_have_positive_limit(self):
         for model, limit in DEFAULT_MODEL_TOKEN_LIMITS.items():

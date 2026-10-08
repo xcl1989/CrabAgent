@@ -25,6 +25,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from crabagent.core.agent.token_limits import get_model_token_limit
 from crabagent.core.database import User
 from crabagent.serve.deps import get_current_user
 
@@ -167,7 +168,7 @@ async def _fetch_codex_models() -> None:
         slugs = fallback
 
     for slug in slugs:
-        _register_dynamic_model_cost(slug, context.get(slug, 270_000))
+        _register_dynamic_model_cost(slug, context.get(slug, get_model_token_limit(slug)))
 
     _codex_model_cache["slugs"] = slugs
     _codex_model_cache["context"] = context

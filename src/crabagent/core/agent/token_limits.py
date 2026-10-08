@@ -17,6 +17,7 @@ DEFAULT_MODEL_TOKEN_LIMITS: dict[str, int] = {
     "gpt-3.5-turbo": 16_000,
     "o3": 200_000,
     "o4-mini": 200_000,
+    "gpt-6.1-sol": 1_000_000,
     # GPT-6 family: 872K context (reported by GET /codex/models, 2026-09)
     "gpt-6-astra": 872_000,
     "gpt-6-sol": 872_000,
@@ -100,7 +101,7 @@ _PREFIX_MATCH_ORDER = [
     "kimi-",
 ]
 
-_FALLBACK = 128_000
+_FALLBACK = 1_000_000
 
 VISION_UNSUPPORTED_EXACT = {
     "deepseek-chat",
