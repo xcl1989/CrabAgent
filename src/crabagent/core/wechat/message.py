@@ -18,6 +18,12 @@ logger = logging.getLogger(__name__)
 
 # Backoff on error
 _ERROR_BACKOFF = 5.0
+# Give up and rebuild the whole loop after this many consecutive poll errors.
+# (Each failed cycle ≈ _LONG_POLL_TIMEOUT 45s + _ERROR_BACKOFF 5s, so 5 errors
+# ≈ 4 minutes of dead connection before self-healing kicks in.)
+_MAX_CONSECUTIVE_POLL_ERRORS = 5
+# Self-heal notification cooldown
+_SELFHEAL_NOTIFY_COOLDOWN = 600.0  # 10 min
 # Session expired re-login notification cooldown
 _RELOGIN_NOTIFY_COOLDOWN = 300.0  # 5 min
 # Archive a WeChat conversation when prior messages exceed this count
@@ -39,13 +45,19 @@ class WeChatMessageLoop:
         self,
         client: WeChatClient,
         on_message: Any | None = None,
+        on_connection_lost: Any | None = None,
     ):
         self.client = client
         self._custom_handler = on_message
+        # Async callback fired (as a background task) when the poll loop
+        # gives up after too many consecutive errors. The owner (scheduler)
+        # uses it to rebuild the loop with a fresh HTTP client.
+        self._on_connection_lost = on_connection_lost
         self._buf = ""
         self._running = False
         self._task: asyncio.Task | None = None
         self._last_relogin_notify = 0.0
+        self._last_selfheal_notify = 0.0
         # Message deduplication: msg_key → timestamp (monotonic)
         # Prevents the same message from being processed twice if
         # long-poll returns it in consecutive batches.
@@ -86,9 +98,11 @@ class WeChatMessageLoop:
 
     async def _run(self) -> None:
         """Main long-poll loop with error recovery."""
+        consecutive_errors = 0
         while self._running:
             try:
                 messages = await self.client.get_updates(self._buf)
+                consecutive_errors = 0
                 for msg in messages:
                     # Update cursor
                     if msg.get_updates_buf:
@@ -108,10 +122,62 @@ class WeChatMessageLoop:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error("[WeChatLoop] Poll error: %s", e)
+                consecutive_errors += 1
+                logger.error(
+                    "[WeChatLoop] Poll error (%d/%d): %s",
+                    consecutive_errors,
+                    _MAX_CONSECUTIVE_POLL_ERRORS,
+                    e,
+                )
+                if consecutive_errors >= _MAX_CONSECUTIVE_POLL_ERRORS:
+                    logger.warning(
+                        "[WeChatLoop] %d consecutive poll errors — connection degraded,"
+                        " giving up this loop and requesting a rebuild",
+                        consecutive_errors,
+                    )
+                    self._running = False
+                    await self._notify_connection_degraded()
+                    # Fire the rebuild callback in its own task — it will call
+                    # loop.stop() which awaits this very task, so we must not
+                    # await it inline (deadlock).
+                    if self._on_connection_lost:
+                        asyncio.create_task(self._safe_connection_lost())
+                    break
                 await asyncio.sleep(_ERROR_BACKOFF)
 
         self._running = False
+
+    async def _safe_connection_lost(self) -> None:
+        """Invoke the connection-lost callback, swallowing exceptions."""
+        try:
+            await self._on_connection_lost()
+        except Exception as e:
+            logger.error("[WeChatLoop] Connection-lost callback failed: %s", e)
+
+    async def _notify_connection_degraded(self) -> None:
+        """Create an in-app notification that the WeChat loop is self-healing."""
+        now = time.time()
+        if now - self._last_selfheal_notify < _SELFHEAL_NOTIFY_COOLDOWN:
+            return
+        self._last_selfheal_notify = now
+
+        try:
+            from crabagent.core.database import Notification, async_session_factory
+
+            async with async_session_factory() as db:
+                notif = Notification(
+                    user_id=1,  # Default admin user
+                    title="🔄 微信通道自愈",
+                    body=(
+                        "微信 iLink 连接连续失败，已自动重建消息循环。"
+                        "如持续提示无法连接，请尝试重启应用或重新扫码登录。"
+                    ),
+                    conversation_id="",
+                )
+                db.add(notif)
+                await db.commit()
+        except Exception as e:
+            logger.error("[WeChatLoop] Failed to create self-heal notification: %s", e)
 
     async def _update_push_target(self, user_id: str, context_token: str) -> None:
         """Persist the first (or latest) user as the push notification target."""

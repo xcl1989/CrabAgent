@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import type { AttentionSummary } from "../api/work";
 import { getAttentionSummary } from "../api/work";
 import { connectGlobalSSE } from "../api/monitor";
+import { api } from "../api/client";
 
 /**
  * Global work-status provider (trusted work system §13).
@@ -36,6 +37,7 @@ export function WorkStatusProvider({ children }: { children: React.ReactNode }) 
 
   const refresh = useCallback(async () => {
     if (busy.current) return;
+    if (!api.getToken()) return; // Not authenticated — skip polling to avoid 401 reload loops
     busy.current = true;
     setLoading(true);
     try {
@@ -68,7 +70,7 @@ export function WorkStatusProvider({ children }: { children: React.ReactNode }) 
     return () => {
       clearInterval(interval);
       window.removeEventListener("focus", onFocus);
-      es.close();
+      es?.close();
       if (debounce !== null) window.clearTimeout(debounce);
     };
   }, [refresh]);

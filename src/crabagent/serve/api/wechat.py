@@ -372,7 +372,9 @@ async def _ensure_message_loop_running():
     if not client:
         return
 
-    loop = WeChatMessageLoop(client)
+    loop = WeChatMessageLoop(
+        client, on_connection_lost=sched._rebuild_wechat_loop
+    )
     sched._wechat_loop = loop
     await loop.start()
     logger.info("[WeChat API] Message loop started")

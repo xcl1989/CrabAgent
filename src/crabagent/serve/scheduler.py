@@ -703,12 +703,30 @@ class SchedulerService:
                 logger.warning("[WeChat] Failed to create authenticated client")
                 return
 
-            loop = WeChatMessageLoop(client)
+            loop = WeChatMessageLoop(client, on_connection_lost=self._rebuild_wechat_loop)
             self._wechat_loop = loop
             await loop.start()
             logger.info("[WeChat] Message loop started (account=%s)", cfg.account_id)
         except Exception as e:
             logger.error("[WeChat] Failed to start loop: %s", e)
+
+    async def _rebuild_wechat_loop(self):
+        """Self-heal: rebuild the WeChat loop with a fresh HTTP client.
+
+        Called (in a background task) by the message loop itself after too
+        many consecutive poll errors — typically caused by a degraded
+        connection pool in a long-running process. Stopping and restarting
+        recreates the underlying httpx client, which fixes it.
+        """
+        logger.warning("[WeChat] Self-heal triggered — rebuilding message loop")
+        try:
+            await self.stop_wechat_loop()
+        except Exception as e:
+            logger.error("[WeChat] Self-heal: failed to stop old loop: %s", e)
+        try:
+            await self.start_wechat_loop()
+        except Exception as e:
+            logger.error("[WeChat] Self-heal: failed to restart loop: %s", e)
 
     async def stop_wechat_loop(self):
         """Stop the WeChat message loop if running."""

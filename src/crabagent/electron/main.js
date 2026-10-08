@@ -1406,9 +1406,17 @@ function createWindow() {
 // ── Desktop pet ──
 // It shares the main window's local origin and session, so its React surface can
 // consume the existing authenticated global SSE stream without extra credentials.
+const primedAuthTargets = new WeakSet();
+
 function primeRendererAuth(target) {
   if (!target || target.isDestroyed() || !authToken) return;
-  target.webContents.once('did-finish-load', () => {
+  if (primedAuthTargets.has(target.webContents)) return; // already listening
+  primedAuthTargets.add(target.webContents);
+  // Re-inject on EVERY load (not just once): if the renderer hits a 401 it
+  // clears the token and reloads — re-priming lets desktop auto-login recover
+  // instead of leaving the app stuck on the login page.
+  target.webContents.on('did-finish-load', () => {
+    if (!authToken) return;
     if (!target.webContents.getURL().startsWith(BACKEND_URL)) return;
     const token = JSON.stringify(authToken);
     target.webContents.executeJavaScript(`window.localStorage.setItem('crab_token', ${token})`);

@@ -71,8 +71,9 @@ export type PipelineSSEEvent =
   | { type: "pipeline_step_end"; data: PipelineStepData; timestamp: number }
   | { type: "pipeline_end"; data: PipelineEndData; timestamp: number };
 
-export function connectGlobalSSE(onEvent: (event: GlobalSSEEvent) => void): EventSource {
-  const token = localStorage.getItem("crab_token") || "";
+export function connectGlobalSSE(onEvent: (event: GlobalSSEEvent) => void): EventSource | null {
+  const token = localStorage.getItem("crab_token");
+  if (!token) return null; // Not authenticated — don't hammer the API with 401s
   const url = `/api/events/global?token=${encodeURIComponent(token)}`;
   const es = new EventSource(url);
   es.onmessage = (e) => {

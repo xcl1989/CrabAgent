@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.16.6] — Desktop Pet Authentication and WeChat Self-Healing (2026-10-08)
+
+### Fixed
+- **Selected desktop pet remained the built-in crab** — The pet renderer now obtains its authentication token before mounting React API consumers, preventing startup 401 responses from clearing the shared session and repeatedly reloading the window.
+- **Unauthenticated polling and event streams** — Work-status polling and global SSE connections no longer start without a token. A 401 only reloads the page when an existing session expires; SSE consumers safely handle an absent connection.
+- **Renderer authentication after reload** — Electron re-injects the desktop authentication token on each page load and avoids duplicate listeners.
+- **WeChat stopped receiving messages after repeated connection failures** — After five consecutive poll errors, the message loop requests a rebuild with a fresh HTTP client. Successful polls reset the error counter; rebuilding runs in a separate task to avoid a stop/await deadlock, with an in-app recovery notification.
+
+### Changed
+- Added desktop pet authentication bootstrap regression tests and WeChat self-healing tests.
+- Synchronized desktop version metadata and bundled frontend assets.
+
+---
+
 ## [0.16.4] — Collaboration Browser Screenshots Work Outside the Browser Page
 
 ### Fixed

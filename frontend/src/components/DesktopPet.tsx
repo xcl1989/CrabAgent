@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { connectGlobalSSE, type AgentMonitorSummary } from "../api/monitor";
 import { getActivePet, getPet, getSpritesheetUrl, type PetDetail } from "../api/pets";
-import { api } from "../api/client";
 import { SpritePet, type SpritePetConfig } from "./pets";
 import {
   derivePetState,
@@ -315,22 +314,7 @@ export function DesktopPet() {
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
-    const initializeActivePet = async () => {
-      // The pet is a separate Electron renderer. Bootstrap its API client from
-      // the main process instead of relying on another window's local storage.
-      try {
-        const token = await window.electronAPI?.getPetAuthToken?.();
-        if (token) {
-          api.setToken(token);
-          localStorage.setItem("crab_token", token);
-        }
-      } catch {
-        // A browser-hosted pet uses its existing web session instead.
-      }
-      if (!cancelled) await loadActivePet();
-    };
-    void initializeActivePet();
+    void loadActivePet();
     const handleStorage = (event: StorageEvent) => {
       if (event.key === "active_pet_id") void loadActivePet();
     };
@@ -342,7 +326,6 @@ export function DesktopPet() {
       window.removeEventListener("storage", handleStorage);
       window.removeEventListener("active_pet_name_changed", loadActivePet);
       window.clearInterval(refreshTimer);
-      cancelled = true;
     };
   }, [loadActivePet]);
 
@@ -447,7 +430,7 @@ export function DesktopPet() {
     const monitorTimer = window.setInterval(() => void syncStateFromMonitor(), 5000);
     const es = connectGlobalSSE(scheduleSync);
     return () => {
-      es.close();
+      es?.close();
       window.removeEventListener("storage", handleStorage);
       window.clearInterval(monitorTimer);
       if (syncTimerRef.current !== null) window.clearTimeout(syncTimerRef.current);

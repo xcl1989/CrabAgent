@@ -44,8 +44,13 @@ class ApiClient {
     }
     const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
     if (res.status === 401) {
+      // Only reload when we actually had a token (session expired). Without a
+      // token (login page) reloading would loop forever on 401 responses.
+      const hadToken = !!this.token;
       this.clearToken();
-      window.location.reload();
+      if (hadToken) {
+        window.location.reload();
+      }
       throw new Error("Unauthorized");
     }
     if (res.status === 204) return undefined as T;

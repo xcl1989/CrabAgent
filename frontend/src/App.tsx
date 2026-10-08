@@ -90,7 +90,7 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
         toast.info(text);
       }
     });
-    return () => es.close();
+    return () => es?.close();
   }, []);
 
   return (
