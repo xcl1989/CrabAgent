@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 import sys
 
@@ -86,6 +87,38 @@ _BACKGROUND_PATTERNS = (
     re.compile(r"\bdisown\b"),
 )
 
+# Capture the path operand of a shell redirect ("> file", ">> file", "2> file")
+# and of "tee file".  The leading lookbehind avoids matching ">" that is part of
+# a larger token (e.g. inside a quoted JSON payload like {"a":">b"}).
+_REDIRECT_RE = re.compile(r"(?<![A-Za-z_])>>?\s*([^\s;&|()<>]+)")
+_TEE_RE = re.compile(r"(?<![A-Za-z_])tee\s+(?:-[A-Za-z]+\s+)*([^\s;&|()<>]+)")
+
+
+def _redirect_write_targets(command: str) -> list[str]:
+    """Return the file paths a command writes to via ``>``, ``>>`` or ``tee``.
+
+    Collecting only real redirect operands means a bare substring such as
+    ``/bin`` inside ``$HOME/.hecom-cli/bin`` is never mistaken for a write to
+    that directory.
+    """
+    targets = [m.group(1) for m in _REDIRECT_RE.finditer(command)]
+    targets.extend(m.group(1) for m in _TEE_RE.finditer(command))
+    return targets
+
+
+def _critical_write_target(command: str) -> str | None:
+    """Return the critical dir a command redirects into, if any."""
+    for raw in _redirect_write_targets(command):
+        target = os.path.expanduser(os.path.expandvars(raw)).strip("\"'")
+        if not target or target.startswith("&"):
+            continue
+        target = re.sub(r"/{2,}", "/", target)
+        for crit_dir in _CRITICAL_DIRS:
+            base = crit_dir.rstrip("/")
+            if target == base or target.startswith(base + "/"):
+                return crit_dir
+    return None
+
 
 def validate_command(command: str) -> str | None:
     for compiled, label in zip(_COMPILED, _LABELS):
@@ -103,10 +136,9 @@ def validate_command(command: str) -> str | None:
         if pipe_pattern in command and ("| sh" in command or "| bash" in command):
             return f"Command blocked: remote code execution via pipe ('{pipe_cmd}... | sh')"
 
-    lower_cmd = command.lower().strip()
-    for crit_dir in _CRITICAL_DIRS:
-        if crit_dir in lower_cmd and (">" in command or ">>" in command or "tee" in command):
-            return f"NEED_CONFIRM:writing to critical system path '{crit_dir}'"
+    crit_target = _critical_write_target(command)
+    if crit_target:
+        return f"NEED_CONFIRM:writing to critical system path '{crit_target}'"
 
     if "> /dev/sd" in command or "> /dev/hd" in command:
         return "Command blocked: direct write to block device"

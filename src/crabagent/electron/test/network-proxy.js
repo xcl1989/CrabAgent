@@ -1,6 +1,8 @@
 const assert = require('node:assert/strict');
 const http = require('node:http');
 const net = require('node:net');
+const dns = require('node:dns').promises;
+const { createLocalPreviewPolicy } = require('../computer-url-policy');
 const { createComputerNetworkProxy } = require('../computer-network-proxy');
 let auth = '';
 
@@ -41,11 +43,18 @@ function connect(proxyPort, authority) {
     answers = [{ address: '8.8.8.8' }, { address: '127.0.0.1' }];
     assert.equal((await fetch(proxyPort, `http://rebind.invalid:${targetPort}/`)).status, 403);
     assert.equal((await fetch(proxyPort, `http://169.254.169.254:${targetPort}/`)).status, 403);
-    const fixture = createComputerNetworkProxy({ allowLocalFixture: true });
+    const localPreviewPolicy = createLocalPreviewPolicy();
+    localPreviewPolicy.grant(`http://127.0.0.1:${targetPort}`);
+    const fixture = createComputerNetworkProxy({ localPreviewPolicy, upstreamResolver: async () => { throw new Error('local must bypass upstream'); } });
     const fixturePort = await listen(fixture.server);
     auth = `Basic ${Buffer.from(`crab:${fixture.proxySecret}`).toString('base64')}`;
     try {
       assert.deepEqual(await fetch(fixturePort, `http://127.0.0.1:${targetPort}/`), { status: 200, body: 'fixture' });
+      assert.equal((await fetch(fixturePort, 'http://127.0.0.1:1/')).status, 403);
+      assert.equal((await fetch(fixturePort, `http://localhost:${targetPort}/`)).status, 403);
+      assert.match(await connect(fixturePort, `127.0.0.1:${targetPort}`), /403 Forbidden/);
+      localPreviewPolicy.clear();
+      assert.equal((await fetch(fixturePort, `http://127.0.0.1:${targetPort}/`)).status, 403);
     } finally { fixture.server.close(); }
     // System-proxy chaining: our proxy must forward to the user's upstream (Clash etc.)
     let upstreamHits = 0;

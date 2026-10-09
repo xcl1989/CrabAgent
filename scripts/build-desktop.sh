@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -57,21 +57,23 @@ echo "  Done."
 
 # 4. Copy backend binary to Electron resources
 echo "[4/5] Copying backend to Electron app..."
-mkdir -p electron/resources
-rm -rf electron/resources/crabagent-backend
-cp -R dist/crabagent-backend electron/resources/
+mkdir -p src/crabagent/electron/resources
+if [ -e src/crabagent/electron/resources/crabagent-backend ]; then
+  mv src/crabagent/electron/resources/crabagent-backend "src/crabagent/electron/resources/crabagent-backend.before-$(date +%Y%m%d-%H%M%S)"
+fi
+cp -R dist/crabagent-backend src/crabagent/electron/resources/
 echo "  Done."
 
 # 5. Build Electron .app
 echo "[5/6] Building Electron .app..."
-cd "$PROJECT_ROOT/electron"
+cd "$PROJECT_ROOT/src/crabagent/electron"
 npm ci --silent 2>/dev/null
-npx electron-builder --mac --dir -p never 2>&1 | tail -5
+npx electron-builder --mac --dir -p never -c.directories.output="${CRAB_DESKTOP_OUTPUT:-dist-electron}" 2>&1 | tail -5
 
 # 6. Build DMG with electron-builder (drag-to-Applications layout from package.json)
 echo "[6/6] Creating .dmg with electron-builder..."
-npx electron-builder --mac dmg -p never 2>&1 | tail -3
+npx electron-builder --mac dmg -p never -c.directories.output="${CRAB_DESKTOP_OUTPUT:-dist-electron}" 2>&1 | tail -3
 
 echo ""
 echo "=== Build Complete! ==="
-ls -lh dist-electron/CrabAgent-*-arm64.dmg | tail -1
+ls -lh "${CRAB_DESKTOP_OUTPUT:-dist-electron}"/CrabAgent-*-arm64.dmg | tail -1

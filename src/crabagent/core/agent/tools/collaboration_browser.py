@@ -28,18 +28,31 @@ def _bridge_request(command: str, payload: dict[str, Any] | None = None, *, cont
 
     action_payload = dict(payload or {})
     mutating_commands = {
-        "navigate", "click", "commit_click", "point", "commit_point", "type", "scroll", "select", "press_key",
+        "navigate",
+        "click",
+        "commit_click",
+        "point",
+        "commit_point",
+        "type",
+        "scroll",
+        "select",
+        "press_key",
     }
     if command in mutating_commands:
         action_payload.setdefault("action_id", str(uuid.uuid4()))
     metadata = context.metadata if context is not None else {}
     # The binding is derived from trusted Agent context, never a model argument.
     task_id = str(metadata.get("_run_id") or metadata.setdefault("_computer_task_id", str(uuid.uuid4())))
-    body = json.dumps({
-        "protocol_version": 1, "runtime_id": "browser:collaboration",
-        "task_id": task_id, "trace_id": str(uuid.uuid4()),
-        "command": command, "payload": action_payload,
-    }).encode("utf-8")
+    body = json.dumps(
+        {
+            "protocol_version": 1,
+            "runtime_id": "browser:collaboration",
+            "task_id": task_id,
+            "trace_id": str(uuid.uuid4()),
+            "command": command,
+            "payload": action_payload,
+        }
+    ).encode("utf-8")
     request = Request(
         f"http://127.0.0.1:{port}/",
         data=body,
@@ -50,7 +63,7 @@ def _bridge_request(command: str, payload: dict[str, Any] | None = None, *, cont
         },
     )
     # Navigation and waiting can take a while for slow sites.
-    timeout = 120 if command in ("navigate", "wait_for") else 35
+    timeout = 120 if command in ("navigate", "wait_for", "authorize_local_preview") else 35
     try:
         with urlopen(request, timeout=timeout) as response:
             data = json.loads(response.read().decode("utf-8"))
@@ -119,6 +132,30 @@ def _versioned_payload(payload: dict[str, Any], page_version: int | None, contex
     if version != current_version:
         raise RuntimeError("STALE_PAGE: supplied page version does not match the latest observation")
     return {**payload, "page_version": version, "observation_id": observation_id}
+
+
+@registry.register(
+    name="collab_browser_authorize_local_preview",
+    description=(
+        "Request explicit user permission in a native desktop dialog for one local preview origin. "
+        "Only 127.0.0.1, localhost or [::1] over http/https are supported. Permission covers this "
+        "exact scheme, host and port for 30 minutes; other private destinations remain blocked. "
+        "After approval use collab_browser_open. Never use this for CrabAgent service ports."
+    ),
+    parameters={"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]},
+    metadata={"source": "builtin", "category": "collaboration_browser"},
+)
+async def collab_browser_authorize_local_preview(url: str, context=None) -> str:
+    # The Electron main process owns the confirmation; no model-supplied approved flag.
+    value = await asyncio.to_thread(_bridge_request, "authorize_local_preview", {"url": url}, context=context)
+    await record_browser_event(
+        context,
+        "approval_requested",
+        action="local_preview",
+        decision=value.get("status", "blocked"),
+        url=value.get("origin", ""),
+    )
+    return _result(value)
 
 
 @registry.register(

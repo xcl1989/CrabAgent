@@ -25,9 +25,11 @@ declare global {
       onOpenSession?: (callback: (sessionId: string) => void) => void;
       onPetDragDirection?: (callback: (data: { direction: string | null }) => void) => void;
       collaborationBrowserLayout?: (bounds: { x: number; y: number; width: number; height: number } | null, visible: boolean) => Promise<boolean>;
+      collaborationBrowserAuthorizeLocal?: (url: string) => Promise<{ status: string; origin: string }>;
+      collaborationBrowserRevokeLocal?: () => Promise<void>;
       collaborationBrowserNavigate?: (url: string) => Promise<void>;
       collaborationBrowserAction?: (action: "back" | "forward" | "reload" | "stop" | "computer-stop" | "computer-resume") => Promise<void>;
-      onCollaborationBrowserState?: (callback: (state: { url: string; title: string; canGoBack: boolean; canGoForward: boolean; loading: boolean; paused?: boolean }) => void) => void;
+      onCollaborationBrowserState?: (callback: (state: { url: string; title: string; canGoBack: boolean; canGoForward: boolean; loading: boolean; paused?: boolean; localPreviewOrigins?: string[] }) => void) => void;
       macosComputerGetStatus?: () => Promise<{
         config: { inputEnabled: boolean; allowlist: string[] };
         permissions: { accessibility: boolean; screenRecording: boolean; secureInput: boolean; osVersion: string } | null;

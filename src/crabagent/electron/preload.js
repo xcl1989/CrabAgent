@@ -27,6 +27,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   movePetDrag: () => ipcRenderer.send('pet-drag-move'),
   endPetDrag: () => ipcRenderer.send('pet-drag-end'),
   collaborationBrowserLayout: (bounds, visible) => ipcRenderer.invoke('collaboration-browser-layout', bounds, visible),
+  collaborationBrowserAuthorizeLocal: (url) => ipcRenderer.invoke('collaboration-browser-authorize-local', url),
+  collaborationBrowserRevokeLocal: () => ipcRenderer.invoke('collaboration-browser-revoke-local'),
   collaborationBrowserNavigate: (url) => ipcRenderer.invoke('collaboration-browser-navigate', url),
   collaborationBrowserAction: (action) => ipcRenderer.invoke('collaboration-browser-action', action),
   onCollaborationBrowserState: (callback) => ipcRenderer.on('collaboration-browser-state', (_event, state) => callback(state)),

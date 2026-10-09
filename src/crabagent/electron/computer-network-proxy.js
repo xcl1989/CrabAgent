@@ -32,16 +32,22 @@ function parseProxyResolution(entry) {
 
 // Resolve and connect through one decided path. Without a system upstream, Chromium must
 // never resolve collaboration traffic independently of this proxy's destination policy.
-function createComputerNetworkProxy({ allowLocalFixture = false, lookup = (host) => dns.lookup(host, { all: true }), upstreamResolver = null, debug = null } = {}) {
+function createComputerNetworkProxy({ localPreviewPolicy, lookup = (host) => dns.lookup(host, { all: true }), upstreamResolver = null, debug = null } = {}) {
   const trace = (msg) => { try { debug && debug(msg); } catch {} };
   function literalBlocked(host, address) {
-    return blockedHost(address) && !(allowLocalFixture && host === '127.0.0.1' && address === '127.0.0.1');
+    return blockedHost(address);
   }
 
   // Decide the path for one authority: system upstream proxy or pinned direct IP.
   async function destination(host, port, scheme) {
     if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Invalid port');
-    if (blockedHost(host) && !(allowLocalFixture && host === '127.0.0.1')) throw new Error('PRIVATE_NETWORK_BLOCKED');
+    const authorityHost = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
+    const url = `${scheme || 'https'}://${authorityHost}:${port}/`;
+    if (localPreviewPolicy?.allows(url)) {
+      // Bypass system proxies and DNS for explicitly approved local previews.
+      return { kind: 'direct', address: host === '[::1]' ? '::1' : '127.0.0.1' };
+    }
+    if (blockedHost(host)) throw new Error('PRIVATE_NETWORK_BLOCKED');
     const upstream = upstreamResolver ? await upstreamResolver(`${scheme || 'https'}://${host}:${port}/`) : null;
     trace(`destination ${host}:${port} -> ${upstream ? upstream.kind + ' ' + (upstream.host || '') + ':' + (upstream.port || '') : 'direct'}`);
     if (upstream && upstream.kind !== 'direct') {
@@ -161,6 +167,12 @@ function createComputerNetworkProxy({ allowLocalFixture = false, lookup = (host)
       response.end();
     }
   });
+  const sockets = new Set();
+  server.on('connection', (socket) => {
+    sockets.add(socket);
+    socket.once('close', () => sockets.delete(socket));
+  });
+  server.closeConnections = () => { for (const socket of sockets) socket.destroy(); };
   server.on('connect', async (request, client, head) => {
     if (!authorized(request)) { fail(client, 407); return; }
     try {

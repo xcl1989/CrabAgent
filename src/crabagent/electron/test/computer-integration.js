@@ -28,7 +28,6 @@ async function run() {
   await assert.rejects(allowedNetworkUrl('http://127.0.0.1/'), /PRIVATE_NETWORK_BLOCKED/);
   await assert.rejects(allowedNetworkUrl('http://user:secret@example.com/'), /Credentials/);
   await assert.rejects(allowedNetworkUrl('http://localhost/'), /PRIVATE_NETWORK_BLOCKED/);
-  process.env.CRAB_COMPUTER_TEST_LOCAL = '1';
   const main = fs.readFileSync(path.join(__dirname, '../main.js'), 'utf8');
   const prelude = main.slice(0, main.indexOf('// ── Window state persistence ──'))
     .replace("const COLLABORATION_START_URL = 'https://www.google.com/';", `const COLLABORATION_START_URL = '${url}';`);
@@ -36,8 +35,8 @@ async function run() {
   const sandbox = { require: mainRequire, process, console, Buffer, URL, setTimeout, clearTimeout,
     __dirname: path.join(__dirname, '..'), log: () => {}, window: null };
   vm.createContext(sandbox);
-  vm.runInContext(prelude + '\nthis.bridge = handleCollaborationBridge; this.setWindow = (value) => { win = value; }; this.pending = collaborationPending; this.startBridge = startCollaborationBridge; this.token = collaborationBridgeToken;', sandbox);
-  // Off-screen + no background throttling: renders fully but never appears on the user's display.
+  vm.runInContext(prelude + `\nlocalPreviewPolicy.grant('${url}');` + '\nthis.bridge = handleCollaborationBridge; this.setWindow = (value) => { win = value; }; this.pending = collaborationPending; this.startBridge = startCollaborationBridge; this.token = collaborationBridgeToken; this.localPreviewPolicy = localPreviewPolicy;', sandbox);
+  // A visible window is required for trusted native input integration tests.
   const window = new BrowserWindow({ width: 800, height: 650, show: true, webPreferences: { sandbox: true } });
   sandbox.setWindow(window);
   sandbox.setCollaborationViewBounds({ x: 0, y: 0, width: 600, height: 500 }, true);
@@ -222,10 +221,15 @@ async function run() {
     await blocking;
     o = await observe();
     assert.ok(o.observation_id);
+    // stop clears all local grants; restore only this fixture origin for the remaining tests.
+    sandbox.localPreviewPolicy.grant(url);
     const loaded = new Promise((resolve) => view.webContents.once('did-finish-load', resolve));
     view.webContents.reload();
     await loaded;
     await assert.rejects(action('scroll', o, { amount: 10 }), /STALE_PAGE/);
+    // Drag-and-drop may leave pointer capture active; start the fixed click set focused.
+    window.focus();
+    view.webContents.focus();
     const cases = [
       { name: 'ordinary English', selector: '#ordinary', value: 'query', read: "document.querySelector('#ordinary').value" },
       { name: 'ordinary Chinese', selector: '#ordinary', value: '搜索', read: "document.querySelector('#ordinary').value" },

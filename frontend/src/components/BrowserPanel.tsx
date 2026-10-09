@@ -145,7 +145,15 @@ export default function BrowserPanel() {
             />
             {browserState.loading ? <Loader2 size={13} className="shrink-0 animate-spin text-[var(--text-tertiary)]" /> : <ShieldCheck size={13} className="shrink-0 text-[var(--success)]" />}
           </div>
-          <button type="submit" className="rounded-lg bg-[var(--brand)] px-3 py-1.5 text-xs font-medium text-[var(--text-on-brand)] transition-colors hover:bg-[var(--brand-hover)]">打开</button>
+          <button type="button" className="browser-text-control" title="授权地址栏中的本机 origin（30 分钟）" onClick={() => {
+            void window.electronAPI?.collaborationBrowserAuthorizeLocal?.(formatUrl(address)).then((result) => {
+              setError(result.status === "authorized" ? `已授权 ${result.origin}，可点击打开` : "授权已取消");
+            }).catch((reason: unknown) => setError(String(reason)));
+          }}>授权本地预览</button>
+          <button type="button" className="browser-text-control" title="撤销本地预览授权" onClick={() => {
+            void window.electronAPI?.collaborationBrowserRevokeLocal?.().then(() => setError("已撤销本地预览授权")).catch((reason: unknown) => setError(String(reason)));
+          }}>撤销授权</button>
+          <button type="submit" className="shrink-0 whitespace-nowrap rounded-lg bg-[var(--brand)] px-3 py-1.5 text-xs font-medium text-[var(--text-on-brand)] transition-colors hover:bg-[var(--brand-hover)]">打开</button>
         </form>
         {error && <p className="mt-1 px-1 text-xs text-[var(--danger)]">{error}</p>}
       </div>
@@ -155,7 +163,7 @@ export default function BrowserPanel() {
         <div ref={hostRef} className="absolute inset-0" />
       </div>
 
-      <style>{`.browser-control { display: inline-flex; height: 30px; width: 30px; align-items: center; justify-content: center; border-radius: 8px; color: var(--text-secondary); transition: background-color 150ms, color 150ms; } .browser-control:hover:not(:disabled) { background: var(--bg-tertiary); color: var(--text-primary); } .browser-control:disabled { cursor: not-allowed; opacity: .35; }`}</style>
+      <style>{`.browser-control { display: inline-flex; flex-shrink: 0; height: 30px; width: 30px; align-items: center; justify-content: center; border-radius: 8px; color: var(--text-secondary); transition: background-color 150ms, color 150ms; } .browser-text-control { display: inline-flex; flex-shrink: 0; height: 30px; width: auto; align-items: center; justify-content: center; white-space: nowrap; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 12px; line-height: 1; color: var(--text-secondary); } .browser-text-control:hover { background: var(--bg-tertiary); color: var(--text-primary); } .browser-control:hover:not(:disabled) { background: var(--bg-tertiary); color: var(--text-primary); } .browser-control:disabled { cursor: not-allowed; opacity: .35; }`}</style>
     </div>
   );
 }

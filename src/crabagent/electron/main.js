@@ -1,12 +1,15 @@
-const { app, BrowserWindow, WebContentsView, Tray, Menu, nativeImage, ipcMain, session } = require('electron');
+const { app, BrowserWindow, WebContentsView, Tray, Menu, nativeImage, ipcMain, session, dialog } = require('electron');
 const { spawn, execSync, exec } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const http = require('http');
 const crypto = require('crypto');
-const { parseBrowserUrl, allowedNetworkUrl } = require('./computer-url-policy');
+const { parseBrowserUrl, allowedNetworkUrl, createLocalPreviewPolicy } = require('./computer-url-policy');
 const { createComputerNetworkProxy, parseProxyResolution } = require('./computer-network-proxy');
+
+// Allow isolated desktop verification without touching the normal profile.
+if (process.env.CRAB_APP_USER_DATA_DIR) app.setPath('userData', path.resolve(process.env.CRAB_APP_USER_DATA_DIR));
 
 const PORT = Number(process.env.CRAB_APP_PORT) || 5210;
 const DIAG = process.env.CRAB_APP_DIAG === '1';
@@ -58,10 +61,50 @@ function normalizeBrowserUrl(rawUrl) {
   return parseBrowserUrl(rawUrl || COLLABORATION_START_URL).toString();
 }
 
-// Only the local, source-based integration fixture may visit its loopback HTTP server.
-const allowLocalFixture = process.env.CRAB_COMPUTER_TEST_LOCAL === '1' && !app.isPackaged;
+const localPreviewPolicy = createLocalPreviewPolicy({
+  forbiddenPorts: () => [PORT, collaborationBridgePort, collaborationNetworkProxy?.address()?.port].filter(Boolean),
+});
+let localPreviewApproval = null;
+async function authorizeLocalPreview(rawUrl) {
+  const origin = localPreviewPolicy.origin(rawUrl);
+  if (localPreviewApproval) throw new Error('LOCAL_PREVIEW_APPROVAL_PENDING');
+  if (!win || win.isDestroyed()) throw new Error('LOCAL_PREVIEW_APPROVAL_UNAVAILABLE');
+  const epoch = collaborationStopEpoch;
+  localPreviewApproval = origin;
+  try {
+    const decision = await dialog.showMessageBox(win, {
+      type: 'warning', title: '本地预览授权',
+      message: `允许协作浏览器和 AI 访问 ${origin} 吗？`,
+      detail: '授权覆盖该 origin 的所有路径，包括其他网页发起的请求。请仅授权可信的预览服务；其他端口、协议和内网地址仍被阻止。授权在 30 分钟后、暂停 AI 控制或主动撤销时失效，不会保存到磁盘。',
+      buttons: ['取消', '授权此 origin'], defaultId: 0, cancelId: 0, noLink: true,
+    });
+    if (decision.response !== 1 || epoch !== collaborationStopEpoch) return { status: 'blocked', origin };
+    localPreviewPolicy.grant(origin);
+    // Close established tunnels too when the grant expires (not just new requests).
+    setTimeout(() => {
+      if (!localPreviewPolicy.allows(origin)) {
+        collaborationView?.webContents.stop();
+        collaborationNetworkProxy?.closeConnections();
+        void collaborationView?.webContents.session.closeAllConnections();
+        sendCollaborationBrowserState();
+      }
+    }, 30 * 60_000 + 1).unref();
+    sendCollaborationBrowserState();
+    return { status: 'authorized', origin, expires_in_seconds: 1800 };
+  } finally { localPreviewApproval = null; }
+}
+
+async function revokeLocalPreviews() {
+  localPreviewPolicy.clear();
+  collaborationStopEpoch += 1;
+  collaborationView?.webContents.stop();
+  collaborationNetworkProxy?.closeConnections();
+  invalidateCollaborationObservation('local-preview-revoke');
+  await collaborationView?.webContents.session.closeAllConnections();
+  sendCollaborationBrowserState();
+}
 async function checkedBrowserUrl(rawUrl) {
-  return allowedNetworkUrl(normalizeBrowserUrl(rawUrl), { allowLocalFixture });
+  return allowedNetworkUrl(normalizeBrowserUrl(rawUrl), { localPreviewPolicy });
 }
 
 function sendCollaborationBrowserState() {
@@ -74,6 +117,7 @@ function sendCollaborationBrowserState() {
     canGoForward: contents.canGoForward(),
     loading: contents.isLoading(),
     paused: collaborationStopped,
+    localPreviewOrigins: localPreviewPolicy.list(),
   });
 }
 
@@ -95,7 +139,7 @@ async function ensureCollaborationNetworkProxy(browserSession) {
           return { kind: 'direct' };
         }
       };
-      const proxy = createComputerNetworkProxy({ allowLocalFixture, upstreamResolver: systemProxy, debug: DIAG ? (msg) => log(`[netproxy] ${msg}`) : null });
+      const proxy = createComputerNetworkProxy({ localPreviewPolicy, upstreamResolver: systemProxy, debug: DIAG ? (msg) => log(`[netproxy] ${msg}`) : null });
       collaborationNetworkProxy = proxy.server;
       collaborationNetworkProxySecret = proxy.proxySecret;
       await new Promise((resolve, reject) => {
@@ -156,7 +200,7 @@ function ensureCollaborationView() {
   });
   for (const eventName of ['did-navigate', 'did-navigate-in-page', 'did-start-loading', 'did-stop-loading', 'page-title-updated']) {
     collaborationView.webContents.on(eventName, () => {
-      if (eventName === 'did-navigate' || eventName === 'did-navigate-in-page') {
+      if (eventName === 'did-navigate' || eventName === 'did-navigate-in-page' || eventName === 'did-start-loading') {
         invalidateCollaborationObservation(eventName);
       }
       sendCollaborationBrowserState();
@@ -355,8 +399,8 @@ async function handleCollaborationBridge(command, payload) {
   const view = ensureCollaborationView();
   const contents = view.webContents;
   if (command === 'stop') {
-    collaborationStopEpoch += 1;
     collaborationStopped = true;
+    await revokeLocalPreviews();
     collaborationTaskId = null;
     invalidateCollaborationObservation();
     return { stopped: true };
@@ -371,6 +415,7 @@ async function handleCollaborationBridge(command, payload) {
     throw new Error('STOPPED: browser actions are paused');
   }
   if (command === 'status') return { page_version: collaborationPageVersion, url: contents.getURL(), title: contents.getTitle(), loading: contents.isLoading() };
+  if (command === 'authorize_local_preview') return authorizeLocalPreview(payload.url);
   if (command === 'navigate') {
     const target = await checkedBrowserUrl(payload.url);
     await ensureCollaborationNetworkProxy(contents.session);
@@ -722,7 +767,7 @@ async function startCollaborationBridge() {
           throw new Error('Invalid computer protocol or runtime binding');
         }
         const command = String(body.command || '');
-        const commands = new Set(['status', 'stop', 'resume', 'navigate', 'observe', 'computer_observe', 'screenshot',
+        const commands = new Set(['status', 'stop', 'resume', 'authorize_local_preview', 'navigate', 'observe', 'computer_observe', 'screenshot',
           'click', 'commit_click', 'point', 'commit_point', 'type', 'scroll', 'select', 'press_key', 'wait_for',
           'macos_permissions', 'macos_windows', 'macos_allow_app',
           'macos_observe', 'macos_capture', 'macos_click', 'macos_double_click', 'macos_right_click',
@@ -1065,7 +1110,7 @@ function startBackend() {
 
     // Priority 1: crabagent CLI from PATH (fastest, most reliable)
     const crabagentBin = resolvePath('crabagent');
-    if (crabagentBin) {
+    if (crabagentBin && !app.isPackaged) {
       log(`Starting system crabagent: ${crabagentBin}`);
       python = spawn(crabagentBin, ['--serve'], { stdio: 'pipe', env });
       python.on('error', (e) => { log(`System crabagent error: ${e.message}`); reject(e); });
@@ -1541,6 +1586,14 @@ ipcMain.handle('collaboration-browser-layout', (event, bounds, visible) => {
   if (event.sender !== win?.webContents) return false;
   return setCollaborationViewBounds(bounds, Boolean(visible));
 });
+ipcMain.handle('collaboration-browser-authorize-local', async (event, url) => {
+  if (event.sender !== win?.webContents) throw new Error('Unauthorized browser request');
+  return authorizeLocalPreview(url);
+});
+ipcMain.handle('collaboration-browser-revoke-local', async (event) => {
+  if (event.sender !== win?.webContents) throw new Error('Unauthorized browser request');
+  await revokeLocalPreviews();
+});
 ipcMain.handle('collaboration-browser-navigate', async (event, url) => {
   if (event.sender !== win?.webContents) throw new Error('Unauthorized browser request');
   const target = await checkedBrowserUrl(url);
@@ -1614,7 +1667,7 @@ ipcMain.handle('collaboration-browser-action', async (event, action) => {
   if (action === 'forward' && contents.canGoForward()) contents.goForward();
   if (action === 'reload') contents.reload();
   if (action === 'stop') contents.stop();
-  if (action === 'computer-stop') { collaborationStopEpoch += 1; collaborationStopped = true; collaborationTaskId = null; invalidateCollaborationObservation(); }
+  if (action === 'computer-stop') { collaborationStopped = true; await revokeLocalPreviews(); collaborationTaskId = null; invalidateCollaborationObservation(); }
   if (action === 'computer-resume') { collaborationStopped = false; collaborationTaskId = null; invalidateCollaborationObservation(); }
   sendCollaborationBrowserState();
 });

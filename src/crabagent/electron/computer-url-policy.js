@@ -44,9 +44,44 @@ function blockedHost(hostname) {
   return false;
 }
 
-async function allowedNetworkUrl(raw, { allowLocalFixture = false } = {}) {
+function localPreviewOrigin(raw) {
   const url = parseBrowserUrl(raw);
-  if (allowLocalFixture && url.hostname === '127.0.0.1') return url.toString();
+  // Exact loopback hosts only: no LAN addresses, DNS aliases or localhost subdomains.
+  if (!['127.0.0.1', '[::1]', 'localhost'].includes(url.hostname)) {
+    throw new Error('LOCAL_PREVIEW_ONLY: use 127.0.0.1, [::1] or localhost');
+  }
+  return url.origin;
+}
+
+function createLocalPreviewPolicy({ ttlMs = 30 * 60_000, now = Date.now, forbiddenPorts = () => [] } = {}) {
+  const grants = new Map();
+  function origin(raw) {
+    const value = localPreviewOrigin(raw);
+    const url = new URL(value);
+    if (forbiddenPorts().includes(Number(url.port || (url.protocol === 'https:' ? 443 : 80)))) {
+      throw new Error('LOCAL_PREVIEW_RESERVED: CrabAgent service ports cannot be authorized');
+    }
+    return value;
+  }
+  return {
+    origin,
+    grant(raw) { const value = origin(raw); grants.set(value, now() + ttlMs); return value; },
+    allows(raw) {
+      try {
+        const value = origin(raw);
+        if ((grants.get(value) || 0) > now()) return true;
+        grants.delete(value);
+      } catch {}
+      return false;
+    },
+    clear() { grants.clear(); },
+    list() { return [...grants.keys()].filter((value) => this.allows(value)); },
+  };
+}
+
+async function allowedNetworkUrl(raw, { localPreviewPolicy } = {}) {
+  const url = parseBrowserUrl(raw);
+  if (localPreviewPolicy?.allows(url.toString())) return url.toString();
   if (blockedHost(url.hostname)) throw new Error('PRIVATE_NETWORK_BLOCKED: local or private network address');
   const records = await dns.lookup(url.hostname, { all: true });
   if (!records.length || records.some(({ address }) => blockedHost(address))) {
@@ -55,4 +90,4 @@ async function allowedNetworkUrl(raw, { allowLocalFixture = false } = {}) {
   return url.toString();
 }
 
-module.exports = { parseBrowserUrl, blockedHost, allowedNetworkUrl };
+module.exports = { parseBrowserUrl, blockedHost, allowedNetworkUrl, localPreviewOrigin, createLocalPreviewPolicy };

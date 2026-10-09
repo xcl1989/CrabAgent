@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
+import { markdownImageUrl } from "./markdownImageUrl";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import { CodeBlock } from "../ui";
@@ -45,5 +46,5 @@ const streamingComponents = {
 export function RichMarkdown({ children, isStreaming = false }: { children: string; isStreaming?: boolean }) {
   // Keep component identities stable while text deltas arrive. Recreating the
   // renderer remounts Recharts repeatedly and can trigger React 19 update loops.
-  return <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]} components={isStreaming ? streamingComponents : components}>{children}</ReactMarkdown>;
+  return <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]} urlTransform={(url, key) => key === "src" ? markdownImageUrl(url) : defaultUrlTransform(url)} components={isStreaming ? streamingComponents : components}>{children}</ReactMarkdown>;
 }

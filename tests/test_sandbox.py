@@ -30,6 +30,24 @@ class TestSandbox:
     def test_block_critical_dir_write(self):
         assert validate_command("echo data > /etc/passwd") is not None
         assert validate_command("tee /boot/config") is not None
+        assert validate_command("echo x >> /usr/bin/foo") is not None
+
+    def test_no_false_positive_bin_substring(self):
+        # Regression: a path that merely *contains* "/bin" (e.g. a CLI install
+        # dir on PATH) combined with an fd redirect must not need confirmation.
+        assert (
+            validate_command(
+                'export PATH="$HOME/.hecom-cli/bin:$PATH"\n'
+                "KEY=$(hecom-cli api call --tool x --data '{}' 2>/dev/null)\n"
+            )
+            is None
+        )
+        assert validate_command("hecom-cli api call --tool x 2>/dev/null") is None
+        assert validate_command("command 2>/dev/null") is None
+        assert validate_command("./bin/run.sh 2>/dev/null") is None
+
+    def test_no_false_positive_redirect_inside_quotes(self):
+        assert validate_command("echo '{\"a\":\">b\"}'") is None
 
     def test_allow_normal_rm(self):
         assert validate_command("rm -rf /tmp/test") is None

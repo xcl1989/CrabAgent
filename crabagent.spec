@@ -173,6 +173,9 @@ HIDDEN_IMPORTS = [
     "crabagent.core.agent.tools.shared",
     "crabagent.core.agent.tools.browser",
     "crabagent.core.agent.tools.browser_dom",
+    "crabagent.core.agent.tools.collaboration_browser",
+    "crabagent.core.agent.tools.computer",
+    "crabagent.core.agent.tools.macos_computer",
     # Agent modules
     "crabagent.core.agent.context",
     "crabagent.core.agent.loop",
