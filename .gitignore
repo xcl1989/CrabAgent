@@ -32,3 +32,15 @@ docs/
 electron/resources/crabagent-backend
 src/crabagent/VERSION
 *.dmg
+
+# Packaged artifacts under src/crabagent/electron
+src/crabagent/electron/dist-electron/
+src/crabagent/electron/resources/
+
+# Local backups / previews
+frontend/node_modules.before-*/
+previews/
+
+# Local notes
+CrabAgent-架构脑图.md
+game_1011_dialogues.md
