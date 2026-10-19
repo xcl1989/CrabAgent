@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
 
-from crabagent.core.database import User, ProviderConfig, async_session_factory
+from crabagent.core.database import ProviderConfig, User, async_session_factory
 from crabagent.core.provider_store import (
     PROVIDER_CATALOG,
     create_provider,
@@ -194,7 +194,6 @@ async def update_provider_endpoint(name: str, req: UpdateProviderRequest, user: 
                 row.extra = _json.dumps(extra)
                 await session.commit()
                 await session.refresh(row)
-                from crabagent.core.provider_store import _to_info
                 return _to_response(row)
 
     updates = {k: v for k, v in req.model_dump().items() if v is not None and k not in ("extra_models", "proxy_enabled", "proxy_url")}
@@ -266,10 +265,17 @@ async def get_provider_models(name: str, user: User = Depends(get_current_user))
         client_kwargs = {"timeout": 15.0}
         if proxy:
             client_kwargs["proxy"] = proxy
+        headers = {"Authorization": f"Bearer {p.api_key}"}
+        if p.provider_type == "opencode-go":
+            # OpenCode Go rejects requests missing x-opencode-session
+            # (see provider_store.opencode_extra_headers).
+            from crabagent.core.provider_store import opencode_extra_headers
+
+            headers.update(opencode_extra_headers())
         async with httpx.AsyncClient(**client_kwargs) as client:
             resp = await client.get(
                 f"{p.base_url}/models",
-                headers={"Authorization": f"Bearer {p.api_key}"},
+                headers=headers,
             )
             resp.raise_for_status()
             data = resp.json()

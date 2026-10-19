@@ -92,6 +92,12 @@ def _remember_page_version(context: Any, value: dict[str, Any]) -> dict[str, Any
     return value
 
 
+def _is_session_state_error(exc: BaseException) -> bool:
+    """Recoverable coordination errors that must not count toward the breaker."""
+    msg = str(exc)
+    return any(tag in msg for tag in ("TASK_MISMATCH:", "STOPPED:", "DUPLICATE_ACTION:"))
+
+
 async def _call(command: str, payload: dict[str, Any] | None, context: Any) -> str:
     session = get_session(context)
     observing = command == "observe"
@@ -99,8 +105,14 @@ async def _call(command: str, payload: dict[str, Any] | None, context: Any) -> s
     started = time.monotonic()
     try:
         value = await asyncio.to_thread(lambda: _bridge_request(command, payload, context=context))
-    except Exception:
-        session.failures += 1
+    except Exception as exc:
+        # Session-state errors (task mismatch, user-paused browser, idempotency
+        # guard) are recoverable coordination signals, not failed page actions.
+        # Counting them as failures would trip the consecutive-error circuit
+        # breaker and permanently deadlock the session (check() rejects every
+        # call once failures >= 3, so failures could never reset to 0).
+        if not _is_session_state_error(exc):
+            session.failures += 1
         await record_browser_event(context, "action_result", action=command, decision="failed", started=started)
         raise
     session.record(value, observe=observing)
@@ -202,8 +214,10 @@ async def collab_browser_screenshot(context=None) -> str | list[dict[str, Any]]:
     session.check(observe=True)
     try:
         value = await asyncio.to_thread(lambda: _bridge_request("computer_observe", context=context))
-    except Exception:
-        session.failures += 1
+    except Exception as exc:
+        # See _call — session-state errors are not page-action failures.
+        if not _is_session_state_error(exc):
+            session.failures += 1
         raise
     value = _remember_page_version(context, value)
     data_url = value.pop("data_url", "")
