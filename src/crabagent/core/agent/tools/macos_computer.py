@@ -19,7 +19,10 @@ from crabagent.core.computer.session import get_session
 
 
 async def _call_bridge(command: str, payload: dict[str, Any], context: Any) -> dict[str, Any]:
-    return await asyncio.to_thread(_bridge_request, command, payload, context=context)
+    session = get_session(context)
+    session.check(observe=command in {"macos_windows", "macos_observe", "macos_capture"})
+    with session.track():
+        return await asyncio.to_thread(_bridge_request, command, payload, context=context)
 
 
 @registry.register(

@@ -12,6 +12,13 @@ from crabagent.core.computer.audit import record_browser_event
 from crabagent.core.computer.session import get_session
 
 
+async def _call_bridge(command: str, payload=None, *, context=None) -> dict[str, Any]:
+    session = get_session(context)
+    session.check(observe=command == "computer_observe")
+    with session.track():
+        return await asyncio.to_thread(_bridge_request, command, payload, context=context)
+
+
 @registry.register(
     name="computer_observe",
     description="Observe the visible browser with one screenshot, page text, element bounds and an observation ID.",
@@ -22,7 +29,7 @@ async def computer_observe(context=None) -> list[dict[str, Any]]:
     session = get_session(context)
     session.check(observe=True)
     try:
-        value = await asyncio.to_thread(_bridge_request, "computer_observe", context=context)
+        value = await _call_bridge("computer_observe", context=context)
     except Exception:
         session.failures += 1
         raise
@@ -131,7 +138,7 @@ async def computer_act(observation_id: str, actions: list[dict[str, Any]], conte
             raise ValueError(f"Unsupported computer action: {kind}")
         started = time.monotonic()
         try:
-            result = await asyncio.to_thread(_bridge_request, command, payload, context=context)
+            result = await _call_bridge(command, payload, context=context)
             if result.get("confirmation_required"):
                 await record_browser_event(
                     context,
@@ -159,8 +166,7 @@ async def computer_act(observation_id: str, actions: list[dict[str, Any]], conte
                 if not approved:
                     result = {"status": "blocked", "reason": "Approval denied or unavailable"}
                 else:
-                    result = await asyncio.to_thread(
-                        _bridge_request,
+                    result = await _call_bridge(
                         "commit_click" if command == "click" else "commit_point",
                         {**payload, "pending_action_id": result["pending_action_id"]},
                         context=context,
