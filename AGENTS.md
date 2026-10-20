@@ -4,11 +4,17 @@
 > 保持简洁——最多约 8000 字符。使用 `update_agents_md` 工具来更新。
 
 ## 版本
-- 当前：**0.14.0**（稳定的 ChatGPT 图像编辑）
+- 当前：**0.17.0**（远程访问：Tailscale + Bark/ntfy 手机推送）
 - **版本唯一源头：`pyproject.toml`**
 - Python 代码通过 `from crabagent import __version__` 动态读取（`importlib.metadata.version("crabagent")`），自动同步
 - Electron `package.json` 需手动运行 `python3 scripts/sync_version.py` 同步
 - 修改版本号只需改 `pyproject.toml` 一处，然后运行 `python3 scripts/sync_version.py` 更新 Electron 配置
+
+## 远程访问与推送
+- **Push 通道**：`core/push/`（Bark/ntfy 客户端 + `PushConfig`，app_settings key=`push_config`）；`PushNotification` 门面；`notify_task_event` 挂在 `serve/app.py` 事件广播器末尾（任务 done/partial/failed/cancelled/waiting_user 自动推手机，10 分钟去重）；API 在 `serve/api/push.py`（/api/push status|config|test）；前端 `PushPanel.tsx`（设置页「手机推送」tab）
+- **scheduler 通知点已双通道**（微信 + 推送并行互不阻塞）：`_create_notification`、早报、提醒
+- **远程访问**：serve 监听 0.0.0.0:5210，手机经 Tailscale 访问 Web UI；深链地址等输入框**不要预置真实 IP 示例**（用户偏好）
+- 设计文档：`docs/remote-access-tailscale-bark.md`
 
 ## Office 文档能力
 

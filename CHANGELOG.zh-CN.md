@@ -8,6 +8,21 @@ English version: [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
+## [0.17.0] — 远程访问：Tailscale + Bark/ntfy 手机推送（2026-10-20）
+
+### 新增
+- **推送通知通道（`core/push/`）** — 支持 Bark（iOS，走 APNs）与 ntfy（Android/自托管）两类服务端，各自对应无状态 HTTP 客户端。`PushConfig` 持久化在 `app_settings` 表（key=`push_config`，与 `wechat_config` 相同的 JSON blob 模式），API 响应中对密钥做掩码处理。`PushNotification` 门面永不抛异常：服务端失败降级为 `False` 并记录警告日志。
+- **任务事件自动推送到手机** — `notify_task_event` 挂接任务领域事件广播器（`serve/app.py`）：任务进入 done/partial/failed/cancelled 时推送结果摘要，`waiting_user` 推送可穿透 iOS 专注模式的时效性通知。同一 (task_id, status) 在 10 分钟内重复广播会被去重。
+- **`/api/push` 端点** — `GET status`（掩码配置）、`PUT config`（掩码回显保护：客户端回传掩码值时保留已存密钥）、`POST test`。均需 JWT 鉴权。
+- **推送设置面板** — 设置页新增「手机推送」标签：启用开关、Bark/ntfy 服务商切换、按事件开关（任务完成 / 任务等待 / 定时任务结果 / 邮件摘要）、用于点击跳转的深链地址、一键发送测试通知。所有地址输入框均不预填默认值。
+- **scheduler 通知双通道** — 系统通知、定时任务结果、每日早报、提醒现在并行发往微信与推送通道；两条通道相互独立（微信未登录不影响推送）。
+- **Tailscale 远程访问指南** — `docs/remote-access-tailscale-bark.md` 记录了通过 Tailscale WireGuard 隧道让手机访问本机 Agent UI 的完整方案（后端已监听 `0.0.0.0:5210`），含验证清单与安全加固建议。
+
+### 变更
+- 同步前端构建产物；推送模块新增 18 个测试（配置往返/掩码、服务端错误路径、门面开关逻辑、事件去重）——全量测试 702 个通过。
+
+---
+
 ## [0.16.6] — 桌宠认证修复与微信通道自愈（2026-10-08）
 
 ### 修复

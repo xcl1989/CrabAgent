@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.17.0] — Remote Access: Tailscale + Bark/ntfy Push (2026-10-20)
+
+### Added
+- **Push notification channel (`core/push/`)** — Bark (iOS, APNs) and ntfy (Android/self-hosted) providers with a stateless HTTP client each. `PushConfig` persists to the `app_settings` table (`push_config` key, same JSON-blob pattern as `wechat_config`); secrets are masked in API responses. `PushNotification` facade never raises: provider failures degrade to `False` + warning log.
+- **Task events push to the phone automatically** — `notify_task_event` hooks into the task domain-event broadcaster (`serve/app.py`): task transitions to done/partial/failed/cancelled push a summary, `waiting_user` pushes a time-sensitive notification that breaks through iOS Focus. Same (task_id, status) repeats within 10 minutes are deduplicated.
+- **`/api/push` endpoints** — `GET status` (masked config), `PUT config` (masked echo-back guard keeps stored secrets when clients round-trip), `POST test`. All JWT-protected.
+- **Push settings panel** — New "手机推送" tab in Settings: enable toggle, Bark/ntfy provider switch, per-event toggles (task done / task waiting / scheduled results / email digest), deep-link URL for tap-through navigation, and a one-click test send. No default addresses are pre-filled.
+- **Dual-channel notifications in scheduler** — System notifications, scheduled-task results, morning brief, and reminders now fan out to WeChat and push channels in parallel; each channel is independent (WeChat no longer being logged in doesn't affect push).
+- **Tailscale remote access guide** — `docs/remote-access-tailscale-bark.md` documents exposing the local Agent UI to your phone via a Tailscale WireGuard tunnel (the backend already listens on `0.0.0.0:5210`), with verification checklists and hardening notes.
+
+### Changed
+- Frontend build assets synchronized; push module covered by 18 new tests (config round-trip/masking, provider error paths, facade gating, event dedup) — full suite at 702 passing.
+
+---
+
 ## [0.16.6] — Desktop Pet Authentication and WeChat Self-Healing (2026-10-08)
 
 ### Fixed

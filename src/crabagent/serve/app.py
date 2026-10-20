@@ -109,6 +109,15 @@ async def lifespan(app: FastAPI):
             if data.get("status") in ("done", "partial", "failed", "cancelled"):
                 asyncio.create_task(_persist_result_card(session_id, data))
 
+        # Push channel (Bark/ntfy): terminal + waiting_user transitions go to
+        # the phone. Fire-and-forget, deduped inside notify_task_event.
+        try:
+            from crabagent.core.push import notify_task_event
+
+            notify_task_event(event_type, data)
+        except Exception:
+            logger.debug("push notify hook failed (non-fatal)", exc_info=True)
+
     async def _persist_result_card(session_id: str, data: dict) -> None:
         """Append (or enrich) a task_result message for the task's conversation.
 
@@ -441,6 +450,7 @@ def create_app() -> FastAPI:
     from crabagent.serve.api.pets import router as pets_router
     from crabagent.serve.api.prompt import router as prompt_router
     from crabagent.serve.api.provider import router as provider_router
+    from crabagent.serve.api.push import router as push_router
     from crabagent.serve.api.quota import router as quota_router
     from crabagent.serve.api.replay import router as replay_router
     from crabagent.serve.api.scheduled_task import router as scheduled_task_router
@@ -484,6 +494,7 @@ def create_app() -> FastAPI:
     app.include_router(email_router, prefix="/api")
     app.include_router(token_usage_router, prefix="/api")
     app.include_router(wechat_router, prefix="/api")
+    app.include_router(push_router, prefix="/api")
     app.include_router(chatgpt_router, prefix="/api")
     app.include_router(calendar_router, prefix="/api")
     app.include_router(execution_router, prefix="/api")

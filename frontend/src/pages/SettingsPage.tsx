@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { useState, useEffect } from "react";
-import { Save, FlaskConical, Search, Check, Smartphone, SlidersHorizontal, Globe, Wifi, Cat, ShieldCheck, MonitorSmartphone } from "lucide-react";
+import { Save, FlaskConical, Search, Check, Smartphone, SlidersHorizontal, Globe, Wifi, Cat, ShieldCheck, MonitorSmartphone, Bell } from "lucide-react";
 import { Input, Button } from "../components/ui";
 import { toast } from "../components/ui/Toast";
 import { cn } from "../lib/cn";
@@ -8,11 +8,12 @@ import * as settingsApi from "../api/settings";
 import ModelSelector from "../components/ModelSelector";
 import { SubAgentModelMapEditor, parseModelMap, serializeModelMap, type ModelMapRow } from "../components/SubAgentModelMapEditor";
 import WeChatPanel from "../components/WeChatPanel";
+import PushPanel from "../components/PushPanel";
 import { PetsSettingsPanel } from "../components/PetsSettingsPanel";
 import MacosComputerPanel from "../components/MacosComputerPanel";
 import { useSettingsData } from "../hooks/useSettingsData";
 
-type SettingsTab = "general" | "search" | "privacy" | "network" | "wechat" | "pets" | "macos";
+type SettingsTab = "general" | "search" | "privacy" | "network" | "wechat" | "push" | "pets" | "macos";
 
 export default function SettingsPage() {
   const { t } = useTranslation();
@@ -178,6 +179,7 @@ export default function SettingsPage() {
     { id: "network", label: t("settingsPage.sectionNetwork"), icon: <Globe size={14} /> },
     { id: "pets", label: t("settingsPage.sectionPets"), icon: <Cat size={14} /> },
     { id: "wechat", label: "微信渠道", icon: <Smartphone size={14} /> },
+    { id: "push", label: "手机推送", icon: <Bell size={14} /> },
     { id: "macos", label: "macOS 控制", icon: <MonitorSmartphone size={14} /> },
   ];
 
@@ -414,6 +416,7 @@ export default function SettingsPage() {
         )}
 
         {activeTab === "wechat" && <WeChatPanel />}
+        {activeTab === "push" && <PushPanel />}
 
         {activeTab === "pets" && (
           <div className="bg-[var(--bg-secondary)] border border-[var(--border)] rounded-xl p-5">

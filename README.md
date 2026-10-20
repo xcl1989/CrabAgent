@@ -161,6 +161,16 @@ You (WeChat): "看一下26年1月有啥工作"
 
 ---
 
+## 📱 Remote Access & Push — Full Agent, Anywhere
+
+Beyond the WeChat chat channel, CrabAgent supports a full-fidelity remote setup:
+
+- **Remote Web UI via Tailscale** — the local server listens on all interfaces, so after a zero-config Tailscale tunnel between your Mac and phone, opening `http://<mac-ip>:5210` on cellular gives you the complete desktop experience: sessions, task drawers, documents, and the collaboration browser. No port forwarding, nothing exposed to the public internet.
+- **Bark / ntfy push notifications** — when a task finishes, fails, or waits for your authorization, a push notification arrives on your phone instantly (waiting-for-you alerts are time-sensitive and break through iOS Focus). Tap the notification to deep-link straight back into the Agent UI. Configure it in Settings → "手机推送", with per-event toggles and a one-click test send.
+- **WeChat stays as a fallback** — both channels run in parallel and independently.
+
+---
+
 ## 🔑 ChatGPT Subscription — Use Your Plus/Pro Membership
 
 Already paying for ChatGPT Plus or Pro? Use it directly in CrabAgent — **no API key, no extra cost**.

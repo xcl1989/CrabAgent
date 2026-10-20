@@ -222,8 +222,9 @@ class SchedulerService:
         default_model = settings.default_model
         # Check database settings override
         try:
-            from crabagent.core.database import AppSetting, async_session_factory
             from sqlalchemy import select
+
+            from crabagent.core.database import AppSetting, async_session_factory
             async with async_session_factory() as _sdb:
                 _r = await _sdb.execute(select(AppSetting).where(AppSetting.key == "default_model"))
                 _row = _r.scalar_one_or_none()
@@ -435,6 +436,14 @@ class SchedulerService:
                 await self._push_to_wechat(category, title, body, conversation_id)
             except Exception as e:
                 logger.warning("[Notify] WeChat push failed: category=%s, error=%s", category, e)
+            # Parallel push channel (Bark/ntfy) — independent of WeChat login
+            try:
+                from crabagent.core.push import PushNotification
+
+                push_text = body[:800]
+                await PushNotification.send(f"🔔 {title}", push_text, category=category)
+            except Exception as e:
+                logger.warning("[Notify] Push channel failed: category=%s, error=%s", category, e)
 
     async def _push_to_wechat(
         self,
@@ -488,8 +497,10 @@ class SchedulerService:
         This ensures that when the user replies in WeChat (e.g. "回邮件"),
         the Agent has the email details in its conversation history.
         """
-        from crabagent.core.database import Conversation, Message as DBMessage, async_session_factory
         from sqlalchemy import select
+
+        from crabagent.core.database import Conversation, async_session_factory
+        from crabagent.core.database import Message as DBMessage
 
         try:
             async with async_session_factory() as db:
@@ -803,7 +814,7 @@ class SchedulerService:
             match_info = ""
             if projects:
                 try:
-                    from crabagent.core.mail.matcher import match_email_to_project, build_project_context
+                    from crabagent.core.mail.matcher import build_project_context, match_email_to_project
 
                     match = await match_email_to_project(
                         subject=subject,
@@ -934,10 +945,11 @@ class SchedulerService:
     async def _get_llm_params(self) -> tuple[str, dict]:
         """Get LLM model and params from default config or most recently used provider+model pair."""
         try:
-            from crabagent.core.provider_store import get_provider
-            from crabagent.core.database import async_session_factory, Conversation, AppSetting
             from sqlalchemy import select
+
             from crabagent.core.config import settings
+            from crabagent.core.database import AppSetting, Conversation, async_session_factory
+            from crabagent.core.provider_store import get_provider
 
             # Check database settings first (user-set via frontend), fall back to env/code default
             default_model = settings.default_model
@@ -999,8 +1011,9 @@ class SchedulerService:
     async def _get_user_locale(self, user_id: int) -> str:
         """Get user's locale setting from database."""
         try:
-            from crabagent.core.database import User, async_session_factory
             from sqlalchemy import select
+
+            from crabagent.core.database import User, async_session_factory
             async with async_session_factory() as db:
                 result = await db.execute(select(User).where(User.id == user_id))
                 user = result.scalar_one_or_none()
@@ -1014,8 +1027,8 @@ class SchedulerService:
     async def _get_user_projects(self, user_id: int) -> list[dict]:
         """Load user's projects for email matching."""
         try:
-            from crabagent.core.task.store import list_projects
             from crabagent.core.database import async_session_factory
+            from crabagent.core.task.store import list_projects
 
             async with async_session_factory() as db:
                 return await list_projects(db, user_id)
@@ -1025,8 +1038,8 @@ class SchedulerService:
     async def _get_project_tasks(self, user_id: int, project: str) -> list[dict]:
         """Load tasks for a specific project."""
         try:
-            from crabagent.core.task.store import list_tasks
             from crabagent.core.database import async_session_factory
+            from crabagent.core.task.store import list_tasks
 
             async with async_session_factory() as db:
                 return await list_tasks(db, user_id, "all", project)
@@ -1095,6 +1108,7 @@ class SchedulerService:
         """
         import datetime
         import json
+
         import litellm
 
         prompt = (
@@ -1349,7 +1363,6 @@ async def _calendar_ical_sync():
     sched = get_scheduler()
     if not await sched._acquire_process_lock("ical_sync", ttl_seconds=120):
         return
-    import datetime
 
     from sqlalchemy import select
 
@@ -1382,12 +1395,9 @@ async def _calendar_morning_brief():
     sched = get_scheduler()
     if not await sched._acquire_process_lock("morning_brief", ttl_seconds=300):
         return
-    import json
 
-    from sqlalchemy import select
 
     from crabagent.core.calendar.store import get_today_overview, load_calendar_settings
-    from crabagent.core.database import AppSetting
 
     try:
         async with async_session_factory() as db:
@@ -1461,6 +1471,14 @@ async def _calendar_morning_brief():
                     logger.info("[Calendar] Morning brief pushed to WeChat (%d chars)", len(brief_text))
                 except Exception as e:
                     logger.warning("[Calendar] Morning brief WeChat push failed: %s", e)
+
+            # Push via Bark/ntfy (independent of the wechat/email channel choice)
+            try:
+                from crabagent.core.push import PushNotification
+
+                await PushNotification.send("📅 今日早报", brief_text[:1500], category="schedule_brief")
+            except Exception as e:
+                logger.warning("[Calendar] Morning brief push failed: %s", e)
 
             # Push via email
             if channel in ("email", "both"):
@@ -1601,6 +1619,14 @@ async def _calendar_event_reminder_impl():
 
                     notif = WeChatNotification()
                     await notif.send(text)
+                except Exception:
+                    pass
+
+                # 3a-2. Bark/ntfy push
+                try:
+                    from crabagent.core.push import PushNotification
+
+                    await PushNotification.send(title or "⏰ 提醒", text[:800], category="reminder")
                 except Exception:
                     pass
 
