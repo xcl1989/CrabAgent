@@ -86,6 +86,25 @@ async def test_active_runs_and_partial_tasks_grouped(db):
 
 
 @pytest.mark.asyncio
+async def test_partial_tasks_stop_after_result_viewed(db):
+    task = await task_store.add_task(db, user_id=1, title="素材包")
+    _, run_id = await task_service.start_agent_run(db, task["id"], 1)
+    await task_service.finish_agent_run(
+        db, run_id, 1, "partial", result_summary="生成了大部分素材"
+    )
+    await task_store.update_task(db, task["id"], 1, status="partial")
+
+    summary = await attention.get_attention_summary(db, 1)
+    assert len(summary["groups"]["partial_tasks"]) == 1
+
+    # Viewing the result acknowledges the partial delivery.
+    await task_service.mark_result_viewed(db, task["id"], 1)
+    summary = await attention.get_attention_summary(db, 1)
+    assert not summary["groups"]["partial_tasks"]
+    assert not summary["groups"]["unread_results"]
+
+
+@pytest.mark.asyncio
 async def test_due_human_tasks_within_24h(db):
     soon = await task_store.add_task(
         db,

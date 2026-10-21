@@ -122,11 +122,18 @@ async def get_attention_summary(db: AsyncSession, user_id: int) -> dict:
     )
 
     # ── partial tasks ──
+    # Only remind about partial results the user has not opened yet;
+    # once result_viewed_at is set the item stops nagging (same rule as
+    # unread_results below), otherwise it would surface forever.
     partial = (
         (
             await db.execute(
                 select(Task)
-                .where(Task.user_id == user_id, Task.status == TaskStatus.PARTIAL.value)
+                .where(
+                    Task.user_id == user_id,
+                    Task.status == TaskStatus.PARTIAL.value,
+                    Task.result_viewed_at.is_(None),
+                )
                 .order_by(Task.updated_at.desc())
             )
         )

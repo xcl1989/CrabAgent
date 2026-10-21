@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.17.1] — Desktop Pet Attention Fixes (2026-10-21)
+
+### Fixed
+- **Partially-completed tasks no longer show the failure animation** — The desktop pet mapped persistent `partial_tasks` attention to the error state, so any task finishing as "partial" kept the pet in the failed pose (and survived restarts by design). Partial results now map to the celebrate state; only real failures show the failure animation.
+- **"Partial completion" reminders now clear after viewing the result** — The `partial_tasks` attention query ignored `result_viewed_at`, so a viewed partial delivery kept surfacing forever (bubble, badges) until the task status changed. The query now filters on `result_viewed_at IS NULL`, matching the `unread_results` rule.
+- **Completion bubble no longer lingers while idle** — After the 6-second celebrate window the pet calms to idle but kept the bubble text; combined with persistent unread results this left "完成啦 / 新成果…" on screen indefinitely. The bubble now resets to the idle text together with the animation. Unread results remain accessible via the notification bell and task panel badges, and viewing the result clears all reminders.
+
+### Changed
+- Rebuilt and synchronized frontend assets; added a partial-attention lifecycle regression test (`test_partial_tasks_stop_after_result_viewed`).
+
+---
+
 ## [0.17.0] — Remote Access: Tailscale + Bark/ntfy Push (2026-10-20)
 
 ### Added

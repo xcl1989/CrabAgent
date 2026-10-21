@@ -191,8 +191,12 @@ function mergeMonitorWithAttention(
       return { ...summary, status: "waiting", message: persistent.message, target };
     }
     case "failed_tasks":
-    case "partial_tasks":
       return { ...summary, status: "error", message: persistent.message, target: summary.target };
+    case "partial_tasks":
+      // A partial result still has deliverables — celebrate instead of
+      // showing the failure animation, otherwise the pet looks broken
+      // for as long as the partial record persists.
+      return { ...summary, status: "completed", message: persistent.message, target: summary.target };
     case "unread_results":
       return { ...summary, status: "completed", message: persistent.message, target: summary.target };
     default:
@@ -373,7 +377,12 @@ export function DesktopPet() {
       // Update SVG state (legacy path)
       const nextSvg = stateFromSummary(summary);
       if (celebrateOver && nextSvg.mood === "celebrating") {
+        // Calm down fully: clear the completion bubble too. Unread results
+        // persist until viewed, so keeping the text would leave the
+        // "完成啦 / 新成果" bubble on screen forever while idle.
         nextSvg.mood = "idle";
+        nextSvg.label = INITIAL_SVG_STATE.label;
+        nextSvg.detail = INITIAL_SVG_STATE.detail;
       }
       const svgKey = svgStateKey(nextSvg);
       if (svgKey !== svgStateKeyRef.current) {
@@ -390,7 +399,11 @@ export function DesktopPet() {
       });
       const nextState =
         celebrateOver && derived.animation === "celebrate"
-          ? { ...derived, animation: "idle" as const, baseAfter: "idle" as const }
+          ? {
+              // Same as the SVG path: after the celebrate window the pet
+              // returns to a plain idle state, bubble text included.
+              ...derivePetState({ status: "idle", targetSessionId: nextTarget }),
+            }
           : derived;
       const key = petStateKey(nextState);
       if (key !== stateKeyRef.current) {
