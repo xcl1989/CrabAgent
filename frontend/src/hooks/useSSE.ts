@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback, useState } from "react";
 import { connectSSE, SSEEvent } from "../api/events";
+import { createStreamEventBatcher } from "../lib/streamEventBatcher";
 
 const HEARTBEAT_TIMEOUT = 40000; // Reconnect if no event in 40s
 const RECONNECT_DELAY = 2000;
@@ -14,7 +15,11 @@ export function useSSE(sessionId: string | null, onEvent: (event: SSEEvent) => v
   onEventRef.current = onEvent;
   activeSessionRef.current = sessionId;
 
+  const batchRef = useRef<ReturnType<typeof createStreamEventBatcher> | null>(null);
+
   const disconnect = useCallback(() => {
+    batchRef.current?.clear();
+    batchRef.current = null;
     if (reconnectRef.current) {
       clearTimeout(reconnectRef.current);
       reconnectRef.current = null;
@@ -35,6 +40,12 @@ export function useSSE(sessionId: string | null, onEvent: (event: SSEEvent) => v
     if (!sessionId) return;
 
     const connectedSessionId = sessionId;
+    const batch = createStreamEventBatcher((event) => {
+      if (activeSessionRef.current === connectedSessionId && batchRef.current === batch) {
+        onEventRef.current(event);
+      }
+    });
+    batchRef.current = batch;
     const es = connectSSE(connectedSessionId, (event: SSEEvent) => {
       // EventSource can deliver queued events after a session switch. Ignore the
       // stale connection before it mutates the newly selected session UI.
@@ -52,7 +63,7 @@ export function useSSE(sessionId: string | null, onEvent: (event: SSEEvent) => v
       } else if (event.type === "keepalive") {
         return; // Don't pass keepalive to handler
       }
-      onEventRef.current(event);
+      batch.push(event);
     });
 
     esRef.current = es;

@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.17.2] — Session Switch Performance (2026-10-22)
+
+### Fixed
+- **Switching sessions or workspaces no longer stalls while an agent is running** — `selectSession` used to block on the `/agents/monitor` request before returning, so every switch waited for the slowest busy-agent lookup. The running state is now seeded from the monitor snapshot already held in the frontend and reconciled with a background request; model/agent selection returns immediately.
+- **Stale view requests are aborted on switch** — a per-view `AbortController` cancels the previous session's message list, lazy-image and session-list fetches, so they stop competing with the running agent for HTTP connections and SQLite. Late responses can no longer paint the wrong conversation.
+- **Orphaned sub-agent events no longer leak into the new session** — pending buffered sub-agent events and the stream batcher are cleared on every switch.
+
+### Changed
+- **Streaming SSE deltas are coalesced (~50 ms)** — consecutive `text_delta` / `thinking_delta` / `bash_output` events are batched before touching React state (typically cutting renders during an active run by an order of magnitude). Structural events (tool calls, results, confirms) still apply immediately and in order.
+- **Message list callbacks are stable** — inline handlers in the chat panel were recreated on every render, defeating `React.memo` on historical messages; they are now memoized, so an active run only re-renders the message that actually changed.
+- **Lazy images load through a 2-slot concurrent queue** — instead of firing one request per message (which saturated the browser connection pool), keeping connections free for SSE and navigation.
+- New `streamEventBatcher` unit tests: coalescing, ordering around structural events, stale-session drop on switch, and multi-stream separation.
+
+---
+
 ## [0.17.1] — Desktop Pet Attention Fixes (2026-10-21)
 
 ### Fixed

@@ -10,8 +10,8 @@ export interface AgentMonitorInfo {
   title?: string;
 }
 
-export async function getAgentMonitor(): Promise<AgentMonitorInfo[]> {
-  return api.get<AgentMonitorInfo[]>("/agents/monitor");
+export async function getAgentMonitor(signal?: AbortSignal): Promise<AgentMonitorInfo[]> {
+  return api.get<AgentMonitorInfo[]>("/agents/monitor", undefined, signal);
 }
 
 export type AgentSummaryStatus = "idle" | "thinking" | "working" | "waiting" | "error" | "completed";

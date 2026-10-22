@@ -62,11 +62,11 @@ export interface WorkspacePreferenceUpdate {
   current_workspace?: string;
 }
 
-export function listSessions(workspace?: string, browserOnly = false): Promise<Session[]> {
+export function listSessions(workspace?: string, browserOnly = false, signal?: AbortSignal): Promise<Session[]> {
   const params: Record<string, string> = {};
   if (workspace) params.workspace = workspace;
   if (browserOnly) params.browser_only = "true";
-  return api.get("/sessions", Object.keys(params).length ? params : undefined);
+  return api.get("/sessions", Object.keys(params).length ? params : undefined, signal);
 }
 
 export function listWorkspaces(): Promise<WorkspaceInfo[]> {
@@ -101,9 +101,9 @@ export function deleteSession(sessionId: string): Promise<void> {
   return api.del(`/sessions/${sessionId}`);
 }
 
-export function getMessages(sessionId: string, limit = 1000, includeCompressed = true): Promise<Message[]> {
+export function getMessages(sessionId: string, limit = 1000, includeCompressed = true, signal?: AbortSignal): Promise<Message[]> {
   // The browser collaboration surface only needs a small recent activity preview.
-  return api.get(`/sessions/${sessionId}/messages?limit=${limit}&include_compressed=${includeCompressed}`);
+  return api.get(`/sessions/${sessionId}/messages?limit=${limit}&include_compressed=${includeCompressed}`, undefined, signal);
 }
 
 export interface BrowserTask {
@@ -160,8 +160,8 @@ export function compressSession(sessionId: string, model: string, provider: stri
   return api.post(`/sessions/${sessionId}/compress`, { model, provider });
 }
 
-export function getMessageImages(sessionId: string, messageId: number): Promise<{ images: string[] }> {
-  return api.get(`/sessions/${sessionId}/messages/${messageId}/images`);
+export function getMessageImages(sessionId: string, messageId: number, signal?: AbortSignal): Promise<{ images: string[] }> {
+  return api.get(`/sessions/${sessionId}/messages/${messageId}/images`, undefined, signal);
 }
 
 export function sendPrompt(

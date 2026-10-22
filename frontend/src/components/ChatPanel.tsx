@@ -256,10 +256,12 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(
     const modalTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const resolvedSubAgentId = externalSubAgentId ?? activeSubAgentId;
-    const closeSubAgent = () => {
-      setActiveSubAgentId(null);
-      onSubAgentModalClose?.();
-    };
+    const onSubAgentClick = useCallback((sid: string | null) => {
+      setActiveSubAgentId(sid || null);
+      if (!sid) onSubAgentModalClose?.();
+    }, [onSubAgentModalClose]);
+    const closeSubAgent = useCallback(() => onSubAgentClick(null), [onSubAgentClick]);
+    const onPreviewImage = useCallback((url: string) => setPreviewImage(url), []);
 
     // Poll the live content ref for the active sub-agent to force a re-render
     // (the content map is a ref, so updates don't trigger React re-render).
@@ -353,8 +355,8 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(
               replaying={replaying}
               activeSubAgentId={resolvedSubAgentId}
               getSubAgentContent={getSubAgentContent}
-              onSubAgentClick={(sid) => sid ? setActiveSubAgentId(sid) : closeSubAgent()}
-              onPreviewImage={(url) => setPreviewImage(url)}
+              onSubAgentClick={onSubAgentClick}
+              onPreviewImage={onPreviewImage}
               onToolConfirm={onToolConfirm}
               onUserInput={onUserInput}
               onBranch={onBranch}

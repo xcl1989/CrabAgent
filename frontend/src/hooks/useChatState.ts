@@ -24,12 +24,24 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
   // the ref-sync effect) could clobber, silently dropping a legitimate load and
   // leaving the chat area blank until the user clicked the session again.
   const loadSeqRef = useRef(0);
+  const viewRequestRef = useRef<AbortController | null>(null);
   // True once the user manually picks a session, so the workspace auto-loader
   // cannot override that choice when its slower response arrives.
   const manualSelectRef = useRef(false);
   const pendingSubEventsRef = useRef<SSEEvent[]>([]);
   const subFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const subAgentContents = useRef<Map<string, string>>(new Map());
+  const resetViewRequests = useCallback(() => {
+    viewRequestRef.current?.abort();
+    viewRequestRef.current = new AbortController();
+    pendingSubEventsRef.current = [];
+    if (subFlushTimerRef.current) clearTimeout(subFlushTimerRef.current);
+    subFlushTimerRef.current = null;
+    subAgentContents.current.clear();
+    setSending(false);
+    setReplaying(false);
+    return viewRequestRef.current.signal;
+  }, []);
 
   const flushSubEvents = useCallback(() => {
     subFlushTimerRef.current = null;
@@ -93,37 +105,40 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
   // Called after messages are set so the UI renders text immediately.
   const lazyLoadImages = useCallback(
     (chatMsgs: ChatMessage[], sessionId: string) => {
+      const signal = viewRequestRef.current?.signal;
+      const isCurrent = () => !signal?.aborted && activeSessionRef.current?.session_id === sessionId;
       const lazyMsgs = chatMsgs.filter((m) => m.lazy_images && m.db_message_id);
       if (lazyMsgs.length === 0) return;
       // Deduplicate by db_message_id
       const seen = new Set<number>();
-      for (const msg of lazyMsgs) {
+      const queue = lazyMsgs.filter((msg) => {
         const dbId = msg.db_message_id!;
-        if (seen.has(dbId)) continue;
+        if (seen.has(dbId)) return false;
         seen.add(dbId);
-        sessionsApi
-          .getMessageImages(sessionId, dbId)
-          .then((res) => {
-            if (!res.images || res.images.length === 0) return;
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.db_message_id === dbId && m.lazy_images
-                  ? { ...m, images: res.images, lazy_images: false }
-                  : m,
-              ),
-            );
-          })
-          .catch(() => {
-            // Mark as failed (remove lazy flag to avoid infinite retry)
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.db_message_id === dbId && m.lazy_images
-                  ? { ...m, lazy_images: false }
-                  : m,
-              ),
-            );
-          });
-      }
+        return true;
+      });
+      // Leave HTTP connections available for navigation and SSE.
+      const worker = async () => {
+        while (queue.length > 0 && isCurrent()) {
+          const dbId = queue.shift()!.db_message_id!;
+          try {
+            const res = await sessionsApi.getMessageImages(sessionId, dbId, signal);
+            if (!isCurrent()) return;
+            setMessages((prev) => prev.map((m) =>
+              m.db_message_id === dbId && m.lazy_images
+                ? { ...m, images: res.images?.length ? res.images : m.images, lazy_images: false }
+                : m,
+            ));
+          } catch {
+            if (!isCurrent()) return;
+            setMessages((prev) => prev.map((m) =>
+              m.db_message_id === dbId && m.lazy_images ? { ...m, lazy_images: false } : m,
+            ));
+          }
+        }
+      };
+      const workerCount = Math.min(2, queue.length);
+      for (let i = 0; i < workerCount; i += 1) void worker();
     },
     [],
   );
@@ -143,14 +158,16 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
         setMessages((prev) => preserveLiveInteractions(chatMsgs, prev));
         lazyLoadImages(chatMsgs, sessionId);
       };
+      const signal = viewRequestRef.current?.signal;
       for (let attempt = 0; attempt < 2; attempt += 1) {
-        if (seq !== loadSeqRef.current) return;
+        if (signal?.aborted || seq !== loadSeqRef.current) return;
         try {
-          const msgs = await sessionsApi.getMessages(sessionId);
+          const msgs = await sessionsApi.getMessages(sessionId, 1000, true, signal);
           if (seq !== loadSeqRef.current || activeSessionRef.current?.session_id !== sessionId) return;
           apply(msgs);
           return;
         } catch {
+          if (signal?.aborted) return;
           if (attempt === 0) await new Promise((resolve) => setTimeout(resolve, 400));
         }
       }
@@ -161,6 +178,7 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
   useEffect(() => {
     return () => {
       if (subFlushTimerRef.current) clearTimeout(subFlushTimerRef.current);
+      viewRequestRef.current?.abort();
     };
   }, []);
 
@@ -172,14 +190,16 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
     // Invalidate any in-flight load from the previous workspace so its late
     // response cannot repaint the new view.
     const seq = ++loadSeqRef.current;
+    const signal = resetViewRequests();
     manualSelectRef.current = false;
     // Clear immediately for responsive workspace switch
     activeSessionRef.current = null;
     setActiveSession(null);
+    setSessions([]);
     setMessages([]);
     
-    sessionsApi.listSessions(workspace).then((result) => {
-      if (seq !== loadSeqRef.current) return;
+    sessionsApi.listSessions(workspace, false, signal).then((result) => {
+      if (signal.aborted || seq !== loadSeqRef.current) return;
       setSessions(result);
       setSending(false);
       // If the user already picked a session while the list was loading, keep
@@ -195,12 +215,12 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
         if (latest.model) onAutoLoadSession?.(latest);
         void loadSessionMessages(latest.session_id, latestSeq);
       }
-    });
+    }).catch(() => { /* A cancelled workspace load must not update the new view. */ });
     return () => {
       // Drop late responses after unmount / workspace change.
       if (seq === loadSeqRef.current) loadSeqRef.current += 1;
     };
-  }, [workspace, onAutoLoadSession, loadSessionMessages]);
+  }, [workspace, onAutoLoadSession, loadSessionMessages, resetViewRequests]);
 
   // Stash onEvent and workspace in refs so handleSSEEvent identity stays stable
   // (prevents SSE reconnect churn when parent re-renders)
@@ -257,10 +277,12 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
         const sid = activeSessionRef.current?.session_id;
         if (sid) {
           const reloadSeq = loadSeqRef.current;
+          const signal = viewRequestRef.current?.signal;
           setTimeout(async () => {
+            if (signal?.aborted || reloadSeq !== loadSeqRef.current) return;
             let msgs: Message[];
             try {
-              msgs = await sessionsApi.getMessages(sid);
+              msgs = await sessionsApi.getMessages(sid, 1000, true, signal);
             } catch {
               return; // transient failure — the next load will retry
             }
@@ -337,6 +359,7 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
       // neither discard this load nor overwrite the newly selected view.
       manualSelectRef.current = true;
       const seq = ++loadSeqRef.current;
+      const signal = resetViewRequests();
       // Update the ref synchronously: the pending confirmation may be replayed
       // by SSE before React has committed the new activeSession state.
       activeSessionRef.current = session;
@@ -345,27 +368,24 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
       // Show empty messages immediately to avoid stale content flash
       setMessages([]);
 
-      // Monitor lookup is best-effort and must never abort the messages fetch.
-      const monitorPromise = import("../api/monitor")
-        .then(({ getAgentMonitor }) => getAgentMonitor())
-        .catch(() => []);
-
-      const [, monitors] = await Promise.all([
-        loadSessionMessages(session.session_id, seq),
-        monitorPromise,
-      ]);
-      // Ignore a late response from a session the user has already left.
-      if (seq !== loadSeqRef.current) {
-        return session.model || (models.length > 0 ? models[0].id : selectedModel);
-      }
-      const hasRunning = (monitors as { session_id: string; status: string }[]).some(
-        (m) => m.session_id === session.session_id && m.status === "running"
-      );
-      setSending(hasRunning);
+      // History and model selection must not wait for a best-effort monitor request.
+      setSending(activeMonitors.some(
+        (m) => m.session_id === session.session_id && m.status === "running",
+      ));
+      void loadSessionMessages(session.session_id, seq);
+      void import("../api/monitor")
+        .then(({ getAgentMonitor }) => signal.aborted ? [] : getAgentMonitor(signal))
+        .then((monitors) => {
+          if (seq !== loadSeqRef.current) return;
+          setSending(monitors.some(
+            (m) => m.session_id === session.session_id && m.status === "running",
+          ));
+        })
+        .catch(() => {});
 
       return session.model || (models.length > 0 ? models[0].id : selectedModel);
     },
-    [loadSessionMessages]
+    [loadSessionMessages, resetViewRequests, activeMonitors]
   );
 
   const newSession = useCallback(async (selectedModel: string, _models: { id: string }[]) => {
@@ -376,11 +396,12 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
     // repainting it with the previous session's messages.
     manualSelectRef.current = true;
     loadSeqRef.current += 1;
+    resetViewRequests();
     activeSessionRef.current = s;
     setActiveSession(s);
     setMessages([]);
     return selectedModel;
-  }, [workspace]);
+  }, [workspace, resetViewRequests]);
 
   // ── Background monitor: detect when non-active sessions finish ──
   // When a background agent completes, refresh session list so the UI stays in sync.
