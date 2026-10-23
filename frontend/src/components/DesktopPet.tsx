@@ -1,3 +1,4 @@
+import { affectsMonitor, createMonitorRefresh } from "../lib/monitorRefresh";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { connectGlobalSSE, type AgentMonitorSummary } from "../api/monitor";
 import { getActivePet, getPet, getSpritesheetUrl, type PetDetail } from "../api/pets";
@@ -274,7 +275,6 @@ export function DesktopPet() {
   const stateKeyRef = useRef("");
   const svgStateKeyRef = useRef("");
   const syncInFlightRef = useRef(false);
-  const syncTimerRef = useRef<number | null>(null);
   const bubbleRef = useRef<HTMLButtonElement>(null);
   const dragStart = useRef<{ x: number; y: number } | null>(null);
   const dragged = useRef(false);
@@ -430,25 +430,22 @@ export function DesktopPet() {
   }, []);
 
   useEffect(() => {
-    const scheduleSync = () => {
-      if (syncTimerRef.current !== null) return;
-      syncTimerRef.current = window.setTimeout(() => {
-        syncTimerRef.current = null;
-        void syncStateFromMonitor();
-      }, 300);
-    };
+    const scheduler = createMonitorRefresh(() => void syncStateFromMonitor());
+    const scheduleSync = () => scheduler.request();
     const handleStorage = (event: StorageEvent) => {
       if (event.key === "crab_token") scheduleSync();
     };
     window.addEventListener("storage", handleStorage);
-    void syncStateFromMonitor();
-    const monitorTimer = window.setInterval(() => void syncStateFromMonitor(), 5000);
-    const es = connectGlobalSSE(scheduleSync);
+    scheduleSync();
+    const monitorTimer = window.setInterval(scheduleSync, 5000);
+    const es = connectGlobalSSE((event) => {
+      if (affectsMonitor(event.type)) scheduleSync();
+    });
     return () => {
       es?.close();
       window.removeEventListener("storage", handleStorage);
       window.clearInterval(monitorTimer);
-      if (syncTimerRef.current !== null) window.clearTimeout(syncTimerRef.current);
+      scheduler.dispose();
       if (toolAnimationTimerRef.current !== null) window.clearTimeout(toolAnimationTimerRef.current);
     };
   }, [syncStateFromMonitor]);

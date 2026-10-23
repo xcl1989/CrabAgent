@@ -90,18 +90,20 @@ async def get_attention_summary(db: AsyncSession, user_id: int) -> dict:
             .order_by(TaskRequest.created_at.asc())
         )
     ).all()
+    # 注意：select(TaskRequest, Task.title) 解包后 r 就是 Task.title 标量
+    # （任务已删除时为 None），不能再取 .title 属性。
     pending_requests = [
         {
             "kind": "pending_requests",
             "priority": PENDING_REQUESTS,
-            "message": r.title or f"等待你的{_REQUEST_TYPE_LABELS.get(t.request_type, '处理')}",
+            "message": r or f"等待你的{_REQUEST_TYPE_LABELS.get(t.request_type, '处理')}",
             "detail": t.question or t.title,
             "target": {
                 "type": "task_request",
                 "request_id": t.request_key,
                 "task_id": t.task_id,
                 "session_id": t.session_id,
-                "title": r.title or t.title,
+                "title": r or t.title,
             },
             "updated_at": t.created_at.isoformat() if t.created_at else None,
         }
