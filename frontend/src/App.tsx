@@ -13,6 +13,7 @@ import { connectGlobalSSE } from "./api/monitor";
 import { toast } from "./components/ui/Toast";
 import { FtsStatusBar } from "./components/FtsStatusBar";
 import { DesktopPet } from "./components/DesktopPet";
+import { MobileConsole } from "./pages/mobile/MobileConsole";
 
 export type PageId = "chat" | "browser" | "agents" | "memory" | "usage" | "calendar" | "settings";
 
@@ -139,6 +140,11 @@ function MainApp() {
 }
 
 export default function App() {
+  // 移动控制台路由：#/m* 由 MobileConsole 独立接管（PWA standalone 入口）
+  if (window.location.hash.startsWith("#/m")) {
+    // 延迟 import 会引入异步闪烁，/m 组件很轻，直接同步引入（见文件头部 import）
+    return <MobileConsole />;
+  }
   return new URLSearchParams(window.location.search).get("surface") === "pet"
     ? <DesktopPet />
     : <MainApp />;

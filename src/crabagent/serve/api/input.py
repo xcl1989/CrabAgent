@@ -57,6 +57,25 @@ async def request_user_input(
     except Exception:
         logger.exception("Failed to persist TaskRequest for input %s", input_id)
 
+    # Push channel: creation-time push so chat-level ask_question reaches the
+    # phone even without a task_id (no task_updated event will fire).
+    try:
+        import asyncio as _asyncio
+
+        from crabagent.core.push import notify_request_created
+
+        _asyncio.get_running_loop().create_task(
+            notify_request_created(
+                request_key=input_id,
+                request_type="choice" if options else "input",
+                title=question[:200],
+                body=question,
+                session_id=session_id,
+            )
+        )
+    except Exception:
+        logger.debug("input push hook failed (non-fatal)", exc_info=True)
+
     data: dict = {
         "input_id": input_id,
         "question": question,

@@ -68,6 +68,26 @@ async def request_confirmation(
     except Exception:
         logger.exception("Failed to persist TaskRequest for confirm %s", confirm_id)
 
+    # Push channel: creation-time push so chat-level approvals reach the
+    # phone even without a task_id (no task_updated event will fire).
+    # Deduped against the task_updated waiting_user push via _pushed_keys.
+    try:
+        import asyncio as _asyncio
+
+        from crabagent.core.push import notify_request_created
+
+        _asyncio.get_running_loop().create_task(
+            notify_request_created(
+                request_key=confirm_id,
+                request_type="approval",
+                title=f"确认执行 {tool_name}",
+                body=args_summary,
+                session_id=session_id,
+            )
+        )
+    except Exception:
+        logger.debug("confirm push hook failed (non-fatal)", exc_info=True)
+
     await event_bus.emit(
         AgentEvent(
             type=EventType.TOOL_CONFIRM_REQUEST,

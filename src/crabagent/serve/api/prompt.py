@@ -755,6 +755,46 @@ Use ordinary Markdown when a visualization is not helpful.
 
     context.event_bus.subscribe(_task_lifecycle_handler)
 
+    # ── Incremental token-usage flush ──
+    # Write each finished iteration's usage row to DB as soon as its
+    # ITERATION_END fires, so the chat stats bar can show mid-turn usage.
+    # The post-run batch write in _run() stays as a safety net and only
+    # flushes records that were not yet persisted (usage_flushed cursor).
+    usage_flushed = 0
+
+    async def _usage_flush_handler(event: AgentEvent):
+        nonlocal usage_flushed
+        if event.type not in (EventType.ITERATION_END, EventType.SUB_AGENT_END):
+            return
+        records = context.usage_records[usage_flushed:]
+        if not records:
+            return
+        try:
+            from crabagent.core.database import token_usage_batch_create
+
+            model = context.metadata.get("resolved_model", context.model or "")
+            provider = context.metadata.get("resolved_provider", "")
+            await token_usage_batch_create(
+                [
+                    {
+                        "user_id": user.id,
+                        "session_id": session_id,
+                        "agent_name": context.current_agent,
+                        "model": model,
+                        "provider": provider,
+                        "branch_id": active_branch,
+                        **r,
+                    }
+                    for r in records
+                ]
+            )
+            usage_flushed += len(records)
+        except Exception:
+            # Cursor not advanced — the post-run batch write will retry these.
+            logger.debug("Incremental token_usage flush failed", exc_info=True)
+
+    context.event_bus.subscribe(_usage_flush_handler)
+
 
     queues = request.app.state.event_queues
 
@@ -1178,7 +1218,9 @@ Use ordinary Markdown when a visualization is not helpful.
             # (persist_compression), so no post-run batch persist is needed.
 
             # ── Persist per-iteration token usage to DB ──
-            if context.usage_records:
+            # Most records were already flushed incrementally on ITERATION_END
+            # (_usage_flush_handler); this only writes the remaining tail.
+            if context.usage_records[usage_flushed:]:
                 try:
                     from crabagent.core.database import token_usage_batch_create
 
@@ -1192,7 +1234,7 @@ Use ordinary Markdown when a visualization is not helpful.
                             "branch_id": active_branch,
                             **r,
                         }
-                        for r in context.usage_records
+                        for r in context.usage_records[usage_flushed:]
                     ]
                     await token_usage_batch_create(records)
                 except Exception:

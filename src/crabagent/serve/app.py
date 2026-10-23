@@ -427,6 +427,28 @@ def create_app() -> FastAPI:
     app.state.interactive_busy = 0
     app.add_middleware(InteractiveWriteTrackerMiddleware, state_holder=app.state)
 
+    # Gzip 静态资源压缩：前端 JS bundle 约 4-6MB，经 Tailscale DERP 中继裸传
+    # 会导致手机端首屏长时间转圈；压缩后体积降 ~75%。
+    # 防御性豁免 SSE 路径（/api/events*）：流式响应经过压缩中间件存在被
+    # 缓冲/延迟的风险，SSE 追求的是逐事件即时送达，两者语义冲突，不值得赌。
+    from fastapi.middleware.gzip import GZipMiddleware
+
+    class _SSEAwareGZipMiddleware:
+        """Gzip everything except SSE streaming endpoints."""
+
+        def __init__(self, app, minimum_size: int = 1024):
+            self._raw = app
+            self._gzip = GZipMiddleware(app, minimum_size=minimum_size)
+
+        async def __call__(self, scope, receive, send):
+            path = scope.get("path", "") if scope.get("type") == "http" else ""
+            if path.startswith("/api/events"):
+                await self._raw(scope, receive, send)
+            else:
+                await self._gzip(scope, receive, send)
+
+    app.add_middleware(_SSEAwareGZipMiddleware)
+
     from crabagent.serve.api.agent import router as agent_router
     from crabagent.serve.api.auth import router as auth_router
     from crabagent.serve.api.branch import router as branch_router

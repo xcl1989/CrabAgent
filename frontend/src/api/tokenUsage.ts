@@ -131,3 +131,26 @@ export function getWorkspacesUsage() {
 export function getSessionUsageDetail(sessionId: string) {
   return api.get<SessionUsageDetail>(`/token-usage/sessions/${encodeURIComponent(sessionId)}`);
 }
+
+/** Lightweight session summary for the chat stats bar (zeroed when empty). */
+export interface SessionUsageSummary {
+  session_id: string;
+  total_tokens: number;
+  prompt_tokens: number;
+  cached_tokens: number;
+  non_cached_tokens: number;
+  completion_tokens: number;
+  reasoning_tokens: number;
+  cache_hit_rate: number;
+  calls: number;
+  turns: number;
+  elapsed: number;
+  first_call_at: string;
+  last_call_at: string;
+}
+
+export function getSessionUsageSummary(sessionId: string) {
+  return api.get<SessionUsageSummary>(
+    `/token-usage/session/${encodeURIComponent(sessionId)}/summary`,
+  );
+}

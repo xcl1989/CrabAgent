@@ -33,7 +33,59 @@ __all__ = [
 
 # (task_id, status) -> last push timestamp; in-memory, best-effort dedup.
 _recent: dict[tuple[str, str], float] = {}
+# request_key -> last push timestamp. Dedups between the creation-time push
+# (fires for ALL requests, incl. chat-level ask_question without a task) and
+# the task_updated waiting_user push.
+_pushed_keys: dict[str, float] = {}
 _DEDUP_WINDOW = 600.0  # 10 minutes
+
+
+def _mark_pushed(key: str) -> None:
+    now = time.monotonic()
+    _pushed_keys[key] = now
+    if len(_pushed_keys) > 256:
+        cutoff = now - _DEDUP_WINDOW
+        for k in [k for k, ts in _pushed_keys.items() if ts < cutoff]:
+            _pushed_keys.pop(k, None)
+
+
+def _key_recently_pushed(key: str) -> bool:
+    ts = _pushed_keys.get(key)
+    return bool(ts and time.monotonic() - ts < _DEDUP_WINDOW)
+
+
+async def notify_request_created(
+    request_key: str,
+    request_type: str,
+    title: str,
+    body: str = "",
+    session_id: str = "",
+) -> None:
+    """Fire-and-forget push for a newly created user-participation request.
+
+    Called from confirm.py / input.py at creation time so that chat-level
+    requests (ask_question / tool approval, which have no task_id and never
+    emit task_updated) also reach the phone. Deep links straight to the
+    request card: <deep_link_base>/#/m/approve/<request_key>.
+    """
+    cfg = await load_config()
+    if not cfg.enabled or not cfg.notify_task_waiting:
+        return
+    label = {
+        "approval": "批准请求",
+        "choice": "选择请求",
+        "input": "提问",
+        "human_step": "人工步骤",
+        "review": "结果确认",
+    }.get(request_type, "请求")
+    url = cfg.deep_link_base.rstrip("/") + "/#/m/approve/" + request_key if cfg.deep_link_base else ""
+    _mark_pushed(request_key)
+    await PushNotification.send(
+        f"⏸ Agent {label}",
+        body or title,
+        url=url,
+        category="task_waiting",
+    )
 
 
 class PushNotification:
@@ -97,11 +149,49 @@ class PushNotification:
         return await PushNotification.send(title, body, category="task_done")
 
     @staticmethod
-    async def send_task_waiting(task: dict) -> bool:
-        """Push a time-sensitive 'task is waiting for you' notification."""
+    async def send_task_waiting(task: dict, deep_link: str = "") -> bool:
+        """Push a time-sensitive 'task is waiting for you' notification.
+
+        ``deep_link`` — optional ``#/m/approve/<request_key>`` URL so tapping
+        the notification lands directly on the approval/question card.
+        """
         title = "⏸ 任务在等你"
         body = task.get("title", "未知任务")
-        return await PushNotification.send(title, body, category="task_waiting")
+        return await PushNotification.send(title, body, url=deep_link, category="task_waiting")
+
+
+async def _latest_pending_request_key(task_id: str) -> str:
+    """Return the request_key of the newest pending TaskRequest for a task.
+
+    Best-effort: any failure (bad id, DB down) returns "" and the push falls
+    back to the generic deep_link_base.
+    """
+    try:
+        from sqlalchemy import select
+
+        from crabagent.core.database import TaskRequest, async_session_factory
+
+        async with async_session_factory() as db:
+            result = await db.execute(
+                select(TaskRequest.request_key)
+                .where(TaskRequest.task_id == int(task_id), TaskRequest.status == "pending")
+                .order_by(TaskRequest.id.desc())
+                .limit(1)
+            )
+            return result.scalar_one_or_none() or ""
+    except Exception:
+        return ""
+
+
+async def _waiting_deep_link(task_id: str) -> str:
+    """Build `#/m/approve/<request_key>` deep link from deep_link_base."""
+    cfg = await load_config()
+    if not cfg.deep_link_base:
+        return ""
+    key = await _latest_pending_request_key(task_id)
+    if not key:
+        return ""
+    return cfg.deep_link_base.rstrip("/") + "/#/m/approve/" + key
 
 
 def notify_task_event(event_type: str, data: dict) -> None:
@@ -139,7 +229,14 @@ def notify_task_event(event_type: str, data: dict) -> None:
     async def _run() -> None:
         try:
             if status == "waiting_user":
-                await PushNotification.send_task_waiting(data)
+                # Dedup: if the newest pending request for this task was
+                # already pushed at creation time (notify_request_created),
+                # don't push again for the same user-attention moment.
+                latest_key = await _latest_pending_request_key(task_id)
+                if latest_key and _key_recently_pushed(latest_key):
+                    return
+                link = await _waiting_deep_link(task_id)
+                await PushNotification.send_task_waiting(data, deep_link=link)
             else:
                 await PushNotification.send_task_done(data)
         except Exception:

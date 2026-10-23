@@ -8,6 +8,7 @@ from crabagent.core.database import (
     User,
     token_usage_overview,
     token_usage_session_detail,
+    token_usage_session_summary,
     token_usage_sessions,
     token_usage_workspaces,
 )
@@ -59,3 +60,12 @@ async def get_session_usage_detail(
     if not detail:
         raise HTTPException(status_code=404, detail="No token usage data for this session")
     return detail
+
+
+@router.get("/session/{session_id}/summary")
+async def get_session_usage_summary(
+    session_id: str,
+    user: User = Depends(get_current_user),
+):
+    """Lightweight session summary for the chat stats bar (zeroed when empty)."""
+    return await token_usage_session_summary(user.id, session_id)

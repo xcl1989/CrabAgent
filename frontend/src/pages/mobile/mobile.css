@@ -1,0 +1,107 @@
+/**
+ * /m 移动控制台局部样式：markdown 渲染 + 底部弹层动画。
+ * Tailwind 覆盖不到的细粒度排版在这里补。
+ */
+
+/* ── markdown 渲染（assistant 消息） ── */
+.mc-md {
+  font-size: 13.5px;
+  line-height: 1.6;
+  word-break: break-word;
+}
+.mc-md p { margin: 0.35em 0; }
+.mc-md p:first-child { margin-top: 0; }
+.mc-md p:last-child { margin-bottom: 0; }
+.mc-md h1, .mc-md h2, .mc-md h3, .mc-md h4 {
+  font-weight: 700;
+  margin: 0.7em 0 0.3em;
+  line-height: 1.35;
+}
+.mc-md h1 { font-size: 1.15em; }
+.mc-md h2 { font-size: 1.1em; }
+.mc-md h3, .mc-md h4 { font-size: 1.05em; }
+.mc-md ul, .mc-md ol { padding-left: 1.3em; margin: 0.35em 0; }
+.mc-md ul { list-style: disc; }
+.mc-md ol { list-style: decimal; }
+.mc-md li { margin: 0.15em 0; }
+.mc-md a { color: #58a6ff; text-decoration: underline; word-break: break-all; }
+.mc-md blockquote {
+  border-left: 3px solid #3f444c;
+  padding-left: 0.7em;
+  margin: 0.4em 0;
+  color: #8b949e;
+}
+.mc-md code {
+  font-family: "SF Mono", Menlo, monospace;
+  font-size: 0.88em;
+  background: #0a0d12;
+  border-radius: 5px;
+  padding: 0.1em 0.35em;
+  color: #a5d6ff;
+}
+.mc-md pre {
+  background: #0a0d12;
+  border: 1px solid #2d333b;
+  border-radius: 10px;
+  padding: 0.7em 0.85em;
+  margin: 0.5em 0;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.mc-md pre code {
+  background: transparent;
+  padding: 0;
+  color: #e6edf3;
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: pre;
+}
+.mc-md table {
+  border-collapse: collapse;
+  margin: 0.5em 0;
+  font-size: 12px;
+  display: block;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  max-width: 100%;
+}
+.mc-md th, .mc-md td {
+  border: 1px solid #2d333b;
+  padding: 4px 8px;
+  text-align: left;
+  white-space: nowrap;
+}
+.mc-md th { background: #161b22; font-weight: 600; }
+.mc-md hr { border: none; border-top: 1px solid #2d333b; margin: 0.7em 0; }
+.mc-md img { max-width: 100%; border-radius: 8px; }
+
+/* ── 底部弹层 ── */
+.mc-sheet-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 30;
+  animation: mc-fade-in 0.15s ease-out;
+}
+.mc-sheet {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  max-height: 62%;
+  background: #161b22;
+  border-top: 1px solid #2d333b;
+  border-radius: 18px 18px 0 0;
+  z-index: 31;
+  display: flex;
+  flex-direction: column;
+  animation: mc-slide-up 0.18s ease-out;
+}
+@keyframes mc-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes mc-slide-up { from { transform: translateY(40%); } to { transform: translateY(0); } }
+
+.mc-md .hljs-keyword, .mc-md .hljs-built_in { color: #ff7b72; }
+.mc-md .hljs-string, .mc-md .hljs-attr { color: #a5d6ff; }
+.mc-md .hljs-comment { color: #8b949e; font-style: italic; }
+.mc-md .hljs-number, .mc-md .hljs-literal { color: #79c0ff; }
+.mc-md .hljs-title, .mc-md .hljs-function { color: #d2a8ff; }

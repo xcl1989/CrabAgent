@@ -8,6 +8,25 @@ English version: [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
+## [0.17.3] — 移动控制台 /m（2026-10-22）
+
+### 新增
+- **移动控制台 `#/m`** — Omnara 形态的手机端界面，与桌面端并行运行（桌面 UI 零改动）：任务流（审批/提问卡）、SSE 实时会话时间线、随时插话输入条。已注册为 PWA（manifest + 生成的图标），「添加到主屏幕」即得全屏独立 App。路由：`#/m`（任务）、`#/m/chat`（时间线）、`#/m/approve/<request_key>`（深链）。
+- **会话级控制** — 新建会话；底部弹层切换工作空间 / 模型（按启用的 provider 分组）/ Agent；进入会话自动同步当前模型与 Agent。
+- **手机发送图片** — base64 dataURL 与桌面同参（≤5 张、单张 ≤5MB），可预览可删除，复用同一 prompt API。
+- **移动端 assistant 消息 markdown 渲染** — react-markdown + GFM 表格 + 代码高亮，配套手机深色排版样式（mobile.css）。
+- **推送在请求创建时即触发** — 聊天级 `ask_question` / 工具批准（无 task_id、不产生 task_updated 事件）现在也会推到手机，深链直达请求卡（Bark `url` / ntfy `Click`）。与任务级 `waiting_user` 推送按键去重（10 分钟窗口），不会双推。
+
+### 修复
+- **手机时间线事件被静默忽略** — SSE 线上事件类型为小写（`text_delta`、`tool_call` 等），而移动端处理器按 Python 枚举大写名（`TEXT_DELTA`）匹配，导致实时事件全部失效。已改为小写并对齐桌面语义：delta 增量追加、`text_done` 落库刷新并清理 live 缓冲防重复、过滤工具轮次的空 assistant 气泡。
+- **跨端决策同步** — 手机控制台（或 task-requests API）决策后向会话 SSE 广播 `REQUEST_RESOLVED`，桌面聊天自动清除对应待处理卡片，不再永久挂起。
+- **Gzip 不再影响 SSE 流式** — 静态资源仍压缩（体积降约 75%，解决 Tailscale DERP 中继下首屏极慢），但 `/api/events*` 通过 `_SSEAwareGZipMiddleware` 豁免压缩，流式响应绝不会被压缩中间件缓冲。
+
+### 变更
+- 设计文档：`docs/mobile-console-design.md` 与交互原型 `docs/mockups/m-console-v2.html`。
+
+---
+
 ## [0.17.2] — 会话切换性能优化（2026-10-22）
 
 ### 修复

@@ -2611,6 +2611,73 @@ async def token_usage_session_detail(user_id: int, session_id: str) -> dict | No
         }
 
 
+async def token_usage_session_summary(user_id: int, session_id: str) -> dict:
+    """Lightweight per-session summary for the chat UI stats bar.
+
+    Aggregates token_usage (input cached/non-cached, output, calls) plus
+    cumulative wall time from main agent_runs (parent_run_id IS NULL, so
+    sub-agent runs are not double counted).
+    Returns zeroed fields instead of 404 when there is no data yet.
+    """
+    from sqlalchemy import func, select
+
+    async with async_session_factory() as db:
+        agg = await db.execute(
+            select(
+                func.count(TokenUsage.id),
+                func.coalesce(func.sum(TokenUsage.prompt_tokens), 0),
+                func.coalesce(func.sum(TokenUsage.cached_tokens), 0),
+                func.coalesce(func.sum(TokenUsage.non_cached_tokens), 0),
+                func.coalesce(func.sum(TokenUsage.completion_tokens), 0),
+                func.coalesce(func.sum(TokenUsage.reasoning_tokens), 0),
+                func.coalesce(func.sum(TokenUsage.total_tokens), 0),
+                func.min(TokenUsage.created_at),
+                func.max(TokenUsage.created_at),
+            ).where(TokenUsage.user_id == user_id, TokenUsage.session_id == session_id)
+        )
+        (
+            calls,
+            prompt_tokens,
+            cached_tokens,
+            non_cached_tokens,
+            completion_tokens,
+            reasoning_tokens,
+            total_tokens,
+            first_call_at,
+            last_call_at,
+        ) = agg.one()
+
+        run_agg = await db.execute(
+            select(
+                func.count(AgentRun.id),
+                func.coalesce(func.sum(AgentRun.elapsed), 0),
+            ).where(
+                AgentRun.user_id == user_id,
+                AgentRun.session_id == session_id,
+                AgentRun.parent_run_id.is_(None),
+            )
+        )
+        turns, elapsed = run_agg.one()
+
+    prompt_tokens = int(prompt_tokens or 0)
+    cached_tokens = int(cached_tokens or 0)
+    return {
+        "session_id": session_id,
+        "total_tokens": int(total_tokens or 0),
+        "prompt_tokens": prompt_tokens,
+        "cached_tokens": cached_tokens,
+        "non_cached_tokens": int(non_cached_tokens or 0),
+        "completion_tokens": int(completion_tokens or 0),
+        "reasoning_tokens": int(reasoning_tokens or 0),
+        "cache_hit_rate": round(cached_tokens / prompt_tokens, 4) if prompt_tokens > 0 else 0,
+        "calls": int(calls or 0),
+        "turns": int(turns or 0),
+        "elapsed": round(float(elapsed or 0), 1),
+        "first_call_at": first_call_at.isoformat() if first_call_at else "",
+        "last_call_at": last_call_at.isoformat() if last_call_at else "",
+    }
+
+
 # ── Execution span persistence and queries ──
 
 

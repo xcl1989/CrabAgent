@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.17.3] — Mobile Console `/m` (2026-10-22)
+
+### Added
+- **Mobile console at `#/m`** — an Omnara-style phone UI that runs alongside the desktop app (desktop UI untouched): task stream with approval/question cards, live session timeline over SSE, quick "steer" input bar. Registered as a PWA (`manifest.json` + generated icon), so "Add to Home Screen" gives a fullscreen standalone app. Route: `#/m` (tasks), `#/m/chat` (timeline), `#/m/approve/<request_key>` (deep link).
+- **Session controls on mobile** — create sessions, switch workspace / model (grouped by enabled provider) / agent via bottom sheets; selection syncs from the active session.
+- **Image attachments on mobile** — pick photos from the phone (base64 data URLs, same limits as desktop: ≤5 images, ≤5 MB each) with preview and remove; sent through the same prompt API.
+- **Markdown rendering for assistant messages on mobile** — react-markdown with GFM tables and syntax highlighting, styled by a mobile-tuned dark theme (`mobile.css`).
+- **Push notifications now fire at request-creation time** — chat-level `ask_question` / tool approvals (which have no task id and never emit `task_updated`) reach the phone via Bark/ntfy, deep-linked straight to the request card (`url` / `Click` header). Deduped against the task-level `waiting_user` push (10-minute window) so both paths never double-push.
+
+### Fixed
+- **Mobile timeline events were silently ignored** — the SSE wire format uses lowercase event types (`text_delta`, `tool_call`, …) while the mobile handler matched Python enum names (`TEXT_DELTA`), so no live event ever applied. Delta chunks now append (matching desktop semantics), `text_done` refreshes from the DB and clears the live buffer to avoid duplicates, and empty tool-round assistant bubbles are filtered.
+- **Cross-surface decisions now propagate** — deciding a request from the mobile console (or the task-requests API) broadcasts `REQUEST_RESOLVED` to the session's SSE stream, so the desktop chat clears its pending card instead of waiting forever.
+- **Gzip no longer risks stalling SSE streams** — static assets are still compressed (~75 % smaller bundles, fixing very slow first loads over Tailscale DERP relays), but `/api/events*` is exempted from compression via `_SSEAwareGZipMiddleware` so streaming responses are never buffered by the compress middleware.
+
+### Changed
+- Design docs: `docs/mobile-console-design.md` and interactive prototype `docs/mockups/m-console-v2.html`.
+
+---
+
 ## [0.17.2] — Session Switch Performance (2026-10-22)
 
 ### Fixed

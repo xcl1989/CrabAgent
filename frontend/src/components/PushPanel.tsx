@@ -198,7 +198,7 @@ export default function PushPanel() {
 
         <div className="mt-4">
           <label className="text-xs text-[var(--text-tertiary)]">
-            深链地址（点通知跳转的 UI 地址，选填）
+            深链地址（点通知跳转的 UI 地址，选填；移动控制台会自动追加 #/m/approve/… 直达审批卡）
           </label>
           <input
             value={deepLink}

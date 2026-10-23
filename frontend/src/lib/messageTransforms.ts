@@ -282,6 +282,14 @@ export function sseEventToMessages(event: SSEEvent, messages: ChatMessage[]): Ch
     return updated;
   }
 
+  // A pending request was decided on another surface (mobile console /
+  // task-requests API). Clear the matching live card from this device.
+  if (event.type === "request_resolved") {
+    const key = (event.data.request_key || event.data.input_id) as string;
+    if (!key) return messages;
+    return messages.filter((m) => m.confirm_id !== key);
+  }
+
   if (event.type === "compress_start") {
     updated.push({
       id: `compress-${Date.now()}`,

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -45,7 +45,7 @@ async def get_request(
     return req
 
 
-async def _decide(request_key: str, decision: str, req: DecisionRequest, user: User, db: AsyncSession):
+async def _decide(request_key: str, decision: str, req: DecisionRequest, user: User, db: AsyncSession, app=None):
     from crabagent.core.task.request_service import decide_request
 
     try:
@@ -59,6 +59,37 @@ async def _decide(request_key: str, decision: str, req: DecisionRequest, user: U
         raise HTTPException(
             status_code=409, detail="Resource changed since the request was created; please review again"
         )
+
+    # Broadcast REQUEST_RESOLVED to the session's SSE streams so OTHER
+    # devices (desktop chat, other phones) clear their live pending card.
+    # The deciding device already updated its own UI locally.
+    if app is not None:
+        import asyncio
+
+        from crabagent.core.event import AgentEvent, EventType
+
+        session_id = str(payload.get("session_id") or "")
+        if session_id:
+            event = AgentEvent(
+                type=EventType.REQUEST_RESOLVED,
+                data={
+                    "request_key": request_key,
+                    "input_id": request_key,
+                    "decision": decision,
+                    "session_id": session_id,
+                },
+            )
+            dead: list[str] = []
+            for qid, entry in list(getattr(app.state, "event_queues", {}).items()):
+                sid, critical_q, stream_q, _ts = entry
+                if sid != session_id:
+                    continue
+                try:
+                    critical_q.put_nowait(event)
+                except asyncio.QueueFull:
+                    dead.append(qid)
+            for qid in dead:
+                app.state.event_queues.pop(qid, None)
     return payload
 
 
@@ -66,37 +97,41 @@ async def _decide(request_key: str, decision: str, req: DecisionRequest, user: U
 async def approve_request(
     request_key: str,
     req: DecisionRequest,
+    request: Request,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await _decide(request_key, "approve", req, user, db)
+    return await _decide(request_key, "approve", req, user, db, app=request.app)
 
 
 @router.post("/{request_key}/reject")
 async def reject_request(
     request_key: str,
     req: DecisionRequest,
+    request: Request,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await _decide(request_key, "reject", req, user, db)
+    return await _decide(request_key, "reject", req, user, db, app=request.app)
 
 
 @router.post("/{request_key}/answer")
 async def answer_request(
     request_key: str,
     req: DecisionRequest,
+    request: Request,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await _decide(request_key, "answer", req, user, db)
+    return await _decide(request_key, "answer", req, user, db, app=request.app)
 
 
 @router.post("/{request_key}/cancel")
 async def cancel_request(
     request_key: str,
     req: DecisionRequest,
+    request: Request,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await _decide(request_key, "cancel", req, user, db)
+    return await _decide(request_key, "cancel", req, user, db, app=request.app)

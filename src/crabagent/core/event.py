@@ -25,6 +25,10 @@ class EventType(StrEnum):
     MESSAGE_CREATED = "message_created"
     TOOL_CONFIRM_REQUEST = "tool_confirm_request"
     USER_INPUT_REQUEST = "user_input_request"
+    # A pending request was decided (approve/reject/answer) via any surface
+    # (desktop, /m mobile console, task-requests API). Carries request_key +
+    # session_id so other devices' live cards can clear themselves.
+    REQUEST_RESOLVED = "request_resolved"
     CONTEXT_COMPRESSED = "context_compressed"
     COMPRESS_START = "compress_start"
     COMPRESS_DELTA = "compress_delta"

@@ -47,7 +47,7 @@ import TaskPanel from "../components/TaskPanel";
 import EmailPanel from "../components/EmailPanel";
 import SkillsPanel from "../components/SkillsPanel";
 import { AgentRunBoard } from "../components/AgentRunBoard";
-import { AgentBar } from "../components/AgentBar";
+import { SessionStatsBar } from "../components/SessionStatsBar";
 import { DelegateModal } from "../components/DelegateModal";
 import { ResultCompare } from "../components/ResultCompare";
 import WorkspaceSwitcher from "../components/WorkspaceSwitcher";
@@ -156,6 +156,8 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
   const [workspaceType, setWorkspaceType] = useState<WorkspaceType>("document");
   const [meetingActive, setMeetingActive] = useState(false);
   const [fileTreeRefreshKey, setFileTreeRefreshKey] = useState(0);
+  // 每次迭代结束（LLM 调用完成、token usage 落库）+1，驱动统计条刷新
+  const [statsTick, setStatsTick] = useState(0);
 
   const handleStartMeeting = useCallback(() => {
     setMeetingActive(true);
@@ -273,6 +275,10 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
   }, []);
 
   const wrappedOnEvent = useCallback((event: SSEEvent) => {
+    if (event.type === "iteration_end" || event.type === "sub_agent_end") {
+      // 该次 LLM 调用的 token usage 刚落库，触发统计条防抖刷新
+      setStatsTick((k) => k + 1);
+    }
     if (event.type.startsWith("goal_")) {
       const snapshot = event.data.goal as GoalData | undefined;
       // Completed or archived goals should not continue occupying the chat header.
@@ -893,27 +899,6 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
     }
   };
 
-  const handleAgentBarClick = (agent: AgentProfileType) => {
-    const textarea = document.querySelector<HTMLTextAreaElement>("textarea");
-    if (!textarea) return;
-    const mention = `@${agent.name} `;
-    const start = textarea.selectionStart;
-    const end = textarea.selectionEnd;
-    const value = textarea.value;
-    // Insert @agent at cursor position (or prepend if cursor is at start)
-    const newValue = value.substring(0, start) + mention + value.substring(end);
-    // Use React's internal setter to update state
-    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-      window.HTMLTextAreaElement.prototype, "value"
-    )?.set;
-    nativeInputValueSetter?.call(textarea, newValue);
-    textarea.dispatchEvent(new Event("input", { bubbles: true }));
-    // Move cursor after the inserted mention
-    const newPos = start + mention.length;
-    textarea.setSelectionRange(newPos, newPos);
-    textarea.focus();
-  };
-
   const handleExportReport = async () => {
     if (!activeSession) return;
     const token = localStorage.getItem("crab_token") || "";
@@ -1133,7 +1118,10 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
                     onDrop={handleDrop}
                     onDragOver={handleDragOver}
                   >
-                    <AgentBar onAgentClick={handleAgentBarClick} />
+                    <SessionStatsBar
+                      sessionId={activeSession?.session_id ?? null}
+                      refreshKey={messages.length * 100 + (sending ? 1 : 0) + statsTick}
+                    />
 
                     {/* Agent + Model selectors */}
                     <div className="mb-1 flex items-center gap-2 flex-wrap">
@@ -1633,7 +1621,10 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
               onDrop={handleDrop}
               onDragOver={handleDragOver}
             >
-              <AgentBar onAgentClick={handleAgentBarClick} />
+              <SessionStatsBar
+                sessionId={activeSession?.session_id ?? null}
+                refreshKey={messages.length * 100 + (sending ? 1 : 0) + statsTick}
+              />
 
               {/* Agent + Model selectors */}
               <div className="mb-1 sm:mb-2 flex items-center gap-2 flex-wrap">
