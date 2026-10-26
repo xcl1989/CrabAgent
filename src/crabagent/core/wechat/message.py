@@ -28,6 +28,12 @@ _SELFHEAL_NOTIFY_COOLDOWN = 600.0  # 10 min
 _RELOGIN_NOTIFY_COOLDOWN = 300.0  # 5 min
 # Archive a WeChat conversation when prior messages exceed this count
 _WECHAT_ARCHIVE_MSG_THRESHOLD = 150
+# Hydration safety: cap a single history message's content length (chars).
+# Messages carrying base64 data-URLs (saved tool/vision outputs) can be
+# megabytes each and blow past the model's prompt limit.
+_WECHAT_HYDRATE_MAX_CHARS = 20_000
+# Marker substituted for stripped base64 data URLs
+_WECHAT_BASE64_PLACEHOLDER = "[图片数据已省略，如需查看请让用户重新发送或使用图片工具]"
 
 
 class WeChatMessageLoop:
@@ -686,6 +692,30 @@ class WeChatProgressListener:
 # ── _run_agent_for_wechat ───────────────────────────────────────────────────
 
 
+def sanitize_history_content(content: str) -> str:
+    """Strip base64 data-URLs and oversize content from a history message.
+
+    Some persisted messages (e.g. vision tool outputs) contain entire
+    images as base64 data-URLs.  Rehydrating them verbatim makes every
+    subsequent LLM call exceed the prompt limit ("Prompt exceeds max
+    length", GLM code 1261), which used to silently break the channel.
+    """
+    if not content:
+        return content
+    import re as _re
+
+    # Replace data URLs (possibly inside JSON content blocks)
+    cleaned = _re.sub(
+        r"data:image/[a-zA-Z+]+;base64,[A-Za-z0-9+/=]+",
+        _WECHAT_BASE64_PLACEHOLDER,
+        content,
+    )
+    # Hard cap oversized messages
+    if len(cleaned) > _WECHAT_HYDRATE_MAX_CHARS:
+        cleaned = cleaned[:_WECHAT_HYDRATE_MAX_CHARS] + "\n…[历史消息过长，已截断]"
+    return cleaned
+
+
 async def _run_agent_for_wechat(msg: IncomingMessage, client: WeChatClient | None = None) -> str:
     """Run the Agent loop for a WeChat message and return the reply text.
 
@@ -774,7 +804,9 @@ async def _run_agent_for_wechat(msg: IncomingMessage, client: WeChatClient | Non
     for m in existing_messages:
         role = m["role"]
         if role in ("user", "assistant"):
-            context.messages.append({"role": role, "content": m["content"]})
+            context.messages.append(
+                {"role": role, "content": sanitize_history_content(m["content"])}
+            )
 
     # Register tools
     await _register_tools(context, workspace)
@@ -788,6 +820,24 @@ async def _run_agent_for_wechat(msg: IncomingMessage, client: WeChatClient | Non
 
     persistence = PersistenceListener(conversation_id=conv_id, branch_id="main")
     context.event_bus.subscribe(persistence.on_event)
+
+    from crabagent.serve.services.usage import UsagePersistenceListener
+    from crabagent.core.database import Conversation
+
+    async with async_session_factory() as db:
+        from sqlalchemy import func
+        from crabagent.core.database import Message as DBMessage
+
+        conversation = await db.get(Conversation, conv_id)
+        usage_user_id = conversation.user_id
+        persistence.sequence = await db.scalar(
+            select(func.max(DBMessage.sequence)).where(
+                DBMessage.conversation_id == conv_id,
+                DBMessage.branch_id == "main",
+            )
+        ) or 0
+    usage = UsagePersistenceListener(context, usage_user_id, session_id)
+    context.event_bus.subscribe(usage.on_event)
 
     # Subscribe WeChat progress listener for real-time status updates
     progress = None
@@ -823,10 +873,11 @@ async def _run_agent_for_wechat(msg: IncomingMessage, client: WeChatClient | Non
         from crabagent.serve.services.message import save_message
 
         async with async_session_factory() as db:
+            persistence.sequence += 1
             await save_message(
                 db,
                 conversation_id=conv_id,
-                sequence=persistence.sequence + 1,
+                sequence=persistence.sequence,
                 role="user",
                 content=display_content,
                 branch_id="main",
@@ -984,12 +1035,18 @@ async def _run_agent_for_wechat(msg: IncomingMessage, client: WeChatClient | Non
     # This context has no confirm_callback, so tools auto-execute.
     # Mutating the global was unsafe: a concurrent desktop prompt would read
     # True and skip installing its own confirm_callback.
+    # Snapshot the message count so reply extraction only considers messages
+    # produced by *this* run — otherwise a failed run would replay the last
+    # assistant message from the hydrated history as if it were a fresh reply.
+    _run_start_msg_count = len(context.messages)
     try:
         await run_agent(context, query)
     except Exception as e:
         logger.error("[WeChatLoop] run_agent error: %s", e)
         return f"处理时出错：{str(e)[:100]}", conv_id
     finally:
+        await usage.flush()
+        await persistence.finalize()
         # Stop the heartbeat timer
         if progress:
             await progress.stop()
@@ -1009,8 +1066,10 @@ async def _run_agent_for_wechat(msg: IncomingMessage, client: WeChatClient | Non
             except Exception:
                 pass
 
-    # Extract last assistant text
-    reply = _extract_last_assistant_text(context)
+    # Extract last assistant text — only from THIS run's messages, never
+    # from the hydrated history (a failed run must not replay old replies).
+    # (If run_agent raised, we already returned an error message above.)
+    reply = _extract_last_assistant_text(context, start_index=_run_start_msg_count)
 
     # If consolidation mode was active, merge buffered progress with
     # the final reply so everything arrives in one iLink send.
@@ -1278,7 +1337,10 @@ async def _maybe_archive_after_reply(conv_id: int, title: str) -> bool:
                 .order_by(DBMessage.id)
             )
             msgs = list(msg_result.scalars().all())
-            prior = [{"role": m.role, "content": m.content} for m in msgs]
+            prior = [
+                {"role": m.role, "content": sanitize_history_content(m.content or "")}
+                for m in msgs
+            ]
 
             # 2. Summarize (skip if too few messages)
             summary = ""
@@ -1389,12 +1451,15 @@ async def _extract_file_content(file_path, original_name: str) -> str | None:
     return None
 
 
-def _extract_last_assistant_text(context) -> str:
+def _extract_last_assistant_text(context, start_index: int = 0) -> str:
     """Extract the last assistant text message from the context.
 
     Messages are plain dicts with ``role`` and ``content`` keys.
+    ``start_index`` limits the scan to messages produced at or after that
+    position — pass the pre-run message count so a failed run cannot
+    replay an old assistant message from the hydrated history.
     """
-    for msg in reversed(context.messages):
+    for msg in reversed(context.messages[start_index:]):
         if isinstance(msg, dict):
             if msg.get("role") == "assistant" and msg.get("content", "").strip():
                 return msg["content"].strip()

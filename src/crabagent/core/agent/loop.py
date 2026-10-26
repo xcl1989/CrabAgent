@@ -234,6 +234,15 @@ async def _emit_retry_with_countdown(
         await asyncio.sleep(frac)
 
 
+async def _consume_user_messages(context: AgentContext) -> bool:
+    pending = context.metadata.pop("_pending_user_messages", [])
+    for content in pending:
+        message = {"role": "user", "content": content, "agent": context.current_agent}
+        context.messages.append(message)
+        await context.event_bus.emit(AgentEvent(type=EventType.MESSAGE_CREATED, data={"message": message}))
+    return bool(pending)
+
+
 async def run_agent(
     context: AgentContext,
     query: str | list[dict],
@@ -308,6 +317,7 @@ async def run_agent(
     context.metadata["_resolved_model_full"] = model  # keep provider prefix for compress
 
     while not context.budget_exhausted:
+        await _consume_user_messages(context)
         context.iteration += 1
         await context.event_bus.emit(AgentEvent(type=EventType.ITERATION_START, data={"iteration": context.iteration}))
 
@@ -520,6 +530,13 @@ async def run_agent(
             await context.event_bus.emit(AgentEvent(type=EventType.TEXT_DONE, data={"text": full_text}))
 
             if not tool_calls_list:
+                await context.event_bus.emit(
+                    AgentEvent(type=EventType.ITERATION_END, data={"iteration": context.iteration})
+                )
+                if await _consume_user_messages(context):
+                    continue
+                # Close admission before the first await in run finalization.
+                context.metadata["_accept_followups"] = False
                 break
 
             tool_metas = []
@@ -798,28 +815,61 @@ async def run_agent(
 
             elif isinstance(e, litellm.exceptions.BadRequestError):
                 err_text = str(e)
+                # Some providers report "prompt too long" as a plain 400
+                # BadRequestError instead of ContextWindowExceededError
+                # (e.g. GLM error code 1261 "Prompt exceeds max length").
+                # Treat it the same way: auto-compress and retry.
+                _err_lower = err_text.lower()
+                _is_prompt_too_long = any(
+                    marker in _err_lower
+                    for marker in (
+                        "prompt exceeds max length",
+                        "prompt is too long",
+                        "maximum context length",
+                        "context length exceeded",
+                        "context_length_exceeded",
+                        "too many tokens",
+                        "reduce the length",
+                    )
+                ) or "code: 1261" in _err_lower
+                if _is_prompt_too_long:
+                    await context.event_bus.emit(
+                        AgentEvent(type=EventType.AGENT_INFO, data={"message": "📏 上下文超出模型限制，正在尝试自动压缩…"})
+                    )
+                    try:
+                        await compress_context(context, llm, model)
+                        _llm_retry_count = 0  # reset since context changed
+                        logger.info("Context auto-compressed after prompt-too-long BadRequestError, retrying")
+                        await context.event_bus.emit(
+                            AgentEvent(type=EventType.AGENT_INFO, data={"message": "✅ 上下文压缩成功，自动重试中…"})
+                        )
+                        continue
+                    except Exception:
+                        user_message = "📏 上下文超出模型限制，自动压缩失败。请新建对话或缩短内容后重试。"
+                        logger.warning("Auto-compression also failed after prompt-too-long BadRequestError")
                 # Providers running text-only models reject multimodal content
                 # blocks with e.g. "messages.content.type 参数非法，取值范围 ['text']".
                 # Recover by stripping image blocks and retrying once in text-only mode.
-                _err_compact = err_text.lower().replace(" ", "").replace("_", "")
-                _is_content_type_reject = (
-                    "content.type" in _err_compact or "contentparts" in _err_compact
-                ) and "text" in _err_compact
-                if _is_content_type_reject and not _force_text_only:
-                    _force_text_only = True
-                    context.metadata["_force_text_only"] = True
-                    _llm_retry_count = 0
-                    user_message = "🖼️ 当前模型不支持图片输入，已自动切换为纯文本模式重试…"
-                    await context.event_bus.emit(AgentEvent(type=EventType.AGENT_INFO, data={"message": user_message}))
-                    logger.warning(
-                        "Provider rejected multimodal content blocks; retrying in text-only mode: %s",
-                        err_text[:200],
-                    )
-                    retryable = True
-                    backoff_delay = 0.0
                 else:
-                    user_message = f"❌ 请求参数错误：{e!s}"
-                    logger.warning("BadRequestError details: %s", e)
+                    _err_compact = err_text.lower().replace(" ", "").replace("_", "")
+                    _is_content_type_reject = (
+                        "content.type" in _err_compact or "contentparts" in _err_compact
+                    ) and "text" in _err_compact
+                    if _is_content_type_reject and not _force_text_only:
+                        _force_text_only = True
+                        context.metadata["_force_text_only"] = True
+                        _llm_retry_count = 0
+                        user_message = "🖼️ 当前模型不支持图片输入，已自动切换为纯文本模式重试…"
+                        await context.event_bus.emit(AgentEvent(type=EventType.AGENT_INFO, data={"message": user_message}))
+                        logger.warning(
+                            "Provider rejected multimodal content blocks; retrying in text-only mode: %s",
+                            err_text[:200],
+                        )
+                        retryable = True
+                        backoff_delay = 0.0
+                    else:
+                        user_message = f"❌ 请求参数错误：{e!s}"
+                        logger.warning("BadRequestError details: %s", e)
 
             else:
                 # Generic / unknown error — still retry once for safety

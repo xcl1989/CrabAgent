@@ -64,13 +64,19 @@ async def event_stream(
         time.time(),
     )
 
-    connected_event = AgentEvent(
-        type=EventType.MESSAGE_CREATED,
-        data={"connected": True, "session_id": session_id, "queue_id": queue_id},
-    )
+    from crabagent.serve.api.prompt import _tasks
 
     async def generate():
-        yield connected_event.to_sse()
+        task = _tasks.get(session_id)
+        yield AgentEvent(
+            type=EventType.MESSAGE_CREATED,
+            data={
+                "connected": True,
+                "session_id": session_id,
+                "queue_id": queue_id,
+                "running": bool(task and not task.done()),
+            },
+        ).to_sse()
 
         from crabagent.core.agent.agents import get_running_subs
 

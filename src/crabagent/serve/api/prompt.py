@@ -62,6 +62,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["prompt"])
 
 _tasks: dict[str, asyncio.Task] = {}
+_contexts: dict[str, AgentContext] = {}
 
 _session_locks: dict[str, asyncio.Lock] = {}
 
@@ -204,7 +205,16 @@ async def prompt_async(
     conv = await get_owned_conversation(db, session_id, user)
 
     if session_id in _tasks and not _tasks[session_id].done():
-        raise HTTPException(status_code=409, detail="Session is already processing a prompt")
+        context = _contexts.get(session_id)
+        if not context or not context.metadata.get("_accept_followups") or context.budget_exhausted:
+            raise HTTPException(status_code=409, detail="Session is finishing; retry shortly")
+        content: str | list[dict] = req.message
+        if req.images:
+            content = [{"type": "text", "text": req.message}] + [
+                {"type": "image_url", "image_url": {"url": image}} for image in req.images
+            ]
+        context.metadata.setdefault("_pending_user_messages", []).append(content)
+        return {"status": "queued", "session_id": session_id}
 
     active_branch = conv.active_branch or "main"
     history_msgs = await get_messages(db, conv.id, branch_id=active_branch)
@@ -1156,6 +1166,11 @@ Use ordinary Markdown when a visualization is not helpful.
             context.metadata["_run_error"] = True
             logger.exception("Agent task failed for session %s", session_id)
         finally:
+            context.metadata["_accept_followups"] = False
+            # Keep accepted follow-ups in history even if the run was aborted or failed.
+            from crabagent.core.agent.loop import _consume_user_messages
+
+            await _consume_user_messages(context)
             elapsed = round(time.time() - t0, 1)
             context.metadata["_run_elapsed"] = elapsed
             resolved_model = context.metadata.get("resolved_model", context.model or "")
@@ -1252,6 +1267,7 @@ Use ordinary Markdown when a visualization is not helpful.
                 except Exception:
                     logger.debug("Failed to write execution_spans", exc_info=True)
 
+            _contexts.pop(session_id, None)
             _tasks.pop(session_id, None)
             _session_locks.pop(session_id, None)
             try:
@@ -1353,6 +1369,8 @@ Use ordinary Markdown when a visualization is not helpful.
             except Exception:
                 logger.exception("Failed to update conversation")
 
+    context.metadata["_accept_followups"] = True
+    _contexts[session_id] = context
     task = asyncio.create_task(_run())
     _tasks[session_id] = task
 

@@ -231,6 +231,11 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
 
   const handleSSEEvent = useCallback(
     (event: SSEEvent) => {
+      if (event.type === "message_created" && event.data.connected) {
+        setSending(event.data.running === true);
+        return;
+      }
+      if (event.type === "agent_start" && !event.data.replay) setSending(true);
       if (event.type === "tool_result") {
         const name = event.data.name as string;
         if (name === "todo_add" || name === "todo_done" || name === "todo_delete") {
@@ -359,7 +364,7 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
       // neither discard this load nor overwrite the newly selected view.
       manualSelectRef.current = true;
       const seq = ++loadSeqRef.current;
-      const signal = resetViewRequests();
+      resetViewRequests();
       // Update the ref synchronously: the pending confirmation may be replayed
       // by SSE before React has committed the new activeSession state.
       activeSessionRef.current = session;
@@ -373,15 +378,7 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
         (m) => m.session_id === session.session_id && m.status === "running",
       ));
       void loadSessionMessages(session.session_id, seq);
-      void import("../api/monitor")
-        .then(({ getAgentMonitor }) => signal.aborted ? [] : getAgentMonitor(signal))
-        .then((monitors) => {
-          if (seq !== loadSeqRef.current) return;
-          setSending(monitors.some(
-            (m) => m.session_id === session.session_id && m.status === "running",
-          ));
-        })
-        .catch(() => {});
+
 
       return session.model || (models.length > 0 ? models[0].id : selectedModel);
     },

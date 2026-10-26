@@ -1,3 +1,4 @@
+import { getToolSummary } from "../lib/toolSummary";
 /**
  * MessageItem — Extracted, memoized message rendering for ChatPanel.
  *
@@ -106,25 +107,6 @@ export interface ChatMessage {
 
 // ── Shared helpers ────────────────────────────────────────────
 
-function getToolSummary(content: string): { name: string; summary: string } {
-  try {
-    const data = JSON.parse(content);
-    const name = data.name || "unknown";
-    const args = data.arguments || {};
-    const firstKey = Object.keys(args)[0];
-    let summary = "";
-    if (firstKey) {
-      const val = args[firstKey];
-      summary =
-        typeof val === "string"
-          ? val.slice(0, 80)
-          : JSON.stringify(val).slice(0, 80);
-    }
-    return { name, summary };
-  } catch {
-    return { name: "unknown", summary: content.slice(0, 80) };
-  }
-}
 
 const TOOL_ICONS: Record<string, ReactNode> = {
   bash: <Terminal size={13} />,
@@ -200,7 +182,7 @@ const ToolCallPairItem = memo(function ToolCallPairItem({
           </span>
         )}
         {summary && (
-          <span className="text-[var(--text-tertiary)] font-mono text-[11px] truncate">
+          <span className="text-[var(--text-tertiary)] text-[11px] truncate" title={summary}>
             {summary}
           </span>
         )}
@@ -256,7 +238,7 @@ const ToolCallItem = memo(function ToolCallItem({
           </span>
         )}
         {summary && (
-          <span className="text-[var(--text-tertiary)] font-mono text-[11px] truncate">
+          <span className="text-[var(--text-tertiary)] text-[11px] truncate" title={summary}>
             {summary}
           </span>
         )}

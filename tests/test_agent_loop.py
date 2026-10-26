@@ -631,3 +631,29 @@ def _async_return(value):
         return value
 
     return inner
+
+
+@pytest.mark.asyncio
+async def test_followup_during_final_response_gets_another_iteration(monkeypatch):
+    context = AgentContext(workspace=Path.cwd(), model="test-model", max_iterations=4)
+    calls = []
+
+    async def fake_provider(provider_name=None):
+        return SimpleNamespace(name="openai", provider_type="openai", api_key="k", base_url="", enabled=True)
+
+    async def fake_acompletion(**kwargs):
+        calls.append(list(kwargs["messages"]))
+        if len(calls) == 1:
+            context.metadata.setdefault("_pending_user_messages", []).append("follow-up")
+        return _stream([_chunk(delta=_delta(content="done"), finish_reason="stop", usage=_usage())])
+
+    events = []
+    context.event_bus.subscribe(lambda event: events.append(event))
+    monkeypatch.setattr(loop, "_resolve_provider", fake_provider)
+    monkeypatch.setattr(loop.litellm, "acompletion", fake_acompletion)
+    monkeypatch.setattr("crabagent.core.proxy.resolve_llm_proxy", _async_return(""))
+    await loop.run_agent(context, "original")
+    assert len(calls) == 2
+    assert any(message.get("content") == "follow-up" for message in calls[1])
+    assert sum(e.type == EventType.MESSAGE_CREATED and e.data["message"].get("content") == "follow-up" for e in events) == 1
+    assert context.metadata["_accept_followups"] is False

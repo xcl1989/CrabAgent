@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.17.4] — Live Conversation Steering and WeChat Reliability (2026-10-26)
+
+### Added
+- **Follow-ups during desktop agent runs** — type and send additional instructions without stopping the agent. Follow-ups queue on the active context and are consumed at safe iteration boundaries.
+- **Readable tool summaries** — tools expose a short `_summary` field; the chat UI prefers it over raw arguments and removes it before invoking local or MCP handlers.
+
+### Fixed
+- **WeChat token accounting** — persist usage incrementally and flush remaining records on exit with retry-safe cursors. Finalize message persistence and continue sequence numbers across turns.
+- **Running state after switching sessions** — include an authoritative running snapshot in the initial SSE event; remove the stale monitor request that could overwrite it.
+- **Oversized WeChat history** — strip embedded base64 image data and cap individual historical messages. Retry provider-specific prompt-length errors after automatic context compression.
+- **Desktop process cleanup** — wait for the backend to exit and terminate its child processes, including MCP servers, instead of leaving orphan processes.
+
+### Changed
+- Rebuilt frontend assets and added regression coverage for follow-ups, SSE snapshots, token persistence, tool summaries, and process cleanup.
+
+---
+
 ## [0.17.3] — Mobile Console `/m` (2026-10-22)
 
 ### Added

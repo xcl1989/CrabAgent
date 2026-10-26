@@ -4,6 +4,8 @@ import base64
 import tempfile
 from pathlib import Path
 
+import pytest
+
 from crabagent.serve.api import prompt as prompt_api
 
 
@@ -51,7 +53,52 @@ def test_extract_local_images_handles_parenthesized_paths(tmp_path: Path):
 def test_mermaid_generation_instructions_require_conservative_flowchart_syntax():
     instructions = prompt_api.MERMAID_GENERATION_INSTRUCTIONS
 
-    assert '`flowchart LR` or `flowchart TD`' in instructions
-    assert '`Q -->|Yes| A`' in instructions
-    assert 'Never use the ambiguous `-- label -->` form.' in instructions
-    assert 'Do not use HTML (including `<br/>`)' in instructions
+    assert "`flowchart LR` or `flowchart TD`" in instructions
+    assert "`Q -->|Yes| A`" in instructions
+    assert "Never use the ambiguous `-- label -->` form." in instructions
+    assert "Do not use HTML (including `<br/>`)" in instructions
+
+
+async def _owned_conversation(*args):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(id=1)
+
+
+@pytest.mark.asyncio
+async def test_running_prompt_accepts_followup_without_starting_second_run(monkeypatch):
+    from types import SimpleNamespace
+
+    from crabagent.core.agent.context import AgentContext
+
+    context = AgentContext(workspace=Path.cwd())
+    context.metadata["_accept_followups"] = True
+    monkeypatch.setattr(prompt_api, "get_owned_conversation", _owned_conversation)
+    monkeypatch.setattr(prompt_api, "_tasks", {"session": SimpleNamespace(done=lambda: False)})
+    monkeypatch.setattr(prompt_api, "_contexts", {"session": context})
+    result = await prompt_api.prompt_async(
+        "session",
+        prompt_api.PromptRequest(message="new instructions", images=["data:image/png;base64,eA=="]),
+        None,
+        SimpleNamespace(id=1),
+        None,
+    )
+    assert result["status"] == "queued"
+    assert context.metadata["_pending_user_messages"][0][0]["text"] == "new instructions"
+
+
+@pytest.mark.asyncio
+async def test_finishing_prompt_does_not_accept_followup(monkeypatch):
+    from types import SimpleNamespace
+
+    from fastapi import HTTPException
+
+    from crabagent.core.agent.context import AgentContext
+
+    context = AgentContext(workspace=Path.cwd())
+    monkeypatch.setattr(prompt_api, "get_owned_conversation", _owned_conversation)
+    monkeypatch.setattr(prompt_api, "_tasks", {"session": SimpleNamespace(done=lambda: False)})
+    monkeypatch.setattr(prompt_api, "_contexts", {"session": context})
+    with pytest.raises(HTTPException) as exc:
+        await prompt_api.prompt_async("session", prompt_api.PromptRequest(message="hi"), None, None, None)
+    assert exc.value.status_code == 409

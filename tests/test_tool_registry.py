@@ -224,3 +224,53 @@ def test_tool_info_list_shows_permission_info():
     perms = {item["name"]: item["default_permission"] for item in info}
     assert perms["auto_tool"] == "auto"
     assert perms["perm_tool"] == "confirm"
+
+
+def test_tool_defs_add_summary_without_mutating_registered_schema():
+    registry = ToolRegistry()
+    schema = {"type": "object", "properties": {"summary": {"type": "string"}}, "required": ["summary"]}
+
+    @registry.register(name="example", description="test", parameters=schema)
+    def example(summary):
+        return summary
+
+    for _ in range(2):
+        params = registry.tool_defs()[0]["function"]["parameters"]
+        assert params["properties"]["_summary"]["type"] == "string"
+        assert params["properties"]["_summary"]["maxLength"] == 40
+        assert params["required"] == ["summary", "_summary"]
+    assert "_summary" not in schema["properties"]
+    assert schema["required"] == ["summary"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("is_async", [False, True])
+async def test_execute_strips_summary_without_mutating_original_arguments(is_async):
+    registry = ToolRegistry()
+
+    def sync_handler(**kwargs):
+        return kwargs
+
+    async def async_handler(**kwargs):
+        return kwargs
+
+    registry.register(
+        name="mcp_example", description="test",
+        parameters={"type": "object", "properties": {}},
+        metadata={"source": "mcp"},
+    )(async_handler if is_async else sync_handler)
+    arguments = {"value": 42, "_summary": "Inspect the example"}
+    assert await registry.execute("mcp_example", arguments) == {"value": 42}
+    assert arguments["_summary"] == "Inspect the example"
+
+
+@pytest.mark.asyncio
+async def test_summary_only_does_not_hide_missing_required_arguments():
+    registry = ToolRegistry()
+
+    @registry.register(name="example", description="test", parameters={"type": "object"})
+    def example(value):
+        return value
+
+    result = await registry.execute("example", {"_summary": "Read value"})
+    assert "without any arguments" in result

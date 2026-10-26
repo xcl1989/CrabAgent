@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import ChatInput from "../components/ChatInput";
 import {
@@ -742,7 +743,8 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
   };
 
   const doSend = async (text: string, images: string[], files: { name: string; path: string; size: number }[] = []) => {
-    if (!activeSession || sending) return;
+    if (!activeSession) return;
+    const wasSending = sending;
 
     // Append file references to the prompt text
     if (files.length > 0) {
@@ -787,13 +789,14 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
         mode === "work" ? workspaceType : undefined,
         mode === "work" && workspaceType !== "browser",
       );
-    } catch {
-      setSending(false);
+    } catch (error) {
+      if (!wasSending) setSending(false);
+      toast.error(error instanceof Error ? error.message : "Message could not be sent");
     }
   };
 
   const handleSend = async (text: string) => {
-    if ((!text.trim() && pendingImages.length === 0 && pendingFiles.length === 0) || !activeSession || sending)
+    if ((!text.trim() && pendingImages.length === 0 && pendingFiles.length === 0) || !activeSession)
       return;
 
     const goalCommand = text.trim().match(/^\/goal(?:\s+([\s\S]+))?$/);

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import inspect
 import logging
 from collections.abc import Callable
@@ -99,8 +100,6 @@ class ToolRegistry:
                     desc = translated.get("description", desc)
                     if "params" in translated and "properties" in params:
                         # Deep copy params to avoid mutating registered defaults
-                        import copy
-
                         params = copy.deepcopy(params)
                         for pname, ptrans in translated["params"].items():
                             if pname in params.get("properties", {}):
@@ -109,6 +108,18 @@ class ToolRegistry:
                                 if desc_text:
                                     params["properties"][pname]["description"] = desc_text
 
+            # Display metadata belongs to the wrapper, not the tool/MCP handler.
+            params = copy.deepcopy(params)
+            params.setdefault("properties", {})["_summary"] = {
+                "type": "string",
+                "description": (
+                    "Briefly explain to the user what this tool call is about to do, "
+                    "in the user's language (one short sentence, at most 40 characters). "
+                    "Describe the action, not a claimed result; do not include secrets."
+                ),
+                "maxLength": 40,
+            }
+            params["required"] = list(dict.fromkeys([*params.get("required", []), "_summary"]))
             result.append(
                 {
                     "type": "function",
@@ -280,6 +291,8 @@ class ToolRegistry:
         if "_truncated_error" in arguments:
             return arguments["_truncated_error"]
 
+        # Keep the original arguments intact for events/history and UI rendering.
+        arguments = {key: value for key, value in arguments.items() if key != "_summary"}
         _t0 = _t.monotonic()
 
         if context is not None:

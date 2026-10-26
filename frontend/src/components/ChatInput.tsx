@@ -98,7 +98,7 @@ export default function ChatInput({
         onKeyDown={handleKeyDown}
         onPaste={onFilePaste}
         placeholder={t("chat.placeholder")}
-        disabled={sending || replaying}
+        disabled={replaying}
         ref={inputRef}
         autoGrow
         minRows={1}
@@ -115,18 +115,17 @@ export default function ChatInput({
         >
           <Square size={14} fill="currentColor" />
         </Button>
-      ) : (
-        <Button
-          variant="brand"
-          onClick={handleSend}
-          disabled={!input.trim()}
-          className="h-9 w-9 sm:h-10 sm:w-10 shrink-0"
-          size="icon"
-          title={t("common.send")}
-        >
-          <ArrowUp size={16} />
-        </Button>
-      )}
+      ) : null}
+      <Button
+        variant="brand"
+        onClick={handleSend}
+        disabled={replaying || !input.trim()}
+        className="h-9 w-9 sm:h-10 sm:w-10 shrink-0"
+        size="icon"
+        title={t("common.send")}
+      >
+        <ArrowUp size={16} />
+      </Button>
     </>
   );
 }

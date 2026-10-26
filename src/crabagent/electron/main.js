@@ -7,6 +7,7 @@ const http = require('http');
 const crypto = require('crypto');
 const { parseBrowserUrl, allowedNetworkUrl, createLocalPreviewPolicy } = require('./computer-url-policy');
 const { createComputerNetworkProxy, parseProxyResolution } = require('./computer-network-proxy');
+const { stopBackend } = require('./backend-lifecycle');
 
 // Allow isolated desktop verification without touching the normal profile.
 if (process.env.CRAB_APP_USER_DATA_DIR) app.setPath('userData', path.resolve(process.env.CRAB_APP_USER_DATA_DIR));
@@ -1173,20 +1174,14 @@ function waitForServer(maxWait = 60000) {
 }
 
 // ── Kill backend process (cross-platform) ──
+let backendStop = null;
 function killBackend() {
-  if (!python) return;
-  try {
-    if (isWin) {
-      // Windows: SIGTERM/SIGKILL don't work, use taskkill on the process tree
-      execSync(`taskkill /PID ${python.pid} /T /F`, { shell: 'cmd.exe', stdio: 'ignore' });
-      log('Backend killed via taskkill');
-    } else {
-      python.kill('SIGTERM');
-      setTimeout(() => { if (python && !python.killed) python.kill('SIGKILL'); }, 3000);
-    }
-  } catch (e) {
-    log(`Backend kill error: ${e.message}`);
+  if (!backendStop) {
+    backendStop = stopBackend(python, { log }).catch((e) => {
+      log(`Backend stop error: ${e.message}`);
+    });
   }
+  return backendStop;
 }
 
 // ── Create tray ──
@@ -1439,7 +1434,6 @@ function createWindow() {
     }
     // Clean up
     saveWindowState();
-    killBackend();
   });
 
   win.on('closed', () => {
@@ -1847,8 +1841,16 @@ app.on('window-all-closed', () => {
   // Only quit when forceQuit is set
 });
 
-app.on('before-quit', () => {
+let backendStopped = false;
+app.on('before-quit', (event) => {
   forceQuit = true;
+  if (backendStopped || !python) return;
+  event.preventDefault();
+  if (backendStop) return;
   collaborationBridge?.close();
   collaborationNetworkProxy?.close();
+  killBackend().finally(() => {
+    backendStopped = true;
+    app.quit();
+  });
 });
