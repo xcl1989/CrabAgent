@@ -109,17 +109,21 @@ class ToolRegistry:
                                     params["properties"][pname]["description"] = desc_text
 
             # Display metadata belongs to the wrapper, not the tool/MCP handler.
+            # A plain "summary" key is used because models reproduce it reliably;
+            # tools that declare a real "summary" parameter keep their own schema.
             params = copy.deepcopy(params)
-            params.setdefault("properties", {})["_summary"] = {
-                "type": "string",
-                "description": (
-                    "Briefly explain to the user what this tool call is about to do, "
-                    "in the user's language (one short sentence, at most 40 characters). "
-                    "Describe the action, not a claimed result; do not include secrets."
-                ),
-                "maxLength": 40,
-            }
-            params["required"] = list(dict.fromkeys([*params.get("required", []), "_summary"]))
+            properties = params.setdefault("properties", {})
+            if "summary" not in properties:
+                properties["summary"] = {
+                    "type": "string",
+                    "description": (
+                        "Briefly explain to the user what this tool call is about to do, "
+                        "in the user's language (one short sentence, at most 40 characters). "
+                        "Describe the action, not a claimed result; do not include secrets."
+                    ),
+                    "maxLength": 40,
+                }
+                params["required"] = list(dict.fromkeys([*params.get("required", []), "summary"]))
             result.append(
                 {
                     "type": "function",
@@ -292,7 +296,15 @@ class ToolRegistry:
             return arguments["_truncated_error"]
 
         # Keep the original arguments intact for events/history and UI rendering.
-        arguments = {key: value for key, value in arguments.items() if key != "_summary"}
+        # "summary" is display metadata injected by tool_defs, so it is dropped
+        # unless the tool declares a real "summary" parameter of its own.
+        # "_summary" is the legacy key emitted by older sessions; drop it too.
+        declared = (tool.parameters or {}).get("properties", {}) or {}
+        arguments = {
+            key: value
+            for key, value in arguments.items()
+            if key != "_summary" and (key != "summary" or "summary" in declared)
+        }
         _t0 = _t.monotonic()
 
         if context is not None:
@@ -318,6 +330,16 @@ class ToolRegistry:
         try:
             sig = inspect.signature(tool.handler)
             kwargs = dict(arguments)
+            # Drop stray keys the handler doesn't declare (models occasionally
+            # invent parameter names such as task_id/description/workdir);
+            # without this filter the whole call would fail with a TypeError.
+            # Handlers with **kwargs (MCP / custom tools) accept everything.
+            if not any(
+                p.kind is inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
+            ):
+                for stray in [k for k in kwargs if k not in sig.parameters]:
+                    logger.warning("Tool '%s': dropping unknown argument '%s'", name, stray)
+                    kwargs.pop(stray)
             if not kwargs:
                 missing = [
                     p_name

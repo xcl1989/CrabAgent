@@ -631,7 +631,12 @@ async def spawn_sub_agent(
     has_shared = False
     can_request_help = False
 
-    for name, tool in parent_context.tool_registry._tools.items():
+    # Derive from the unpruned pool when the parent was narrowed by its own agent
+    # profile — otherwise the parent's deny list would silently strip tools the
+    # sub-agent is explicitly allowed to use.
+    base_registry = parent_context.base_tool_registry or parent_context.tool_registry
+
+    for name, tool in base_registry._tools.items():
         if name in _DELEGATION_TOOLS:
             continue
         if name in _MEMORY_TOOLS:
@@ -644,7 +649,7 @@ async def spawn_sub_agent(
     has_shared = bool(_SHARED_TOOLS & set(sub_registry._tools.keys()))
 
     if agent_def.get("allow_delegation") and current_depth < max_depth:
-        parent_tools = parent_context.tool_registry._tools
+        parent_tools = base_registry._tools
         if "request_help" in parent_tools:
             sub_registry._tools["request_help"] = parent_tools["request_help"]
             can_request_help = True
@@ -681,6 +686,9 @@ async def spawn_sub_agent(
 
     sub_context.confirm_callback = None
     sub_context.tool_permissions = agent_tool_perms
+    # Carry the unpruned pool forward so a second-level delegation is not limited
+    # by this sub-agent's own deny list either.
+    sub_context.base_tool_registry = base_registry
     sub_context.metadata["_sub_agent_name"] = agent_name
     sub_context.metadata["_sub_agent_depth"] = current_depth + 1
     sub_context.locale = sub_locale

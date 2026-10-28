@@ -18,13 +18,16 @@ function appendToLast(
 
 /** Append `text` to the `bashStream` of the most recent bash tool_call.
  *  Returns true when a matching tool_call was found. */
-function appendBashOutput(messages: ChatMessage[], text: string): boolean {
+function appendBashOutput(messages: ChatMessage[], text: string, callId?: string): boolean {
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
-    if (m.role === "tool_call" && m.content?.includes('"bash"')) {
-      messages[i] = { ...m, bashStream: (m.bashStream || "") + text };
-      return true;
-    }
+    if (m.role !== "tool_call") continue;
+    if (callId && m.tool_call_id !== callId && m.id !== `tc-${callId}`) continue;
+    try {
+      if (JSON.parse(m.content).name !== "bash") continue;
+    } catch { continue; }
+    messages[i] = { ...m, bashStream: (m.bashStream || "") + text };
+    return true;
   }
   return false;
 }
@@ -93,7 +96,7 @@ export function sseEventToMessages(event: SSEEvent, messages: ChatMessage[]): Ch
 
   if (event.type === "bash_output") {
     const text = (event.data.text as string) || "";
-    if (appendBashOutput(updated, text)) return updated;
+    if (appendBashOutput(updated, text, event.data.tool_call_id as string | undefined)) return updated;
     return updated;
   }
 

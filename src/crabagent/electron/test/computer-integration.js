@@ -31,7 +31,7 @@ async function run() {
   const main = fs.readFileSync(path.join(__dirname, '../main.js'), 'utf8');
   const prelude = main.slice(0, main.indexOf('// ── Window state persistence ──'))
     .replace("const COLLABORATION_START_URL = 'https://www.google.com/';", `const COLLABORATION_START_URL = '${url}';`);
-  const mainRequire = (name) => name === './computer-url-policy' ? require('../computer-url-policy') : name === './computer-network-proxy' ? require('../computer-network-proxy') : require(name);
+  const mainRequire = (name) => name.startsWith('./') ? require(path.join(__dirname, '..', name)) : require(name);
   const sandbox = { require: mainRequire, process, console, Buffer, URL, setTimeout, clearTimeout,
     __dirname: path.join(__dirname, '..'), log: () => {}, window: null };
   vm.createContext(sandbox);
@@ -39,11 +39,20 @@ async function run() {
   // A visible window is required for trusted native input integration tests.
   const window = new BrowserWindow({ width: 800, height: 650, show: true, webPreferences: { sandbox: true } });
   sandbox.setWindow(window);
-  sandbox.setCollaborationViewBounds({ x: 0, y: 0, width: 600, height: 500 }, true);
   const bridge = sandbox.bridge;
   const view = sandbox.ensureCollaborationView();
   await sandbox.ensureCollaborationNetworkProxy(view.webContents.session);
   await view.webContents.loadURL(url);
+  const background = await bridge('computer_observe', {});
+  assert.equal(background.viewport.width, 1200);
+  assert.equal(background.viewport.height, 800);
+  assert.match(background.data_url, /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/);
+  const backgroundSafe = background.elements.find((element) => element.selector === '#safe');
+  await bridge('click', { page_version: background.page_version, observation_id: background.observation_id, index: backgroundSafe.index });
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  assert.equal(await view.webContents.executeJavaScript('window.safeClicks || 0'), 1, 'background click');
+  await view.webContents.executeJavaScript('window.safeClicks = 0');
+  sandbox.setCollaborationViewBounds({ x: 0, y: 0, width: 600, height: 500 }, true);
   const observe = async () => bridge('observe', {});
   const action = (command, observation, extra = {}) => bridge(command,
     { page_version: observation.page_version, observation_id: observation.observation_id, ...extra });
@@ -78,11 +87,11 @@ async function run() {
     assert.match(first.data_url, /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/);
     assert.equal(first.viewport.width, 600);
     assert.ok(first.screenshot.width > 0);
-    window.contentView.removeChildView(view);
+    sandbox.setCollaborationViewBounds(null, false);
     const detached = await bridge('computer_observe', {});
     assert.match(detached.data_url, /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/);
-    window.contentView.addChildView(view);
-    view.setBounds({ x: 0, y: 0, width: 600, height: 500 });
+    await bridge('navigate', { url });
+    sandbox.setCollaborationViewBounds({ x: 0, y: 0, width: 600, height: 500 }, true);
     assert.equal(first.screenshot.scale_x, first.screenshot.width / first.viewport.width);
     assert.equal(first.screenshot.scale_y, first.screenshot.height / first.viewport.height);
     assert.ok(!first.text.includes('secret123'));
@@ -201,7 +210,16 @@ async function run() {
     });
     await assert.rejects(request('not-a-command'), /Invalid bridge command/);
     await request('observe');
-    await assert.rejects(request('observe', {}, require('node:crypto').randomUUID()), /TASK_MISMATCH/);
+    sandbox.setCollaborationViewBounds(null, false);
+    await request('observe');
+    const nextTask = require('node:crypto').randomUUID();
+    await assert.rejects(request('observe', {}, nextTask), /TASK_MISMATCH/);
+    await assert.rejects(request('release', {}, nextTask), /TASK_MISMATCH/);
+    await request('release');
+    await request('observe', {}, nextTask);
+    await request('release', {}, nextTask);
+    await request('observe');
+    sandbox.setCollaborationViewBounds({ x: 0, y: 0, width: 600, height: 500 }, true);
     await assert.rejects(request('type', { index: 1 }), /Invalid action_id/);
     const duplicateId = require('node:crypto').randomUUID();
     const typed = await observe();

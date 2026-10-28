@@ -18,6 +18,10 @@ class AgentContext:
     messages: list[dict[str, Any]] = field(default_factory=list)
     event_bus: EventBus = field(default_factory=lambda: EventBus(name="agent"))
     tool_registry: ToolRegistry = field(default_factory=ToolRegistry)
+    # Unpruned tool pool (before agent-profile narrowing). Sub-agents must derive
+    # their capabilities from here, otherwise the parent's deny list leaks into
+    # every delegated agent. ``None`` means ``tool_registry`` is already complete.
+    base_tool_registry: ToolRegistry | None = None
     iteration: int = 0
     max_iterations: int = 50
     model: str | None = None

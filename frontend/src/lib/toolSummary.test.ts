@@ -4,21 +4,27 @@ import { getToolSummary } from "./toolSummary";
 describe("tool call summaries", () => {
   it("prefers the model summary over the first business argument", () => {
     expect(getToolSummary(JSON.stringify({ name: "edit", arguments: {
-      file_path: "/tmp/file", _summary: "Update field mappings",
+      file_path: "/tmp/file", summary: "Update field mappings",
     } }))).toEqual({ name: "edit", summary: "Update field mappings" });
+  });
+
+  it("still renders the legacy underscore key from older sessions", () => {
+    expect(getToolSummary(JSON.stringify({ name: "edit", arguments: {
+      file_path: "/tmp/file", _summary: "Legacy caption",
+    } }))).toEqual({ name: "edit", summary: "Legacy caption" });
   });
 
   it("normalizes and bounds the displayed summary", () => {
     const summary = getToolSummary(JSON.stringify({ arguments: {
-      _summary: `  Review\n changes ${"x".repeat(100)}`,
+      summary: `  Review\n changes ${"x".repeat(100)}`,
     } })).summary;
     expect(summary).toHaveLength(40);
     expect(summary.startsWith("Review changes ")).toBe(true);
   });
 
-  it.each([undefined, "", "   ", 42, null])("falls back for absent or invalid metadata: %s", (_summary) => {
+  it.each([undefined, "", "   ", 42, null])("falls back for absent or invalid metadata: %s", (summary) => {
     expect(getToolSummary(JSON.stringify({ name: "bash", arguments: {
-      _summary, command: "pwd",
+      summary, command: "pwd",
     } }))).toEqual({ name: "bash", summary: "pwd" });
   });
 

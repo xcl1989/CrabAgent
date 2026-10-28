@@ -144,38 +144,47 @@ def _guess_extension(content_type: str | None) -> str:
     return ".png"
 
 
-async def _chatgpt_image_edit(prompt: str, image_path: Path) -> bytes | None:
-    """Use the ChatGPT subscription image-generation endpoint with a reference."""
+async def _chatgpt_image_edit(prompt: str, image_path: Path | list[Path]) -> bytes | None:
+    """Send ordered references to the ChatGPT subscription image endpoint."""
     import httpx
 
     from crabagent.serve.api.chatgpt_auth import get_codex_model, get_codex_request_headers
 
     try:
-        encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
+        paths = [image_path] if isinstance(image_path, Path) else image_path
+        content = [
+            {
+                "type": "input_text",
+                "text": (
+                    "Use the image generation tool to edit the supplied reference images. "
+                    "Images are numbered in input order, starting at 1. Follow the requested "
+                    "roles for each image; preserve details unless asked to change them. "
+                    "Request: " + prompt
+                ),
+            }
+        ]
+        for index, path in enumerate(paths, 1):
+            encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+            mime = mimetypes.guess_type(path.name)[0] or "image/png"
+            content.extend(
+                [
+                    {"type": "input_text", "text": f"Image {index}:"},
+                    {"type": "input_image", "image_url": f"data:{mime};base64,{encoded}"},
+                ]
+            )
         headers = await get_codex_request_headers()
         model = await get_codex_model()
     except Exception as e:
         logger.warning("Unable to prepare ChatGPT image edit: %s", e)
         return None
 
-    mime = mimetypes.guess_type(image_path.name)[0] or "image/png"
     payload = {
         "model": model,
         "instructions": "You are a helpful assistant. Use tools when available.",
         "input": [
             {
                 "role": "user",
-                "content": [
-                    {
-                        "type": "input_text",
-                        "text": (
-                            "Use the image generation tool to create a new image based on the "
-                            "reference image. Preserve identity, colors, and style unless the "
-                            "request says otherwise. Request: " + prompt
-                        ),
-                    },
-                    {"type": "input_image", "image_url": f"data:{mime};base64,{encoded}"},
-                ],
+                "content": content,
             }
         ],
         "store": False,
@@ -224,16 +233,48 @@ def _resolve_reference_path(reference_image_path: str, context: Any) -> Path | N
     return path
 
 
+def _resolve_reference_paths(
+    reference_image_path: str,
+    reference_image_paths: list[str] | None,
+    context: Any,
+) -> list[Path]:
+    """Validate every reference without silently dropping or reordering inputs."""
+    if reference_image_paths is not None and reference_image_path:
+        raise ValueError("Use either reference_image_path or reference_image_paths, not both.")
+    if reference_image_paths is not None:
+        paths = reference_image_paths
+    elif reference_image_path:
+        paths = [reference_image_path]
+    else:
+        paths = (getattr(context, "metadata", {}) or {}).get("attached_image_paths", [])
+    if not isinstance(paths, list) or not 1 <= len(paths) <= 16:
+        raise ValueError("Provide 1 to 16 reference images or attach them to the current message.")
+    workspace = Path(getattr(context, "workspace", "") or Path.cwd())
+    references = []
+    for index, value in enumerate(paths, 1):
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"Reference image {index} must be a nonempty file path.")
+        path = Path(value).expanduser()
+        if not path.is_absolute():
+            path = workspace / path
+        reference = _resolve_reference_path(str(path), context)
+        if reference is None:
+            raise ValueError(f"Reference image {index} is missing or unsupported: {value}")
+        references.append(reference)
+    return references
+
+
 # ── Tool registration ───────────────────────────────────────────────────
 
 
 @registry.register(
     name="image_edit",
     description=(
-        "Create a new image from a reference image. Use this when the user attaches "
-        "an image and asks to modify it, change its style/background, create a new "
-        "scene with the same subject, or otherwise generate based on that reference. "
-        "If reference_image_path is omitted, uses the most recently attached image."
+        "Edit one or multiple reference images, including replacing a person using "
+        "another image, combining subjects, or changing style/background. "
+        "Use reference_image_paths for ordered references and describe each image's role "
+        "in the prompt as image 1, image 2, etc. The first image is normally the base. "
+        "If no paths are provided, uses all images attached to the current message in order."
     ),
     parameters={
         "type": "object",
@@ -242,6 +283,16 @@ def _resolve_reference_path(reference_image_path: str, context: Any) -> Path | N
             "reference_image_path": {
                 "type": "string",
                 "description": "Optional path to the reference image attached by the user.",
+            },
+            "reference_image_paths": {
+                "type": "array",
+                "items": {"type": "string"},
+                "minItems": 1,
+                "maxItems": 16,
+                "description": (
+                    "Ordered reference image paths. Image 1 is normally the base; "
+                    "describe each reference's role in prompt. Do not combine with reference_image_path."
+                ),
             },
             "size": {"type": "string", "description": "Output size. Default: 1024x1024.", "default": "1024x1024"},
             "output_name": {"type": "string", "description": "Output filename base, without extension.", "default": ""},
@@ -255,11 +306,13 @@ async def image_edit(
     size: str = "1024x1024",
     output_name: str = "",
     context=None,
+    reference_image_paths: list[str] | None = None,
 ) -> str:
-    """Generate an image using an attached image as its reference."""
-    reference = _resolve_reference_path(reference_image_path, context)
-    if reference is None:
-        return json.dumps({"error": "No valid reference image was provided or attached."}, ensure_ascii=False)
+    """Edit ordered references while retaining the legacy single-image parameter."""
+    try:
+        references = _resolve_reference_paths(reference_image_path, reference_image_paths, context)
+    except ValueError as e:
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
 
     provider_type, provider_name = "openai", "default"
     try:
@@ -294,13 +347,20 @@ async def image_edit(
     try:
         edit_model = "image-2.5" if provider_type == "chatgpt" else "gpt-image-2"
         if provider_type == "chatgpt":
-            image_bytes = await _chatgpt_image_edit(prompt, reference)
+            image_bytes = await _chatgpt_image_edit(prompt, references)
         else:
             import litellm
 
             response = await litellm.aimage_edit(
                 model="gpt-image-2",
-                image=reference.read_bytes(),
+                image=(
+                    references[0].read_bytes()
+                    if len(references) == 1
+                    else [
+                        (path.name, path.read_bytes(), mimetypes.guess_type(path.name)[0] or "image/png")
+                        for path in references
+                    ]
+                ),
                 prompt=prompt,
                 size=size,
                 n=1,
@@ -331,7 +391,8 @@ async def image_edit(
             "provider": provider_name,
             "model": edit_model,
             "size": size,
-            "reference_image": str(reference),
+            "reference_image": str(references[0]),
+            "reference_images": [str(path) for path in references],
             "images": [{"index": 1, "path": str(path), "filename": path.name, "prompt": prompt, "size": size}],
         },
         ensure_ascii=False,

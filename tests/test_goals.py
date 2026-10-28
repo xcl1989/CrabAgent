@@ -303,7 +303,7 @@ async def test_goal_tools_register_and_checkpoint_emit_event(monkeypatch: pytest
     tools.register_goal_tools(context, "session", 9)
 
     handler = context.tool_registry.get("checkpoint_goal").handler
-    result = await handler(summary="Tests added", next_step="Run suite", context=context)
+    result = await handler(progress="Tests added", next_step="Run suite", context=context)
 
     assert captured["committed"] is True
     assert result["checkpoint"] == {"summary": "Tests added", "next_step": "Run suite"}

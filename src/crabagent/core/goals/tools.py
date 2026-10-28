@@ -25,13 +25,13 @@ def register_goal_tools(context, session_id: str, user_id: int) -> None:
         parameters={
             "type": "object",
             "properties": {
-                "summary": {"type": "string", "description": "What was completed or learned."},
+                "progress": {"type": "string", "description": "What was completed or learned."},
                 "next_step": {"type": "string", "description": "The next concrete unfinished step."},
             },
-            "required": ["summary"],
+            "required": ["progress"],
         },
     )
-    async def checkpoint_goal_tool(summary: str, next_step: str = "", context=None):
+    async def checkpoint_goal_tool(progress: str, next_step: str = "", context=None):
         from crabagent.core.database import async_session_factory
 
         if context is not None:
@@ -40,7 +40,7 @@ def register_goal_tools(context, session_id: str, user_id: int) -> None:
             goal = await get_current_goal(db, session_id)
             if not goal:
                 return "Error: no active goal for this session"
-            checkpoint = await checkpoint_goal(db, goal, summary, next_step)
+            checkpoint = await checkpoint_goal(db, goal, progress, next_step)
             await db.commit()
             snapshot = goal_to_dict(goal)
         checkpoint_data = {"summary": checkpoint.summary, "next_step": checkpoint.next_step}

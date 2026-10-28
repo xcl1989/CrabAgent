@@ -189,7 +189,7 @@
       "description": "Hand off the current task to another agent. The receiving agent continues the work based on the conversation so far. Use when another agent's expertise is better suited for the next step.",
       "params": {
         "agent_name": "Name of the agent to hand off to.",
-        "summary": "Summary of current progress and context for the next agent."
+        "context_summary": "Summary of current progress and context for the next agent."
       }
     },
     "delegate_parallel": {
@@ -367,7 +367,7 @@
       "plan_task": "`plan_task(task)`: Analyze a complex task and produce an execution plan (does not execute)",
       "delegate_task": "`delegate_task(agent_name, task)`: Delegate a task to a specific agent",
       "delegate_parallel": "`delegate_parallel(tasks)`: Run multiple independent agent tasks simultaneously (no ordering)",
-      "handoff_to": "`handoff_to(agent_name, summary)`: Hand off work to another agent with context",
+      "handoff_to": "`handoff_to(agent_name, context_summary)`: Hand off work to another agent with context",
       "run_pipeline": "`run_pipeline(steps)`: Multi-step workflow with dependencies. Steps without depends_on run in parallel. Prefer for complex workflows."
     },
     "shared": {

@@ -48,3 +48,20 @@ describe("task result cards", () => {
     expect(updated[1].task_result?.result_summary).toBe("V2 verified");
   });
 });
+
+describe("bash stream correlation", () => {
+  const calls: ChatMessage[] = ["one", "two"].map((id) => ({
+    id: `tc-${id}`, role: "tool_call", tool_call_id: id,
+    content: JSON.stringify({ name: "bash", arguments: {} }),
+  }));
+  it("routes chunks to the matching call instead of the most recent bash", () => {
+    const updated = sseEventToMessages({ type: "bash_output", timestamp: 0, data: { text: "first", tool_call_id: "one" } }, calls);
+    expect(updated[0].bashStream).toBe("first");
+    expect(updated[1].bashStream).toBeUndefined();
+    expect(calls[0].bashStream).toBeUndefined();
+  });
+  it("does not route an unknown call to a different terminal", () => {
+    const updated = sseEventToMessages({ type: "bash_output", timestamp: 0, data: { text: "lost", tool_call_id: "missing" } }, calls);
+    expect(updated.every((call) => !call.bashStream)).toBe(true);
+  });
+});

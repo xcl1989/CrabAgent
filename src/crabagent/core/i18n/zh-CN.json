@@ -189,7 +189,7 @@
       "description": "将当前任务交接给另一个 Agent。接收方 Agent 基于已有对话继续工作。当另一个 Agent 的专业技能更适合下一步时使用。",
       "params": {
         "agent_name": "要交接到的 Agent 名称。",
-        "summary": "当前进展和给下个 Agent 的上下文摘要。"
+        "context_summary": "当前进展和给下个 Agent 的上下文摘要。"
       }
     },
     "delegate_parallel": {
@@ -367,7 +367,7 @@
       "plan_task": "`plan_task(task)`：分析复杂任务并生成执行计划（不执行）",
       "delegate_task": "`delegate_task(agent_name, task)`：将任务委派给指定 Agent",
       "delegate_parallel": "`delegate_parallel(tasks)`：并行运行多个独立任务（无顺序）",
-      "handoff_to": "`handoff_to(agent_name, summary)`：将工作交接给另一个 Agent",
+      "handoff_to": "`handoff_to(agent_name, context_summary)`：将工作交接给另一个 Agent",
       "run_pipeline": "`run_pipeline(steps)`：带依赖关系的多步骤工作流。无 depends_on 的步骤并行运行。适用于复杂工作流。"
     },
     "shared": {

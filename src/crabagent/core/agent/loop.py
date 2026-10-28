@@ -247,6 +247,22 @@ async def run_agent(
     context: AgentContext,
     query: str | list[dict],
 ) -> list[dict]:
+    try:
+        return await _run_agent(context, query)
+    finally:
+        if context.metadata.pop("_collab_browser_used", False):
+            try:
+                from crabagent.core.agent.tools.collaboration_browser import _bridge_request
+
+                await asyncio.to_thread(_bridge_request, "release", context=context)
+            except Exception:
+                logger.warning("Failed to release collaboration browser task", exc_info=True)
+
+
+async def _run_agent(
+    context: AgentContext,
+    query: str | list[dict],
+) -> list[dict]:
     _t0 = time.time()
     context.messages.append({"role": "user", "content": query, "agent": context.current_agent})
     context.metadata["_batch_molt"] = True  # batch molts per round

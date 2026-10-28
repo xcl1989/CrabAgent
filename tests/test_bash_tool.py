@@ -278,3 +278,32 @@ def _async_return(value):
         return value
 
     return inner
+
+
+@pytest.mark.asyncio
+async def test_stream_output_preserves_split_utf8_and_terminal_controls(monkeypatch):
+    raw = "中文🙂\r\x1b[2Kdone\n".encode("utf-8")
+
+    class FakeStream:
+        def __init__(self, chunks):
+            self.chunks = iter(chunks)
+
+        async def read(self, size):
+            return next(self.chunks, b"")
+
+    events = []
+
+    async def capture(context, text, tool_call_id=""):
+        events.append((text, tool_call_id))
+
+    monkeypatch.setattr(bash_tool, "_ENCODING", "utf-8")
+    monkeypatch.setattr(bash_tool, "_emit_bash_output", capture)
+    proc = SimpleNamespace(
+        stdout=FakeStream([raw[i:i + 1] for i in range(len(raw))]),
+        stderr=FakeStream([]),
+    )
+    stdout, stderr = [], []
+    await bash_tool._stream_output(proc, stdout, stderr, object(), "call-1")
+    assert "".join(stdout) == raw.decode("utf-8")
+    assert "".join(text for text, _ in events) == raw.decode("utf-8")
+    assert all(call_id == "call-1" for _, call_id in events)

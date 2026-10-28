@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.17.5] — Browser Reliability and Tool Improvements (2026-10-28)
+
+### Fixed
+- Keep collaboration browser actions available when the browser page is hidden; preserve a background viewport and release task bindings when an agent run ends.
+- Isolate agent tool profiles and derive sub-agent tools from the unfiltered registry.
+- Decode streamed bash output incrementally and associate output with the correct tool call.
+
+### Changed
+- Support ordered multiple reference images in image editing and improve tool summary metadata compatibility.
+- Refresh frontend assets and expand regression coverage. Background rendering still uses a transparent off-screen window; a native offscreen alternative remains under evaluation.
+
+---
+
 ## [0.17.4] — Live Conversation Steering and WeChat Reliability (2026-10-26)
 
 ### Added

@@ -683,8 +683,14 @@ Use ordinary Markdown when a visualization is not helpful.
         if agent_def:
             tp = agent_def.get("tool_permissions", {})
             context.tool_permissions = tp if isinstance(tp, dict) else {}
+            # Snapshot the unpruned pool first: the main agent may only expose a
+            # narrowed tool list to the model, but sub-agents must still be able
+            # to inherit tools this profile denies.
+            context.base_tool_registry = context.tool_registry
             context.tool_registry = filter_tool_registry(
-                context.tool_registry, tool_permissions=context.tool_permissions
+                context.tool_registry,
+                tool_permissions=context.tool_permissions,
+                allow_delegation=True,
             )
             if agent_def.get("model"):
                 context.model = agent_def["model"]

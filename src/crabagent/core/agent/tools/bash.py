@@ -1,4 +1,5 @@
 import asyncio
+import codecs
 import logging
 import os
 import subprocess
@@ -223,6 +224,7 @@ async def _stream_output(
         label: str,
     ) -> None:
         buf = ""
+        decoder = codecs.getincrementaldecoder(_ENCODING)(errors="replace")
         last_emit = 0.0
         while True:
             try:
@@ -243,7 +245,7 @@ async def _stream_output(
             if not chunk:
                 break
 
-            text = chunk.decode(_ENCODING, errors="replace")
+            text = decoder.decode(chunk)
             sink.append(text)
             buf += text
 
@@ -254,6 +256,9 @@ async def _stream_output(
                 buf = ""
                 last_emit = now
 
+        tail = decoder.decode(b"", final=True)
+        sink.append(tail)
+        buf += tail
         # Flush remaining buffer
         if buf:
             await _emit_bash_output(context, buf, tool_call_id)

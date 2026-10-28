@@ -1535,8 +1535,15 @@ class DualPanelTui(TuiSession):
 
                 from crabagent.core.agent.agent_switch import filter_tool_registry
 
-                filtered = filter_tool_registry(self._full_tool_registry, agent.get("tools"))
+                filtered = filter_tool_registry(
+                    self._full_tool_registry,
+                    agent.get("tools"),
+                    allow_delegation=True,
+                )
                 self.agent_ctx.tool_registry = filtered
+                # Keep the complete pool reachable so delegated sub-agents are not
+                # capped by this agent's own deny list.
+                self.agent_ctx.base_tool_registry = self._full_tool_registry
                 if agent.get("model"):
                     self.agent_ctx.model = agent["model"]
 

@@ -9,6 +9,7 @@ import {
   Terminal, FileText, Pencil, Search, FolderOpen, Save, Globe,
   GitBranch, Zap, Check, X, AlertTriangle, ChevronDown,
 } from "lucide-react";
+import { terminalOutput } from "../lib/terminalOutput";
 import { cn } from "../lib/cn";
 import i18n from "../i18n";
 
@@ -298,7 +299,7 @@ function FileContentLines({ lines, maxLines = 20 }: { lines: string[]; maxLines?
 
 function BashRender({ args, result, accentVar }: { args: Record<string, unknown>; result: string; accentVar: string }) {
   const command = str(args.command) || "";
-  const lines = result.split("\n");
+  const lines = terminalOutput(result).split("\n");
   const err = isError(result);
   const exitCode = err ? 1 : 0;
 

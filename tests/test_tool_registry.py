@@ -228,19 +228,33 @@ def test_tool_info_list_shows_permission_info():
 
 def test_tool_defs_add_summary_without_mutating_registered_schema():
     registry = ToolRegistry()
-    schema = {"type": "object", "properties": {"summary": {"type": "string"}}, "required": ["summary"]}
+    schema = {"type": "object", "properties": {"value": {"type": "integer"}}, "required": ["value"]}
 
     @registry.register(name="example", description="test", parameters=schema)
-    def example(summary):
-        return summary
+    def example(value):
+        return value
 
     for _ in range(2):
         params = registry.tool_defs()[0]["function"]["parameters"]
-        assert params["properties"]["_summary"]["type"] == "string"
-        assert params["properties"]["_summary"]["maxLength"] == 40
-        assert params["required"] == ["summary", "_summary"]
-    assert "_summary" not in schema["properties"]
-    assert schema["required"] == ["summary"]
+        assert params["properties"]["summary"]["type"] == "string"
+        assert params["properties"]["summary"]["maxLength"] == 40
+        assert params["required"] == ["value", "summary"]
+    assert "summary" not in schema["properties"]
+    assert schema["required"] == ["value"]
+
+
+def test_tool_defs_leaves_declared_summary_parameter_untouched():
+    registry = ToolRegistry()
+    own = {"type": "string", "description": "Business summary field"}
+    schema = {"type": "object", "properties": {"summary": own}, "required": ["summary"]}
+
+    @registry.register(name="reporter", description="test", parameters=schema)
+    def reporter(summary):
+        return summary
+
+    params = registry.tool_defs()[0]["function"]["parameters"]
+    assert params["properties"]["summary"] == own
+    assert params["required"] == ["summary"]
 
 
 @pytest.mark.asyncio
@@ -259,9 +273,40 @@ async def test_execute_strips_summary_without_mutating_original_arguments(is_asy
         parameters={"type": "object", "properties": {}},
         metadata={"source": "mcp"},
     )(async_handler if is_async else sync_handler)
-    arguments = {"value": 42, "_summary": "Inspect the example"}
+    arguments = {"value": 42, "summary": "Inspect the example", "_summary": "Legacy caption"}
     assert await registry.execute("mcp_example", arguments) == {"value": 42}
-    assert arguments["_summary"] == "Inspect the example"
+    assert arguments["summary"] == "Inspect the example"
+    assert arguments["_summary"] == "Legacy caption"
+
+
+@pytest.mark.asyncio
+async def test_execute_keeps_declared_summary_argument():
+    registry = ToolRegistry()
+
+    @registry.register(
+        name="reporter",
+        description="test",
+        parameters={"type": "object", "properties": {"summary": {"type": "string"}}, "required": ["summary"]},
+    )
+    def reporter(summary):
+        return summary
+
+    assert await registry.execute("reporter", {"summary": "Business value"}) == "Business value"
+
+
+@pytest.mark.asyncio
+async def test_execute_drops_unknown_arguments_instead_of_failing():
+    registry = ToolRegistry()
+
+    @registry.register(
+        name="bash_like", description="test",
+        parameters={"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]},
+    )
+    def bash_like(command):
+        return command
+
+    result = await registry.execute("bash_like", {"command": "pwd", "workdir": "/tmp", "summary": "Run pwd"})
+    assert result == "pwd"
 
 
 @pytest.mark.asyncio
@@ -272,5 +317,5 @@ async def test_summary_only_does_not_hide_missing_required_arguments():
     def example(value):
         return value
 
-    result = await registry.execute("example", {"_summary": "Read value"})
+    result = await registry.execute("example", {"summary": "Read value"})
     assert "without any arguments" in result

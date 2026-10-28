@@ -82,21 +82,21 @@ async def list_agents() -> str:
                 "type": "string",
                 "description": "Name of the agent to hand off to",
             },
-            "summary": {
+            "context_summary": {
                 "type": "string",
                 "description": "Summary of what has been done so far and what needs to be done next",
             },
         },
-        "required": ["agent_name", "summary"],
+        "required": ["agent_name", "context_summary"],
     },
     metadata={"source": "builtin", "category": "agent"},
 )
-async def handoff_to(agent_name: str, summary: str, context=None) -> str:
+async def handoff_to(agent_name: str, context_summary: str, context=None) -> str:
     if context is None:
         return "Error: agent handoff requires an active session"
     from crabagent.core.agent.agents import spawn_sub_agent
 
-    return await spawn_sub_agent(agent_name, summary, context, include_history=True)
+    return await spawn_sub_agent(agent_name, context_summary, context, include_history=True)
 
 
 @registry.register(

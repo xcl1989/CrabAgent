@@ -41,6 +41,8 @@ def _bridge_request(command: str, payload: dict[str, Any] | None = None, *, cont
     if command in mutating_commands:
         action_payload.setdefault("action_id", str(uuid.uuid4()))
     metadata = context.metadata if context is not None else {}
+    if context is not None and not command.startswith("macos_") and command not in {"status", "release"}:
+        metadata["_collab_browser_used"] = True
     # The binding is derived from trusted Agent context, never a model argument.
     task_id = str(metadata.get("_run_id") or metadata.setdefault("_computer_task_id", str(uuid.uuid4())))
     body = json.dumps(

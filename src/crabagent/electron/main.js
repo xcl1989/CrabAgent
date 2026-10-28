@@ -31,6 +31,7 @@ let forceQuit = false;
 let petQuietUntil = 0;
 let authToken = null;
 let collaborationView = null;
+let collaborationBackgroundWindow = null;
 let collaborationBridge = null;
 let collaborationBridgePort = null;
 let collaborationNetworkProxy = null;
@@ -178,6 +179,7 @@ function ensureCollaborationView() {
       paintWhenInitiallyHidden: true,
     },
   });
+  attachCollaborationBackground(collaborationView);
   collaborationView.webContents.setWindowOpenHandler(({ url }) => {
     try {
       invalidateCollaborationObservation('window-open');
@@ -223,6 +225,32 @@ function ensureCollaborationView() {
   return collaborationView;
 }
 
+function attachCollaborationBackground(view) {
+  if (!collaborationBackgroundWindow || collaborationBackgroundWindow.isDestroyed()) {
+    collaborationBackgroundWindow = new BrowserWindow({
+      show: false,
+      frame: false,
+      skipTaskbar: true,
+      focusable: false,
+      opacity: 0,
+      x: -10000,
+      y: -10000,
+      width: 1200,
+      height: 800,
+      webPreferences: { backgroundThrottling: false, paintWhenInitiallyHidden: true },
+    });
+  }
+  if (!collaborationBackgroundWindow.contentView.children.includes(view)) {
+    collaborationBackgroundWindow.contentView.addChildView(view);
+  }
+  const bounds = view.getBounds();
+  const width = bounds.width > 1 ? bounds.width : 1200;
+  const height = bounds.height > 1 ? bounds.height : 800;
+  collaborationBackgroundWindow.setContentSize(width, height);
+  view.setBounds({ x: 0, y: 0, width, height });
+  collaborationBackgroundWindow.showInactive();
+}
+
 function isCollaborationViewAttached() {
   if (!win || win.isDestroyed() || !collaborationView || collaborationView.webContents.isDestroyed()) return false;
   try {
@@ -233,7 +261,8 @@ function isCollaborationViewAttached() {
 }
 
 async function captureCollaborationPage(view) {
-  if (isCollaborationViewAttached()) return view.webContents.capturePage();
+  if (isCollaborationViewAttached() || (collaborationBackgroundWindow && !collaborationBackgroundWindow.isDestroyed()
+      && collaborationBackgroundWindow.contentView.children.includes(view))) return view.webContents.capturePage();
 
   // A detached WebContentsView keeps its DOM alive but capturePage returns an
   // empty NativeImage. Temporarily composite it in a hidden window so chats
@@ -270,9 +299,6 @@ function setCollaborationViewBounds(bounds, visible) {
     return false;
   }
   if (!visible) {
-    collaborationStopped = true;
-    collaborationStopEpoch += 1;
-    collaborationTaskId = null;
     invalidateCollaborationObservation();
     log('[CollabView] hide requested');
     if (collaborationView) {
@@ -285,6 +311,7 @@ function setCollaborationViewBounds(bounds, visible) {
       try {
         if (typeof win.removeBrowserView === 'function') win.removeBrowserView(collaborationView);
       } catch {}
+      attachCollaborationBackground(collaborationView);
     }
     return false;
   }
@@ -294,6 +321,10 @@ function setCollaborationViewBounds(bounds, visible) {
   }
 
   const view = ensureCollaborationView();
+  if (collaborationBackgroundWindow && !collaborationBackgroundWindow.isDestroyed()
+      && collaborationBackgroundWindow.contentView.children.includes(view)) {
+    collaborationBackgroundWindow.contentView.removeChildView(view);
+  }
   const nextBounds = {
     x: Math.max(0, Math.round(bounds.x)),
     y: Math.max(0, Math.round(bounds.y)),
@@ -399,6 +430,11 @@ function isSensitiveInput(type, label) {
 async function handleCollaborationBridge(command, payload) {
   const view = ensureCollaborationView();
   const contents = view.webContents;
+  if (command === 'release') {
+    collaborationTaskId = null;
+    invalidateCollaborationObservation('task-release');
+    return { released: true };
+  }
   if (command === 'stop') {
     collaborationStopped = true;
     await revokeLocalPreviews();
@@ -768,7 +804,7 @@ async function startCollaborationBridge() {
           throw new Error('Invalid computer protocol or runtime binding');
         }
         const command = String(body.command || '');
-        const commands = new Set(['status', 'stop', 'resume', 'authorize_local_preview', 'navigate', 'observe', 'computer_observe', 'screenshot',
+        const commands = new Set(['status', 'stop', 'resume', 'release', 'authorize_local_preview', 'navigate', 'observe', 'computer_observe', 'screenshot',
           'click', 'commit_click', 'point', 'commit_point', 'type', 'scroll', 'select', 'press_key', 'wait_for',
           'macos_permissions', 'macos_windows', 'macos_allow_app',
           'macos_observe', 'macos_capture', 'macos_click', 'macos_double_click', 'macos_right_click',
@@ -822,7 +858,7 @@ async function startCollaborationBridge() {
           if (queuedAtEpoch !== collaborationStopEpoch && !['status', 'stop', 'resume'].includes(command)) {
             throw new Error('STOPPED: action queued before stop');
           }
-          if (!collaborationTaskId && !collaborationStopped && !['stop', 'resume', 'status'].includes(command)) collaborationTaskId = body.task_id;
+          if (!collaborationTaskId && !collaborationStopped && !['stop', 'resume', 'status', 'release'].includes(command)) collaborationTaskId = body.task_id;
           const actionId = body.payload.action_id;
           const mutating = new Set(['navigate', 'click', 'commit_click', 'point', 'commit_point', 'type', 'scroll', 'select', 'press_key']);
           if (mutating.has(command)) {
@@ -1437,6 +1473,8 @@ function createWindow() {
   });
 
   win.on('closed', () => {
+    if (collaborationBackgroundWindow && !collaborationBackgroundWindow.isDestroyed()) collaborationBackgroundWindow.destroy();
+    collaborationBackgroundWindow = null;
     collaborationView = null;
     win = null;
   });

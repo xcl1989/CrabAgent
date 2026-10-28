@@ -1,3 +1,4 @@
+import { terminalOutput } from "../lib/terminalOutput";
 import { getToolSummary } from "../lib/toolSummary";
 /**
  * MessageItem — Extracted, memoized message rendering for ChatPanel.
@@ -249,7 +250,7 @@ const ToolCallItem = memo(function ToolCallItem({
       {isBashStreaming && (
         <div className="mt-1 p-2 rounded-b-lg bg-[#1e1e1e] border border-t-0 border-[var(--border)]">
           <pre className="whitespace-pre-wrap font-mono text-[11px] text-green-300 leading-relaxed m-0 max-h-64 overflow-y-auto">
-            {bashStream}
+            {terminalOutput(bashStream)}
           </pre>
         </div>
       )}
