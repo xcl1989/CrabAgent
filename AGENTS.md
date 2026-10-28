@@ -171,6 +171,14 @@ pytest tests/test_sandbox.py  # 单个文件
 - 默认无头模式；设置 `CRAB_BROWSER_HEADLESS=false` 启用有头模式
 - 清理：CLI 和 serve 的 prompt 处理器中 `finally` 块都会调用 `browser_mgr.close()`
 
+## 协作浏览器 (Electron Bridge)
+- 实现：`src/crabagent/electron/main.js`（本地 Bridge）、`frontend/src/pages/BrowserCollaborationPage.tsx`（前端）、`serve/api/browser_tasks.py`（任务 API）、`core/agent/tools/collaboration_browser.py`（Agent 工具）
+- 隐藏视图不得暂停：`setCollaborationViewBounds(...,false)` 只失效观察并迁到后台容器，不设 `collaborationStopped`
+- macOS 完全隐藏窗口 `capturePage()` 返回空帧：后台容器为屏幕外、`focusable:false`、`opacity:0` 的 BrowserWindow，尺寸兜底 1200×800
+- 运行结束必须 `release` 任务绑定（`run_agent` 的 finally），否则下一个运行报 `TASK_MISMATCH`
+- 离屏渲染可截图与注入事件，但不能直接挂到可见窗口；帧转发方案未落地
+- 集成测试：`electron src/crabagent/electron/test/computer-integration.js`（会弹测试窗口，先征得用户同意）
+
 ## 配置
 - 所有设置使用环境变量前缀 `CRAB_`（如 `CRAB_DB_URL`、`CRAB_SERVE_PORT`、`CRAB_JWT_SECRET`）
 - `.env` 文件由 pydantic-settings 自动加载
@@ -185,10 +193,6 @@ pytest tests/test_sandbox.py  # 单个文件
 - 预设 4 个默认 Agent 配置：researcher、analyst、coder、writer
 - 要求 Python >=3.12
 - 有疑问时，先询问用户再执行任何破坏性操作
-
-## 语言要求
-请使用简体中文回复。所有对用户的回复、总结、说明都应使用简体中文。
-代码注释和文件内容保持原文，文件路径、命令等技术术语保持原文。
 
 ## 语言要求
 请使用简体中文回复。所有对用户的回复、总结、说明都应使用简体中文。

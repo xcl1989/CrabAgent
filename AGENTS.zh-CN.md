@@ -49,6 +49,11 @@ pytest tests
 - 前端：`frontend/src/pages/BrowserCollaborationPage.tsx`
 - 浏览器任务 API：`src/crabagent/serve/api/browser_tasks.py`
 - 协作浏览器会话选择器应保持轻量：不要加载完整会话历史到右侧，仅加载近期少量摘要消息；Agent 后端仍基于完整会话上下文工作。
+- **隐藏视图不等于暂停**：`setCollaborationViewBounds(bounds,false)` 只把视图迁到后台渲染容器并失效观察，**不得**设 `collaborationStopped`；只有用户显式 `computer-stop`/`stop` 才真暂停
+- **macOS 完全隐藏的窗口 `capturePage()` 返回空帧**：后台容器用屏幕外（x/y=-10000）、`focusable:false`、`opacity:0` 的 BrowserWindow，且不能让它变成可见窗口；视图尺寸为 0 时兜底 1200×800，否则 `CAPTURE_FAILED`
+- **任务绑定必须释放**：`run_agent` 的 `finally` 用 `release` 命令释放自己绑定的 `collaborationTaskId`，否则下一个 Agent 运行会收到 `TASK_MISMATCH`
+- 集成测试：`src/crabagent/electron/node_modules/.bin/electron src/crabagent/electron/test/computer-integration.js`（会弹测试窗口，先征得用户同意）
+- 离屏渲染（`webPreferences.offscreen`）可截图/注入事件，但**不能直接挂到可见窗口显示**，需前端配合转发画面，尚未落地
 
 ## macOS Computer Use（M0/M1）
 - **项目里有两个 electron 目录**：根目录 `electron/` 是陈旧遗留，**当前开发在 `src/crabagent/electron/`**（打包产物确认来自这里）。构建/打包一律用后者。
