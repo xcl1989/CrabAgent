@@ -58,6 +58,7 @@ import { useChatState } from "../hooks/useChatState";
 import { useAgentRunBoard } from "../hooks/useAgentRunBoard";
 import { useModelSelector } from "../hooks/useModelSelector";
 import { cn } from "../lib/cn";
+import { reasoningOptions, effectiveEffort } from "../lib/reasoningEffort";
 import { dbMessagesToChat } from "../lib/messageTransforms";
 import { DocumentPanel, DocState } from "../components/DocumentPanel";
 import { DocOpEvent } from "../components/DocumentTimeline";
@@ -106,6 +107,9 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
     setProvidersLoading,
     refreshProviders,
   } = useModelSelector();
+
+  const effortOptions = reasoningOptions(providerModels, providers, selectedProvider, selectedModel);
+  const activeEffort = effectiveEffort(reasoningEffort, effortOptions);
 
   const onAutoLoadSession = useCallback((session: Session) => {
     if (session.model) setSelectedModel(session.model);
@@ -320,10 +324,10 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
   } = useChatState(wrappedOnEvent, workspace, onAutoLoadSession);
 
   useEffect(() => {
-    window.electronAPI?.onOpenSession?.((sessionId) => {
-      void selectSessionById(sessionId, selectedModel, models);
+    return window.electronAPI?.onOpenSession?.((sessionId) => {
+      void selectSessionById(sessionId, selectedModel, models).then(setSelectedModel);
     });
-  }, [selectSessionById]);
+  }, [selectSessionById, selectedModel, models, setSelectedModel]);
 
   // ── Open Office document from file tree ───────────────────────
   const handleOpenDoc = useCallback(async (path: string, name: string) => {
@@ -415,7 +419,7 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
         execution_model: selectedModel,
         execution_provider: provider ?? "",
         execution_agent: selectedAgent,
-        reasoning_effort: reasoningEffort,
+        reasoning_effort: activeEffort,
       };
       const result = goal
         ? await goalsApi.updateGoal(activeSession.session_id, draft)
@@ -442,7 +446,7 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
     selectedProvider,
     providerModels,
     selectedAgent,
-    reasoningEffort,
+    activeEffort,
   ]);
 
   const setGoalStatus = useCallback(async (status: "active" | "paused") => {
@@ -483,17 +487,17 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
     (modelId: string, providerName: string | null) => {
       setSelectedModel(modelId);
       setSelectedProvider(providerName);
-      void syncGoalExecution({ execution_model: modelId, execution_provider: providerName ?? "" });
+      void syncGoalExecution({ execution_model: modelId, execution_provider: providerName ?? "", reasoning_effort: effectiveEffort(reasoningEffort, reasoningOptions(providerModels, providers, providerName, modelId)) });
     },
-    [syncGoalExecution],
+    [syncGoalExecution, reasoningEffort, providerModels, providers],
   );
 
   const handleModelInput = useCallback(
     (modelId: string) => {
       setSelectedModel(modelId);
-      void syncGoalExecution({ execution_model: modelId });
+      void syncGoalExecution({ execution_model: modelId, reasoning_effort: effectiveEffort(reasoningEffort, reasoningOptions(providerModels, providers, selectedProvider, modelId)) });
     },
-    [syncGoalExecution],
+    [syncGoalExecution, reasoningEffort, providerModels, providers, selectedProvider],
   );
 
   const handleEffortChange = useCallback(
@@ -783,7 +787,7 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
         selectedModel,
         images.length > 0 ? images : undefined,
         selectedAgent,
-        reasoningEffort,
+        activeEffort,
         selectedProvider ?? undefined,
         currentDocPath || undefined,
         mode === "work" ? workspaceType : undefined,
@@ -997,14 +1001,14 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
       setSending(true);
       sessionsApi.sendPrompt(
         activeSession.session_id, text, selectedModel, undefined, selectedAgent,
-        reasoningEffort, selectedProvider ?? undefined,
+        activeEffort, selectedProvider ?? undefined,
         currentDocPath || undefined,
         mode === "work" ? workspaceType : undefined,
         mode === "work",
       )
         .catch(() => setSending(false));
     }
-  }, [activeSession, selectedModel, selectedAgent, reasoningEffort, selectedProvider, currentDocPath, mode, workspaceType, sending, setMessages, setSending]);
+  }, [activeSession, selectedModel, selectedAgent, activeEffort, selectedProvider, currentDocPath, mode, workspaceType, sending, setMessages, setSending]);
 
   const completedTasks = agentRunBoardRuns.filter((t) => t.status === "done");
 
@@ -1222,18 +1226,18 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
                           {t("chatPage.effort")}
                         </span>
                         <button
+                          disabled={!effortOptions.length}
                           onClick={() => setEffortOpen((v) => !v)}
                           className="flex items-center gap-1.5 text-xs h-7 pl-2.5 pr-1.5 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border)] text-[var(--text-primary)] font-mono focus:outline-none focus:border-[var(--brand)] focus:ring-2 focus:ring-[var(--brand)]/30 transition-colors"
                         >
-                          <span>{t(`chatPage.reasoning${reasoningEffort.charAt(0).toUpperCase() + reasoningEffort.slice(1)}`)}</span>
+                          <span>{activeEffort ? t(`chatPage.reasoning${activeEffort.charAt(0).toUpperCase() + activeEffort.slice(1)}`, { defaultValue: activeEffort }) : t("chatPage.reasoningUnavailable")}</span>
                           <ChevronDown size={13} className={cn("text-[var(--text-tertiary)] transition-transform shrink-0", effortOpen && "rotate-180")} />
                         </button>
                         {effortOpen && (
                           <div className="absolute bottom-full mb-1.5 right-0 z-50 min-w-[120px] rounded-lg border border-[var(--border)] bg-[var(--bg-secondary)] shadow-[var(--shadow-lg)] py-1.5">
-                            {["reasoningLow", "reasoningMedium", "reasoningHigh"].map((key) => {
-                              const label = t(`chatPage.${key}`);
-                              const effort = key.replace("reasoning", "").toLowerCase();
-                              const isSelected = effort === reasoningEffort;
+                            {effortOptions.map((effort) => {
+                              const label = t(`chatPage.reasoning${effort.charAt(0).toUpperCase() + effort.slice(1)}`, { defaultValue: effort });
+                              const isSelected = effort === activeEffort;
                               return (
                                 <button
                                   key={effort}
@@ -1419,7 +1423,7 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
                     onPrompt={(text) => {
                       setMessages((prev) => [...prev, { id: `u-${Date.now()}`, role: "user", content: text }]);
                       setSending(true);
-                      sessionsApi.sendPrompt(activeSession.session_id, text, selectedModel, undefined, selectedAgent, reasoningEffort, selectedProvider ?? undefined, currentDocPath || undefined)
+                      sessionsApi.sendPrompt(activeSession.session_id, text, selectedModel, undefined, selectedAgent, activeEffort, selectedProvider ?? undefined, currentDocPath || undefined)
                         .catch(() => setSending(false));
                     }}
                   />
@@ -1725,18 +1729,18 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
                     {t("chatPage.effort")}
                   </span>
                   <button
-                    onClick={() => setEffortOpen((v) => !v)}
+                    disabled={!effortOptions.length}
+                          onClick={() => setEffortOpen((v) => !v)}
                     className="flex items-center gap-1.5 text-xs h-7 pl-2.5 pr-1.5 rounded-md bg-[var(--bg-tertiary)] border border-[var(--border)] text-[var(--text-primary)] font-mono focus:outline-none focus:border-[var(--brand)] focus:ring-2 focus:ring-[var(--brand)]/30 transition-colors"
                   >
-                    <span>{t(`chatPage.reasoning${reasoningEffort.charAt(0).toUpperCase() + reasoningEffort.slice(1)}`)}</span>
+                    <span>{activeEffort ? t(`chatPage.reasoning${activeEffort.charAt(0).toUpperCase() + activeEffort.slice(1)}`, { defaultValue: activeEffort }) : t("chatPage.reasoningUnavailable")}</span>
                     <ChevronDown size={13} className={cn("text-[var(--text-tertiary)] transition-transform shrink-0", effortOpen && "rotate-180")} />
                   </button>
                   {effortOpen && (
                     <div className="absolute bottom-full mb-1.5 right-0 z-50 min-w-[120px] rounded-lg border border-[var(--border)] bg-[var(--bg-secondary)] shadow-[var(--shadow-lg)] py-1.5">
-                      {["reasoningLow", "reasoningMedium", "reasoningHigh"].map((key) => {
-                        const label = t(`chatPage.${key}`);
-                        const effort = key.replace("reasoning", "").toLowerCase();
-                        const isSelected = effort === reasoningEffort;
+                      {effortOptions.map((effort) => {
+                        const label = t(`chatPage.reasoning${effort.charAt(0).toUpperCase() + effort.slice(1)}`, { defaultValue: effort });
+                        const isSelected = effort === activeEffort;
                         return (
                           <button
                             key={effort}

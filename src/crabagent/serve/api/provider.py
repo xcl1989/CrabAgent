@@ -241,14 +241,16 @@ async def get_provider_models(name: str, user: User = Depends(get_current_user))
     # unioned with static presets and user-configured extra models.
     if p.provider_type == "chatgpt":
         from crabagent.core.provider_store import CHATGPT_MODELS
-        from crabagent.serve.api.chatgpt_auth import get_codex_model_slugs
+        from crabagent.serve.api.chatgpt_auth import _codex_model_cache, get_codex_model_slugs
 
         try:
             dynamic = await get_codex_model_slugs()
         except Exception:
             dynamic = []
         ordered = list(dict.fromkeys(dynamic + list(CHATGPT_MODELS)))
-        models = [{"id": m, "owned_by": "chatgpt"} for m in ordered]
+        models = [{"id": m, "owned_by": "chatgpt",
+                   **({"reasoning_efforts": _codex_model_cache.get("efforts", {})[m]}
+                      if m in _codex_model_cache.get("efforts", {}) else {})} for m in ordered]
         existing_ids = {m["id"] for m in models}
         for mid in p.extra.get("extra_models", []):
             if mid and mid not in existing_ids:

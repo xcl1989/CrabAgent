@@ -490,6 +490,7 @@
     "model": "Model",
     "effort": "Effort",
     "modelPlaceholder": "type model id…",
+    "reasoningUnavailable": "Unavailable",
     "reasoningLow": "low",
     "reasoningMedium": "medium",
     "reasoningHigh": "high",

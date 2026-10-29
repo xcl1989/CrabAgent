@@ -7,6 +7,8 @@ export interface WeChatStatus {
   auto_reply: boolean;
   workspace: string;
   allowed_users: string[];
+  auto_authorization_status: "unverified" | "missing_login_user";
+  allowed_workspaces: string[];
   notify_task_overdue: boolean;
   notify_schedule_result: boolean;
   notify_email_summary: boolean;
@@ -56,6 +58,7 @@ export function updateConfig(config: Partial<{
   auto_reply: boolean;
   workspace: string;
   allowed_users: string[];
+  allowed_workspaces: string[];
   notify_task_overdue: boolean;
   notify_schedule_result: boolean;
   notify_email_summary: boolean;

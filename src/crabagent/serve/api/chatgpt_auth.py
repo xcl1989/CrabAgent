@@ -62,6 +62,7 @@ _codex_model_cache: dict[str, Any] = {
     "slug": None,
     "slugs": None,       # list[str] — visible model slugs, priority order
     "context": {},       # slug -> max_context_window reported by the API
+    "efforts": {},       # slug -> supported reasoning effort levels
     "fetched_at": 0.0,
 }
 _CODEX_MODEL_TTL = 600.0  # seconds
@@ -140,6 +141,7 @@ async def _fetch_codex_models() -> None:
     fallback = _fallback_codex_slugs()
     slugs: list[str] = []
     context: dict[str, int] = {}
+    efforts: dict[str, list[str]] = {}
     try:
         access_token = await get_chatgpt_access_token()
         headers = build_codex_headers(access_token, None)
@@ -158,6 +160,10 @@ async def _fetch_codex_models() -> None:
                     if not slug:
                         continue
                     slugs.append(slug)
+                    levels = m.get("supported_reasoning_levels")
+                    if isinstance(levels, list):
+                        efforts[slug] = [level["effort"] for level in levels
+                                         if isinstance(level, dict) and isinstance(level.get("effort"), str)]
                     max_ctx = m.get("max_context_window") or m.get("context_window")
                     if isinstance(max_ctx, int) and max_ctx > 0:
                         context[slug] = max_ctx
@@ -172,6 +178,7 @@ async def _fetch_codex_models() -> None:
 
     _codex_model_cache["slugs"] = slugs
     _codex_model_cache["context"] = context
+    _codex_model_cache["efforts"] = efforts
     _codex_model_cache["slug"] = slugs[0] if slugs else CODEX_FALLBACK_MODEL
     _codex_model_cache["fetched_at"] = now
 

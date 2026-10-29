@@ -23,7 +23,7 @@ declare global {
       startPetDrag: (offsetX: number, offsetY: number) => void;
       movePetDrag: () => void;
       endPetDrag: () => void;
-      onOpenSession?: (callback: (sessionId: string) => void) => void;
+      onOpenSession?: (callback: (sessionId: string) => void) => () => void;
       onPetDragDirection?: (callback: (data: { direction: string | null }) => void) => void;
       collaborationBrowserLayout?: (bounds: { x: number; y: number; width: number; height: number } | null, visible: boolean) => Promise<boolean>;
       collaborationBrowserAuthorizeLocal?: (url: string) => Promise<{ status: string; origin: string }>;

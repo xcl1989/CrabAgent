@@ -18,6 +18,7 @@ import { toast } from "./ui/Toast";
 import * as wechatApi from "../api/wechat";
 import type { WeChatStatus, WeChatConversation } from "../api/wechat";
 import WorkspaceSwitcher from "./WorkspaceSwitcher";
+import { listWorkspaces, type WorkspaceInfo } from "../api/sessions";
 
 export default function WeChatPanel() {
   const [status, setStatus] = useState<WeChatStatus | null>(null);
@@ -26,6 +27,7 @@ export default function WeChatPanel() {
   const [qrUrl, setQrUrl] = useState<string>("");
   const [qrPolling, setQrPolling] = useState(false);
   const [qrError, setQrError] = useState("");
+  const [desktopWorkspaces, setDesktopWorkspaces] = useState<WorkspaceInfo[]>([]);
   const [testing, setTesting] = useState(false);
   const [conversations, setConversations] = useState<WeChatConversation[]>([]);
   const [convsLoading, setConvsLoading] = useState(false);
@@ -57,6 +59,7 @@ export default function WeChatPanel() {
 
   useEffect(() => {
     fetchStatus();
+    listWorkspaces().then(setDesktopWorkspaces).catch(() => {});
     return () => {
       if (pollTimerRef.current) clearInterval(pollTimerRef.current);
     };
@@ -251,6 +254,26 @@ export default function WeChatPanel() {
                   onChange={handleWorkspaceChange}
                 />
               </div>
+            </div>
+
+            <div className="mt-3 pt-3 border-t border-[var(--border)]">
+              <p className="text-xs text-orange-500">单微信绑定模式：开启自动回复后，绑定机器人收到的所有发送者消息均可使用通道，并不限于扫码账号。请仅在信任该通道的情况下启用。</p>
+            </div>
+
+            <div className="mt-3 pt-3 border-t border-[var(--border)]">
+              <p className="text-xs text-[var(--text-secondary)]">允许微信切换的桌面工作空间</p>
+              <p className="text-xs text-[var(--text-tertiary)] mt-1">授权后所有允许使用机器人的微信用户均可访问；默认工作空间始终可用。</p>
+              {desktopWorkspaces.filter((w) => !w.hidden || (status?.allowed_workspaces ?? []).includes(w.workspace)).map((w) => (
+                <label key={w.workspace} className="flex gap-2 mt-2 text-xs break-all">
+                  <input type="checkbox" checked={(status?.allowed_workspaces ?? []).includes(w.workspace)} onChange={async (event) => {
+                    const current = status?.allowed_workspaces ?? [];
+                    const allowed_workspaces = event.target.checked ? [...current, w.workspace] : current.filter((p) => p !== w.workspace);
+                    try { await wechatApi.updateConfig({ allowed_workspaces }); await fetchStatus(); }
+                    catch (e: unknown) { toast.error(e instanceof Error ? e.message : "授权更新失败"); }
+                  }} />
+                  {w.workspace}
+                </label>
+              ))}
             </div>
 
             <div className="mt-3 pt-3 border-t border-[var(--border)]">

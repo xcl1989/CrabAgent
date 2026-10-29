@@ -35,6 +35,8 @@ class WeChatStatus(BaseModel):
     auto_reply: bool = True
     workspace: str = ""
     allowed_users: list[str] = []
+    auto_authorization_status: str = "unverified"
+    allowed_workspaces: list[str] = []
     notify_task_overdue: bool = True
     notify_schedule_result: bool = True
     notify_email_summary: bool = False
@@ -57,6 +59,7 @@ class UpdateConfigRequest(BaseModel):
     auto_reply: bool | None = None
     workspace: str | None = None
     allowed_users: list[str] | None = None
+    allowed_workspaces: list[str] | None = None
     notify_task_overdue: bool | None = None
     notify_schedule_result: bool | None = None
     notify_email_summary: bool | None = None
@@ -132,6 +135,8 @@ async def get_status(
         auto_reply=cfg.auto_reply,
         workspace=cfg.workspace,
         allowed_users=cfg.allowed_users,
+        auto_authorization_status="all_channel_senders",
+        allowed_workspaces=cfg.allowed_workspaces,
         notify_task_overdue=cfg.notify_task_overdue,
         notify_schedule_result=cfg.notify_schedule_result,
         notify_email_summary=cfg.notify_email_summary,
@@ -170,7 +175,6 @@ async def check_qr_status(
     user: User = Depends(get_current_user),
 ):
     """Poll QR code scan status."""
-    from crabagent.core.wechat.client import WeChatClient
 
     session_key = f"user_{user.id}"
     qrcode = _qr_state.get(session_key)
@@ -194,22 +198,16 @@ async def check_qr_status(
             # Cleanup QR state FIRST so subsequent polls don't repeat
             _qr_state.pop(session_key, None)
             _qr_client.pop(session_key, None)
-            logged_in = True
-
-            # Persist credentials
+            # Do not infer a sender mapping from the QR identity.
             try:
-                client.apply_credentials(creds)  # type: ignore[attr-defined]
-                from crabagent.core.wechat.config import load_config, save_config
+                from crabagent.core.wechat.auth import _persist_credentials
 
-                cfg = await load_config()
-                cfg.bot_token = creds.bot_token
-                cfg.base_url = creds.base_url
-                cfg.account_id = creds.ilink_bot_id
-                cfg.enabled = True
-                await save_config(cfg)
-                logger.info("[WeChat API] Credentials persisted, starting message loop")
+                await _persist_credentials(creds)
+                client.apply_credentials(creds)  # type: ignore[attr-defined]
+                logged_in = True
             except Exception as e:
                 logger.error("[WeChat API] Failed to persist credentials: %s", e)
+                return QRCodeStatusResponse(status="error", logged_in=False)
 
             # Start the message loop (non-blocking — don't fail login if this errors)
             try:
@@ -244,6 +242,29 @@ async def update_config(
 
     cfg = await load_config()
     updates = req.model_dump(exclude_none=True)
+    admin_only = ("allowed_users", "allowed_workspaces", "workspace")
+    if any(key in updates for key in admin_only) and (user.id != 1 or user.role != "admin"):
+        raise HTTPException(status_code=403, detail="Only the WeChat owner can configure workspaces")
+    if "allowed_users" in updates:
+        if updates["allowed_users"]:
+            raise HTTPException(status_code=400, detail="Sender allowlists are not supported in single-binding mode")
+    if "allowed_workspaces" in updates:
+        from pathlib import Path
+
+        from crabagent.core.wechat.selection import available_workspaces, workspace_path
+        try:
+            requested = list(dict.fromkeys(workspace_path(p) for p in updates["allowed_workspaces"] if p))
+        except (OSError, RuntimeError, ValueError):
+            raise HTTPException(status_code=400, detail="Invalid workspace path")
+        from dataclasses import replace
+        candidate = replace(cfg, workspace=updates.get("workspace", cfg.workspace), allowed_workspaces=requested)
+        available = await available_workspaces(candidate)
+        if any(p not in available or not Path(p).is_dir() for p in requested):
+            raise HTTPException(
+                status_code=400,
+                detail="Workspace must be an existing desktop workspace of the WeChat owner",
+            )
+        updates["allowed_workspaces"] = requested
     for key, value in updates.items():
         setattr(cfg, key, value)
     await save_config(cfg)
@@ -313,7 +334,8 @@ async def list_wechat_conversations(
     """List all WeChat conversations with last message preview."""
     from sqlalchemy import func, select
 
-    from crabagent.core.database import Conversation, Message as DBMessage, async_session_factory
+    from crabagent.core.database import Conversation, async_session_factory
+    from crabagent.core.database import Message as DBMessage
 
     async with async_session_factory() as db:
         result = await db.execute(
@@ -361,7 +383,6 @@ async def list_wechat_conversations(
 async def _ensure_message_loop_running():
     """Start the WeChat message loop if not already running."""
     from crabagent.core.wechat import WeChatMessageLoop, get_authenticated_client
-
     from crabagent.serve.scheduler import get_scheduler
 
     sched = get_scheduler()
@@ -386,7 +407,7 @@ async def _stop_message_loop():
 
     sched = get_scheduler()
     loop = getattr(sched, "_wechat_loop", None)
-    if loop and loop._running:
+    if loop:
         await loop.stop()
     sched._wechat_loop = None
     logger.info("[WeChat API] Message loop stopped")

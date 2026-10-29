@@ -9,10 +9,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 from typing import Any
 
 from crabagent.core.wechat.client import IncomingMessage, SessionExpiredError, WeChatClient
+from crabagent.core.wechat.process_lock import acquire_process_lock
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +37,8 @@ _WECHAT_HYDRATE_MAX_CHARS = 20_000
 # Marker substituted for stripped base64 data URLs
 _WECHAT_BASE64_PLACEHOLDER = "[图片数据已省略，如需查看请让用户重新发送或使用图片工具]"
 
+
+_WECHAT_COMMANDS = ("/状态", "/模型", "/工作空间", "/会话", "/新会话", "/帮助")
 
 class WeChatMessageLoop:
     """Async long-poll loop that bridges WeChat messages to the Agent.
@@ -69,6 +73,11 @@ class WeChatMessageLoop:
         # long-poll returns it in consecutive batches.
         self._recent_msgs: dict[str, float] = {}
         self._dedup_ttl = 120.0  # seconds
+        self._user_locks: dict[str, asyncio.Lock] = {}
+        self._active_runs: dict[str, dict] = {}
+        self._dispatch_tails: dict[str, asyncio.Task] = {}
+        self._dispatch_tasks: set[asyncio.Task] = set()
+        self._lock_file = None
 
     async def start(self) -> None:
         """Start the long-poll loop in a background task."""
@@ -87,20 +96,51 @@ class WeChatMessageLoop:
                 )
         except Exception as e:
             logger.warning("[WeChatLoop] Failed to restore context_token: %s", e)
+        from crabagent.core.database import engine
+
+        url = engine.url
+        if url.get_backend_name() != "sqlite" or not url.database or url.database == ":memory:":
+            raise RuntimeError("WeChat polling requires a file-backed SQLite database")
+        lock_file = acquire_process_lock(os.path.realpath(url.database) + ".wechat.lock")
+        self._lock_file = lock_file
         self._running = True
-        self._task = asyncio.create_task(self._run(), name="wechat-message-loop")
+        self._task = asyncio.create_task(self._run_locked(), name="wechat-message-loop")
         logger.info("[WeChatLoop] Started")
 
     async def stop(self) -> None:
         """Stop the loop gracefully."""
+        was_running = self._running
         self._running = False
-        if self._task and not self._task.done():
-            self._task.cancel()
+        if self._task:
+            # Let the wrapper enter its finally block even on immediate stop.
+            await asyncio.sleep(0)
+            if not self._task.done() and was_running:
+                self._task.cancel()
             try:
-                await self._task
+                await asyncio.shield(self._task)
             except asyncio.CancelledError:
-                pass
+                if asyncio.current_task().cancelling():
+                    raise
         logger.info("[WeChatLoop] Stopped")
+
+    async def _run_locked(self) -> None:
+        try:
+            await self._run()
+        finally:
+            self._running = False
+            while self._dispatch_tasks or self._active_runs:
+                tasks = set(self._dispatch_tasks) | {v["task"] for v in self._active_runs.values() if "task" in v}
+                if not tasks:
+                    break
+                await asyncio.gather(*tasks, return_exceptions=True)
+                await asyncio.sleep(0)
+            if self._lock_file is not None:
+                self._lock_file.close()
+                self._lock_file = None
+
+    def _track_dispatch(self, task: asyncio.Task) -> None:
+        self._dispatch_tasks.add(task)
+        task.add_done_callback(self._dispatch_tasks.discard)
 
     async def _run(self) -> None:
         """Main long-poll loop with error recovery."""
@@ -113,14 +153,11 @@ class WeChatMessageLoop:
                     # Update cursor
                     if msg.get_updates_buf:
                         self._buf = msg.get_updates_buf
-                    # Persist push target on first incoming message
-                    if msg.from_user and msg.context_token:
-                        await self._update_push_target(msg.from_user, msg.context_token)
                     # Reset per-user send counter for the new message round
                     if msg.from_user:
                         self.client.reset_send_count(msg.from_user)
                     # Dispatch
-                    asyncio.create_task(self._dispatch(msg))
+                    self._schedule_dispatch(msg)
             except SessionExpiredError:
                 logger.warning("[WeChatLoop] Session expired — stopping loop")
                 await self._notify_session_expired()
@@ -191,14 +228,13 @@ class WeChatMessageLoop:
             from crabagent.core.wechat.config import load_config, save_config
 
             cfg = await load_config()
-            # Always update context_token; set target_user only if not yet set
             updated = False
-            if context_token != cfg.cached_context_token:
-                cfg.cached_context_token = context_token
-                updated = True
             if not cfg.notify_target_user:
                 cfg.notify_target_user = user_id
                 logger.info("[WeChatLoop] Push target set to %s", user_id)
+                updated = True
+            if cfg.notify_target_user == user_id and context_token != cfg.cached_context_token:
+                cfg.cached_context_token = context_token
                 updated = True
             if updated:
                 await save_config(cfg)
@@ -233,25 +269,291 @@ class WeChatMessageLoop:
         self._recent_msgs[key] = now
         return False
 
-    async def _dispatch(self, msg: IncomingMessage) -> None:
+    @staticmethod
+    def _is_switch_command(msg: IncomingMessage) -> bool:
+        parts = (msg.content or "").strip().split(maxsplit=1)
+        if not parts:
+            return False
+        command = parts[0]
+        argument = parts[1].strip() if len(parts) > 1 else ""
+        return bool(command == "/新会话" or
+                    (command in {"/工作空间", "/会话"} and argument) or
+                    (command == "/模型" and len(argument.split(maxsplit=1)) == 2))
+
+    async def _prepare_deferred_switch(self, msg: IncomingMessage, queued: bool) -> bool:
+        from crabagent.core.wechat.config import load_config
+
+        cfg = await load_config()
+        if (not cfg.enabled or not cfg.auto_reply or not msg.from_user
+                or (cfg.allowed_users and msg.from_user not in cfg.allowed_users) or self._is_duplicate(msg)):
+            return False
+        if msg.context_token:
+            await self._update_push_target(msg.from_user, msg.context_token)
+        if queued:
+            try:
+                await self.client.send_message(
+                    to_user=msg.from_user,
+                    text="切换命令已排队，将在当前任务结束后按顺序执行；重启后未执行的队列会丢失。",
+                )
+            except Exception:
+                logger.warning("[WeChatLoop] Failed to acknowledge queued switch", exc_info=True)
+        return True
+
+    def _schedule_dispatch(self, msg: IncomingMessage) -> None:
+        """Preserve arrival order per sender without blocking other senders."""
+        sender = msg.from_user
+        previous = self._dispatch_tails.get(sender)
+        command = (msg.content or "").strip().split(maxsplit=1)[:1]
+        active = self._active_runs.get(sender)
+        if not self._custom_handler and self._is_switch_command(msg):
+            queued = bool((active and not active["task"].done()) or (previous and not previous.done()))
+            preparation = asyncio.create_task(self._prepare_deferred_switch(msg, queued))
+            self._track_dispatch(preparation)
+
+            async def apply_switch():
+                accepted = await preparation
+                if previous:
+                    try:
+                        await asyncio.shield(previous)
+                    except asyncio.CancelledError:
+                        if asyncio.current_task().cancelling():
+                            raise
+                        logger.warning("[WeChatLoop] Previous dispatch was cancelled")
+                    except Exception:
+                        logger.exception("[WeChatLoop] Previous dispatch failed")
+                if not accepted:
+                    return
+                active_run = self._active_runs.get(sender)
+                if active_run and not active_run["task"].done():
+                    try:
+                        await asyncio.shield(active_run["task"])
+                    except asyncio.CancelledError:
+                        if asyncio.current_task().cancelling():
+                            raise
+                        logger.warning("[WeChatLoop] Active run was cancelled before queued switch")
+                    except Exception:
+                        logger.exception("[WeChatLoop] Active run failed before queued switch")
+                await self._dispatch(msg, prechecked=True)
+
+            task = asyncio.create_task(apply_switch())
+            self._track_dispatch(task)
+            self._dispatch_tails[sender] = task
+            def cleanup_switch(done):
+                if self._dispatch_tails.get(sender) is done:
+                    self._dispatch_tails.pop(sender, None)
+            task.add_done_callback(cleanup_switch)
+            return
+        # Read-only commands may bypass an occupied sender queue.
+        read_only = {"/状态", "/模型", "/工作空间", "/会话", "/帮助"}
+        if command and command[0] in read_only and active and not active["task"].done():
+            task = asyncio.create_task(self._dispatch(msg))
+            self._track_dispatch(task)
+            task.add_done_callback(lambda done: None if done.cancelled() else done.exception())
+            return
+
+        async def dispatch_ordered():
+            if previous:
+                try:
+                    await asyncio.shield(previous)
+                except asyncio.CancelledError:
+                    if asyncio.current_task().cancelling():
+                        raise
+                    logger.warning("[WeChatLoop] Previous dispatch was cancelled")
+                except Exception:
+                    logger.exception("[WeChatLoop] Previous dispatch failed")
+            await self._dispatch(msg)
+
+        task = asyncio.create_task(dispatch_ordered())
+        self._track_dispatch(task)
+        self._dispatch_tails[sender] = task
+        def cleanup(done):
+            if self._dispatch_tails.get(sender) is done:
+                self._dispatch_tails.pop(sender, None)
+        task.add_done_callback(cleanup)
+
+    async def _dispatch(self, msg: IncomingMessage, *, prechecked: bool = False) -> None:
         """Handle a single incoming message.
 
         Calls the custom handler if set, otherwise uses the default
         Agent bridge.
         """
-        # Deduplicate before processing
-        if self._is_duplicate(msg):
+        from crabagent.core.wechat.config import load_config
+
+        cfg = await load_config()
+        if (not cfg.enabled or not cfg.auto_reply or not msg.from_user
+                or (cfg.allowed_users and msg.from_user not in cfg.allowed_users)):
+            logger.info("[WeChatLoop] Ignoring unauthorized or disabled message")
             return
+        if not prechecked:
+            if self._is_duplicate(msg):
+                return
+            if msg.context_token:
+                await self._update_push_target(msg.from_user, msg.context_token)
 
         try:
+            head = (msg.content or "").strip().split(maxsplit=1)[:1]
+            if not self._custom_handler and head in [[c] for c in _WECHAT_COMMANDS]:
+                lock = self._user_locks.setdefault(msg.from_user, asyncio.Lock())
+                active = self._active_runs.get(msg.from_user)
+                if lock.locked() and active and not active["task"].done():
+                    parts = (msg.content or "").strip().split(maxsplit=1)
+                    command = parts[0]
+                    argument = parts[1].strip() if len(parts) > 1 else ""
+                    switching = (command == "/新会话" or
+                                 (command in {"/工作空间", "/会话"} and argument) or
+                                 (command == "/模型" and len(argument.split(maxsplit=1)) == 2))
+                    if switching:
+                        await self.client.send_message(
+                            to_user=msg.from_user,
+                            text="当前有运行中的任务，请等待完成后再切换。",
+                        )
+                    else:
+                        await self._handle_command(msg)
+                else:
+                    async with lock:
+                        await self._handle_command(msg)
+                return
             if self._custom_handler:
                 await self._custom_handler(msg)
-            else:
-                await self._default_handler(msg)
+                return
+            lock = self._user_locks.setdefault(msg.from_user, asyncio.Lock())
+            async with lock:
+                active = self._active_runs.get(msg.from_user)
+                if active and not active["task"].done():
+                    ready = asyncio.create_task(active["ready"].wait())
+                    await asyncio.wait({ready, active["task"]}, return_when=asyncio.FIRST_COMPLETED)
+                    if not ready.done():
+                        ready.cancel()
+                    context = active.get("context")
+                    if context and context.metadata.get("_accept_followups") and not context.budget_exhausted:
+                        query = await _wechat_query(msg, self.client, context.workspace)
+                        if context.metadata.get("_accept_followups") and not context.budget_exhausted:
+                            context.metadata.setdefault("_pending_user_messages", []).append(query)
+                            return
+                    await active["task"]
+                active = {"ready": asyncio.Event(), "context": None}
+                self._active_runs[msg.from_user] = active
+                task = asyncio.create_task(self._default_handler(msg, active))
+                active["task"] = task
+                def finished(done):
+                    if self._active_runs.get(msg.from_user) is active:
+                        self._active_runs.pop(msg.from_user, None)
+                    if not done.cancelled() and done.exception():
+                        logger.error("[WeChatLoop] Handler failed: %s", done.exception())
+                task.add_done_callback(finished)
+        
         except Exception as e:
             logger.error("[WeChatLoop] Message dispatch error: %s", e)
 
-    async def _default_handler(self, msg: IncomingMessage) -> None:
+    async def _handle_command(self, msg: IncomingMessage) -> bool:
+        """Keep channel commands out of the agent and active follow-up queue."""
+        parts = (msg.content or "").strip().split(maxsplit=1)
+        if not parts or parts[0] not in {"/状态", "/模型", "/工作空间", "/会话", "/新会话", "/帮助"}:
+            return False
+        from pathlib import Path
+
+        from crabagent.core.provider_store import list_providers
+        from crabagent.core.wechat.config import load_config
+        from crabagent.core.wechat.selection import available_workspaces, conversations, load, save, workspace_path
+        from crabagent.serve.api.provider import get_provider_models
+
+        command = parts[0]
+        argument = parts[1].strip() if len(parts) > 1 else ""
+        cfg = await load_config()
+        title = _wechat_identity_title(cfg.account_id, msg.from_user)
+        state = await load(cfg.account_id, msg.from_user)
+        workspace = state.get("workspace") or workspace_path(cfg.workspace or str(Path.cwd()))
+        active = self._active_runs.get(msg.from_user)
+        running = bool(active and not active["task"].done())
+        if command == "/帮助":
+            reply = (
+                "微信命令：/状态、/模型 [服务商 模型]、/工作空间 [路径]、/会话 [编号]、/新会话。"
+                "运行中切换会排队，任务结束后生效；重启会丢失未执行的队列。"
+            )
+        elif command == "/状态":
+            provider_label = state.get("provider", "默认")
+            model_label = state.get("model", "默认")
+            session_label = state.get("sessions", {}).get(workspace, "自动")
+            reply = (
+                f"当前运行：{'处理中' if running else '空闲'}\n"
+                f"工作空间：{workspace}\n"
+                f"模型：{provider_label} / {model_label}\n"
+                f"会话：{session_label}"
+            )
+            context = active.get("context") if running else None
+            if context:
+                current_provider = getattr(context, "provider_name", None) or "默认"
+                reply += (
+                    f"\n本次运行工作空间：{context.workspace}"
+                    f"\n本次运行模型：{context.model or '默认'}"
+                    f"\n本次运行服务商：{current_provider}"
+                )
+        elif running and (
+            command == "/新会话"
+            or (command in {"/工作空间", "/会话"} and argument)
+            or (command == "/模型" and len(argument.split(maxsplit=1)) == 2)
+        ):
+            reply = "当前有运行中的任务，请等待完成后再切换。"
+        elif command == "/模型":
+            providers = [p for p in await list_providers() if p.enabled]
+            if not argument:
+                names = "、".join(p.name for p in providers) or "无"
+                reply = f"可用服务商：{names}\n使用 /模型 服务商 模型；或 /模型 服务商 查看模型。"
+            else:
+                values = argument.split(maxsplit=1)
+                provider = next((p for p in providers if p.name == values[0]), None)
+                if not provider:
+                    reply = "服务商不存在或未启用，配置未更改。"
+                else:
+                    try:
+                        models = [item["id"] for item in await get_provider_models(provider.name, user=None)]
+                    except Exception:
+                        logger.warning("[WeChatLoop] Failed to list provider models", exc_info=True)
+                        models = []
+                    if len(values) == 1:
+                        reply = "可用模型：" + ("、".join(models) if models else "无法获取模型列表，配置未更改。")
+                    elif values[1] not in models:
+                        reply = "模型不在该服务商可用列表中或列表获取失败，配置未更改。"
+                    else:
+                        state.update(provider=provider.name, model=values[1])
+                        await save(cfg.account_id, msg.from_user, state)
+                        reply = f"已选择模型：{provider.name} / {values[1]}"
+        elif command == "/工作空间":
+            available = await available_workspaces(cfg)
+            if not argument:
+                reply = "可用工作空间：\n" + "\n".join(available)
+            else:
+                try:
+                    chosen = workspace_path(argument)
+                except (OSError, RuntimeError, ValueError):
+                    chosen = ""
+                if chosen not in available:
+                    reply = "工作空间不在可用列表中或目录不存在，配置未更改。"
+                else:
+                    state["workspace"] = chosen
+                    await save(cfg.account_id, msg.from_user, state)
+                    reply = f"已切换工作空间：{chosen}"
+        elif command == "/会话":
+            items = await conversations(title, workspace)
+            if not argument:
+                listing = "\n".join(f"{c.id}: {c.session_id}" for c in items[:30]) or "无"
+                reply = f"当前工作空间的会话：\n{listing}\n使用 /会话 编号切换。"
+            else:
+                chosen = next((c for c in items if str(c.id) == argument or c.session_id == argument), None)
+                if not chosen:
+                    reply = "会话不存在或不属于当前用户及工作空间。"
+                else:
+                    state.setdefault("sessions", {})[workspace] = chosen.id
+                    await save(cfg.account_id, msg.from_user, state)
+                    reply = f"已切换会话：{chosen.id}"
+        else:
+            state.setdefault("sessions", {})[workspace] = 0
+            await save(cfg.account_id, msg.from_user, state)
+            reply = "已选择新会话，下条消息将创建。"
+        await self.client.send_message(to_user=msg.from_user, text=reply)
+        return True
+
+    async def _default_handler(self, msg: IncomingMessage, active: dict | None = None) -> None:
         """Default handler: forward to Agent and reply with the response.
 
         This creates a temporary conversation, runs the Agent, extracts
@@ -269,7 +571,7 @@ class WeChatMessageLoop:
         await self.client.send_typing(msg.from_user, status=1)
 
         try:
-            reply_text, _ = await _run_agent_for_wechat(msg, self.client)
+            reply_text, _ = await _run_agent_for_wechat(msg, self.client, active)
         except Exception as e:
             logger.error("[WeChatLoop] Agent execution failed: %s", e)
             reply_text = f"抱歉，处理消息时出错：{str(e)[:100]}"
@@ -312,7 +614,8 @@ class WeChatMessageLoop:
 
         # Detect and send files/images referenced in the reply
         try:
-            await self._send_reply_attachments(msg, reply_text)
+            workspace_hint = active.get("context").workspace if active and active.get("context") else None
+            await self._send_reply_attachments(msg, reply_text, workspace_hint)
         except SessionExpiredError:
             logger.warning("[WeChatLoop] Session expired before attachments could be sent")
         except Exception as e:
@@ -321,7 +624,7 @@ class WeChatMessageLoop:
         # Stop typing
         await self.client.send_typing(msg.from_user, status=2)
 
-    async def _send_reply_attachments(self, msg: IncomingMessage, reply_text: str) -> None:
+    async def _send_reply_attachments(self, msg: IncomingMessage, reply_text: str, run_workspace=None) -> None:
         """Detect image/file references in the reply and send them via WeChat."""
         import re
         from pathlib import Path
@@ -330,7 +633,7 @@ class WeChatMessageLoop:
 
         try:
             cfg = await load_config()
-            workspace = Path(cfg.workspace).resolve() if cfg.workspace else Path.cwd().resolve()
+            workspace = Path(run_workspace or cfg.workspace or Path.cwd()).resolve()
         except Exception:
             workspace = Path.cwd().resolve()
 
@@ -716,7 +1019,20 @@ def sanitize_history_content(content: str) -> str:
     return cleaned
 
 
-async def _run_agent_for_wechat(msg: IncomingMessage, client: WeChatClient | None = None) -> str:
+def _wechat_identity_title(account_id: str, from_user: str) -> str:
+    """Use an opaque stable channel identity, never a mutable display name."""
+    import hashlib
+    import json
+
+    identity = json.dumps([account_id, from_user], ensure_ascii=True, separators=(",", ":"))
+    return "微信 - identity " + hashlib.sha256(identity.encode()).hexdigest()
+
+
+async def _run_agent_for_wechat(
+    msg: IncomingMessage,
+    client: WeChatClient | None = None,
+    active: dict | None = None,
+) -> tuple[str, int]:
     """Run the Agent loop for a WeChat message and return the reply text.
 
     Reuses an existing WeChat conversation for the same user (multi-turn
@@ -740,7 +1056,12 @@ async def _run_agent_for_wechat(msg: IncomingMessage, client: WeChatClient | Non
     from crabagent.core.wechat.config import load_config
 
     cfg = await load_config()
-    workspace = Path(cfg.workspace).resolve() if cfg.workspace else Path.cwd().resolve()
+    from crabagent.core.wechat.selection import available_workspaces, load, save, workspace_path
+    state = await load(cfg.account_id, msg.from_user)
+    selected_workspace = workspace_path(state.get("workspace") or cfg.workspace or str(Path.cwd()))
+    if selected_workspace not in await available_workspaces(cfg):
+        raise ValueError("当前工作空间不可用或授权已撤销，请使用 /工作空间 重新选择。")
+    workspace = Path(selected_workspace)
 
     # ---- Resolve model ----
     default_model = app_settings.default_model
@@ -753,8 +1074,18 @@ async def _run_agent_for_wechat(msg: IncomingMessage, client: WeChatClient | Non
     except Exception:
         pass
 
+    provider_name = state.get("provider") or None
+    selected_model = state.get("model") or None
+    if bool(provider_name) != bool(selected_model):
+        raise ValueError("微信模型配置不完整，请重新选择服务商和模型。")
+    if not selected_model:
+        from crabagent.core.agent.loop import _get_default_model_settings, _resolve_provider
+        saved_model, saved_provider = await _get_default_model_settings()
+        selected_model = saved_model or app_settings.default_model
+        provider_name = (await _resolve_provider(saved_provider)).name
     sender_label = msg.from_nickname or msg.from_user
-    title = f"微信 - {sender_label} v2"
+    # Legacy nickname-based conversations cannot be attributed safely.
+    title = _wechat_identity_title(cfg.account_id, msg.from_user)
     system_prompt = (
         f"你正在回复微信消息。发送者: {sender_label}。\n"
         f"请简洁回复，适合手机阅读。工作目录: {workspace}\n\n"
@@ -779,23 +1110,25 @@ async def _run_agent_for_wechat(msg: IncomingMessage, client: WeChatClient | Non
         title=title,
         workspace=str(workspace),
         model=default_model,
+        selected_id=state.get("sessions", {}).get(str(workspace)),
     )
+    state.setdefault("sessions", {})[str(workspace)] = conv_id
+    await save(cfg.account_id, msg.from_user, state)
 
-    # Roll over a prior-day conversation before building this turn's context.
-    # This lets the first message of a new day receive the compact summary.
-    if await _maybe_archive_after_reply(conv_id=conv_id, title=title):
+    # Compact in place before hydration: the selected conversation ID remains stable.
+    from crabagent.core.wechat.compaction import compact
+    if await compact(cfg.account_id, msg.from_user, str(workspace), conv_id, title,
+                     selected_model or default_model, provider_name,
+                     threshold=_WECHAT_ARCHIVE_MSG_THRESHOLD):
         session_id, conv_id, existing_messages = await _find_or_create_wechat_conversation(
-            from_user=msg.from_user,
-            title=title,
-            workspace=str(workspace),
-            model=default_model,
-        )
+            msg.from_user, title, str(workspace), default_model, selected_id=conv_id)
 
     context = AgentContext(
         workspace=workspace,
-        tool_registry=registry,
+        tool_registry=registry.clone(),
         max_iterations=app_settings.max_iterations,
-        model=default_model or None,
+        model=selected_model,
+        provider_name=provider_name,
         system_prompt=system_prompt,
     )
 
@@ -803,7 +1136,7 @@ async def _run_agent_for_wechat(msg: IncomingMessage, client: WeChatClient | Non
     # Only include user and assistant roles to avoid broken tool_call chains
     for m in existing_messages:
         role = m["role"]
-        if role in ("user", "assistant"):
+        if role in ("user", "assistant", "compress"):
             context.messages.append(
                 {"role": role, "content": sanitize_history_content(m["content"])}
             )
@@ -821,11 +1154,12 @@ async def _run_agent_for_wechat(msg: IncomingMessage, client: WeChatClient | Non
     persistence = PersistenceListener(conversation_id=conv_id, branch_id="main")
     context.event_bus.subscribe(persistence.on_event)
 
-    from crabagent.serve.services.usage import UsagePersistenceListener
     from crabagent.core.database import Conversation
+    from crabagent.serve.services.usage import UsagePersistenceListener
 
     async with async_session_factory() as db:
         from sqlalchemy import func
+
         from crabagent.core.database import Message as DBMessage
 
         conversation = await db.get(Conversation, conv_id)
@@ -885,6 +1219,75 @@ async def _run_agent_for_wechat(msg: IncomingMessage, client: WeChatClient | Non
     except Exception as e:
         logger.warning("[WeChatLoop] Failed to save user message: %s", e)
 
+    query = await _wechat_query(msg, client, workspace)
+
+    # Run agent — no need to mutate the global auto_approve_tools flag.
+    # This context has no confirm_callback, so tools auto-execute.
+    # Mutating the global was unsafe: a concurrent desktop prompt would read
+    # True and skip installing its own confirm_callback.
+    # Snapshot the message count so reply extraction only considers messages
+    # produced by *this* run — otherwise a failed run would replay the last
+    # assistant message from the hydrated history as if it were a fresh reply.
+    _run_start_msg_count = len(context.messages)
+    context.metadata["_accept_followups"] = True
+    if active is not None:
+        active["context"] = context
+        active["ready"].set()
+    try:
+        await run_agent(context, query)
+    except Exception as e:
+        logger.error("[WeChatLoop] run_agent error: %s", e)
+        return f"处理时出错：{str(e)[:100]}", conv_id
+    finally:
+        context.metadata["_accept_followups"] = False
+        from crabagent.core.agent.loop import _consume_user_messages
+        await _consume_user_messages(context)
+        await usage.flush()
+        await persistence.finalize()
+        # Stop the heartbeat timer
+        if progress:
+            await progress.stop()
+        # Cleanup
+        browser_mgr = context.metadata.get("_browser_manager")
+        if browser_mgr:
+            try:
+                await browser_mgr.close()
+            except Exception:
+                pass
+        mcp_mgr = context.metadata.get("_mcp_manager")
+        if mcp_mgr:
+            try:
+                import asyncio as _a
+
+                await _a.wait_for(mcp_mgr.stop_all(), timeout=10)
+            except Exception:
+                pass
+
+    # Extract last assistant text — only from THIS run's messages, never
+    # from the hydrated history (a failed run must not replay old replies).
+    # (If run_agent raised, we already returned an error message above.)
+    reply = _extract_last_assistant_text(context, start_index=_run_start_msg_count)
+
+    # If consolidation mode was active, merge buffered progress with
+    # the final reply so everything arrives in one iLink send.
+    if progress and progress._consolidated:
+        parts = list(progress._consolidated)
+        if reply:
+            parts.append(reply)
+        merged = "\n\n".join(parts)
+        logger.info(
+            "[WeChatProgress] Consolidation: %d msgs + reply merged (%d chars)",
+            len(progress._consolidated),
+            len(merged),
+        )
+        return merged, conv_id
+
+    return reply or "（无回复内容）", conv_id
+
+
+async def _wechat_query(msg, client, workspace):
+    """Build the same multimodal query for initial and follow-up messages."""
+    from pathlib import Path
     # ---- Voice-only: promote ASR text to message content ----
     if not msg.content and msg.attachments:
         for att in msg.attachments:
@@ -909,7 +1312,7 @@ async def _run_agent_for_wechat(msg: IncomingMessage, client: WeChatClient | Non
                             import time as _time
                             save_dir = workspace / "wechat_files"
                             save_dir.mkdir(parents=True, exist_ok=True)
-                            img_filename = f"wechat_img_{int(_time.time())}.jpg"
+                            img_filename = f"wechat_img_{_time.time_ns()}.jpg"
                             img_path = save_dir / img_filename
                             img_path.write_bytes(raw_bytes)
 
@@ -973,7 +1376,8 @@ async def _run_agent_for_wechat(msg: IncomingMessage, client: WeChatClient | Non
                         if raw_bytes:
                             save_dir = workspace / "wechat_files"
                             save_dir.mkdir(parents=True, exist_ok=True)
-                            file_path = save_dir / (att.file_name or f"file_{att.file_size}")
+                            fallback = f"file_{att.file_size}"
+                            file_path = save_dir / (Path(att.file_name).name if att.file_name else fallback)
                             file_path.write_bytes(raw_bytes)
                             # Auto-extract content for readable file types
                             file_content = await _extract_file_content(file_path, att.file_name or "")
@@ -1031,61 +1435,7 @@ async def _run_agent_for_wechat(msg: IncomingMessage, client: WeChatClient | Non
 
         query = content_blocks if content_blocks else msg.content
 
-    # Run agent — no need to mutate the global auto_approve_tools flag.
-    # This context has no confirm_callback, so tools auto-execute.
-    # Mutating the global was unsafe: a concurrent desktop prompt would read
-    # True and skip installing its own confirm_callback.
-    # Snapshot the message count so reply extraction only considers messages
-    # produced by *this* run — otherwise a failed run would replay the last
-    # assistant message from the hydrated history as if it were a fresh reply.
-    _run_start_msg_count = len(context.messages)
-    try:
-        await run_agent(context, query)
-    except Exception as e:
-        logger.error("[WeChatLoop] run_agent error: %s", e)
-        return f"处理时出错：{str(e)[:100]}", conv_id
-    finally:
-        await usage.flush()
-        await persistence.finalize()
-        # Stop the heartbeat timer
-        if progress:
-            await progress.stop()
-        # Cleanup
-        browser_mgr = context.metadata.get("_browser_manager")
-        if browser_mgr:
-            try:
-                await browser_mgr.close()
-            except Exception:
-                pass
-        mcp_mgr = context.metadata.get("_mcp_manager")
-        if mcp_mgr:
-            try:
-                import asyncio as _a
-
-                await _a.wait_for(mcp_mgr.stop_all(), timeout=10)
-            except Exception:
-                pass
-
-    # Extract last assistant text — only from THIS run's messages, never
-    # from the hydrated history (a failed run must not replay old replies).
-    # (If run_agent raised, we already returned an error message above.)
-    reply = _extract_last_assistant_text(context, start_index=_run_start_msg_count)
-
-    # If consolidation mode was active, merge buffered progress with
-    # the final reply so everything arrives in one iLink send.
-    if progress and progress._consolidated:
-        parts = list(progress._consolidated)
-        if reply:
-            parts.append(reply)
-        merged = "\n\n".join(parts)
-        logger.info(
-            "[WeChatProgress] Consolidation: %d msgs + reply merged (%d chars)",
-            len(progress._consolidated),
-            len(merged),
-        )
-        return merged, conv_id
-
-    return reply or "（无回复内容）", conv_id
+    return query
 
 
 async def _register_tools(context, workspace) -> None:
@@ -1134,6 +1484,7 @@ async def _find_or_create_wechat_conversation(
     title: str,
     workspace: str,
     model: str,
+    selected_id: int | None = None,
 ) -> tuple[str, int, list[dict]]:
     """Find an existing WeChat conversation for *from_user* or create a new one.
 
@@ -1156,12 +1507,17 @@ async def _find_or_create_wechat_conversation(
                 Conversation.source == "wechat",
                 Conversation.user_id == 1,
                 Conversation.title == title,
+                Conversation.workspace == workspace,
             )
             .order_by(Conversation.updated_at.desc())
             .limit(1)
         )
+        if selected_id is not None:
+            stmt = stmt.where(Conversation.id == selected_id)
         result = await db.execute(stmt)
         conv = result.scalar_one_or_none()
+        if selected_id and not conv:
+            raise ValueError("Selected WeChat session is unavailable")
 
         if conv:
             # Load all messages for context — no limit.
@@ -1173,12 +1529,15 @@ async def _find_or_create_wechat_conversation(
                 .where(
                     DBMessage.conversation_id == conv.id,
                     DBMessage.branch_id == "main",
+                    DBMessage.compressed == False,  # noqa: E712
                 )
-                .order_by(DBMessage.id)
+                .order_by(DBMessage.sequence, DBMessage.id)
             )
             msgs = list(msg_result.scalars().all())
             prior = [
-                {"role": m.role, "content": m.content} for m in msgs if m.content and m.role in ("user", "assistant")
+                {"role": m.role, "content": m.content}
+                for m in msgs
+                if m.content and m.role in ("user", "assistant", "compress")
             ]
             # Touch updated_at
             conv.updated_at = conv.updated_at  # trigger onupdate
@@ -1215,7 +1574,7 @@ async def _find_or_create_wechat_conversation(
 # ---------------------------------------------------------------------------
 
 
-async def _summarize_conversation(messages: list[dict], model: str) -> str:
+async def _summarize_conversation(messages: list[dict], model: str, provider_name: str | None = None) -> str:
     """One-shot LLM summarization of conversation history.
 
     Reuses the i18n compress prompt for consistency with the main
@@ -1223,11 +1582,8 @@ async def _summarize_conversation(messages: list[dict], model: str) -> str:
     """
     import litellm
 
-    from crabagent.core.provider_store import (
-        get_default_provider,
-        resolve_litellm_params,
-        resolve_model_for_provider,
-    )
+    from crabagent.core.agent.loop import _get_default_model_settings, _litellm_params, _resolve_provider
+    from crabagent.core.proxy import resolve_llm_proxy
 
     # Keep this formatter local: the generic compression module exposes no
     # private formatting helper, which broke rollover in packaged builds.
@@ -1245,12 +1601,11 @@ async def _summarize_conversation(messages: list[dict], model: str) -> str:
         f"需要总结的对话：\n{history_text}"
     )
 
-    # Resolve provider params (api_key, api_base, custom_llm_provider)
-    provider = await get_default_provider()
-    if not provider:
-        raise RuntimeError("No LLM provider configured")
-    llm_params = await resolve_litellm_params(provider)
-    model = resolve_model_for_provider(provider, model)
+    _, default_provider = await _get_default_model_settings()
+    provider = await _resolve_provider(provider_name or default_provider)
+    llm_params = _litellm_params(provider, await resolve_llm_proxy(provider))
+    if "/" not in model:
+        model = f"{'chatgpt' if provider.provider_type == 'chatgpt' else 'openai'}/{model}"
 
     response = await litellm.acompletion(
         model=model,

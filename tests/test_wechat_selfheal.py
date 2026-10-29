@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
 import pytest
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from crabagent.core.wechat.client import IncomingMessage
 from crabagent.core.wechat.message import (
@@ -18,11 +20,25 @@ def _make_loop(client, **kwargs) -> WeChatMessageLoop:
     return WeChatMessageLoop(client, **kwargs)
 
 
+@pytest.fixture(autouse=True)
+def isolated_database(tmp_path, monkeypatch):
+    from crabagent.core import database
+
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'selfheal.db'}")
+    monkeypatch.setattr(database, "engine", engine)
+    monkeypatch.setattr(
+        "crabagent.core.wechat.config.load_config",
+        AsyncMock(return_value=SimpleNamespace(notify_target_user="", cached_context_token="")),
+    )
+    yield
+
+
 @pytest.fixture
 def flaky_client():
     """Client whose get_updates always raises, send/db helpers mocked out."""
     client = AsyncMock()
     client.get_updates = AsyncMock(side_effect=RuntimeError("boom"))
+    client.reset_send_count = Mock()
     return client
 
 

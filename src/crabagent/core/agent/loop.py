@@ -374,10 +374,16 @@ async def _run_agent(
             # OpenCode Go rejects the OpenAI reasoning_effort extension even for
             # models that otherwise accept multimodal and tool-call requests.
             if provider.provider_type != "opencode-go":
-                completion_params["reasoning_effort"] = context.metadata.get(
-                    "reasoning_effort", settings.reasoning_effort
-                )
-                completion_params["allowed_openai_params"] = ["reasoning_effort"]
+                effort = context.metadata.get("reasoning_effort", settings.reasoning_effort)
+                if provider.provider_type == "chatgpt":
+                    from crabagent.serve.api.chatgpt_auth import _codex_model_cache
+
+                    levels = _codex_model_cache.get("efforts", {}).get(model.split("/", 1)[-1])
+                    if levels is not None and effort not in levels:
+                        effort = "medium" if "medium" in levels else (levels[0] if levels else None)
+                if effort:
+                    completion_params["reasoning_effort"] = effort
+                    completion_params["allowed_openai_params"] = ["reasoning_effort"]
             response = await litellm.acompletion(**completion_params)
 
             async for chunk in response:
@@ -808,7 +814,10 @@ async def _run_agent(
                     AgentEvent(type=EventType.AGENT_INFO, data={"message": "📏 上下文超出模型限制，正在尝试自动压缩…"})
                 )
                 try:
+                    before_compression = context.messages
                     await compress_context(context, llm, model)
+                    if context.messages is before_compression:
+                        raise RuntimeError("Context compression made no progress")
                     _llm_retry_count = 0  # reset since context changed
                     logger.info("Context auto-compressed after ContextWindowExceededError, retrying")
                     await context.event_bus.emit(
@@ -853,7 +862,10 @@ async def _run_agent(
                         AgentEvent(type=EventType.AGENT_INFO, data={"message": "📏 上下文超出模型限制，正在尝试自动压缩…"})
                     )
                     try:
+                        before_compression = context.messages
                         await compress_context(context, llm, model)
+                        if context.messages is before_compression:
+                            raise RuntimeError("Context compression made no progress")
                         _llm_retry_count = 0  # reset since context changed
                         logger.info("Context auto-compressed after prompt-too-long BadRequestError, retrying")
                         await context.event_bus.emit(

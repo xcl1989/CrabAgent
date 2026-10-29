@@ -66,6 +66,9 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
     }
   }, []);
   useEffect(() => {
+    return window.electronAPI?.onOpenSession?.(() => setPage("chat"));
+  }, []);
+  useEffect(() => {
     const handleHashChange = () => {
       const targetPage = pageFromHash();
       if (targetPage) setPage(targetPage);

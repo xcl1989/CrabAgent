@@ -212,6 +212,10 @@ async def compress_context(context: AgentContext, llm_params: dict, model: str) 
         )
         return
 
+    if not summary.strip():
+        logger.warning("Context compression returned an empty summary; keeping original")
+        return
+
     compressed = [
         {
             "role": "compress",

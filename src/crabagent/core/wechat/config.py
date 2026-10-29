@@ -24,10 +24,12 @@ class WeChatConfig:
     enabled: bool = False
     bot_token: str = ""          # Bearer token — Fernet-encrypted at rest
     account_id: str = ""         # iLink account ID
+    ilink_user_id: str = ""     # QR login identity; sender mapping is unverified
     base_url: str = "https://ilinkai.weixin.qq.com"
     auto_reply: bool = True      # Auto-reply to incoming messages via Agent
     workspace: str = ""           # Working directory for WeChat Agent (empty = cwd)
-    allowed_users: list[str] = field(default_factory=list)  # Empty = everyone
+    allowed_users: list[str] = field(default_factory=list)  # Empty = all senders on the bound channel
+    allowed_workspaces: list[str] = field(default_factory=list)  # Explicit desktop workspace grants
     # Notification toggles
     notify_task_overdue: bool = True
     notify_schedule_result: bool = True
@@ -44,7 +46,10 @@ class WeChatConfig:
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> WeChatConfig:
         known = {f.name for f in cls.__dataclass_fields__.values()}  # type: ignore[attr-defined]
-        return cls(**{k: v for k, v in d.items() if k in known})
+        values = {k: v for k, v in d.items() if k in known}
+        # Migrate legacy sender grants to the single-binding policy.
+        values["allowed_users"] = []
+        return cls(**values)
 
 
 # ---------------------------------------------------------------------------

@@ -568,6 +568,12 @@ async def test_run_agent_retries_context_window_with_compression(monkeypatch: py
         return _stream([_chunk(delta=_delta(content="done"), finish_reason="stop", usage=_usage())])
 
     async def fake_compress(context_arg, llm_params, model_name):
+        # Real compress_context replaces the message list, which the loop uses to
+        # detect that compression actually made progress.
+        context_arg.messages = [
+            {"role": "compress", "content": "summary of earlier turns"},
+            *context_arg.messages[-2:],
+        ]
         context_arg.metadata["compressed"] = model_name
 
     monkeypatch.setattr(loop, "_resolve_provider", fake_provider)

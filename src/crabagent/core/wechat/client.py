@@ -637,7 +637,10 @@ class WeChatClient:
                 logger.warning("[iLink] AES decrypt produced unrecognized data, trying alternative keys...")
                 
                 import hashlib as _hl
-                from cryptography.hazmat.primitives.ciphers import Cipher as _Cipher, algorithms as _alg, modes as _modes
+
+                from cryptography.hazmat.primitives.ciphers import Cipher as _Cipher
+                from cryptography.hazmat.primitives.ciphers import algorithms as _alg
+                from cryptography.hazmat.primitives.ciphers import modes as _modes
                 
                 raw_key_str = attachment.aes_key or media.get("aes_key", "")
                 alt_keys = [

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import datetime
 import logging
 import os
 import time as _time_module
@@ -693,10 +695,6 @@ class SchedulerService:
 
     async def start_wechat_loop(self):
         """Start the WeChat message long-poll loop if enabled and logged in."""
-        # Prevent duplicate WeChat loops across multiple server instances
-        if not await self._acquire_process_lock("wechat_loop", ttl_seconds=120):
-            logger.info("[WeChat] Another instance already running the loop — skipping")
-            return
         try:
             from crabagent.core.wechat import WeChatMessageLoop, get_authenticated_client
             from crabagent.core.wechat.config import load_config
@@ -742,7 +740,7 @@ class SchedulerService:
     async def stop_wechat_loop(self):
         """Stop the WeChat message loop if running."""
         loop = self._wechat_loop
-        if loop and getattr(loop, "_running", False):
+        if loop:
             await loop.stop()
         self._wechat_loop = None
 

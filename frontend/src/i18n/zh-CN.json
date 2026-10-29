@@ -490,6 +490,7 @@
     "model": "模型",
     "effort": "思考强度",
     "modelPlaceholder": "输入模型 ID…",
+    "reasoningUnavailable": "不可用",
     "reasoningLow": "低",
     "reasoningMedium": "中",
     "reasoningHigh": "高",

@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.17.6] — WeChat Session Controls and Model Reasoning (2026-10-29)
+
+### Added
+- WeChat commands for model, workspace and session selection, status and help; workspace access is explicitly configured.
+- Transactional long-session compaction for SQLite and a local process lock for the WeChat polling loop.
+- Model-specific reasoning effort options, including capabilities supplied by ChatGPT models.
+
+### Changed
+- Single WeChat binding accepts messages from any non-empty sender received by the bound bot when the channel and auto-reply are enabled; it is not limited to the scanning account. Existing sender allowlists are cleared on migration or rebinding.
+- WeChat switch commands received during a run wait for it to finish; the in-memory queue is lost on restart.
+- Improved session restoration, follow-up ordering and desktop session-opening behavior.
+
+### Limitations
+- WeChat has not been validated end to end with a live account. The process lock coordinates compatible processes on the same host and SQLite database only.
+
+---
+
 ## [0.17.5] — Browser Reliability and Tool Improvements (2026-10-28)
 
 ### Fixed

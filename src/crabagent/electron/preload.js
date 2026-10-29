@@ -35,6 +35,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   macosComputerGetStatus: () => ipcRenderer.invoke('macos-computer-get-status'),
   macosComputerOpenSettings: (kind) => ipcRenderer.invoke('macos-computer-open-settings', kind),
   macosComputerSetConfig: (config) => ipcRenderer.invoke('macos-computer-set-config', config),
-  onOpenSession: (callback) => ipcRenderer.on('open-session', (_event, sessionId) => callback(sessionId)),
+  onOpenSession: (callback) => {
+    const listener = (_event, sessionId) => callback(sessionId);
+    ipcRenderer.on('open-session', listener);
+    return () => ipcRenderer.removeListener('open-session', listener);
+  },
   onPetDragDirection: (callback) => ipcRenderer.on('pet-drag-direction', (_event, data) => callback(data)),
 });

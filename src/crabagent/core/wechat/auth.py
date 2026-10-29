@@ -84,6 +84,14 @@ async def wait_for_login(
 async def _persist_credentials(creds: LoginCredentials) -> None:
     """Save login credentials to the config (token encrypted)."""
     cfg = await load_config()
+    if not creds.bot_token or not creds.ilink_bot_id:
+        raise ValueError("QR login response lacks bot credentials")
+    if cfg.account_id != creds.ilink_bot_id or not cfg.ilink_user_id or cfg.ilink_user_id != creds.ilink_user_id:
+        cfg.allowed_users = []
+        cfg.notify_target_user = ""
+        cfg.cached_context_token = ""
+    cfg.allowed_users = []
+    cfg.ilink_user_id = creds.ilink_user_id
     cfg.bot_token = creds.bot_token
     cfg.base_url = creds.base_url
     cfg.account_id = creds.ilink_bot_id  # store ilink_bot_id as account_id
@@ -114,6 +122,10 @@ async def logout() -> None:
     cfg = await load_config()
     cfg.bot_token = ""
     cfg.account_id = ""
+    cfg.ilink_user_id = ""
+    cfg.allowed_users = []
+    cfg.notify_target_user = ""
+    cfg.cached_context_token = ""
     cfg.enabled = False
     await save_config(cfg)
     logger.info("[iLink] Logged out — credentials cleared")

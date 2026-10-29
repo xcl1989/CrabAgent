@@ -32,6 +32,7 @@ export interface CatalogEntry {
 export interface ModelInfo {
   id: string;
   owned_by: string;
+  reasoning_efforts?: string[];
 }
 
 export function listProviders(): Promise<Provider[]> {
