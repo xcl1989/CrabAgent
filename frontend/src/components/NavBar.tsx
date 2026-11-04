@@ -92,6 +92,7 @@ function LanguageSwitcher({ sessionId }: { sessionId?: string | null }) {
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)]",
         )}
         title={t("language.title")}
+        aria-label={t("language.title")}
         onClick={() => {
           // Quick cycle through languages
           const idx = SUPPORTED_LANGUAGES.findIndex((l) => l.code === currentLang);
@@ -150,7 +151,7 @@ export function NavBar({
   return (
     <header
       className={cn(
-        "sticky top-0 z-30 flex items-center gap-1 px-4 sm:px-6 h-12",
+        "sticky top-0 z-30 flex items-center gap-1 px-2 sm:px-6 h-12 min-w-0",
         "backdrop-blur-md bg-[var(--bg-secondary)]/80",
         "border-b border-[var(--border)]",
       )}
@@ -158,7 +159,7 @@ export function NavBar({
     >
       <button
         onClick={() => onNavigate("chat")}
-        className="flex items-center gap-2 mr-1 sm:mr-4 group"
+        className="flex shrink-0 items-center gap-2 mr-1 lg:mr-4 group"
       >
         <span
           className="w-7 h-7 rounded-lg flex items-center justify-center text-base shadow-[var(--shadow-sm)]"
@@ -169,20 +170,22 @@ export function NavBar({
         >
           🦀
         </span>
-        <span className="font-semibold text-sm text-[var(--text-primary)] group-hover:text-[var(--brand)] transition-colors">
+        <span className="hidden lg:inline font-semibold text-sm text-[var(--text-primary)] group-hover:text-[var(--brand)] transition-colors">
           CrabAgent
         </span>
       </button>
 
-      <nav className="flex items-center gap-0.5">
+      <nav aria-label="Primary navigation" className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto overscroll-x-contain [scrollbar-width:none]">
         {items.map((item) => {
           const isActive = currentPage === item.id;
           return (
             <button
               key={item.id}
               onClick={() => onNavigate(item.id)}
+              aria-label={t(item.labelKey)}
+              aria-current={isActive ? "page" : undefined}
               className={cn(
-                "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all relative",
+                "flex shrink-0 items-center gap-1.5 px-2 lg:px-3 py-1.5 rounded-lg text-sm font-medium transition-all relative",
                 isActive
                   ? "text-[var(--text-primary)] bg-[var(--bg-tertiary)]"
                   : "text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]/60",
@@ -191,7 +194,7 @@ export function NavBar({
               <span className={cn(isActive && "text-[var(--brand)]")}>
                 {item.icon}
               </span>
-              <span className="hidden sm:inline">{t(item.labelKey)}</span>
+              <span className="hidden lg:inline">{t(item.labelKey)}</span>
               {isActive && (
                 <span className="absolute -bottom-[9px] left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-[var(--brand)]" />
               )}
@@ -200,7 +203,7 @@ export function NavBar({
         })}
       </nav>
 
-      <div className="ml-auto flex items-center gap-1">
+      <div className="ml-auto flex shrink-0 items-center gap-1">
         {onLogout && (
           <button
             onClick={() => setShowLogoutConfirm(true)}

@@ -66,6 +66,10 @@ _codex_model_cache: dict[str, Any] = {
     "fetched_at": 0.0,
 }
 _CODEX_MODEL_TTL = 600.0  # seconds
+# A failed live fetch must not lock the static fallback in for the full TTL:
+# one network blip (e.g. at app startup, before the proxy is up) would hide
+# newly published models — such as gpt-6.1-terra — for ten minutes.
+_CODEX_FALLBACK_RETRY = 60.0  # seconds
 
 
 def build_codex_headers(access_token: str, account_id: str | None) -> dict[str, str]:
@@ -153,7 +157,13 @@ async def _fetch_codex_models() -> None:
             )
             if resp.status_code == 200:
                 models = resp.json().get("models") or []
-                visible = [m for m in models if m.get("visibility") != "hidden"]
+                # The API spells hidden models "hide" (not "hidden"), so compare
+                # against a set — equality with "hidden" silently let internal
+                # models such as codex-auto-review leak into the selectable list.
+                visible = [
+                    m for m in models
+                    if str(m.get("visibility") or "").strip().lower() not in {"hidden", "hide"}
+                ]
                 visible.sort(key=lambda m: m.get("priority", 999))
                 for m in visible:
                     slug = m.get("slug")
@@ -170,8 +180,10 @@ async def _fetch_codex_models() -> None:
     except Exception as e:
         logger.debug("Failed to fetch Codex model list, using fallback: %s", e)
 
+    used_fallback = False
     if not slugs:
         slugs = fallback
+        used_fallback = True
 
     for slug in slugs:
         _register_dynamic_model_cost(slug, context.get(slug, get_model_token_limit(slug)))
@@ -180,7 +192,11 @@ async def _fetch_codex_models() -> None:
     _codex_model_cache["context"] = context
     _codex_model_cache["efforts"] = efforts
     _codex_model_cache["slug"] = slugs[0] if slugs else CODEX_FALLBACK_MODEL
-    _codex_model_cache["fetched_at"] = now
+    # Retry the live list soon after a fallback instead of waiting a full TTL.
+    if used_fallback:
+        _codex_model_cache["fetched_at"] = now - _CODEX_MODEL_TTL + _CODEX_FALLBACK_RETRY
+    else:
+        _codex_model_cache["fetched_at"] = now
 
 
 async def get_codex_model_slugs() -> list[str]:

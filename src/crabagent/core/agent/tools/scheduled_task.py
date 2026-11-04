@@ -53,9 +53,7 @@ async def _tasks_to_str(tasks: list, locale: str = "en", show_all: bool = False)
 
 @registry.register(
     name="scheduled_task_create",
-    description=(
-        "Create a scheduled task that sends a question to AI at specified cron intervals."
-    ),
+    description=("Create a scheduled task that sends a question to AI at specified cron intervals."),
     parameters={
         "type": "object",
         "properties": {
@@ -117,11 +115,13 @@ async def scheduled_task_create(
             resolved_model = context.model or context.metadata.get("resolved_model", "") or ""
         if not resolved_model:
             from crabagent.core.config import settings
+
             resolved_model = settings.default_model
             # Check database settings override
             try:
                 from crabagent.core.database import AppSetting, async_session_factory
                 from sqlalchemy import select
+
                 async with async_session_factory() as _sdb:
                     _r = await _sdb.execute(select(AppSetting).where(AppSetting.key == "default_model"))
                     _row = _r.scalar_one_or_none()
@@ -156,8 +156,12 @@ async def scheduled_task_create(
             else _t("scheduled_task_default_model", locale)
         )
         return _t(
-            "scheduled_task_created", locale,
-            id=task.id, name=name, cron=cron_expression, model=model_str,
+            "scheduled_task_created",
+            locale,
+            id=task.id,
+            name=name,
+            cron=cron_expression,
+            model=model_str,
         )
     except Exception as e:
         await db.rollback()
@@ -170,7 +174,8 @@ async def scheduled_task_create(
     name="scheduled_task_list",
     description=(
         "List all scheduled tasks for the current user, "
-        "including enabled status, cron expression, last execution time, etc."
+        "including enabled status, cron expression, last execution time, etc. "
+        "Prompts are truncated in the output; use scheduled_task_get for the full prompt."
     ),
     parameters={"type": "object", "properties": {}},
     metadata={"source": "builtin", "category": "scheduled"},
@@ -188,6 +193,80 @@ async def scheduled_task_list(context=None) -> str:
         return await _tasks_to_str(list(tasks), locale=locale, show_all=True)
     except Exception as e:
         return _t("scheduled_task_list_error", locale, error=str(e))
+    finally:
+        await db.close()
+
+
+@registry.register(
+    name="scheduled_task_get",
+    description=(
+        "Get full details of a single scheduled task by ID, "
+        "including the COMPLETE prompt (scheduled_task_list truncates long prompts), "
+        "cron expression, model, enabled status, last run time/status/error, "
+        "next run time and creation time."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "task_id": {
+                "type": "integer",
+                "description": "The task ID to look up.",
+            },
+        },
+        "required": ["task_id"],
+    },
+    metadata={"source": "builtin", "category": "scheduled"},
+)
+async def scheduled_task_get(task_id: int, context=None) -> str:
+    from sqlalchemy import select
+
+    from crabagent.core.database import ScheduledTask
+
+    locale = _get_locale(context)
+    db = await _get_db()
+    try:
+        result = await db.execute(select(ScheduledTask).where(ScheduledTask.id == task_id))
+        task = result.scalar_one_or_none()
+        if not task:
+            return _t("scheduled_task_not_found", locale, id=task_id)
+
+        icon = "\u2705" if task.enabled else "\u23f8\ufe0f"
+        state = (
+            _t("scheduled_task_get_enabled", locale) if task.enabled else _t("scheduled_task_get_paused_state", locale)
+        )
+        next_run = (
+            task.next_run_at.strftime("%Y-%m-%d %H:%M")
+            if hasattr(task.next_run_at, "strftime")
+            else str(task.next_run_at)[:16]
+        )
+        lines = [
+            _t("scheduled_task_get_title", locale, id=task.id, name=task.name),
+            f"{_t('scheduled_task_get_status', locale)} {icon} {state}",
+            f"{_t('scheduled_task_get_cron', locale)} `{task.cron_expression}`",
+        ]
+        if task.model:
+            lines.append(f"{_t('scheduled_task_get_model', locale)} {task.model}")
+        if task.next_run_at:
+            lines.append(f"{_t('scheduled_task_get_next_run', locale)} {next_run}")
+        if task.last_run_at:
+            ts = (
+                task.last_run_at.strftime("%Y-%m-%d %H:%M:%S")
+                if hasattr(task.last_run_at, "strftime")
+                else str(task.last_run_at)[:19]
+            )
+            lines.append(f"{_t('scheduled_task_get_last_run', locale)} {ts} ({task.last_status or 'ok'})")
+        if task.last_error:
+            lines.append(f"{_t('scheduled_task_get_last_error', locale)} {task.last_error}")
+        created = (
+            task.created_at.strftime("%Y-%m-%d %H:%M")
+            if hasattr(task.created_at, "strftime")
+            else str(task.created_at)[:16]
+        )
+        lines.append(f"{_t('scheduled_task_get_created', locale)} {created}")
+        lines.append(f"{_t('scheduled_task_get_prompt', locale)}\n{task.prompt}")
+        return "\n".join(lines)
+    except Exception as e:
+        return _t("scheduled_task_get_error", locale, error=str(e))
     finally:
         await db.close()
 

@@ -1,5 +1,4 @@
 import asyncio
-import codecs
 import logging
 import os
 import subprocess
@@ -10,6 +9,7 @@ from typing import Any
 
 from crabagent.core.agent.tools.registry import registry
 from crabagent.core.agent.tools.sandbox import truncate_output, validate_command
+from crabagent.core.agent.tools.text_encoding import StreamDecoder, windows_output_encoding
 
 logger = logging.getLogger(__name__)
 
@@ -23,16 +23,7 @@ _EMIT_INTERVAL = 0.15
 # Prevents hanging if the process stalls without producing output.
 _CHUNK_READ_TIMEOUT = 60
 
-# On Windows, console output uses the system codepage (e.g. cp936/GBK for
-# Chinese).  We try to force UTF-8 via environment variables, but decode
-# with a sensible fallback encoding if that fails.
-if IS_WINDOWS:
-    import locale
-
-    _ENCODING = locale.getpreferredencoding(False) or "utf-8"
-else:
-    _ENCODING = "utf-8"
-
+_ENCODING = windows_output_encoding()
 
 def _build_subprocess_kwargs(workdir: str | None = None) -> dict:
     """Build platform-appropriate kwargs for subprocess creation."""
@@ -224,7 +215,7 @@ async def _stream_output(
         label: str,
     ) -> None:
         buf = ""
-        decoder = codecs.getincrementaldecoder(_ENCODING)(errors="replace")
+        decoder = StreamDecoder(_ENCODING)
         last_emit = 0.0
         while True:
             try:
@@ -345,14 +336,19 @@ async def _auto_background(
         pass
 
     # Redirect process remaining output to log file (append mode)
-    try:
-        log_fd = os.open(log_file, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
-        if proc.stdout:
-            asyncio.ensure_future(_drain_to_fd(proc.stdout, log_fd))
-        if proc.stderr:
-            asyncio.ensure_future(_drain_to_fd(proc.stderr, log_fd, prefix=b"[stderr] "))
-    except Exception:
-        pass
+    for stream, prefix in ((proc.stdout, b""), (proc.stderr, b"[stderr] ")):
+        if not stream:
+            continue
+        try:
+            log_fd = os.open(log_file, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+        except OSError:
+            continue
+        drain = _drain_to_fd(stream, log_fd, prefix=prefix)
+        try:
+            asyncio.ensure_future(drain)
+        except Exception:
+            drain.close()
+            os.close(log_fd)
 
     # Emit final event to inform frontend
     try:

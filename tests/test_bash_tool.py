@@ -1,6 +1,7 @@
 """Tests for the bash command execution tool."""
 from __future__ import annotations
 
+import asyncio
 import os
 from pathlib import Path
 from types import SimpleNamespace
@@ -217,6 +218,90 @@ class TestProcessHelpers:
         assert "process is running" in result
         assert "4321" in result
         assert events
+
+    @pytest.mark.asyncio
+    async def test_auto_background_keeps_stream_fds_independent(self, monkeypatch, tmp_path):
+        stdout_finished = asyncio.Event()
+        release_stderr = asyncio.Event()
+        tasks = []
+        log_fds = []
+        real_ensure_future = asyncio.ensure_future
+        real_open = os.open
+
+        class Stdout:
+            def __init__(self):
+                self.sent = False
+
+            async def read(self, size):
+                if not self.sent:
+                    self.sent = True
+                    return b"later out"
+                stdout_finished.set()
+                return b""
+
+        class Stderr:
+            def __init__(self):
+                self.sent = False
+
+            async def read(self, size):
+                await release_stderr.wait()
+                if self.sent:
+                    return b""
+                self.sent = True
+                return b"late error"
+
+        def track_task(coro):
+            task = real_ensure_future(coro)
+            tasks.append(task)
+            return task
+
+        async def check_alive(pid):
+            return ""
+
+        def track_open(path, *args):
+            fd = real_open(path, *args)
+            if str(path).endswith("crabagent-bg-12345.log"):
+                log_fds.append(fd)
+            return fd
+
+        monkeypatch.setattr(bash_tool.os, "open", track_open)
+        monkeypatch.setattr(bash_tool.tempfile, "gettempdir", lambda: str(tmp_path))
+        monkeypatch.setattr(bash_tool.asyncio, "ensure_future", track_task)
+        monkeypatch.setattr(bash_tool.asyncio, "sleep", _async_noop)
+        monkeypatch.setattr(bash_tool, "_check_process_alive", check_alive)
+        proc = SimpleNamespace(pid=12345, stdout=Stdout(), stderr=Stderr())
+        await bash_tool._auto_background(proc, ["earlier out"], ["earlier err"], "echo", 1, None)
+        await stdout_finished.wait()
+        await tasks[0]
+
+        # Reuse the closed stdout descriptor for an unrelated file.
+        unrelated = tmp_path / "unrelated"
+        fd = os.open(unrelated, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            assert len(log_fds) == 2 and log_fds[0] != log_fds[1]
+            assert fd == log_fds[0]
+            release_stderr.set()
+            await asyncio.gather(*tasks)
+            os.write(fd, b"safe")
+        finally:
+            os.close(fd)
+        assert unrelated.read_bytes() == b"safe"
+        assert (tmp_path / "crabagent-bg-12345.log").read_bytes() == (
+            b"earlier out\n[stderr]\nearlier errlater out[stderr] late error"
+        )
+
+    @pytest.mark.asyncio
+    async def test_auto_background_without_streams_does_not_open_fd(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(bash_tool.tempfile, "gettempdir", lambda: str(tmp_path))
+        monkeypatch.setattr(bash_tool.asyncio, "sleep", _async_noop)
+        monkeypatch.setattr(bash_tool, "_check_process_alive", _async_return(""))
+
+        def unexpected_open(*args, **kwargs):
+            raise AssertionError("no drain descriptor should be opened")
+
+        monkeypatch.setattr(bash_tool.os, "open", unexpected_open)
+        proc = SimpleNamespace(pid=12346, stdout=None, stderr=None)
+        await bash_tool._auto_background(proc, [], [], "echo", 1, None)
 
     @pytest.mark.asyncio
     async def test_drain_to_fd_writes_prefix_once(self, tmp_path: Path):

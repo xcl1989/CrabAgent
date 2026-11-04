@@ -117,6 +117,7 @@ export default function CalendarPage() {
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showMobileOverview, setShowMobileOverview] = useState(false);
   const [loading, setLoading] = useState(false);
   const [icalSources, setIcalSources] = useState<IcalSource[]>([]);
 
@@ -188,28 +189,30 @@ export default function CalendarPage() {
   return (
     <div className="flex h-full overflow-hidden bg-[var(--bg-primary)]">
       {/* Main calendar area */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className={cn("min-w-0 flex-1 flex-col overflow-hidden", showMobileOverview ? "hidden md:flex" : "flex")}>
         {/* Header */}
-        <div className="flex items-center gap-3 px-6 py-3 border-b border-[var(--border)] shrink-0">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3 px-3 sm:px-6 py-3 border-b border-[var(--border)] shrink-0">
           <div className="flex items-center gap-1">
             <button
+              aria-label="上一时段"
               onClick={() => navigate(-1)}
               className="p-1.5 rounded-lg hover:bg-[var(--bg-tertiary)] text-[var(--text-secondary)] transition-colors"
             >
               <ChevronLeft size={18} />
             </button>
             <button
+              aria-label="下一时段"
               onClick={() => navigate(1)}
               className="p-1.5 rounded-lg hover:bg-[var(--bg-tertiary)] text-[var(--text-secondary)] transition-colors"
             >
               <ChevronRight size={18} />
             </button>
           </div>
-          <h2 className="text-base font-semibold text-[var(--text-primary)] min-w-[140px]">{titleStr}</h2>
+          <h2 className="text-base font-semibold text-[var(--text-primary)] sm:min-w-[140px]">{titleStr}</h2>
           <Button size="sm" variant="ghost" onClick={goToday}>
             今天
           </Button>
-          <div className="ml-auto flex items-center gap-2">
+          <div className="w-full sm:w-auto sm:ml-auto flex flex-wrap items-center gap-2">
             {/* View switcher */}
             <div className="flex items-center rounded-lg border border-[var(--border)] overflow-hidden">
               {(["month", "week", "day"] as ViewMode[]).map((v) => (
@@ -230,7 +233,9 @@ export default function CalendarPage() {
             <Button size="sm" onClick={() => setShowCreate(true)}>
               <Plus size={14} className="mr-1" /> 新建事件
             </Button>
+            <button type="button" onClick={() => setShowMobileOverview(true)} className="md:hidden px-2 py-1 text-xs rounded-lg border border-[var(--border)] text-[var(--text-secondary)]">今日概览</button>
             <button
+              aria-label="日历设置"
               onClick={() => setShowSettings(true)}
               className="p-1.5 rounded-lg hover:bg-[var(--bg-tertiary)] text-[var(--text-secondary)] transition-colors"
             >
@@ -240,17 +245,23 @@ export default function CalendarPage() {
         </div>
 
         {/* Calendar body */}
-        <div className="flex-1 overflow-y-auto p-6">
+        <div className="flex-1 overflow-y-auto p-3 sm:p-6">
+          <div className="md:hidden">
+            <MobileAgenda events={events} rangeStart={rangeStart} rangeEnd={rangeEnd} loading={loading} onEventClick={setSelectedEvent} />
+          </div>
+          <div className="hidden md:block h-full">
           {view === "month" && (
             <MonthView matrix={getMonthMatrix(cursor.getFullYear(), cursor.getMonth())} eventsByDay={eventsByDay} onEventClick={setSelectedEvent} cursor={cursor} />
           )}
           {view === "week" && <WeekView days={getWeekDays(cursor)} events={events} onEventClick={setSelectedEvent} />}
           {view === "day" && <DayView day={cursor} events={events.filter((e) => e.start_time && isSameDay(parseDate(e.start_time), cursor))} onEventClick={setSelectedEvent} />}
+          </div>
         </div>
       </div>
 
       {/* Right sidebar — today overview */}
-      <div className="w-80 shrink-0 border-l border-[var(--border)] flex flex-col overflow-hidden bg-[var(--bg-secondary)]">
+      <div className={cn("w-full md:w-80 shrink-0 border-l border-[var(--border)] flex-col overflow-hidden bg-[var(--bg-secondary)]", showMobileOverview ? "flex" : "hidden md:flex")}>
+        <button type="button" onClick={() => setShowMobileOverview(false)} className="md:hidden text-left px-4 pt-3 text-sm text-[var(--text-secondary)]">← 返回日历</button>
         <div className="px-4 py-3 border-b border-[var(--border)] shrink-0">
           <div className="flex items-center gap-2 text-sm font-semibold text-[var(--text-primary)]">
             <Sun size={15} className="text-amber-400" />
@@ -340,6 +351,31 @@ export default function CalendarPage() {
         <CalendarSettingsModal onClose={() => setShowSettings(false)} onChanged={fetchEvents} />
       )}
     </div>
+  );
+}
+
+export function MobileAgenda({ events, rangeStart, rangeEnd, loading, onEventClick }: {
+  events: CalendarEvent[]; rangeStart: string; rangeEnd: string; loading: boolean;
+  onEventClick: (event: CalendarEvent) => void;
+}) {
+  const visibleEvents = events.filter((event) => {
+    const date = event.start_time?.slice(0, 10);
+    return date && date >= rangeStart && date <= rangeEnd;
+  }).slice().sort((a, b) => (a.start_time || "").localeCompare(b.start_time || ""));
+  return (
+    <section aria-label="日程列表" className="space-y-2">
+      {loading && <p className="py-4 text-sm text-[var(--text-tertiary)]">加载中...</p>}
+      {!loading && visibleEvents.length === 0 && <p className="py-8 text-center text-sm text-[var(--text-tertiary)]">此时段没有事件</p>}
+      {visibleEvents.map((event) => {
+        const colors = TYPE_COLORS[event.type] || TYPE_COLORS.manual;
+        return (
+          <button key={event.id} type="button" onClick={() => onEventClick(event)} className={cn("w-full rounded-lg border p-3 text-left", colors.bg, colors.border)}>
+            <span className="block text-xs text-[var(--text-tertiary)]">{event.start_time?.slice(0, 10)} {event.all_day ? "全天" : event.start_time ? formatTime(event.start_time) : ""}</span>
+            <span className="mt-1 block break-words text-sm font-medium text-[var(--text-primary)]">{event.title}</span>
+          </button>
+        );
+      })}
+    </section>
   );
 }
 

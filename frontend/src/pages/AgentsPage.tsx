@@ -13,6 +13,7 @@ import {
   X,
   Circle,
   Clock,
+  ArrowLeft,
 } from "lucide-react";
 import {
   AgentProfile,
@@ -430,12 +431,13 @@ export default function AgentsPage() {
     </div>
   );
 
+  const mobileDetail = !!selected || showCreate || editingDefault;
   const activeCount = agents.filter((a) => a.enabled).length;
 
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <header className="flex items-center justify-between px-6 h-12 border-b border-[var(--border)] bg-[var(--bg-secondary)] shrink-0">
+      <header className="flex items-center justify-between gap-2 px-3 sm:px-6 h-12 border-b border-[var(--border)] bg-[var(--bg-secondary)] shrink-0">
         <div className="flex items-center gap-3">
           <h1 className="text-sm font-semibold text-[var(--text-primary)]">
             {tr("agentsPage.title")}
@@ -454,7 +456,7 @@ export default function AgentsPage() {
       {/* Body: left-right split */}
       <div className="flex-1 flex overflow-hidden">
         {/* Left: agent list */}
-        <div className="w-64 lg:w-72 shrink-0 border-r border-[var(--border)] flex flex-col bg-[var(--bg-secondary)]">
+        <div className={cn("w-full md:w-64 lg:w-72 shrink-0 border-r border-[var(--border)] flex-col bg-[var(--bg-secondary)]", mobileDetail ? "hidden md:flex" : "flex")}>
           <div className="flex-1 overflow-y-auto p-2">
             {initialLoading && (
               <div className="flex items-center justify-center py-8 text-xs text-[var(--text-tertiary)]">
@@ -544,9 +546,14 @@ export default function AgentsPage() {
         </div>
 
         {/* Right: detail panel */}
-        <div className="flex-1 overflow-y-auto bg-[var(--bg-primary)]">
+        <div className={cn("min-w-0 flex-1 overflow-y-auto bg-[var(--bg-primary)]", mobileDetail ? "block" : "hidden md:block")}>
+          {mobileDetail && (
+            <button type="button" onClick={() => { setSelectedName(null); cancelForm(); }} className="md:hidden flex items-center gap-1 px-4 pt-4 text-sm text-[var(--text-secondary)]">
+              <ArrowLeft size={16} /> {tr("agentsPage.title")}
+            </button>
+          )}
           {editingDefault && (
-            <div className="max-w-2xl mx-auto p-6">
+            <div className="max-w-2xl mx-auto p-4 sm:p-6">
               <h2 className="text-lg font-semibold text-[var(--text-primary)] mb-4">
                 {tr("agentsPage.defaultPermissions")}
               </h2>
@@ -616,7 +623,7 @@ export default function AgentsPage() {
           )}
 
           {showCreate && (
-            <div className="max-w-lg mx-auto p-6">
+            <div className="max-w-lg mx-auto p-4 sm:p-6">
               <h2 className="text-sm font-semibold text-[var(--text-primary)] mb-4">
                 {tr("agentsPage.createNew")}
               </h2>
@@ -630,7 +637,7 @@ export default function AgentsPage() {
           )}
 
           {selected && !showCreate && (
-            <div className="p-6">
+            <div className="p-4 sm:p-6">
               {error && (
                 <div className="mb-3 px-3 py-2 rounded-lg bg-[var(--danger-bg)] border border-[var(--danger-border)] text-xs text-[var(--danger)]">
                   {error}
@@ -647,7 +654,7 @@ export default function AgentsPage() {
               ) : (
                 <>
                   {/* Agent header */}
-                  <div className="flex items-start gap-4 mb-5">
+                  <div className="flex flex-wrap items-start gap-3 sm:gap-4 mb-5">
                     <span className="text-3xl w-14 h-14 rounded-xl flex items-center justify-center shrink-0 bg-[var(--bg-tertiary)] border border-[var(--border)]">
                       {selected.icon || "🤖"}
                     </span>

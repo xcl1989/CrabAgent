@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.17.7] — Mobile Optimization and Model List Fixes (2026-11-04)
+
+### Added
+- Full-app mobile optimization: horizontally scrollable narrow-screen nav, single-line chat input layout, single-pane work-mode toggle on phones; Agents page becomes list/detail single column, Calendar shows an agenda list on mobile, Usage page uses expandable session cards, Settings uses a category picker.
+- New-session button added to the mobile session drawer; it closes the drawer automatically after creating a session.
+- New `scheduled_task_get` tool returns the full prompt of a scheduled task; list output now truncates prompts.
+- Electron tray and app menu gained "Reload UI" and "Force Reload (ignore cache)" actions, restoring the Ctrl/Cmd+R accelerator for refreshing stale frontend caches.
+
+### Fixed
+- Desktop workspace-switcher dropdown no longer clipped by the chat toolbar: the menu renders into body and repositions on scroll/resize.
+- ChatGPT model list: visibility check now matches both `hidden`/`hide` so internal models no longer leak into the selectable list; failed live fetches retry after 60s instead of locking the static fallback for the full TTL (e.g. `gpt-6.1-terra` no longer disappears for ten minutes after a startup network blip); static fallback list adds `gpt-6.1-terra`.
+- Bash streaming output and the read tool now share a unified text-decoding module: incremental decoding for multibyte encodings (UTF-16/32, GB18030, etc.), BOM detection, and binary files are no longer decoded as text.
+
+### Improved
+- Frontend static assets rebuilt and synced; regression tests added for mobile interactions, layouts and the workspace menu (60 frontend tests passing).
+
+### Limitations
+- Mobile layouts are covered by component tests and builds, but soft-keyboard, safe-area and touch behavior still need on-device verification; the packaged desktop app must be rebuilt to pick up the new frontend and Electron menu changes.
+
+---
+
 ## [0.17.6] — WeChat Session Controls and Model Reasoning (2026-10-29)
 
 ### Added

@@ -335,7 +335,7 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(
         onWheel={onWheelIntent}
         onTouchStart={onTouchStartRecord}
         onTouchMove={onTouchMoveIntent}
-        className="chat-scroll flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 sm:px-6 py-3 sm:py-4 relative"
+        className="chat-scroll flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain px-3 sm:px-6 py-3 sm:py-4 relative"
       >
         <div ref={contentRef}>
         {!connected && messages.length > 0 && (

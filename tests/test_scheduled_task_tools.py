@@ -193,3 +193,44 @@ def _async_return(value):
         return value
 
     return inner
+
+
+@pytest.mark.asyncio
+async def test_scheduled_task_get_returns_full_details(monkeypatch: pytest.MonkeyPatch):
+    from datetime import datetime
+
+    task = SimpleNamespace(
+        id=4,
+        name="Flight monitor",
+        prompt="run monitor.py and email report",
+        cron_expression="0 */2 * * *",
+        model="glm-5.3-flash",
+        enabled=True,
+        next_run_at=datetime(2026, 11, 2, 12, 0),
+        last_run_at=datetime(2026, 11, 2, 10, 1, 7),
+        last_status="success",
+        last_error="",
+        created_at=datetime(2026, 10, 28, 12, 55),
+    )
+    db = FakeDB(task=task)
+    monkeypatch.setattr(scheduled_task_tools, "_get_db", _async_return(db))
+
+    result = await scheduled_task_tools.scheduled_task_get(4, context=SimpleNamespace(locale="en", metadata={}))
+
+    assert "# Scheduled Task #4: Flight monitor" in result
+    assert "0 */2 * * *" in result
+    assert "glm-5.3-flash" in result
+    assert "2026-11-02 10:01:07 (success)" in result
+    # full prompt must not be truncated
+    assert "run monitor.py and email report" in result
+    assert "2026-10-28 12:55" in result
+
+
+@pytest.mark.asyncio
+async def test_scheduled_task_get_missing_returns_not_found(monkeypatch: pytest.MonkeyPatch):
+    db = FakeDB(task=None)
+    monkeypatch.setattr(scheduled_task_tools, "_get_db", _async_return(db))
+
+    result = await scheduled_task_tools.scheduled_task_get(999, context=SimpleNamespace(locale="en", metadata={}))
+
+    assert "does not exist" in result

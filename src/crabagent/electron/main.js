@@ -1273,6 +1273,14 @@ function createTray() {
         );
       },
     },
+    {
+      label: '重新载入界面',
+      click: () => reloadMainWindow(false),
+    },
+    {
+      label: '强制重新载入（忽略缓存）',
+      click: () => reloadMainWindow(true),
+    },
     { type: 'separator' },
     {
       label: '退出',
@@ -1287,6 +1295,19 @@ function createTray() {
 
   // Double-click tray icon to show window
   tray.on('double-click', () => showWindow());
+}
+
+// ── Reload the app UI ──
+// The app builds its own application menu, and a custom menu loses Electron's
+// built-in Cmd+R accelerator, so reload has to be wired explicitly. Without it
+// the renderer can only be refreshed by quitting the app — which is how stale
+// frontend caches (e.g. a model list fetched during a network blip) survived
+// for a whole session.
+function reloadMainWindow(ignoreCache = false) {
+  if (!win || win.isDestroyed()) return;
+  showWindow();
+  if (ignoreCache) win.webContents.reloadIgnoringCache();
+  else win.webContents.reload();
 }
 
 // ── Create application menu ──
@@ -1338,6 +1359,27 @@ function createAppMenu() {
         { role: 'copy', label: '复制' },
         { role: 'paste', label: '粘贴' },
         { role: 'selectAll', label: '全选' },
+      ],
+    },
+    {
+      label: '视图',
+      submenu: [
+        {
+          label: '重新载入界面',
+          accelerator: 'CmdOrCtrl+R',
+          click: () => reloadMainWindow(false),
+        },
+        {
+          label: '强制重新载入（忽略缓存）',
+          accelerator: 'CmdOrCtrl+Shift+R',
+          click: () => reloadMainWindow(true),
+        },
+        { type: 'separator' },
+        { role: 'resetZoom', label: '实际大小' },
+        { role: 'zoomIn', label: '放大' },
+        { role: 'zoomOut', label: '缩小' },
+        { type: 'separator' },
+        { role: 'togglefullscreen', label: '进入全屏' },
       ],
     },
     {

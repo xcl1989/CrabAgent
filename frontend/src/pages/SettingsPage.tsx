@@ -186,13 +186,16 @@ export default function SettingsPage() {
   const showSaveButton = activeTab === "general" || activeTab === "search" || activeTab === "privacy" || activeTab === "network";
 
   return (
-    <div className="h-full flex flex-col p-6 sm:p-8 max-w-5xl mx-auto w-full">
+    <div className="h-full min-w-0 flex flex-col p-4 sm:p-8 max-w-5xl mx-auto w-full">
       <h1 className="text-xl font-semibold text-[var(--text-primary)] mb-4">
         {t("settingsPage.title")}
       </h1>
 
-      {/* Tab Bar — nowrap labels; scrolls horizontally instead of wrapping characters */}
-      <div className="flex gap-0.5 mb-6 border-b border-[var(--border)] overflow-x-auto">
+      <select aria-label={t("settingsPage.title")} value={activeTab} onChange={(event) => setActiveTab(event.target.value as SettingsTab)} className="sm:hidden mb-4 w-full rounded-lg border border-[var(--border)] bg-[var(--bg-secondary)] px-3 py-2 text-sm text-[var(--text-primary)]">
+        {tabs.map((tab) => <option key={tab.id} value={tab.id}>{tab.label}</option>)}
+      </select>
+      {/* Desktop tabs remain available at wider widths. */}
+      <div className="hidden sm:flex gap-0.5 mb-6 border-b border-[var(--border)] overflow-x-auto">
         {tabs.map((tab) => (
           <button
             key={tab.id}
@@ -212,9 +215,9 @@ export default function SettingsPage() {
       </div>
 
       {/* Tab Content */}
-      <div className="flex-1 overflow-y-auto pb-4">
+      <div className="flex-1 min-h-0 min-w-0 overflow-y-auto pb-4">
         {activeTab === "general" && (
-          <div className="bg-[var(--bg-secondary)] border border-[var(--border)] rounded-xl p-5 space-y-4">
+          <div className="bg-[var(--bg-secondary)] border border-[var(--border)] rounded-xl p-4 sm:p-5 space-y-4">
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-medium text-[var(--text-secondary)]">
                 {t("settingsPage.defaultModel")}
@@ -263,7 +266,7 @@ export default function SettingsPage() {
         )}
 
         {activeTab === "search" && (
-          <div className="bg-[var(--bg-secondary)] border border-[var(--border)] rounded-xl p-5 space-y-4">
+          <div className="bg-[var(--bg-secondary)] border border-[var(--border)] rounded-xl p-4 sm:p-5 space-y-4">
             <Input
               label={t("settingsPage.searxngUrl")}
               hint={t("settingsPage.searxngUrlDesc")}
@@ -296,7 +299,7 @@ export default function SettingsPage() {
         )}
 
         {activeTab === "privacy" && (
-          <div className="bg-[var(--bg-secondary)] border border-[var(--border)] rounded-xl p-5 space-y-4">
+          <div className="bg-[var(--bg-secondary)] border border-[var(--border)] rounded-xl p-4 sm:p-5 space-y-4">
             <div className="flex items-start justify-between gap-5">
               <div className="space-y-1">
                 <h2 className="text-sm font-medium text-[var(--text-primary)]">允许 Agent 检索历史会话</h2>
@@ -319,7 +322,7 @@ export default function SettingsPage() {
         )}
 
         {activeTab === "network" && (
-          <div className="bg-[var(--bg-secondary)] border border-[var(--border)] rounded-xl p-5 space-y-4">
+          <div className="bg-[var(--bg-secondary)] border border-[var(--border)] rounded-xl p-4 sm:p-5 space-y-4">
             <div className="flex items-center gap-2 mb-2">
               <Wifi size={14} className="text-[var(--brand)]" />
               <span className="text-xs font-medium text-[var(--text-secondary)]">

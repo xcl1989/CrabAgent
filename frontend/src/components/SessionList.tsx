@@ -219,9 +219,19 @@ export default function SessionList({
         <span className="text-sm font-semibold text-[var(--text-primary)] flex-1">
           {t("session.sessions")}
         </span>
+        <Button
+          size="icon"
+          variant="brand"
+          onClick={handleNew}
+          title={`${t("session.newChat")} (⌘K)`}
+          aria-label={t("session.newChat")}
+        >
+          <Plus size={14} />
+        </Button>
         <button
           onClick={onMobileClose}
           title={t("common.close")}
+          aria-label={t("common.close")}
           className="p-1.5 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
         >
           <XIcon size={14} />

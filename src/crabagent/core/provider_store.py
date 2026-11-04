@@ -82,10 +82,13 @@ class ProviderInfo:
 CHATGPT_MODELS = [
     # Current generation (verified on Plus 2026-09 via GET /codex/models)
     # GPT-6 family reports max_context_window = 872_000.
-    # gpt-6.1-sol must stay here: it is the live-API #1 priority model, and the
-    # static list is the fallback shown whenever /codex/models is unreachable.
+    # Mirror every *visible* slug returned by GET /codex/models here, in its
+    # reported priority order: this list is the fallback shown whenever the live
+    # call fails (a startup network blip is enough), so a slug missing here is
+    # invisible to the user until the live list comes back.
     "gpt-6.1-sol",
     "gpt-6-astra",
+    "gpt-6.1-terra",
     "gpt-6-sol",
     "gpt-6-luna",
     "gpt-reserve",

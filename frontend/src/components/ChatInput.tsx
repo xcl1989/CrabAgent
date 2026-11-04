@@ -58,6 +58,7 @@ export default function ChatInput({
         onClick={onFileUpload}
         disabled={sending || replaying}
         title={t("chat.attachFile")}
+        aria-label={t("chat.attachFile")}
         className="h-9 w-9 sm:h-10 sm:w-10"
       >
         <Paperclip size={15} />
@@ -69,6 +70,7 @@ export default function ChatInput({
           onClick={onGoalOpen}
           disabled={sending || replaying}
           title={hasGoal ? "管理目标" : "创建目标"}
+          aria-label={hasGoal ? "管理目标" : "创建目标"}
           className={`h-9 w-9 sm:h-10 sm:w-10 ${hasGoal ? "text-[var(--brand)] border-[var(--brand)]/40" : ""}`}
         >
           <Target size={15} />
@@ -81,7 +83,8 @@ export default function ChatInput({
           onClick={onDelegateOpen}
           disabled={sending || replaying}
           title={t("chat.delegate")}
-          className="hidden sm:flex h-10 w-10 text-[var(--accent-2)] hover:text-[var(--accent-2)] hover:bg-[var(--accent-2-bg)] border-[var(--border)]"
+          aria-label={t("chat.delegate")}
+          className="flex h-9 w-9 sm:h-10 sm:w-10 text-[var(--accent-2)] hover:text-[var(--accent-2)] hover:bg-[var(--accent-2-bg)] border-[var(--border)]"
         >
           <Bot size={15} />
         </Button>
@@ -103,7 +106,8 @@ export default function ChatInput({
         autoGrow
         minRows={1}
         maxRows={6}
-        className="flex-1 min-h-[36px] sm:min-h-[40px]"
+        wrapperClassName="order-first basis-full sm:order-none sm:basis-auto sm:flex-1"
+        className="min-h-[36px] sm:min-h-[40px]"
       />
       {sending ? (
         <Button
@@ -112,6 +116,7 @@ export default function ChatInput({
           className="h-9 w-9 sm:h-10 sm:w-10"
           size="icon"
           title={t("common.stop")}
+          aria-label={t("common.stop")}
         >
           <Square size={14} fill="currentColor" />
         </Button>
@@ -120,9 +125,10 @@ export default function ChatInput({
         variant="brand"
         onClick={handleSend}
         disabled={replaying || !input.trim()}
-        className="h-9 w-9 sm:h-10 sm:w-10 shrink-0"
+        className="h-9 w-9 sm:h-10 sm:w-10 shrink-0 ml-auto sm:ml-0"
         size="icon"
         title={t("common.send")}
+        aria-label={t("common.send")}
       >
         <ArrowUp size={16} />
       </Button>

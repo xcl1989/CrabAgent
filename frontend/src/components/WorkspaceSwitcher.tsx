@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import {
   Activity, Check, ChevronDown, Eye, EyeOff, FolderOpen, GripVertical,
@@ -35,6 +36,8 @@ export default function WorkspaceSwitcher({ current, onChange, onOverlayChange }
   const [attentionByWorkspace, setAttentionByWorkspace] = useState<Record<string, WorkspaceAttention>>({});
   const [draggedWorkspace, setDraggedWorkspace] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
 
   const loadWorkspaces = () => listWorkspaces().then(setWorkspaces).catch(() => {});
 
@@ -84,10 +87,27 @@ export default function WorkspaceSwitcher({ current, onChange, onOverlayChange }
     onOverlayChange?.(open || showPicker || showManager);
   }, [onOverlayChange, open, showPicker, showManager]);
 
+  useLayoutEffect(() => {
+    if (!open) return;
+    const updatePosition = () => {
+      const rect = ref.current?.getBoundingClientRect();
+      if (!rect) return;
+      const width = Math.min(320, window.innerWidth * 0.9);
+      setMenuPosition({ top: rect.bottom + 4, left: Math.max(0, Math.min(rect.left, window.innerWidth - width)) });
+    };
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [open]);
+
   useEffect(() => {
     if (!open) return;
     const handler = (event: MouseEvent) => {
-      if (ref.current && !ref.current.contains(event.target as Node)) setOpen(false);
+      if (!ref.current?.contains(event.target as Node) && !menuRef.current?.contains(event.target as Node)) setOpen(false);
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
@@ -185,7 +205,7 @@ export default function WorkspaceSwitcher({ current, onChange, onOverlayChange }
         <ChevronDown size={10} className={cn("transition-transform", open && "rotate-180")} />
       </button>
 
-      {open && <div className={cn("absolute top-full left-0 mt-1 z-50 min-w-[220px] max-w-[min(90vw,320px)]", "bg-[var(--bg-secondary)] border border-[var(--border)] rounded-lg shadow-[var(--shadow-lg)] py-1 animate-fade-in")}>
+      {open && createPortal(<div ref={menuRef} style={{ top: menuPosition.top, left: menuPosition.left, maxHeight: `calc(100dvh - ${menuPosition.top}px - 8px)` }} className={cn("fixed z-50 min-w-[min(220px,90vw)] max-w-[min(90vw,320px)] overflow-y-auto", "bg-[var(--bg-secondary)] border border-[var(--border)] rounded-lg shadow-[var(--shadow-lg)] py-1 animate-fade-in")}>
         <button onClick={() => { onChange(""); setOpen(false); }} className={cn("w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left transition-colors", !current ? "text-[var(--brand)] font-medium bg-[var(--brand)]/5" : "text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]")}>
           <Home size={12} /><span className="flex-1 truncate" title={currentWorkspacePath}>{workspaceName(currentWorkspacePath) || t("workspaceSwitcher.directory")}</span>{!current && <Check size={12} />}
         </button>
@@ -195,7 +215,7 @@ export default function WorkspaceSwitcher({ current, onChange, onOverlayChange }
         <div className="border-t border-[var(--border)] my-1" />
         <button onClick={() => { setOpen(false); setShowPicker(true); }} className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left text-[var(--text-tertiary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"><Plus size={12} /><span>{t("workspaceSwitcher.chooseDirectory")}</span></button>
         <button onClick={() => { setOpen(false); setShowManager(true); }} className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left text-[var(--text-tertiary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"><Settings2 size={12} /><span>{t("workspaceSwitcher.manage")}</span></button>
-      </div>}
+      </div>, document.body)}
 
       <DirectoryPicker open={showPicker} onClose={() => setShowPicker(false)} onSelect={handlePickerSelect} />
       <Modal open={showManager} onOpenChange={setShowManager} title={t("workspaceSwitcher.manage")} description={t("workspaceSwitcher.manageDescription")} size="lg">

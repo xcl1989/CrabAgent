@@ -6,6 +6,8 @@ from crabagent.core.agent.multimodal import image_file_to_block, is_image_path
 from crabagent.core.agent.token_limits import is_vision_model
 from crabagent.core.agent.tools.path_utils import resolve_tool_path
 from crabagent.core.agent.tools.registry import registry
+from crabagent.core.agent.tools.text_encoding import decode_file
+import codecs
 
 # Shared exclude set — keep in sync with glob.py and grep.py
 _SKIP_DIRS = {
@@ -34,7 +36,10 @@ def _is_binary(filepath: str) -> bool:
     try:
         with open(filepath, "rb") as f:
             chunk = f.read(4096)
-        return b"\x00" in chunk
+        return b"\x00" in chunk and not chunk.startswith((
+            codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE,
+            codecs.BOM_UTF32_LE, codecs.BOM_UTF32_BE,
+        ))
     except (OSError, PermissionError):
         return True
 
@@ -118,7 +123,7 @@ def read_file(
         )
 
     try:
-        lines = path.read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
+        lines = decode_file(path.read_bytes()).splitlines(keepends=True)
     except Exception as e:
         return f"Error reading file: {e}"
 

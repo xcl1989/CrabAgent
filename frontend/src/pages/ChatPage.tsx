@@ -156,6 +156,7 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
     } catch {}
     return "chat";
   });
+  const [mobileWorkChat, setMobileWorkChat] = useState(false);
   const [pendingHighlight, setPendingHighlight] = useState<{ path?: string; text?: string } | null>(null);
   type WorkspaceType = "document" | "code" | "prototype" | "meeting" | "markdown" | "browser";
   const [workspaceType, setWorkspaceType] = useState<WorkspaceType>("document");
@@ -1071,6 +1072,9 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
           >
             <MessageSquare size={16} />
           </button>
+          <button onClick={() => setMobileWorkChat((value) => !value)} className="md:hidden w-8 h-8 flex items-center justify-center rounded-lg hover:bg-[var(--bg-tertiary)] text-[var(--text-secondary)]" aria-label={mobileWorkChat ? t("document.workMode") : t("document.chatMode")} title={mobileWorkChat ? t("document.workMode") : t("document.chatMode")}>
+            <LayoutPanelLeft size={16} />
+          </button>
         </div>
       )}
 
@@ -1078,7 +1082,7 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
         /* ── WORK MODE ───────────────────────────────────────── */
         <>
           {/* AI Chat — left sidebar (350px) */}
-          <div className="w-[350px] shrink-0 min-h-0 overflow-hidden border-r border-[var(--border)] bg-[var(--bg-primary)] flex flex-col">
+          <div className={cn("w-[350px] shrink-0 min-h-0 overflow-hidden border-r border-[var(--border)] bg-[var(--bg-primary)] flex-col md:flex", mobileWorkChat ? "flex max-md:flex-1 max-md:w-0" : "hidden")}>
             <div className="flex-1 min-h-0 flex flex-col">
               {activeSession ? (
                 <>
@@ -1313,7 +1317,7 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
                     )}
 
                     {/* Input row */}
-                    <div className="flex gap-1.5 items-end">
+                    <div className="flex flex-wrap gap-1.5 items-end sm:flex-nowrap">
                       <ChatInput
                         sending={sending}
                         replaying={replaying}
@@ -1345,9 +1349,9 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
           </div>
 
           {/* Workspace — right side (flex-1) */}
-          <div className="flex-1 flex flex-col min-w-0 bg-[var(--bg-primary)]">
+          <div className={cn("flex-1 flex-col min-w-0 bg-[var(--bg-primary)] md:flex", mobileWorkChat ? "hidden" : "flex")}>
             {/* Work mode toolbar */}
-            <div className="flex items-center gap-2 px-3 h-11 border-b border-[var(--border)] bg-[var(--bg-secondary)] shrink-0">
+            <div className="flex items-center gap-2 px-3 h-11 overflow-x-auto overscroll-x-contain border-b border-[var(--border)] bg-[var(--bg-secondary)] shrink-0">
               <button
                 onClick={() => setMode("chat")}
                 className="flex items-center gap-1 px-2 py-1 rounded text-[11px] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)] transition-colors"
@@ -1515,7 +1519,7 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
         <>
         <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
           {/* Toolbar */}
-          <div className="flex items-center gap-1 px-3 h-11 shrink-0 border-b border-[var(--border)] bg-[var(--bg-secondary)]">
+          <div className="flex items-center gap-1 px-2 sm:px-3 h-11 shrink-0 overflow-x-auto overscroll-x-contain border-b border-[var(--border)] bg-[var(--bg-secondary)]">
             <Button
               size="icon"
               variant="ghost"
@@ -1816,7 +1820,7 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
               )}
 
               {/* Input row */}
-              <div className="flex gap-1.5 sm:gap-2 items-end">
+              <div className="flex flex-wrap gap-1.5 items-end sm:flex-nowrap sm:gap-2">
                 <ChatInput
                   sending={sending}
                   replaying={replaying}
@@ -1895,7 +1899,7 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
       {docState && (
         <div
           className={cn(
-            "flex flex-col bg-[var(--bg-primary)] shrink-0 transition-[width] duration-150",
+            "flex flex-col bg-[var(--bg-primary)] shrink-0 transition-[width] duration-150 max-md:!absolute max-md:inset-0 max-md:z-30 max-md:!w-full max-md:!max-w-none",
             docPanelMaximized
               ? "absolute inset-y-0 right-0 z-30 border-l-0 shadow-[-8px_0_24px_rgba(0,0,0,0.35)]"
               : "relative border-l border-[var(--border)]",

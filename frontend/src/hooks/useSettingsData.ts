@@ -78,7 +78,13 @@ function getOrStartSettingsFetch(): Promise<SettingsValues> {
 // ── Providers cache (slow track) ─────────────────────────────────────────
 
 let _providersCache: ProviderModels[] | null = null;
+let _providersCacheAt = 0;
 let _providersInflight: Promise<ProviderModels[]> | null = null;
+
+// Providers add/retire model slugs at any time, so the cached list must not be
+// trusted forever — otherwise a single failed fetch (e.g. right after launch,
+// before the proxy is up) hides models until the app is restarted.
+const PROVIDERS_CACHE_TTL = 10 * 60 * 1000;
 
 async function fetchProviderModels(): Promise<ProviderModels[]> {
   const providers = await providersApi.listProviders();
@@ -100,8 +106,12 @@ function getOrStartProvidersFetch(): Promise<ProviderModels[]> {
   if (!_providersInflight) {
     _providersInflight = fetchProviderModels()
       .then((pm) => {
-        _providersCache = pm;
-        return pm;
+        // Never cache an empty result: it means every provider request failed.
+        if (pm.length > 0) {
+          _providersCache = pm;
+          _providersCacheAt = Date.now();
+        }
+        return pm.length > 0 ? pm : (_providersCache ?? pm);
       })
       .finally(() => {
         _providersInflight = null;
@@ -146,10 +156,20 @@ export function useSettingsData() {
   // Load providers (slow, independent).
   useEffect(() => {
     let mounted = true;
+    const stale = Date.now() - _providersCacheAt > PROVIDERS_CACHE_TTL;
     if (_providersCache) {
       setProviderModels(_providersCache);
       setProvidersLoading(false);
-      return;
+      if (!stale) return;
+      // Stale-while-revalidate: show the cached list, then refresh silently.
+      getOrStartProvidersFetch()
+        .then((pm) => {
+          if (mounted && pm.length > 0) setProviderModels(pm);
+        })
+        .catch(() => {});
+      return () => {
+        mounted = false;
+      };
     }
     setProvidersLoading(true);
     getOrStartProvidersFetch()

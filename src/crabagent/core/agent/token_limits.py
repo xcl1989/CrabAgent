@@ -20,6 +20,7 @@ DEFAULT_MODEL_TOKEN_LIMITS: dict[str, int] = {
     "gpt-6.1-sol": 1_000_000,
     # GPT-6 family: 872K context (reported by GET /codex/models, 2026-09)
     "gpt-6-astra": 872_000,
+    "gpt-6.1-terra": 872_000,
     "gpt-6-sol": 872_000,
     "gpt-6-luna": 872_000,
     "gpt-reserve": 872_000,

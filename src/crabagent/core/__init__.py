@@ -24,6 +24,7 @@ def configure_litellm() -> None:
     # Legacy models: 270K context, 128K max output.
     _CHATGPT_CTX_OVERRIDES = {
         "gpt-6-astra": 872_000,
+        "gpt-6.1-terra": 872_000,
         "gpt-6-sol": 872_000,
         "gpt-6-luna": 872_000,
         "gpt-reserve": 872_000,

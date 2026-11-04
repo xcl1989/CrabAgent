@@ -116,16 +116,17 @@ export interface TextareaProps extends TextareaHTMLAttributes<HTMLTextAreaElemen
   autoGrow?: boolean;
   minRows?: number;
   maxRows?: number;
+  wrapperClassName?: string;
 }
 
 export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
   function Textarea(
-    { label, error, hint, className, id, autoGrow, minRows = 1, maxRows = 8, onInput, ...rest },
+    { label, error, hint, className, wrapperClassName, id, autoGrow, minRows = 1, maxRows = 8, onInput, ...rest },
     ref,
   ) {
     const inputId = id || rest.name || undefined;
     return (
-      <div className="flex flex-col gap-1.5 w-full">
+      <div className={cn("flex flex-col gap-1.5 w-full min-w-0", wrapperClassName)}>
         {label && (
           <label
             htmlFor={inputId}
