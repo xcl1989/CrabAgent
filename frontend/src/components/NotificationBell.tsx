@@ -193,7 +193,10 @@ export default function NotificationBell({ onSwitchSession, onNotificationAction
   useEffect(() => {
     if (open) fetchList();
     const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      // 面板经 portal 渲染到 body，必须同时排除锚点和面板，否则点击面板内容会被误判为外部点击。
+      if (ref.current?.contains(target) || panelRef.current?.contains(target)) return;
+      setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setOpen(false);
