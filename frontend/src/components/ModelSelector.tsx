@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { ChevronDown, Check, Search } from "lucide-react";
 import { cn } from "../lib/cn";
 import { ProviderModels } from "../hooks/useModelSelector";
+import FloatingMenu from "./ui/FloatingMenu";
 
 function providerLabel(provider: ProviderModels["provider"]): string {
   const displayName = provider.display_name || provider.name;
@@ -38,6 +39,7 @@ export default function ModelSelector({
   );
   const [searchQuery, setSearchQuery] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const highlightSource = useRef<"keyboard" | "mouse">("keyboard");
@@ -65,9 +67,10 @@ export default function ModelSelector({
   useEffect(() => {
     if (!open) return;
     const handleClick = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
+      const target = e.target as Node;
+      // The dropdown renders in a portal; its clicks must not count as outside clicks.
+      if (containerRef.current?.contains(target) || menuRef.current?.contains(target)) return;
+      setOpen(false);
     };
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
@@ -217,13 +220,15 @@ export default function ModelSelector({
       </button>
 
       {open && (
-        <div
+        <FloatingMenu
+          open
+          anchorRef={containerRef}
+          menuRef={menuRef}
+          placement={dropdownUpward ? "top-end" : "bottom-start"}
           className={cn(
-            "absolute z-50",
             "min-w-[260px] max-w-[340px]",
             "rounded-lg border border-[var(--border)] bg-[var(--bg-secondary)]",
-            "shadow-[var(--shadow-lg)] flex flex-col",
-            dropdownUpward ? "bottom-full mb-1.5 right-0" : "top-full mt-1.5 left-0"
+            "shadow-[var(--shadow-lg)] flex flex-col overflow-y-auto",
           )}
         >
           <div className="p-1.5 border-b border-[var(--border)]">
@@ -281,7 +286,7 @@ export default function ModelSelector({
               ))
             )}
           </div>
-        </div>
+        </FloatingMenu>
       )}
     </div>
   );

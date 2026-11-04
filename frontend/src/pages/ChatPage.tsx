@@ -43,6 +43,7 @@ import BranchSelector from "../components/BranchSelector";
 import FileBrowser from "../components/FileBrowser";
 import TodoWidget from "../components/TodoWidget";
 import NotificationBell from "../components/NotificationBell";
+import FloatingMenu from "../components/ui/FloatingMenu";
 import { ScheduledTaskPanel } from "../components/ScheduledTaskPanel";
 import TaskPanel from "../components/TaskPanel";
 import EmailPanel from "../components/EmailPanel";
@@ -544,8 +545,14 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
   const [agentProfiles, setAgentProfiles] = useState<AgentProfileType[]>([]);
   const [agentOpen, setAgentOpen] = useState(false);
   const [effortOpen, setEffortOpen] = useState(false);
-  const agentDropdownRef = useRef<HTMLDivElement>(null);
-  const effortDropdownRef = useRef<HTMLDivElement>(null);
+  // 工作模式侧栏与主聊天区各渲染一份 Agent/Effort 工具栏，分别持有锚点 ref；
+  // FloatingMenu 经 portal 渲染到 body，portal 菜单 ref 用于外点关闭判断。
+  const sidebarAgentRef = useRef<HTMLDivElement>(null);
+  const mainAgentRef = useRef<HTMLDivElement>(null);
+  const sidebarEffortRef = useRef<HTMLDivElement>(null);
+  const mainEffortRef = useRef<HTMLDivElement>(null);
+  const agentMenuRef = useRef<HTMLDivElement>(null);
+  const effortMenuRef = useRef<HTMLDivElement>(null);
   const [localeMismatch, setLocaleMismatch] = useState<{ pendingText: string; pendingImages: string[]; pendingFiles: { name: string; path: string; size: number }[] } | null>(null);
   const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
   const [mcpStatus, setMcpStatus] = useState<McpServerStatus[]>([]);
@@ -589,10 +596,15 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
   // Click outside to close agent/effort dropdowns
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (agentOpen && agentDropdownRef.current && !agentDropdownRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      const inAgent = [sidebarAgentRef.current, mainAgentRef.current, agentMenuRef.current]
+        .some((el) => el?.contains(target));
+      if (agentOpen && !inAgent) {
         setAgentOpen(false);
       }
-      if (effortOpen && effortDropdownRef.current && !effortDropdownRef.current.contains(e.target as Node)) {
+      const inEffort = [sidebarEffortRef.current, mainEffortRef.current, effortMenuRef.current]
+        .some((el) => el?.contains(target));
+      if (effortOpen && !inEffort) {
         setEffortOpen(false);
       }
     };
@@ -1137,7 +1149,7 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
                     {/* Agent + Model selectors */}
                     <div className="mb-1 flex items-center gap-2 flex-wrap">
                       {agentProfiles.length > 0 && (
-                        <div ref={agentDropdownRef} className="flex items-center gap-1.5 relative">
+                        <div ref={sidebarAgentRef} className="flex items-center gap-1.5 relative">
                           <span className="text-[11px] text-[var(--text-tertiary)]">
                             Agent
                           </span>
@@ -1156,7 +1168,14 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
                             <ChevronDown size={13} className={cn("text-[var(--text-tertiary)] transition-transform shrink-0", agentOpen && "rotate-180")} />
                           </button>
                           {agentOpen && (
-                            <div className="absolute bottom-full mb-1.5 right-0 z-50 min-w-[160px] rounded-lg border border-[var(--border)] bg-[var(--bg-secondary)] shadow-[var(--shadow-lg)] py-1.5">
+                            <FloatingMenu
+                              open={agentOpen}
+                              anchorRef={sidebarAgentRef}
+                              menuRef={agentMenuRef}
+                              placement="top-end"
+                              gap={6}
+                              className="min-w-[160px] rounded-lg border border-[var(--border)] bg-[var(--bg-secondary)] shadow-[var(--shadow-lg)] py-1.5"
+                            >
                               {[{ name: "default", icon: "🦀", display_name: "default" as const }, ...agentProfiles].map((a) => {
                                 const isSelected = a.name === selectedAgent;
                                 return (
@@ -1180,7 +1199,7 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
                                   </button>
                                 );
                               })}
-                            </div>
+                            </FloatingMenu>
                           )}
                         </div>
                       )}
@@ -1225,7 +1244,7 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
                           )}
                         </div>
                       )}
-                      <div ref={effortDropdownRef} className="flex items-center gap-1.5 relative">
+                      <div ref={sidebarEffortRef} className="flex items-center gap-1.5 relative">
                         <span className="text-[11px] text-[var(--text-tertiary)]">
                           {t("chatPage.effort")}
                         </span>
@@ -1238,7 +1257,14 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
                           <ChevronDown size={13} className={cn("text-[var(--text-tertiary)] transition-transform shrink-0", effortOpen && "rotate-180")} />
                         </button>
                         {effortOpen && (
-                          <div className="absolute bottom-full mb-1.5 right-0 z-50 min-w-[120px] rounded-lg border border-[var(--border)] bg-[var(--bg-secondary)] shadow-[var(--shadow-lg)] py-1.5">
+                          <FloatingMenu
+                            open={effortOpen}
+                            anchorRef={sidebarEffortRef}
+                            menuRef={effortMenuRef}
+                            placement="top-end"
+                            gap={6}
+                            className="min-w-[120px] rounded-lg border border-[var(--border)] bg-[var(--bg-secondary)] shadow-[var(--shadow-lg)] py-1.5"
+                          >
                             {effortOptions.map((effort) => {
                               const label = t(`chatPage.reasoning${effort.charAt(0).toUpperCase() + effort.slice(1)}`, { defaultValue: effort });
                               const isSelected = effort === activeEffort;
@@ -1259,7 +1285,7 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
                                 </button>
                               );
                             })}
-                          </div>
+                          </FloatingMenu>
                         )}
                       </div>
                     </div>
@@ -1640,7 +1666,7 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
               {/* Agent + Model selectors */}
               <div className="mb-1 sm:mb-2 flex items-center gap-2 flex-wrap">
                 {agentProfiles.length > 0 && (
-                  <div ref={agentDropdownRef} className="flex items-center gap-1.5 relative">
+                  <div ref={mainAgentRef} className="flex items-center gap-1.5 relative">
                     <span className="text-[11px] text-[var(--text-tertiary)] hidden sm:inline">
                       Agent
                     </span>
@@ -1659,7 +1685,14 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
                       <ChevronDown size={13} className={cn("text-[var(--text-tertiary)] transition-transform shrink-0", agentOpen && "rotate-180")} />
                     </button>
                     {agentOpen && (
-                      <div className="absolute bottom-full mb-1.5 right-0 z-50 min-w-[160px] rounded-lg border border-[var(--border)] bg-[var(--bg-secondary)] shadow-[var(--shadow-lg)] py-1.5">
+                      <FloatingMenu
+                        open={agentOpen}
+                        anchorRef={mainAgentRef}
+                        menuRef={agentMenuRef}
+                        placement="top-end"
+                        gap={6}
+                        className="min-w-[160px] rounded-lg border border-[var(--border)] bg-[var(--bg-secondary)] shadow-[var(--shadow-lg)] py-1.5"
+                      >
                         {[{ name: "default", icon: "🦀", display_name: "default" as const }, ...agentProfiles].map((a) => {
                           const isSelected = a.name === selectedAgent;
                           return (
@@ -1683,7 +1716,7 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
                             </button>
                           );
                         })}
-                      </div>
+                      </FloatingMenu>
                     )}
                   </div>
                 )}
@@ -1728,7 +1761,7 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
                     )}
                   </div>
                 )}
-                <div ref={effortDropdownRef} className="flex items-center gap-1.5 relative">
+                <div ref={mainEffortRef} className="flex items-center gap-1.5 relative">
                   <span className="text-[11px] text-[var(--text-tertiary)] hidden sm:inline">
                     {t("chatPage.effort")}
                   </span>
@@ -1741,7 +1774,14 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
                     <ChevronDown size={13} className={cn("text-[var(--text-tertiary)] transition-transform shrink-0", effortOpen && "rotate-180")} />
                   </button>
                   {effortOpen && (
-                    <div className="absolute bottom-full mb-1.5 right-0 z-50 min-w-[120px] rounded-lg border border-[var(--border)] bg-[var(--bg-secondary)] shadow-[var(--shadow-lg)] py-1.5">
+                    <FloatingMenu
+                      open={effortOpen}
+                      anchorRef={mainEffortRef}
+                      menuRef={effortMenuRef}
+                      placement="top-end"
+                      gap={6}
+                      className="min-w-[120px] rounded-lg border border-[var(--border)] bg-[var(--bg-secondary)] shadow-[var(--shadow-lg)] py-1.5"
+                    >
                       {effortOptions.map((effort) => {
                         const label = t(`chatPage.reasoning${effort.charAt(0).toUpperCase() + effort.slice(1)}`, { defaultValue: effort });
                         const isSelected = effort === activeEffort;
@@ -1762,7 +1802,7 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
                           </button>
                         );
                       })}
-                    </div>
+                    </FloatingMenu>
                   )}
                 </div>
               </div>

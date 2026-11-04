@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Bold, Italic, Underline, Type, Palette, Sparkles,
@@ -6,6 +6,7 @@ import {
   Presentation, Rows3, ImagePlus,
 } from "lucide-react";
 import { cn } from "../lib/cn";
+import FloatingMenu from "./ui/FloatingMenu";
 
 export interface EditElementStyle {
   bold: boolean;
@@ -53,6 +54,24 @@ export function DocToolbar({ active, style, onStyleChange, onAIEdit, className, 
   const { t } = useTranslation();
   const [showFontMenu, setShowFontMenu] = useState(false);
   const [showColorMenu, setShowColorMenu] = useState(false);
+  const fontAnchorRef = useRef<HTMLDivElement>(null);
+  const colorAnchorRef = useRef<HTMLDivElement>(null);
+  const fontPanelRef = useRef<HTMLDivElement>(null);
+  const colorPanelRef = useRef<HTMLDivElement>(null);
+  // Close toolbar popovers on outside click (menus render in a portal now).
+  useEffect(() => {
+    if (!showFontMenu && !showColorMenu) return;
+    const onDown = (e: PointerEvent) => {
+      const target = e.target as Node;
+      const inside = (r: RefObject<HTMLElement | null>) => r.current?.contains(target);
+      const outside =
+        !inside(fontAnchorRef) && !inside(fontPanelRef) &&
+        !inside(colorAnchorRef) && !inside(colorPanelRef);
+      if (outside) { setShowFontMenu(false); setShowColorMenu(false); }
+    };
+    document.addEventListener("pointerdown", onDown, true);
+    return () => document.removeEventListener("pointerdown", onDown, true);
+  }, [showFontMenu, showColorMenu]);
   const [showAIInput, setShowAIInput] = useState(false);
   const [aiText, setAiText] = useState("");
   const [showFormulaInput, setShowFormulaInput] = useState(false);
@@ -87,6 +106,8 @@ export function DocToolbar({ active, style, onStyleChange, onAIEdit, className, 
 
   // ── PPT Theme picker state ──
   const [showThemePicker, setShowThemePicker] = useState(false);
+  const themeAnchorRef = useRef<HTMLDivElement>(null);
+  const themePanelRef = useRef<HTMLDivElement>(null);
   const [themeColors, setThemeColors] = useState<Record<string, string>>({
     accent1: "4472C4", accent2: "ED7D31", accent3: "A5A5A5",
     accent4: "FFC000", accent5: "5B9BD5", accent6: "70AD47",
@@ -132,7 +153,7 @@ export function DocToolbar({ active, style, onStyleChange, onAIEdit, className, 
       <div className="w-px h-5 bg-[var(--border)] mx-1" />
 
       {/* Font size */}
-      <div className="relative">
+      <div className="relative" ref={fontAnchorRef}>
         <button
           disabled={!active}
           onClick={() => active && setShowFontMenu((v) => !v)}
@@ -143,7 +164,14 @@ export function DocToolbar({ active, style, onStyleChange, onAIEdit, className, 
           <span className="text-[10px]">{style?.fontSize ? Math.round(parseFloat(style.fontSize)) : "—"}</span>
         </button>
         {showFontMenu && active && (
-          <div className="absolute top-full left-0 mt-1 z-50 bg-[var(--bg-elevated)] border border-[var(--border)] rounded-lg shadow-[var(--shadow-lg)] py-1 max-h-48 overflow-y-auto">
+          <FloatingMenu
+            open={showFontMenu && active}
+            anchorRef={fontAnchorRef}
+            menuRef={fontPanelRef}
+            placement="bottom-start"
+            gap={4}
+            className="bg-[var(--bg-elevated)] border border-[var(--border)] rounded-lg shadow-[var(--shadow-lg)] py-1 max-h-48 overflow-y-auto"
+          >
             {FONT_SIZES.map((sz) => (
               <button
                 key={sz}
@@ -156,12 +184,12 @@ export function DocToolbar({ active, style, onStyleChange, onAIEdit, className, 
                 {sz}pt
               </button>
             ))}
-          </div>
+          </FloatingMenu>
         )}
       </div>
 
       {/* Color */}
-      <div className="relative">
+      <div className="relative" ref={colorAnchorRef}>
         <button
           disabled={!active}
           onClick={() => active && setShowColorMenu((v) => !v)}
@@ -171,7 +199,14 @@ export function DocToolbar({ active, style, onStyleChange, onAIEdit, className, 
           <Palette size={14} />
         </button>
         {showColorMenu && active && (
-          <div className="absolute top-full left-0 mt-1 z-50 bg-[var(--bg-elevated)] border border-[var(--border)] rounded-lg shadow-[var(--shadow-lg)] p-2">
+          <FloatingMenu
+            open={showColorMenu && active}
+            anchorRef={colorAnchorRef}
+            menuRef={colorPanelRef}
+            placement="bottom-start"
+            gap={4}
+            className="bg-[var(--bg-elevated)] border border-[var(--border)] rounded-lg shadow-[var(--shadow-lg)] p-2"
+          >
             <div className="grid grid-cols-6 gap-1">
               {["#000000", "#e03131", "#2f9e44", "#1971c2", "#f08c00", "#9c36b5",
                 "#495057", "#fa5252", "#40c057", "#228be6", "#fab005", "#ae3ec9"].map((color) => (
@@ -186,7 +221,7 @@ export function DocToolbar({ active, style, onStyleChange, onAIEdit, className, 
                 />
               ))}
             </div>
-          </div>
+          </FloatingMenu>
         )}
       </div>
 
@@ -292,7 +327,7 @@ export function DocToolbar({ active, style, onStyleChange, onAIEdit, className, 
           >
             <ImagePlus size={14} />
           </button>
-          <div className="relative">
+          <div className="relative" ref={themeAnchorRef}>
             <button
               onClick={() => setShowThemePicker((v) => !v)}
               className={cn(btnBase, "gap-1 w-auto px-1.5 hover:bg-[var(--bg-tertiary)]")}
@@ -302,7 +337,15 @@ export function DocToolbar({ active, style, onStyleChange, onAIEdit, className, 
               <span className="text-[10px]">主题</span>
             </button>
             {showThemePicker && (
-              <div className="absolute top-full left-0 mt-1 z-50 bg-[var(--bg-elevated)] border border-[var(--border)] rounded-lg shadow-[var(--shadow-lg)] p-3 w-72" onClick={(e) => e.stopPropagation()}>
+              <FloatingMenu
+                open={showThemePicker}
+                anchorRef={themeAnchorRef}
+                menuRef={themePanelRef}
+                placement="bottom-start"
+                gap={4}
+                className="bg-[var(--bg-elevated)] border border-[var(--border)] rounded-lg shadow-[var(--shadow-lg)] w-72"
+              >
+                <div className="p-3" onClick={(e) => e.stopPropagation()}>
                 <div className="text-xs font-semibold text-[var(--text-primary)] mb-2">主题配色</div>
                 <div className="grid grid-cols-6 gap-1.5 mb-3">
                   {Object.entries(themeColors).map(([key, val]) => (
@@ -359,7 +402,8 @@ export function DocToolbar({ active, style, onStyleChange, onAIEdit, className, 
                     应用主题
                   </button>
                 </div>
-              </div>
+                </div>
+              </FloatingMenu>
             )}
           </div>
         </>

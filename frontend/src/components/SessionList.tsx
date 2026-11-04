@@ -26,6 +26,7 @@ import { Session, SearchResult, searchSessions } from "../api/sessions";
 import { AgentMonitorInfo } from "../api/monitor";
 import { formatDate } from "../api/time";
 import { Button, EmptyState, ConfirmDialog } from "./ui";
+import FloatingMenu from "./ui/FloatingMenu";
 import { cn } from "../lib/cn";
 
 interface Props {
@@ -75,6 +76,7 @@ export default function SessionList({
   const [deleteTarget, setDeleteTarget] = useState<Session | null>(null);
   const [quickMenuOpen, setQuickMenuOpen] = useState(false);
   const quickMenuRef = useRef<HTMLDivElement>(null);
+  const quickMenuPanelRef = useRef<HTMLDivElement>(null);
 
   // Set of session_ids that are currently running
   const runningIds = useMemo(() => {
@@ -96,11 +98,18 @@ export default function SessionList({
     }
   }, [mobileOpen, onMobileClose]);
 
+  // Close quick menu when the mobile drawer hides this list (portal menu would
+  // otherwise keep floating above the page like the old clipped absolute menu)
+  useEffect(() => {
+    if (!mobileOpen) setQuickMenuOpen(false);
+  }, [mobileOpen]);
+
   // Close quick menu on outside click
   useEffect(() => {
     if (!quickMenuOpen) return;
     const handler = (e: MouseEvent) => {
-      if (quickMenuRef.current && !quickMenuRef.current.contains(e.target as Node)) {
+      if (quickMenuRef.current && !quickMenuRef.current.contains(e.target as Node)
+        && quickMenuPanelRef.current && !quickMenuPanelRef.current.contains(e.target as Node)) {
         setQuickMenuOpen(false);
       }
     };
@@ -456,7 +465,14 @@ export default function SessionList({
               <Zap size={15} />
             </button>
             {quickMenuOpen && (
-              <div className="absolute bottom-full left-0 mb-1 w-40 rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] shadow-[var(--shadow-lg)] py-1 animate-scale-in origin-bottom-left z-50">
+              <FloatingMenu
+                open={quickMenuOpen}
+                anchorRef={quickMenuRef}
+                menuRef={quickMenuPanelRef}
+                placement="top-start"
+                gap={4}
+                className="w-40 rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] shadow-[var(--shadow-lg)] py-1 animate-scale-in"
+              >
                 <button
                   onClick={() => { onQuickAction("digest"); setQuickMenuOpen(false); }}
                   className="w-full flex items-center gap-2 px-3 py-2 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] transition-colors"
@@ -478,7 +494,7 @@ export default function SessionList({
                   <Inbox size={13} className="text-[var(--accent)]" />
                   {t("quickAction.inbox")}
                 </button>
-              </div>
+              </FloatingMenu>
             )}
           </div>
         )}

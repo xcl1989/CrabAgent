@@ -10,6 +10,7 @@ import {
 } from "../api/notifications";
 import { cn } from "../lib/cn";
 import { useWorkStatus } from "../hooks/useWorkStatus";
+import FloatingMenu from "./ui/FloatingMenu";
 
 interface Props {
   onSwitchSession: (sessionId: string) => void;
@@ -155,6 +156,7 @@ export default function NotificationBell({ onSwitchSession, onNotificationAction
   const [tab, setTab] = useState<Tab>("unread");
   const { waitingCount } = useWorkStatus();
   const ref = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
 
   const fetchUnread = async () => {
     try {
@@ -246,9 +248,13 @@ export default function NotificationBell({ onSwitchSession, onNotificationAction
         )}
       </button>
       {open && (
-        <div
+        <FloatingMenu
+          open
+          anchorRef={ref}
+          menuRef={panelRef}
+          placement="bottom-end"
           className={cn(
-            "absolute right-0 top-full mt-1 w-80 rounded-xl flex flex-col z-50",
+            "w-80 max-w-[92vw] rounded-xl flex flex-col overflow-hidden",
             "bg-[var(--bg-elevated)] border border-[var(--border)]",
             "shadow-[var(--shadow-lg)] animate-scale-in origin-top-right",
           )}
@@ -306,7 +312,7 @@ export default function NotificationBell({ onSwitchSession, onNotificationAction
               ))
             )}
           </div>
-        </div>
+        </FloatingMenu>
       )}
     </div>
   );

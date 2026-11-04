@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   FolderOpen,
   Lightbulb,
@@ -27,6 +27,7 @@ import {
 import { listWorkspaces, type WorkspaceInfo } from "../api/sessions";
 import { Button, Input, Modal, EmptyState, toast } from "../components/ui";
 import { cn } from "../lib/cn";
+import FloatingMenu from "../components/ui/FloatingMenu";
 
 type MemoryTab = "project" | "agent_lesson" | "user_preference";
 
@@ -67,6 +68,20 @@ export default function MemoryPage() {
   const [selectedWorkspace, setSelectedWorkspace] = useState("");
   const [projectMemory, setProjectMemory] = useState<ProjectMemoryData | null>(null);
   const [wsOpen, setWsOpen] = useState(false);
+  const wsAnchorRef = useRef<HTMLDivElement>(null);
+  const wsPanelRef = useRef<HTMLDivElement>(null);
+  // 工作区下拉通过 portal 渲染，外点关闭需同时排除锚点和浮层。
+  useEffect(() => {
+    if (!wsOpen) return;
+    const onDown = (e: PointerEvent) => {
+      const target = e.target as Node;
+      if (!wsAnchorRef.current?.contains(target) && !wsPanelRef.current?.contains(target)) {
+        setWsOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", onDown, true);
+    return () => document.removeEventListener("pointerdown", onDown, true);
+  }, [wsOpen]);
 
   // Agent filter
   const [allAgentNames, setAllAgentNames] = useState<string[]>([]);
@@ -222,7 +237,7 @@ export default function MemoryPage() {
       {tab === "project" && projectMemory && (
         <div className="px-5 pb-3">
           {workspaces.length > 1 && (
-            <div className="relative mb-3">
+            <div className="relative mb-3" ref={wsAnchorRef}>
               <button
                 onClick={() => setWsOpen((o) => !o)}
                 className="flex items-center gap-2 w-full max-w-xs px-3 py-1.5 rounded-lg text-xs text-left border border-[var(--border)] bg-[var(--bg-tertiary)] text-[var(--text-primary)] hover:border-[var(--border-strong)] transition-colors"
@@ -239,7 +254,14 @@ export default function MemoryPage() {
                 />
               </button>
               {wsOpen && (
-                <div className="absolute top-full left-0 z-50 mt-1 rounded-lg border border-[var(--border)] bg-[var(--bg-secondary)] shadow-[var(--shadow-lg)] max-h-48 overflow-auto max-w-xs">
+                <FloatingMenu
+                  open={wsOpen}
+                  anchorRef={wsAnchorRef}
+                  menuRef={wsPanelRef}
+                  placement="bottom-start"
+                  gap={4}
+                  className="rounded-lg border border-[var(--border)] bg-[var(--bg-secondary)] shadow-[var(--shadow-lg)] max-h-48 overflow-auto max-w-xs"
+                >
                   {workspaces.map((ws) => (
                     <button
                       key={ws.workspace}
@@ -256,7 +278,7 @@ export default function MemoryPage() {
                       </span>
                     </button>
                   ))}
-                </div>
+                </FloatingMenu>
               )}
             </div>
           )}

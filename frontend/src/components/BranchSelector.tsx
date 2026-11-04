@@ -4,6 +4,7 @@ import * as sessionsApi from "../api/sessions";
 import { BranchInfo } from "../api/sessions";
 import { useTranslation } from "react-i18next";
 import { cn } from "../lib/cn";
+import FloatingMenu from "./ui/FloatingMenu";
 
 interface Props {
   sessionId: string;
@@ -22,6 +23,7 @@ export default function BranchSelector({
   const [branches, setBranches] = useState<BranchInfo[]>([]);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     sessionsApi.listBranches(sessionId).then(setBranches).catch(() => {});
@@ -31,7 +33,10 @@ export default function BranchSelector({
   useEffect(() => {
     if (!open) return;
     const onDoc = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      // The menu renders in a portal; its clicks must not count as outside clicks.
+      if (ref.current?.contains(target) || menuRef.current?.contains(target)) return;
+      setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setOpen(false);
@@ -73,9 +78,13 @@ export default function BranchSelector({
       </button>
 
       {open && (
-        <div
+        <FloatingMenu
+          open
+          anchorRef={ref}
+          menuRef={menuRef}
+          placement="bottom-start"
           className={cn(
-            "absolute top-full left-0 mt-1 z-50 py-1 rounded-lg min-w-[200px]",
+            "py-1 rounded-lg min-w-[200px] overflow-y-auto",
             "bg-[var(--bg-elevated)] border border-[var(--border)]",
             "shadow-[var(--shadow-md)] animate-scale-in origin-top-left",
           )}
@@ -134,7 +143,7 @@ export default function BranchSelector({
               </div>
             );
           })}
-        </div>
+        </FloatingMenu>
       )}
     </div>
   );
