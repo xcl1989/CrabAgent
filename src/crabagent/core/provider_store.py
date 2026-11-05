@@ -113,6 +113,8 @@ CHATGPT_MODELS = [
 ]
 
 CHATGPT_IMAGE_MODELS = [
+    "gpt-image-2.6-sunburst",
+    "gpt-image-2.6-flare",
     "image-2.5",
     "image-2",
     "gpt-image-2",

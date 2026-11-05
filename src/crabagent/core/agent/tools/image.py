@@ -27,11 +27,15 @@ logger = logging.getLogger(__name__)
 
 # ── Provider → default image model mapping ─────────────────────────────
 _CHATGPT_IMAGE_MODELS = [
+    "gpt-image-2.6-sunburst",
+    "gpt-image-2.6-flare",
     "image-2.5",
     "image-2",
     "chatgpt-image-latest",
 ]
 _OPENAI_IMAGE_MODELS = [
+    "gpt-image-2.6-sunburst",
+    "gpt-image-2.6-flare",
     "gpt-image-2",
     "gpt-image-1.5",
     "gpt-image-1",
@@ -40,6 +44,8 @@ _OPENAI_IMAGE_MODELS = [
 ]
 _VALID_SIZES = {"1024x1024", "1024x1536", "1536x1024", "1792x1024", "1024x1792"}
 _VALID_QUALITIES = {"auto", "standard", "hd", "high", "medium", "low"}
+_SUNBURST = "gpt-image-2.6-sunburst"
+_FLARE = "gpt-image-2.6-flare"
 
 
 def _resolve_model(provider_type: str, model: str) -> str:
@@ -188,7 +194,7 @@ async def _chatgpt_image_edit(prompt: str, image_path: Path | list[Path]) -> byt
             }
         ],
         "store": False,
-        "tools": [{"type": "image_generation", "model": "image-2.5"}],
+        "tools": [{"type": "image_generation", "model": _SUNBURST}],
         "tool_choice": "auto",
         "parallel_tool_calls": True,
         "stream": True,
@@ -345,14 +351,14 @@ async def image_edit(
         size = "1024x1024"
 
     try:
-        edit_model = "image-2.5" if provider_type == "chatgpt" else "gpt-image-2"
+        edit_model = _SUNBURST
         if provider_type == "chatgpt":
             image_bytes = await _chatgpt_image_edit(prompt, references)
         else:
             import litellm
 
             response = await litellm.aimage_edit(
-                model="gpt-image-2",
+                model=edit_model,
                 image=(
                     references[0].read_bytes()
                     if len(references) == 1
@@ -390,6 +396,7 @@ async def image_edit(
             "generated": 1,
             "provider": provider_name,
             "model": edit_model,
+            "model_verified": False,
             "size": size,
             "reference_image": str(references[0]),
             "reference_images": [str(path) for path in references],
@@ -451,6 +458,16 @@ async def image_edit(
                 ),
                 "default": "",
             },
+            "task_complexity": {
+                "type": "string",
+                "enum": ["simple", "complex"],
+                "description": (
+                    "Choose simple for straightforward images (Flare); choose complex for detailed "
+                    "compositions, dense text, or precise layouts (Sunburst). Default: complex. "
+                    "Selects the model, not the model complexity setting."
+                ),
+                "default": "complex",
+            },
             "output_name": {
                 "type": "string",
                 "description": (
@@ -471,6 +488,7 @@ async def image_generate(
     style: str = "",
     output_name: str = "",
     context=None,
+    task_complexity: str = "complex",
 ) -> str:
     """Generate images using the configured AI provider."""
     import litellm
@@ -510,17 +528,20 @@ async def image_generate(
             pass
 
     # ── Determine model ──────────────────────────────────────────────
+    if task_complexity not in {"simple", "complex"}:
+        return json.dumps({"error": "task_complexity must be simple or complex"})
+    selected_model = _FLARE if task_complexity == "simple" else _SUNBURST
     if provider_type == "chatgpt":
-        model = "chatgpt/image-2.5"
+        model = f"chatgpt/{selected_model}"
         # Clamp n for chatgpt provider (typically max 1-2)
         if n > 2:
             n = 2
     elif provider_type == "openai":
-        model = "gpt-image-2"
+        model = selected_model
         if n > 4:
             n = 4
     else:
-        model = "gpt-image-2"
+        model = selected_model
         if n > 4:
             n = 4
 
@@ -626,6 +647,8 @@ async def image_generate(
         "model": model,
         "provider": provider_name,
         "provider_type": provider_type,
+        "model_verified": False,
+        "task_complexity": task_complexity,
         "size": size,
         "quality": quality,
         "n": n,
@@ -643,6 +666,8 @@ async def image_generate(
         "generated": len(saved),
         "provider": provider_name,
         "model": model,
+        "model_verified": False,
+        "task_complexity": task_complexity,
         "size": size,
         "quality": quality,
         "images": saved,

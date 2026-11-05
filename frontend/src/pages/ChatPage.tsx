@@ -323,6 +323,7 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
     handleAbort,
     handleDeleteSession,
     getSubAgentContent,
+    requestMessageImages,
   } = useChatState(wrappedOnEvent, workspace, onAutoLoadSession);
 
   useEffect(() => {
@@ -1122,6 +1123,7 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
                   {goal && <GoalCard goal={goal} busy={goalSaving || sending} onPause={() => setGoalStatus("paused")} onResume={() => setGoalStatus("active")} onEdit={() => setGoalComposerOpen(true)} onHistory={() => setGoalTimelineOpen(true)} />}
                   <ChatPanel
                     sessionId={activeSession.session_id}
+                    onVisibleImage={requestMessageImages}
                     messages={messages}
                     connected={connected}
                     sending={sending}
@@ -1638,6 +1640,7 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
             {goal && <GoalCard goal={goal} busy={goalSaving || sending} onPause={() => setGoalStatus("paused")} onResume={() => setGoalStatus("active")} onEdit={() => setGoalComposerOpen(true)} onHistory={() => setGoalTimelineOpen(true)} />}
             <ChatPanel
               sessionId={activeSession.session_id}
+              onVisibleImage={requestMessageImages}
               messages={messages}
               connected={connected}
               sending={sending}

@@ -35,6 +35,7 @@ function StreamingMarkdownPre({ children }: { children?: ReactNode }) {
 
 const components = {
   a({ children, ...props }: any) { return <a {...props} target="_blank" rel="noopener noreferrer">{children}</a>; },
+  img({ node: _node, ...props }: any) { return <img {...props} loading="lazy" />; },
   pre: MarkdownPre,
 };
 

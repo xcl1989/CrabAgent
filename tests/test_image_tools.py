@@ -165,6 +165,8 @@ class TestImageEdit:
         assert result["reference_image"] == str(paths[0])
         assert result["reference_images"] == [str(p) for p in expected]
         assert Path(result["images"][0]["path"]).read_bytes() == b"edited"
+        assert mock_edit.call_args.kwargs["model"] == "gpt-image-2.6-sunburst"
+        assert result["model"] == "gpt-image-2.6-sunburst"
         sent = mock_edit.call_args.kwargs["image"]
         if mode == "legacy":
             assert sent == paths[0].read_bytes()
@@ -245,6 +247,7 @@ class TestImageEdit:
 
         monkeypatch.setattr(httpx, "AsyncClient", Client)
         assert await image_module._chatgpt_image_edit("Swap person", paths) == raw_image
+        assert captured["tools"] == [{"type": "image_generation", "model": "gpt-image-2.6-sunburst"}]
         content = captured["input"][0]["content"]
         images = [part["image_url"] for part in content if part["type"] == "input_image"]
         assert images == [
@@ -252,3 +255,48 @@ class TestImageEdit:
             for p, mime in zip(paths, ["image/png", "image/jpeg"])
         ]
         assert [part["text"] for part in content[1:] if part["type"] == "input_text"] == ["Image 1:", "Image 2:"]
+
+
+class TestImageModelRouting:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("provider_type", "task_complexity", "expected"),
+        [
+            ("openai", "simple", "gpt-image-2.6-flare"),
+            ("openai", "complex", "gpt-image-2.6-sunburst"),
+            ("chatgpt", "simple", "chatgpt/gpt-image-2.6-flare"),
+            ("chatgpt", "complex", "chatgpt/gpt-image-2.6-sunburst"),
+        ],
+    )
+    async def test_generate_routing(self, tmp_path, monkeypatch, provider_type, task_complexity, expected):
+        import base64
+        import json
+        from unittest.mock import AsyncMock
+
+        import litellm
+
+        from crabagent.core import provider_store
+
+        provider = SimpleNamespace(provider_type=provider_type, name="test")
+        monkeypatch.setattr(provider_store, "get_default_provider", AsyncMock(return_value=provider))
+        generate = AsyncMock(return_value={"data": [{"b64_json": base64.b64encode(b"image").decode()}]})
+        monkeypatch.setattr(litellm, "aimage_generation", generate)
+        ctx = SimpleNamespace(workspace=tmp_path)
+        result = json.loads(await image_module.image_generate("test", context=ctx, task_complexity=task_complexity))
+        assert generate.call_args.kwargs["model"] == expected
+        assert result["model"] == expected
+        assert result["model_verified"] is False
+        assert result["task_complexity"] == task_complexity
+
+    @pytest.mark.asyncio
+    async def test_invalid_complexity_rejected(self, monkeypatch):
+        import json
+        from unittest.mock import AsyncMock
+
+        import litellm
+
+        generate = AsyncMock()
+        monkeypatch.setattr(litellm, "aimage_generation", generate)
+        result = json.loads(await image_module.image_generate("test", task_complexity="high"))
+        assert "error" in result
+        generate.assert_not_called()

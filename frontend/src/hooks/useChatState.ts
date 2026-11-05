@@ -5,6 +5,7 @@ import { Session, Message } from "../api/sessions";
 import * as sessionsApi from "../api/sessions";
 import { AgentMonitorInfo } from "../api/monitor";
 import { sseEventToMessages, dbMessagesToChat } from "../lib/messageTransforms";
+import { ImageLoadQueue } from "../lib/imageLoadQueue";
 import { useSSE } from "./useSSE";
 
 export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: string, onAutoLoadSession?: (session: Session) => void) {
@@ -25,6 +26,7 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
   // leaving the chat area blank until the user clicked the session again.
   const loadSeqRef = useRef(0);
   const viewRequestRef = useRef<AbortController | null>(null);
+  const imageQueueRef = useRef(new ImageLoadQueue());
   // True once the user manually picks a session, so the workspace auto-loader
   // cannot override that choice when its slower response arrives.
   const manualSelectRef = useRef(false);
@@ -32,6 +34,8 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
   const subFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const subAgentContents = useRef<Map<string, string>>(new Map());
   const resetViewRequests = useCallback(() => {
+    imageQueueRef.current.cancel();
+    imageQueueRef.current = new ImageLoadQueue();
     viewRequestRef.current?.abort();
     viewRequestRef.current = new AbortController();
     pendingSubEventsRef.current = [];
@@ -101,47 +105,25 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
     }
   }, []);
 
-  // Lazily fetch images for messages marked with lazy_images.
-  // Called after messages are set so the UI renders text immediately.
-  const lazyLoadImages = useCallback(
-    (chatMsgs: ChatMessage[], sessionId: string) => {
-      const signal = viewRequestRef.current?.signal;
-      const isCurrent = () => !signal?.aborted && activeSessionRef.current?.session_id === sessionId;
-      const lazyMsgs = chatMsgs.filter((m) => m.lazy_images && m.db_message_id);
-      if (lazyMsgs.length === 0) return;
-      // Deduplicate by db_message_id
-      const seen = new Set<number>();
-      const queue = lazyMsgs.filter((msg) => {
-        const dbId = msg.db_message_id!;
-        if (seen.has(dbId)) return false;
-        seen.add(dbId);
-        return true;
-      });
-      // Leave HTTP connections available for navigation and SSE.
-      const worker = async () => {
-        while (queue.length > 0 && isCurrent()) {
-          const dbId = queue.shift()!.db_message_id!;
-          try {
-            const res = await sessionsApi.getMessageImages(sessionId, dbId, signal);
-            if (!isCurrent()) return;
-            setMessages((prev) => prev.map((m) =>
-              m.db_message_id === dbId && m.lazy_images
-                ? { ...m, images: res.images?.length ? res.images : m.images, lazy_images: false }
-                : m,
-            ));
-          } catch {
-            if (!isCurrent()) return;
-            setMessages((prev) => prev.map((m) =>
-              m.db_message_id === dbId && m.lazy_images ? { ...m, lazy_images: false } : m,
-            ));
-          }
-        }
-      };
-      const workerCount = Math.min(2, queue.length);
-      for (let i = 0; i < workerCount; i += 1) void worker();
-    },
-    [],
-  );
+  const requestMessageImages = useCallback((dbId: number, sessionId: string) => {
+    const signal = viewRequestRef.current?.signal;
+    const isCurrent = () => !signal?.aborted && activeSessionRef.current?.session_id === sessionId;
+    if (!isCurrent()) return;
+    imageQueueRef.current.enqueue(dbId, async () => {
+      if (!isCurrent()) return;
+      try {
+        const res = await sessionsApi.getMessageImages(sessionId, dbId, signal);
+        if (!isCurrent()) return;
+        setMessages((prev) => prev.map((m) =>
+          m.db_message_id === dbId && m.lazy_images
+            ? { ...m, images: res.images?.length ? res.images : m.images, lazy_images: false }
+            : m,
+        ));
+      } catch {
+        // Keep the placeholder retryable on a future visibility change.
+      }
+    });
+  }, []);
 
   // Load and apply a session's messages with two guarantees:
   //   1. A response is only applied while its token is still current AND the
@@ -156,7 +138,7 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
         const chatMsgs = dbMessagesToChat(msgs);
         populateSubAgentContents(chatMsgs);
         setMessages((prev) => preserveLiveInteractions(chatMsgs, prev));
-        lazyLoadImages(chatMsgs, sessionId);
+
       };
       const signal = viewRequestRef.current?.signal;
       for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -172,12 +154,13 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
         }
       }
     },
-    [populateSubAgentContents, preserveLiveInteractions, lazyLoadImages],
+    [populateSubAgentContents, preserveLiveInteractions],
   );
 
   useEffect(() => {
     return () => {
       if (subFlushTimerRef.current) clearTimeout(subFlushTimerRef.current);
+      imageQueueRef.current.cancel();
       viewRequestRef.current?.abort();
     };
   }, []);
@@ -336,7 +319,7 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
                   })();
               return merged;
             });
-            lazyLoadImages(dbMsgs, sid);
+
           }, 800);
         }
       }
@@ -455,7 +438,7 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
                 : prev.filter((m) => m.role === "screenshot" && m.images?.length);
               return dbTotal >= prevTotal ? [...chatMsgs, ...liveOnly] : prev;
             });
-            lazyLoadImages(chatMsgs, activeSid);
+
           }
         }
 
@@ -521,9 +504,9 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
       const chatMsgs = dbMessagesToChat(msgs);
       populateSubAgentContents(chatMsgs);
       setMessages(chatMsgs);
-      lazyLoadImages(chatMsgs, activeSession.session_id);
+
     },
-    [activeSession, populateSubAgentContents, lazyLoadImages]
+    [activeSession, populateSubAgentContents]
   );
 
   const handleBranch = useCallback(
@@ -537,9 +520,9 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
       const msgs = await sessionsApi.getMessages(activeSession.session_id);
       const chatMsgs = dbMessagesToChat(msgs);
       setMessages(chatMsgs);
-      lazyLoadImages(chatMsgs, activeSession.session_id);
+
     },
-    [activeSession, lazyLoadImages]
+    [activeSession]
   );
 
   const handleAbort = useCallback(async () => {
@@ -591,5 +574,6 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
     handleAbort,
     handleDeleteSession,
     getSubAgentContent,
+    requestMessageImages,
   };
 }

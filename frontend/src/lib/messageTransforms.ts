@@ -574,7 +574,12 @@ export function dbMessagesToChat(msgs: Message[]): ChatMessage[] {
         tool_call_id: m.tool_call_id || undefined,
         content: toolContent,
       };
-      if (toolImages && toolImages.length > 0) toolResultMsg.images = toolImages;
+      const validToolImages = toolImages?.filter(Boolean);
+      if (validToolImages?.length) toolResultMsg.images = validToolImages;
+      if (m.has_images && (!validToolImages || validToolImages.length < (toolImages?.length || 1))) {
+        toolResultMsg.lazy_images = true;
+        toolResultMsg.db_message_id = m.id;
+      }
       result.push(toolResultMsg);
       continue;
     }

@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.17.8] — Image Routing and Chat Image Loading (2026-11-05)
+
+### Changed
+- Image generation selects GPT Image 2.6 Flare for simple requests and Sunburst for complex requests; image edits request Sunburst. The `task_complexity` argument controls model selection.
+- Chat history loads images when messages become visible, with a bounded, cancellable queue and lazy rendering.
+
+### Limitations
+- Model names indicate requests, not verified execution: the ChatGPT subscription endpoint may ignore model selection, and OpenAI API access has not been tested. Packaged desktop builds require rebuilding.
+
+---
+
 ## [0.17.7] — Mobile Optimization and Model List Fixes (2026-11-04)
 
 ### Added

@@ -678,6 +678,7 @@ function ImageGenerateRender({ args, result, images, onPreviewImage, accentVar }
           if (!img) return null;
           return (
             <img
+          loading="lazy"
               key={idx}
               src={img}
               alt={`Generated ${idx + 1}`}
@@ -782,6 +783,7 @@ function GenericRender({ name, args, result, images, onPreviewImage, accentVar }
               <div className="mt-2 flex flex-wrap gap-2">
                 {images.map((img, idx) => (
                   <img
+          loading="lazy"
                     key={idx}
                     src={img}
                     alt={`Result ${idx + 1}`}

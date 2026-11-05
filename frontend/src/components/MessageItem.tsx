@@ -643,6 +643,7 @@ const ScreenshotItem = memo(function ScreenshotItem({
       )}
       {msg.images?.map((img, idx) => (
         <img
+          loading="lazy"
           key={idx}
           src={img}
           alt="Generated image"
@@ -684,6 +685,7 @@ const UserMessageItem = memo(function UserMessageItem({
           <div className="flex gap-2 mb-2 flex-wrap">
             {msg.images.map((img, idx) => (
               <img
+          loading="lazy"
                 key={idx}
                 src={img}
                 className="max-w-[200px] max-h-[200px] rounded-lg cursor-pointer object-contain"

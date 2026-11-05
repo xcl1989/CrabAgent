@@ -29,6 +29,7 @@ interface ChatMessage {
   server_name?: string;
   images?: string[];
   lazy_images?: boolean;
+  db_message_id?: number;
   sub_agent_id?: string;
   sub_agent_name?: string;
   sub_agent_display?: string;
@@ -51,6 +52,7 @@ interface ChatMessage {
 
 interface Props {
   sessionId?: string | null;
+  onVisibleImage?: (id: number, sessionId: string) => void;
   messages: ChatMessage[];
   connected: boolean;
   sending?: boolean;
@@ -69,6 +71,7 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(
   (
     {
       sessionId,
+      onVisibleImage,
       messages,
       connected,
       sending,
@@ -348,8 +351,8 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(
         {grouped.map((item) => {
           const key = Array.isArray(item) ? item[0].id : item.id;
           return (
+            <VisibleMessage key={key} item={item} sessionId={sessionId} onVisibleImage={onVisibleImage}>
             <MessageItem
-              key={key}
               item={item}
               sessionId={sessionId}
               replaying={replaying}
@@ -367,6 +370,7 @@ const ChatPanel = forwardRef<HTMLDivElement, Props>(
                   : undefined
               }
             />
+            </VisibleMessage>
           );
         })}
 
@@ -472,3 +476,24 @@ function ExecutionTreeToggle({ sessionId }: { sessionId: string }) {
   );
 }
 export default ChatPanel;
+
+function VisibleMessage({ item, sessionId, onVisibleImage, children }: {
+  item: ChatMessage | ChatMessage[]; sessionId?: string | null;
+  onVisibleImage?: (id: number, sessionId: string) => void; children: React.ReactNode;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const entries = Array.isArray(item) ? item : [item];
+  const ids = entries.filter((m) => m.lazy_images && m.db_message_id).map((m) => m.db_message_id!).join(",");
+  useEffect(() => {
+    const element = ref.current;
+    if (!element || !ids || !sessionId || !onVisibleImage) return;
+    const request = () => ids.split(",").map(Number).forEach((id) => onVisibleImage(id, sessionId));
+    if (typeof IntersectionObserver === "undefined") { request(); return; }
+    const observer = new IntersectionObserver((changes) => {
+      if (changes.some((change) => change.isIntersecting)) request();
+    }, { root: element.closest(".chat-scroll"), rootMargin: "0px" });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [ids, sessionId, onVisibleImage]);
+  return <div ref={ref}>{children}</div>;
+}
