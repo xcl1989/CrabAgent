@@ -74,6 +74,8 @@ export default function ProviderPanel({
   const [deepseekBusy, setDeepseekBusy] = useState<string | null>(null);
   const [zhipuQuotas, setZhipuQuotas] = useState<Record<string, quotaApi.ProviderQuota>>({});
   const [zhipuBusy, setZhipuBusy] = useState<string | null>(null);
+  const [opencodeQuotas, setOpencodeQuotas] = useState<Record<string, quotaApi.OpenCodeGoQuota>>({});
+  const [opencodeBusy, setOpencodeBusy] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Check ChatGPT auth status when a chatgpt provider exists
@@ -181,6 +183,18 @@ export default function ProviderPanel({
       toast.error(error instanceof Error ? error.message : "获取 DeepSeek 余额失败");
     } finally {
       setDeepseekBusy(null);
+    }
+  };
+
+  const handleOpenCodeQuota = async (name: string) => {
+    setOpencodeBusy(name);
+    try {
+      const info = await quotaApi.getProviderQuota(name);
+      setOpencodeQuotas((current) => ({ ...current, [name]: info.summary as quotaApi.OpenCodeGoQuota }));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "获取 OpenCode Go 额度失败");
+    } finally {
+      setOpencodeBusy(null);
     }
   };
 
@@ -624,6 +638,25 @@ export default function ProviderPanel({
                               {!chatgptAccount.email && !chatgptAccount.plan && (
                                 <div className="text-[var(--text-tertiary)]">无法获取账户信息，请重新登录</div>
                               )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {p.type === "opencode-go" && (
+                        <div className="pt-1.5 space-y-2">
+                          <Button variant="secondary" size="sm" onClick={() => handleOpenCodeQuota(p.name)} loading={opencodeBusy === p.name}>
+                            {opencodeBusy === p.name ? "查询中..." : "查看额度"}
+                          </Button>
+                          {opencodeQuotas[p.name] && (
+                            <div className="p-3 rounded-lg bg-[var(--bg-secondary)] border border-[var(--border)] text-[11px] space-y-3">
+                              {([["rolling", "5 小时窗口"], ["weekly", "每周"], ["monthly", "每月"]] as const).map(([key, label]) => {
+                                const window = opencodeQuotas[p.name][key];
+                                const reset = window.resetsAt ? Date.parse(window.resetsAt) : NaN;
+                                return <UsageBar key={key} label={`${label} · 已用`} usedPercent={window.percent}
+                                  windowText={`剩余 ${Math.max(0, 100 - window.percent).toFixed(1)}%`}
+                                  resetText={Number.isFinite(reset) ? `${new Date(reset).toLocaleString()} 重置` : ""} />;
+                              })}
                             </div>
                           )}
                         </div>

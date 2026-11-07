@@ -663,3 +663,40 @@ async def test_followup_during_final_response_gets_another_iteration(monkeypatch
     assert any(message.get("content") == "follow-up" for message in calls[1])
     assert sum(e.type == EventType.MESSAGE_CREATED and e.data["message"].get("content") == "follow-up" for e in events) == 1
     assert context.metadata["_accept_followups"] is False
+
+
+def test_uploaded_image_path_survives_model_conversion_and_text_fallback(tmp_path):
+    from crabagent.serve.api.prompt import _save_image_temp
+    import base64
+
+    raw = b"screenshot bytes"
+    image = "data:image/png;base64," + base64.b64encode(raw).decode()
+    meta = _save_image_temp(image)
+    context = AgentContext(
+        workspace=tmp_path,
+        model="gpt-4o",
+        messages=[{"role": "user", "content": [
+            {"type": "text", "text": "Inspect the screenshot"},
+            {"type": "image_url", "image_url": {"url": image}, **meta},
+        ]}],
+    )
+
+    visual = loop._build_messages(context)[0]["content"]
+    assert visual[1] == {"type": "image_url", "image_url": {"url": image}}
+    assert meta["file_path"] in visual[2]["text"]
+    assert Path(meta["file_path"]).read_bytes() == raw
+    assert meta["file_path"] in loop._build_messages(context, text_only=True)[0]["content"]
+    context.model = "deepseek-chat"
+    assert meta["file_path"] in loop._build_messages(context)[0]["content"]
+
+
+def test_visual_message_keeps_each_image_path_associated():
+    context = AgentContext(workspace=Path.cwd(), model="gpt-4o", messages=[{
+        "role": "user", "content": [
+            {"type": "image_url", "image_url": {"url": "https://example.com/1.png"}, "file_path": "/tmp/one.png"},
+            {"type": "image_url", "image_url": {"url": "https://example.com/2.png"}, "file_path": "/tmp/two.png"},
+        ],
+    }])
+    blocks = loop._build_messages(context)[0]["content"]
+    assert blocks[1]["text"].endswith("/tmp/one.png]")
+    assert blocks[3]["text"].endswith("/tmp/two.png]")

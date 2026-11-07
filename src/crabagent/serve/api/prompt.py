@@ -169,7 +169,6 @@ def _extract_local_images(message: str) -> list[dict]:
             continue
         size_kb = os.path.getsize(path_str) // 1024
         data_url = f"data:{mime};base64,{b64}"
-        _save_image_temp(data_url)
         blocks.append(
             {
                 "type": "image_url",
@@ -209,10 +208,14 @@ async def prompt_async(
         if not context or not context.metadata.get("_accept_followups") or context.budget_exhausted:
             raise HTTPException(status_code=409, detail="Session is finishing; retry shortly")
         content: str | list[dict] = req.message
-        if req.images:
-            content = [{"type": "text", "text": req.message}] + [
-                {"type": "image_url", "image_url": {"url": image}} for image in req.images
-            ]
+        local_images = _extract_local_images(req.message)
+        if req.images or local_images:
+            image_blocks = [
+                {"type": "image_url", "image_url": {"url": image}, **_save_image_temp(image)}
+                for image in (req.images or [])
+            ] + local_images
+            content = [{"type": "text", "text": req.message}] + image_blocks
+            context.metadata["attached_image_paths"] = [block["file_path"] for block in image_blocks]
         context.metadata.setdefault("_pending_user_messages", []).append(content)
         return {"status": "queued", "session_id": session_id}
 
@@ -593,10 +596,7 @@ Use ordinary Markdown when a visualization is not helpful.
         context.metadata["work_mode"] = req.work_mode
 
     if req.images or local_images:
-        attached_images = []
-        if req.images:
-            attached_images.extend(_save_image_temp(img)["file_path"] for img in req.images)
-        attached_images.extend(block.get("file_path", "") for block in local_images)
+        attached_images = [block.get("file_path", "") for block in content_blocks if block.get("type") == "image_url"]
         context.metadata["attached_image_paths"] = [path for path in attached_images if path]
         context.system_prompt += (
             "\n\nWhen the user asks to generate or modify an image based on an attached image, "
@@ -1142,25 +1142,7 @@ Use ordinary Markdown when a visualization is not helpful.
                         await conv_svc.update_conversation(title_db, session_id, title=title)
                 except Exception:
                     pass
-            agent_query: str | list[dict]
-            if req.images:
-                agent_query = [{"type": "text", "text": req.message}]
-                for img in req.images:
-                    meta = _save_image_temp(img)
-                    agent_query.append(
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": img},
-                            "file_path": meta["file_path"],
-                            "mime": meta["mime"],
-                            "size_kb": meta["size_kb"],
-                        }
-                    )
-                agent_query.extend(local_images)
-            elif local_images:
-                agent_query = [{"type": "text", "text": req.message}] + local_images
-            else:
-                agent_query = req.message
+            agent_query: str | list[dict] = content_blocks if req.images or local_images else req.message
             await run_agent(context, agent_query)
         except asyncio.CancelledError:
             # The finally block still emits AGENT_END for cleanup and stats.

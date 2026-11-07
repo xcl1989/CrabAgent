@@ -8,18 +8,27 @@ Unified endpoint to query remaining quota/balance across supported providers:
 from __future__ import annotations
 
 import logging
+import math
 from urllib.parse import urlparse
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from crabagent.core.database import User
-from crabagent.core.provider_store import get_provider
+from crabagent.core.provider_store import get_provider, opencode_extra_headers
 from crabagent.serve.deps import get_current_user
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/providers", tags=["providers"])
+
+
+async def _query_opencode_go_quota(api_key: str) -> dict:
+    headers = {**opencode_extra_headers(), "Authorization": f"Bearer {api_key}"}
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.get("https://opencode.ai/zen/go/v1/usage", headers=headers)
+        resp.raise_for_status()
+        return resp.json()
 
 
 async def _query_deepseek_balance(api_key: str) -> dict:
@@ -59,6 +68,22 @@ async def get_provider_quota(
     provider = await get_provider(name)
     if not provider:
         raise HTTPException(status_code=404, detail=f"Provider '{name}' not found")
+
+    if provider.provider_type == "opencode-go":
+        try:
+            raw = await _query_opencode_go_quota(provider.api_key)
+            usage = raw.get("usage")
+            if not isinstance(usage, dict):
+                raise ValueError("Missing usage data")
+            for name in ("rolling", "weekly", "monthly"):
+                window = usage.get(name)
+                percent = window.get("percent") if isinstance(window, dict) else None
+                if isinstance(percent, bool) or not isinstance(percent, (int, float)) or not math.isfinite(percent):
+                    raise ValueError(f"Invalid {name} usage data")
+        except Exception as e:
+            logger.warning("OpenCode Go quota query failed: %s", e)
+            raise HTTPException(status_code=502, detail="OpenCode Go quota query failed") from e
+        return {"provider_type": "opencode-go", "raw": raw, "summary": usage}
 
     if provider.provider_type == "deepseek":
         try:

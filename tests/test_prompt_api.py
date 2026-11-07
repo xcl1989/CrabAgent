@@ -85,6 +85,13 @@ async def test_running_prompt_accepts_followup_without_starting_second_run(monke
     )
     assert result["status"] == "queued"
     assert context.metadata["_pending_user_messages"][0][0]["text"] == "new instructions"
+    block = context.metadata["_pending_user_messages"][0][1]
+    assert Path(block["file_path"]).read_bytes() == b"x"
+    assert context.metadata["attached_image_paths"] == [block["file_path"]]
+    context.model = "gpt-4o"
+    context.messages = [{"role": "user", "content": context.metadata["_pending_user_messages"][0]}]
+    from crabagent.core.agent.loop import _build_messages
+    assert block["file_path"] in _build_messages(context)[0]["content"][2]["text"]
 
 
 @pytest.mark.asyncio

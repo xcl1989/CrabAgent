@@ -175,7 +175,7 @@ export function NavBar({
         </span>
       </button>
 
-      <nav aria-label="Primary navigation" className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto overscroll-x-contain [scrollbar-width:none]">
+      <nav aria-label="Primary navigation" className="flex h-full min-w-0 flex-1 items-center gap-0.5 overflow-x-auto overflow-y-hidden overscroll-x-contain [scrollbar-width:none]">
         {items.map((item) => {
           const isActive = currentPage === item.id;
           return (
@@ -196,7 +196,7 @@ export function NavBar({
               </span>
               <span className="hidden lg:inline">{t(item.labelKey)}</span>
               {isActive && (
-                <span className="absolute -bottom-[9px] left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-[var(--brand)]" />
+                <span className="absolute -bottom-[7px] left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-[var(--brand)]" />
               )}
             </button>
           );

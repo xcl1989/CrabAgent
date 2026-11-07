@@ -39,12 +39,24 @@ export interface ZhipuQuota {
   time_limit: ZhipuTimeLimit | null;
 }
 
+export interface OpenCodeGoWindow {
+  status: string;
+  percent: number;
+  resetsAt: string | null;
+}
+
+export interface OpenCodeGoQuota {
+  rolling: OpenCodeGoWindow;
+  weekly: OpenCodeGoWindow;
+  monthly: OpenCodeGoWindow;
+}
+
 // ── Unified ──
 
 export interface ProviderQuota {
-  provider_type: "deepseek" | "zhipu";
+  provider_type: "deepseek" | "zhipu" | "opencode-go";
   raw: Record<string, unknown>;
-  summary: DeepSeekQuota | ZhipuQuota;
+  summary: DeepSeekQuota | ZhipuQuota | OpenCodeGoQuota;
 }
 
 export function getProviderQuota(name: string): Promise<ProviderQuota> {
