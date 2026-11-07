@@ -27,6 +27,8 @@ electron/dist/
 .crabagent/
 .opencode/
 AGENT.md
+AGENTS.md
+AGENTS.zh-CN.md
 ROADMAP.md
 docs/
 electron/resources/crabagent-backend
