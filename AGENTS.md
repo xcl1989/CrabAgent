@@ -4,11 +4,10 @@
 > 保持简洁——最多约 8000 字符。使用 `update_agents_md` 工具来更新。
 
 ## 版本
-- 当前：**0.17.9**（远程访问：Tailscale + Bark/ntfy 手机推送）
-- **版本唯一源头：`pyproject.toml`**
-- Python 代码通过 `from crabagent import __version__` 动态读取（`importlib.metadata.version("crabagent")`），自动同步
-- Electron `package.json` 需手动运行 `python3 scripts/sync_version.py` 同步
-- 修改版本号只需改 `pyproject.toml` 一处，然后运行 `python3 scripts/sync_version.py` 更新 Electron 配置
+- 当前：**0.17.9**
+- **版本唯一源头：`pyproject.toml`**，改这一处后运行 `python3 scripts/sync_version.py` 同步 Electron 配置
+- Python 代码通过 `from crabagent import __version__` 动态读取，无需手动同步
+- 发布流程：改版本号 → sync_version.py → pytest 核心测试 → git push → `python3 -m build` + `twine upload dist/*`
 
 ## 远程访问与推送
 - **Push 通道**：`core/push/`（Bark/ntfy 客户端 + `PushConfig`，app_settings key=`push_config`）；`PushNotification` 门面；`notify_task_event` 挂在 `serve/app.py` 事件广播器末尾（任务 done/partial/failed/cancelled/waiting_user 自动推手机，10 分钟去重）；API 在 `serve/api/push.py`（/api/push status|config|test）；前端 `PushPanel.tsx`（设置页「手机推送」tab）
@@ -63,31 +62,14 @@ make install          # 构建前端 -> 复制到 static -> pip install -e '.[de
 pip install -e '.[dev]'
 ```
 
-### 仅构建前端（沙箱 / 无 shell 访问）
-当 `npm` 不在 PATH 中时，使用 python3 方案：
+### 构建并同步前端产物
 ```
-cd frontend && python3 << 'PYEOF'
-import os, subprocess
-B = chr(98) + chr(105) + chr(110)
-bp = '/usr/local/' + B
-node = bp + '/node'
-npm = '/usr/local/lib/node_modules/npm/' + B + '/npm-cli.js'
-env = os.environ.copy()
-env['PATH'] = bp + ':/usr/' + B + ':/' + B
-env['SHELL'] = bp + '/sh'
-proc = subprocess.run([node, npm, 'run', 'build'], cwd='.', env=env, timeout=180, capture_output=True, text=True)
-if proc.returncode == 0:
-    top = '/Users/xiecongling/Documents/Coding/CrabAgent'
-    import glob
-    for old in glob.glob(top + '/src/crabagent/static/assets/*'):
-        os.remove(old)
-    subprocess.run(['cp', '-R', top + '/frontend/dist/index.html', top + '/frontend/dist/assets', top + '/src/crabagent/static/'], capture_output=True, text=True, timeout=10)
-    print('OK')
-else:
-    print((proc.stdout or '')[-500:])
-PYEOF
+cd frontend && npm run build
+rsync -a --delete frontend/dist/ src/crabagent/static/
 ```
-构建产物在 `frontend/dist/`，复制到 `src/crabagent/static/`。复制前务必清理旧资源文件。
+- **必须用 `rsync --delete` 同步**：Vite 产物带内容哈希，直接 `cp` 会累积旧哈希文件（曾堆到 513 个/33MB）；`--delete` 保证 static 只保留当前版本引用的产物
+- `npm` 不在 PATH 时先 `export PATH="/usr/local/bin:$PATH"`
+- 打包版（pip 安装）不使用本目录的 static，需重新打包才生效
 
 ### 运行
 ```
@@ -125,7 +107,8 @@ pytest tests/test_sandbox.py  # 单个文件
 | `src/crabagent/core/agent/token_limits.py` | 模型 Token 限制注册表 |
 | `src/crabagent/core/config.py` | `Settings`（pydantic-settings，环境变量前缀 `CRAB_`，读取 `.env`） |
 | `src/crabagent/core/database.py` | SQLAlchemy 异步模型 + `init_db()` 含 ALTER TABLE 迁移 |
-| `src/crabagent/core/provider_store.py` | LLM 供应商 CRUD（API 密钥用 Fernet 加密） |
+| `src/crabagent/core/provider_store.py` | LLM 供应商 CRUD（API 密钥用 Fernet 加密；`opencode_extra_headers` 提供 OpenCode Go 必需的 session/UA 头） |
+| `src/crabagent/serve/api/quota.py` | 供应商额度查询——deepseek 余额、智谱 Coding Plan、OpenCode Go（GET /zen/go/v1/usage） |
 | `src/crabagent/core/mcp/` | MCP（模型上下文协议）客户端 + 工具注册 |
 | `src/crabagent/core/office/` | Office 文档处理（OfficeCLI 管理器 + Agent 工具） |
 | `src/crabagent/core/molt/` | 快照/回滚系统（差异存储在 `.crabagent/molts/`） |
