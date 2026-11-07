@@ -188,7 +188,7 @@ def load_agents_md(workspace: Path, locale: str = "en") -> str:
     if not text:
         return ""
     # Truncate to prevent excessive context
-    MAX_AGENTS_MD = 8000
+    MAX_AGENTS_MD = 16000
     if len(text) > MAX_AGENTS_MD:
         text = text[:MAX_AGENTS_MD] + "\n... (truncated)"
     return text
