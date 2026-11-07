@@ -4,11 +4,10 @@
 > 保持简洁——最多约 8000 字符。使用 `update_agents_md` 工具来更新。
 
 ## 版本
-- 当前：**0.17.6**（远程访问：Tailscale + Bark/ntfy 手机推送）
-- **版本唯一源头：`pyproject.toml`**
-- Python 代码通过 `from crabagent import __version__` 动态读取（`importlib.metadata.version("crabagent")`），自动同步
-- Electron `package.json` 需手动运行 `python3 scripts/sync_version.py` 同步
-- 修改版本号只需改 `pyproject.toml` 一处，然后运行 `python3 scripts/sync_version.py` 更新 Electron 配置
+- 当前：**0.17.9**
+- **版本唯一源头：`pyproject.toml`**，改这一处后运行 `python3 scripts/sync_version.py` 同步 Electron 配置
+- Python 代码通过 `from crabagent import __version__` 动态读取，无需手动同步
+- 发布流程：改版本号 → sync_version.py → pytest 核心测试 → git push → `python3 -m build` + `twine upload dist/*`
 
 ## 远程访问与推送
 - **Push 通道**：`core/push/`（Bark/ntfy 客户端 + `PushConfig`，app_settings key=`push_config`）；`PushNotification` 门面；`notify_task_event` 挂在 `serve/app.py` 事件广播器末尾（任务 done/partial/failed/cancelled/waiting_user 自动推手机，10 分钟去重）；API 在 `serve/api/push.py`（/api/push status|config|test）；前端 `PushPanel.tsx`（设置页「手机推送」tab）
@@ -37,7 +36,13 @@ ruff format src/ tests/
 pytest tests
 ```
 
-前端构建：`cd frontend && npm run build`，之后将 `frontend/dist/index.html` 和 `frontend/dist/assets` 同步至 `src/crabagent/static/`。
+前端构建并同步产物：
+```bash
+cd frontend && npm run build
+rsync -a --delete frontend/dist/ src/crabagent/static/
+```
+- **必须用 `rsync --delete`**：Vite 产物带内容哈希，直接 `cp` 会累积旧哈希文件（曾堆到 513 个/33MB）
+- `npm` 不在 PATH 时先 `export PATH="/usr/local/bin:$PATH"`
 
 ## 数据库结构变更
 - 添加新列/表时**绝不要**删除 `crabagent.db`。
