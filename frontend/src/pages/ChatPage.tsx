@@ -59,6 +59,7 @@ import { useChatState } from "../hooks/useChatState";
 import { useAgentRunBoard } from "../hooks/useAgentRunBoard";
 import { useModelSelector } from "../hooks/useModelSelector";
 import { cn } from "../lib/cn";
+import { sendWithLocale } from "../lib/localeSend";
 import { reasoningOptions, effectiveEffort } from "../lib/reasoningEffort";
 import { dbMessagesToChat } from "../lib/messageTransforms";
 import { DocumentPanel, DocState } from "../components/DocumentPanel";
@@ -554,6 +555,7 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
   const mainEffortRef = useRef<HTMLDivElement>(null);
   const agentMenuRef = useRef<HTMLDivElement>(null);
   const effortMenuRef = useRef<HTMLDivElement>(null);
+  const localeSendInProgress = useRef(false);
   const [localeMismatch, setLocaleMismatch] = useState<{ pendingText: string; pendingImages: string[]; pendingFiles: { name: string; path: string; size: number }[] } | null>(null);
   const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
   const [mcpStatus, setMcpStatus] = useState<McpServerStatus[]>([]);
@@ -846,18 +848,25 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
     doSend(text, images, files);
   };
 
-  const handleSendWithLocale = async (text: string, images: string[], locale: string) => {
-    // Reset cached system prompt then send
+  const handleSendWithLocale = async () => {
+    if (!activeSession || !localeMismatch || localeSendInProgress.current) return;
+    localeSendInProgress.current = true;
+    const locale = i18n.language;
     try {
-      const { api } = await import("../api/client");
-      await api.post(`/sessions/${activeSession?.session_id}/reset-system-prompt`, {});
+      await sendWithLocale(activeSession.session_id, locale, localeMismatch,
+        ({ pendingText, pendingImages, pendingFiles }) => doSend(pendingText, pendingImages, pendingFiles),
+        () => {
+          setActiveSession({ ...activeSession, prompt_locale: locale });
+          setPendingImages([]);
+          setPendingFiles([]);
+          setLocaleMismatch(null);
+        });
     } catch (e) {
-      console.error("Failed to reset system prompt:", e);
+      console.error("Failed to synchronize locale or reset system prompt:", e);
+      toast.error(t("localeMismatch.resetFailed"));
+    } finally {
+      localeSendInProgress.current = false;
     }
-    if (activeSession) {
-      setActiveSession({ ...activeSession, prompt_locale: locale });
-    }
-    doSend(text, images, localeMismatch?.pendingFiles ?? []);
   };
 
   const handleToolConfirm = async (confirmId: string, approved: boolean) => {
@@ -2168,9 +2177,7 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
               <Button
                 variant="brand"
                 onClick={async () => {
-                  const { pendingText, pendingImages: imgs } = localeMismatch;
-                  setLocaleMismatch(null);
-                  await handleSendWithLocale(pendingText, imgs, i18n.language);
+                  await handleSendWithLocale();
                 }}
               >
                 {t("localeMismatch.rebuild")}
@@ -2178,11 +2185,11 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
               <Button
                 variant="ghost"
                 onClick={async () => {
-                  const { pendingText } = localeMismatch;
+                  const { pendingText, pendingImages: imgs, pendingFiles: files } = localeMismatch;
                   setLocaleMismatch(null);
                   setPendingImages([]);
                   setPendingFiles([]);
-                  doSend(pendingText, [], []);
+                  await doSend(pendingText, imgs, files);
                 }}
               >
                 {t("localeMismatch.keep")}

@@ -329,6 +329,7 @@
     "noTasks": "暂无任务"
   },
   "language": {
+    "syncFailed": "语言已在本地切换，但同步失败，请重试。",
     "title": "语言",
     "switchTitle": "切换语言？",
     "switchDesc": "切换语言会重建当前会话的 system prompt，可能短暂增加 token 消耗。",
@@ -499,6 +500,7 @@
     "welcome": "欢迎使用 CrabAgent"
   },
   "localeMismatch": {
+    "resetFailed": "无法同步语言或重建系统提示词，请重试。",
     "title": "语言环境不匹配",
     "desc": "当前语言与构建此会话提示词时的语言不同。",
     "current": "当前语言：{{locale}}",

@@ -86,8 +86,15 @@ export function getThemeColors(theme: Theme): ThemeColors {
 }
 
 export function useThemeColors(): ThemeColors {
-  const { theme } = useTheme();
-  return getThemeColors(theme);
+  const { theme, colors } = useTheme();
+  const defaults = getThemeColors(theme);
+  if (!colors) return defaults;
+  const result = { ...defaults };
+  for (const key of Object.keys(result) as (keyof ThemeColors)[]) {
+    const token = key.replace(/[A-Z]/g, letter => `-${letter.toLowerCase()}`).replace("accent2", "accent-2");
+    if (token in colors) result[key] = colors[token as keyof typeof colors];
+  }
+  return result;
 }
 
 export function agentColor(name: string, colors: ThemeColors): string {

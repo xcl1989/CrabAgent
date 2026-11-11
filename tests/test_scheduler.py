@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -92,7 +93,8 @@ async def test_add_task_skips_invalid_cron(monkeypatch: pytest.MonkeyPatch):
 
 
 @pytest.mark.asyncio
-async def test_run_agent_uses_default_model_override(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+@pytest.mark.parametrize("outcome", ["success", "error", "cancel"])
+async def test_run_agent_uses_default_model_override(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, outcome: str):
     service = SchedulerService()
     task = SimpleNamespace(id=9, user_id=1, name="digest", prompt="do work", model="")
     recorded = {}
@@ -130,9 +132,23 @@ async def test_run_agent_uses_default_model_override(monkeypatch: pytest.MonkeyP
             return None
 
     async def fake_run_agent(context, prompt):
+        from crabagent.core.event import AgentEvent, EventType
+
         recorded["context_model"] = context.model
         recorded["prompt"] = prompt
+        context.metadata.update(resolved_model="resolved", resolved_provider="provider")
+        context.usage_records.append({"prompt_tokens": 10, "completion_tokens": 2})
+        await context.event_bus.emit(AgentEvent(type=EventType.ITERATION_END))
+        context.usage_records.append({"prompt_tokens": 3, "completion_tokens": 1})
+        if outcome == "error":
+            raise RuntimeError("agent failed")
+        if outcome == "cancel":
+            asyncio.current_task().cancel()
+            await asyncio.sleep(0)
         return []
+
+    async def save_usage(rows):
+        recorded.setdefault("usage", []).extend(rows)
 
     async def fake_commit(task_id, conversation_id, error):
         recorded["commit"] = (task_id, conversation_id, error)
@@ -148,6 +164,7 @@ async def test_run_agent_uses_default_model_override(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr("crabagent.serve.services.persistence.PersistenceListener", FakePersistence)
     monkeypatch.setattr("crabagent.core.agent.run_recorder.RunRecorder", FakeRunRecorder)
     monkeypatch.setattr("crabagent.core.agent.loop.run_agent", fake_run_agent)
+    monkeypatch.setattr("crabagent.serve.services.usage.token_usage_batch_create", save_usage)
     monkeypatch.setattr(service, "_commit_task_status", fake_commit)
     monkeypatch.setattr(service, "_create_notification", fake_notification)
     monkeypatch.setattr("crabagent.core.tool_loader.discover_and_register_tools", lambda registry, workspace: None)
@@ -163,12 +180,20 @@ async def test_run_agent_uses_default_model_override(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr("crabagent.core.mcp.tools.register_mcp_tools", lambda registry, manager: None)
     monkeypatch.setattr("crabagent.core.config.settings", SimpleNamespace(default_model="gpt-4o", max_iterations=5, auto_approve_tools=False, skill_discovery_dirs=lambda: []))
 
-    session_id = await service._run_agent(task)
+    if outcome == "cancel":
+        with pytest.raises(asyncio.CancelledError):
+            await service._run_agent(task)
+    else:
+        assert await service._run_agent(task) == "sess-1"
+        assert recorded["notifications"][0][4] == "scheduled_task"
+        assert (recorded["commit"][2] is not None) == (outcome == "error")
 
-    assert session_id == "sess-1"
     assert recorded["context_model"] == "gpt-4.1"
     assert recorded["create_conversation"][3] == "gpt-4.1"
-    assert recorded["notifications"][0][4] == "scheduled_task"
+    assert [row["prompt_tokens"] for row in recorded["usage"]] == [10, 3]
+    for row in recorded["usage"]:
+        assert (row["user_id"], row["session_id"], row["branch_id"]) == (1, "sess-1", "main")
+        assert (row["model"], row["provider"]) == ("resolved", "provider")
 
 
 @pytest.mark.asyncio

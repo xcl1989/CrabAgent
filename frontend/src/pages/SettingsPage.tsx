@@ -11,9 +11,10 @@ import WeChatPanel from "../components/WeChatPanel";
 import PushPanel from "../components/PushPanel";
 import { PetsSettingsPanel } from "../components/PetsSettingsPanel";
 import MacosComputerPanel from "../components/MacosComputerPanel";
+import ThemeSettingsPanel from "../components/ThemeSettingsPanel";
 import { useSettingsData } from "../hooks/useSettingsData";
 
-type SettingsTab = "general" | "search" | "privacy" | "network" | "wechat" | "push" | "pets" | "macos";
+type SettingsTab = "appearance" | "general" | "search" | "privacy" | "network" | "wechat" | "push" | "pets" | "macos";
 
 export default function SettingsPage() {
   const { t } = useTranslation();
@@ -173,6 +174,7 @@ export default function SettingsPage() {
   }
 
   const tabs: { id: SettingsTab; label: string; icon: React.ReactNode }[] = [
+    { id: "appearance", label: "外观", icon: <SlidersHorizontal size={14} /> },
     { id: "general", label: t("settingsPage.sectionGeneral"), icon: <SlidersHorizontal size={14} /> },
     { id: "search", label: t("settingsPage.sectionSearch"), icon: <Search size={14} /> },
     { id: "privacy", label: "隐私", icon: <ShieldCheck size={14} /> },
@@ -216,6 +218,7 @@ export default function SettingsPage() {
 
       {/* Tab Content */}
       <div className="flex-1 min-h-0 min-w-0 overflow-y-auto pb-4">
+        {activeTab === "appearance" && <ThemeSettingsPanel />}
         {activeTab === "general" && (
           <div className="bg-[var(--bg-secondary)] border border-[var(--border)] rounded-xl p-4 sm:p-5 space-y-4">
             <div className="flex flex-col gap-1.5">

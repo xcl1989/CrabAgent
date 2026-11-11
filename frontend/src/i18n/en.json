@@ -329,6 +329,7 @@
     "noTasks": "No tasks"
   },
   "language": {
+    "syncFailed": "Language changed locally, but synchronization failed. Please try again.",
     "title": "Language",
     "switchTitle": "Switch language?",
     "switchDesc": "Changing the language will rebuild the system prompt for this session. This may briefly increase token usage.",
@@ -541,6 +542,7 @@
     "close": "Close"
   },
   "localeMismatch": {
+    "resetFailed": "Could not synchronize the language or rebuild the system prompt. Please try again.",
     "title": "Language mismatch",
     "desc": "Your current language differs from the one used to build this conversation's prompt.",
     "current": "Current: {{locale}}",

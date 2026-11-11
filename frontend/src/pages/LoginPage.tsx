@@ -24,16 +24,16 @@ export default function LoginPage({ onLogin }: Props) {
     setLoading(true);
     setError(null);
     try {
-      if (mode === "login") {
-        const res = await authApi.login(username, password);
-        api.setToken(res.access_token);
-        onLogin();
-      } else {
-        await authApi.register(username, password);
-        const res = await authApi.login(username, password);
-        api.setToken(res.access_token);
-        onLogin();
+      if (mode === "register") await authApi.register(username, password);
+      const res = await authApi.login(username, password);
+      api.setToken(res.access_token);
+      try {
+        await api.patch("/auth/user", { locale: i18n.language });
+      } catch {
+        api.clearToken();
+        throw new Error(t("language.syncFailed"));
       }
+      onLogin();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed");
     } finally {

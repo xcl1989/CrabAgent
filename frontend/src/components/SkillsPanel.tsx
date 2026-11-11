@@ -1,178 +1,74 @@
-import { useState, useEffect, useCallback } from "react";
-import { Sparkles, ChevronDown, FileText, FolderOpen, Loader2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ArrowLeft, FileText, FolderOpen, Loader2, Search, Sparkles } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { Modal } from "./ui";
 import * as settingsApi from "../api/settings";
 import type { SkillInfo, SkillDetail } from "../api/settings";
 import { cn } from "../lib/cn";
 
-interface Props {
-  onClose: () => void;
-}
+interface Props { onClose: () => void }
+type Status = "loading" | "ready" | "error";
+const buttonStyle = "rounded-md px-3 py-1.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)]";
 
 export default function SkillsPanel({ onClose }: Props) {
   const [skills, setSkills] = useState<SkillInfo[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [expandedName, setExpandedName] = useState<string | null>(null);
+  const [listStatus, setListStatus] = useState<Status>("loading");
+  const [listAttempt, setListAttempt] = useState(0);
+  const [query, setQuery] = useState("");
+  const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<SkillDetail | null>(null);
-  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailStatus, setDetailStatus] = useState<Status>("loading");
+  const [detailAttempt, setDetailAttempt] = useState(0);
+  const [view, setView] = useState<"markdown" | "raw">("markdown");
 
   useEffect(() => {
-    settingsApi
-      .getSkills()
-      .then(setSkills)
-      .catch(() => setSkills([]))
-      .finally(() => setLoading(false));
-  }, []);
+    let active = true;
+    setListStatus("loading");
+    settingsApi.getSkills().then((items) => {
+      if (active) { setSkills(items); setListStatus("ready"); }
+    }).catch(() => { if (active) setListStatus("error"); });
+    return () => { active = false; };
+  }, [listAttempt]);
 
-  const handleToggle = useCallback(
-    async (name: string) => {
-      if (expandedName === name) {
-        setExpandedName(null);
-        setDetail(null);
-        return;
-      }
-      setExpandedName(name);
-      setDetail(null);
-      setDetailLoading(true);
-      try {
-        const d = await settingsApi.getSkillDetail(name);
-        setDetail(d);
-      } catch {
-        setDetail(null);
-      } finally {
-        setDetailLoading(false);
-      }
-    },
-    [expandedName],
-  );
+  useEffect(() => {
+    if (!selected) return;
+    let active = true;
+    setDetail(null);
+    setDetailStatus("loading");
+    settingsApi.getSkillDetail(selected).then((item) => {
+      if (active) { setDetail(item); setDetailStatus("ready"); }
+    }).catch(() => { if (active) setDetailStatus("error"); });
+    return () => { active = false; };
+  }, [selected, detailAttempt]);
 
+  const filtered = skills.filter((skill) => `${skill.name} ${skill.description}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
   return (
-    <Modal open={true} onOpenChange={(o) => !o && onClose()} title={
-      <span className="flex items-center gap-2">
-        <Sparkles size={16} className="text-[var(--brand)]" />
-        Skills
-      </span>
-    } size="lg">
-      {loading ? (
-        <div className="flex items-center justify-center py-12">
-          <Loader2 size={20} className="animate-spin text-[var(--text-tertiary)]" />
-        </div>
-      ) : skills.length === 0 ? (
-        <div className="text-center py-8">
-          <FileText size={32} className="mx-auto text-[var(--text-tertiary)] mb-3" />
-          <p className="text-sm text-[var(--text-secondary)] mb-1">No skills loaded</p>
-          <p className="text-xs text-[var(--text-tertiary)]">
-            Place <code className="px-1 py-0.5 rounded bg-[var(--bg-tertiary)] text-[10px]">SKILL.md</code> in{" "}
-            <code className="px-1 py-0.5 rounded bg-[var(--bg-tertiary)] text-[10px]">~/.crabagent/skills/</code>
-          </p>
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {skills.map((s) => {
-            const isOpen = expandedName === s.name;
-            return (
-              <div
-                key={s.name}
-                className={cn(
-                  "rounded-lg border transition-colors",
-                  isOpen
-                    ? "border-[var(--brand)]/40 bg-[var(--brand-bg)]/30"
-                    : "border-[var(--border)] bg-[var(--bg-tertiary)]/30",
-                )}
-              >
-                {/* Header row — clickable */}
-                <button
-                  onClick={() => handleToggle(s.name)}
-                  className="w-full flex items-start gap-2.5 px-3.5 py-3 text-left"
-                >
-                  <Sparkles
-                    size={14}
-                    className={cn(
-                      "shrink-0 mt-0.5",
-                      isOpen ? "text-[var(--brand)]" : "text-[var(--text-tertiary)]",
-                    )}
-                  />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-[var(--text-primary)]">
-                        {s.name}
-                      </span>
-                      {s.auxiliary_files.length > 0 && (
-                        <span className="text-[10px] text-[var(--text-tertiary)] flex items-center gap-0.5">
-                          <FileText size={10} />
-                          {s.auxiliary_files.length}
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-xs text-[var(--text-tertiary)] mt-0.5 leading-relaxed line-clamp-2">
-                      {s.description}
-                    </p>
-                  </div>
-                  <ChevronDown
-                    size={15}
-                    className={cn(
-                      "shrink-0 mt-0.5 text-[var(--text-tertiary)] transition-transform",
-                      isOpen && "rotate-180",
-                    )}
-                  />
-                </button>
-
-                {/* Expanded detail */}
-                {isOpen && (
-                  <div className="px-3.5 pb-3 border-t border-[var(--border)]/50 pt-2.5 animate-fade-in">
-                    {detailLoading ? (
-                      <div className="flex items-center gap-2 py-3 text-xs text-[var(--text-tertiary)]">
-                        <Loader2 size={12} className="animate-spin" />
-                        Loading…
-                      </div>
-                    ) : detail ? (
-                      <>
-                        {/* Location */}
-                        <div className="flex items-center gap-1.5 mb-2 text-[10px] text-[var(--text-tertiary)]">
-                          <FolderOpen size={11} />
-                          <span className="font-mono truncate">{detail.location}</span>
-                        </div>
-                        {/* SKILL.md content */}
-                        <pre className="text-xs text-[var(--text-secondary)] bg-[var(--bg-primary)] border border-[var(--border)] rounded-md p-3 max-h-64 overflow-y-auto whitespace-pre-wrap leading-relaxed font-mono">
-                          {detail.content}
-                        </pre>
-                        {/* Auxiliary files */}
-                        {detail.auxiliary_files.length > 0 && (
-                          <div className="mt-2.5">
-                            <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--text-tertiary)] mb-1.5">
-                              Auxiliary Files
-                            </div>
-                            <div className="space-y-0.5">
-                              {detail.auxiliary_files.map((f) => (
-                                <div
-                                  key={f}
-                                  className="flex items-center gap-1.5 text-xs text-[var(--text-secondary)] font-mono"
-                                >
-                                  <FileText size={11} className="text-[var(--text-tertiary)] shrink-0" />
-                                  {f}
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                      </>
-                    ) : (
-                      <div className="py-2 text-xs text-[var(--danger)]">
-                        Failed to load skill detail.
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-
-          {/* Footer hint */}
-          <p className="text-[10px] text-[var(--text-tertiary)] text-center pt-1">
-            AI will automatically load the matching skill when it recognizes a relevant task.
-          </p>
-        </div>
-      )}
+    <Modal open onOpenChange={(open) => !open && onClose()} size="full" title={<span className="flex items-center gap-2"><Sparkles size={16} className="text-[var(--brand)]" />Skills</span>}>
+      <div className="md:flex md:gap-5 md:h-[65vh] min-h-[45vh]">
+        <section aria-label="Skills list" className={cn("md:w-1/3 md:shrink-0 md:flex md:flex-col md:border-r md:border-[var(--border)] md:pr-4", selected && "hidden")}>
+          <div className="relative mb-3">
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)]" aria-hidden="true" />
+            <input aria-label="Search skills" placeholder="Search skills..." value={query} onChange={(event) => setQuery(event.target.value)} className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg-primary)] py-2 pl-9 pr-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)]" />
+          </div>
+          <div className="md:overflow-y-auto space-y-2">
+            {listStatus === "loading" ? <p role="status" className="text-sm text-[var(--text-secondary)]">Loading skills...</p> : listStatus === "error" ? <div role="alert" className="text-sm text-[var(--danger)]">Failed to load skills. <button className={buttonStyle} onClick={() => setListAttempt((n) => n + 1)}>Retry</button></div> : skills.length === 0 ? <p className="text-sm text-[var(--text-secondary)]">No skills loaded. Place SKILL.md in ~/.crabagent/skills/.</p> : filtered.length === 0 ? <p className="text-sm text-[var(--text-secondary)]">No matching skills.</p> : filtered.map((skill) => <button key={skill.name} type="button" aria-pressed={selected === skill.name} onClick={() => { setSelected(skill.name); setView("markdown"); }} className={cn("w-full rounded-lg border p-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)]", selected === skill.name ? "border-[var(--brand)] bg-[var(--brand-bg)]" : "border-[var(--border)] bg-[var(--bg-tertiary)]/30")}><span className="block text-sm font-medium text-[var(--text-primary)]">{skill.name}</span><span className="mt-1 block text-xs text-[var(--text-tertiary)] line-clamp-2">{skill.description}</span><span className="mt-1 block text-xs text-[var(--text-tertiary)]">{skill.auxiliary_files.length} auxiliary files</span></button>)}
+          </div>
+        </section>
+        <section aria-label="Skill detail" className={cn("min-w-0 flex-1 md:block md:overflow-y-auto", !selected && "hidden")}>
+          {!selected ? <p className="text-sm text-[var(--text-secondary)]">Select a skill to view its details.</p> : <>
+            <button type="button" onClick={() => setSelected(null)} className={cn(buttonStyle, "mb-3 inline-flex items-center gap-1 text-[var(--text-secondary)] md:hidden")}><ArrowLeft size={14} /> Back to skills</button>
+            <h2 className="mb-3 text-base font-semibold text-[var(--text-primary)]">{selected}</h2>
+            {detailStatus === "loading" ? <p role="status" className="flex items-center gap-2 text-sm text-[var(--text-secondary)]"><Loader2 size={14} className="animate-spin" />Loading skill...</p> : detailStatus === "error" ? <div role="alert" className="text-sm text-[var(--danger)]">Failed to load skill detail. <button className={buttonStyle} onClick={() => setDetailAttempt((n) => n + 1)}>Retry</button></div> : detail && <>
+              <p className="mb-3 flex items-center gap-1.5 break-all text-xs text-[var(--text-tertiary)]"><FolderOpen size={13} className="shrink-0" />{detail.location}</p>
+              <div role="group" aria-label="Content view" className="mb-3 flex gap-1"><button type="button" aria-pressed={view === "markdown"} onClick={() => setView("markdown")} className={cn(buttonStyle, view === "markdown" && "bg-[var(--brand-bg)] text-[var(--brand)]")}>Markdown</button><button type="button" aria-pressed={view === "raw"} onClick={() => setView("raw")} className={cn(buttonStyle, view === "raw" && "bg-[var(--brand-bg)] text-[var(--brand)]")}>Raw</button></div>
+              {view === "raw" ? <pre className="whitespace-pre-wrap break-words rounded-md border border-[var(--border)] bg-[var(--bg-primary)] p-3 text-xs text-[var(--text-secondary)]">{detail.content}</pre> : <div className="markdown-body overflow-x-auto rounded-md border border-[var(--border)] bg-[var(--bg-primary)] p-3 text-sm text-[var(--text-primary)]"><ReactMarkdown remarkPlugins={[remarkGfm]}>{detail.content}</ReactMarkdown></div>}
+              <h3 className="mt-4 mb-2 text-xs font-semibold uppercase text-[var(--text-tertiary)]">Auxiliary files</h3>
+              {detail.auxiliary_files.length ? <ul className="space-y-1">{detail.auxiliary_files.map((file) => <li key={file} className="flex items-center gap-2 break-all text-xs text-[var(--text-secondary)]"><FileText size={12} className="shrink-0" />{file}</li>)}</ul> : <p className="text-xs text-[var(--text-tertiary)]">No auxiliary files.</p>}
+            </>}
+          </>}
+        </section>
+      </div>
     </Modal>
   );
 }

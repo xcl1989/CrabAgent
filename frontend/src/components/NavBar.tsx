@@ -2,6 +2,7 @@ import { MessageSquare, Users, Brain, Settings, Sun, Moon, LogOut, Globe, Coins,
 import { useTheme } from "../lib/theme";
 import { cn } from "../lib/cn";
 import { useState } from "react";
+import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import { Modal, Button } from "./ui";
 import type { PageId } from "../App";
@@ -42,7 +43,7 @@ function ThemeToggle() {
   );
 }
 
-function LanguageSwitcher({ sessionId }: { sessionId?: string | null }) {
+export function LanguageSwitcher({ sessionId }: { sessionId?: string | null }) {
   const { i18n, t } = useTranslation();
   const [showConfirm, setShowConfirm] = useState(false);
   const [pendingLang, setPendingLang] = useState<LanguageCode>("en");
@@ -58,18 +59,21 @@ function LanguageSwitcher({ sessionId }: { sessionId?: string | null }) {
   const handleConfirm = async () => {
     i18n.changeLanguage(pendingLang);
     localStorage.setItem("crabagent-language", pendingLang);
+    let syncFailed = false;
     // Notify backend: update both AppSetting and User.locale
     try {
       const { updateSettings } = await import("../api/settings");
       await updateSettings({ language: pendingLang });
     } catch (e) {
       console.error("[i18n] Failed to update settings:", e);
+      syncFailed = true;
     }
     try {
       const { api } = await import("../api/client");
       await api.patch("/auth/user", { locale: pendingLang });
     } catch (e) {
       console.error("[i18n] Failed to update user locale:", e);
+      syncFailed = true;
     }
     // Reset cached system prompt for current session so next message uses new locale
     if (sessionId) {
@@ -78,8 +82,10 @@ function LanguageSwitcher({ sessionId }: { sessionId?: string | null }) {
         await api.post(`/sessions/${sessionId}/reset-system-prompt`, {});
       } catch (e) {
         console.error("[i18n] Failed to reset system prompt:", e);
+        syncFailed = true;
       }
     }
+    if (syncFailed) toast.error(t("language.syncFailed"));
     setShowConfirm(false);
   };
 

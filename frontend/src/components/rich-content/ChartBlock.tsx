@@ -9,7 +9,7 @@ import { VisualizationFrame } from "./VisualizationFrame";
 import { MeasuredChartContainer } from "../charts/MeasuredChartContainer";
 import { useStableVisualization } from "./stableVisualization";
 
-const COLORS = ["#0f766e", "#d97706", "#2563eb", "#db2777", "#7c3aed", "#65a30d"];
+const COLORS = ["var(--brand)", "var(--warning)", "var(--accent)", "var(--danger)", "var(--accent-2)", "var(--success)"];
 
 function InvalidVisualization({ label, error, source }: { label: string; error: string; source: string }) {
   return <VisualizationFrame title={label} source={source}><div className="visualization-error"><AlertTriangle size={17} /><span>{error}，已保留源内容。</span></div></VisualizationFrame>;

@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from crabagent.core.database import get_db
+from crabagent.core.database import User, get_db
 from crabagent.serve.deps import get_current_user
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -66,6 +66,13 @@ async def update_user(
     db: AsyncSession = Depends(get_db),
 ):
     if req.locale is not None:
-        user.locale = req.locale
+        persisted_user = await db.get(User, user.id)
+        if not persisted_user:
+            raise HTTPException(status_code=404, detail="User not found")
+        persisted_user.locale = req.locale
         await db.commit()
+        from crabagent.serve.deps import _user_cache
+
+        _user_cache.pop(user.id, None)
+        return {"status": "ok", "locale": persisted_user.locale}
     return {"status": "ok", "locale": user.locale}

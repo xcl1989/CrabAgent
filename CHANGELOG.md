@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.18.0] — Language Synchronization
+
+### Added
+- Custom theme settings with background images and system theme mode; searchable skill browser with Markdown and raw views.
+
+### Fixed
+- Record usage for scheduled agent runs.
+- Persist account language changes reliably and synchronize the selected language on login and when rebuilding a session prompt.
+- Preserve image and file attachments when sending through the language mismatch dialog; report synchronization failures.
+
+---
+
 ## [0.17.8] — Image Routing and Chat Image Loading (2026-11-05)
 
 ### Changed

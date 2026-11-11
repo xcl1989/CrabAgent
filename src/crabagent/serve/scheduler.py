@@ -312,6 +312,11 @@ class SchedulerService:
         context.event_bus.subscribe(persistence.on_event)
         logger.info("[ST] PersistenceListener subscribed")
 
+        from crabagent.serve.services.usage import UsagePersistenceListener
+
+        usage = UsagePersistenceListener(context, task.user_id, ctx_conv_id)
+        context.event_bus.subscribe(usage.on_event)
+
         from crabagent.core.agent.run_recorder import RunRecorder
 
         run_recorder = RunRecorder(user_id=task.user_id, session_id=ctx_conv_id, model=model)
@@ -325,6 +330,8 @@ class SchedulerService:
         except Exception as e:
             logger.error("[ST] run_agent error: %s", e)
             agent_error = e
+        finally:
+            await usage.flush()
 
         await self._commit_task_status(task.id, ctx_conv_id, agent_error)
 
