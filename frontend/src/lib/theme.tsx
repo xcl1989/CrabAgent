@@ -5,6 +5,83 @@ export type Theme = "light" | "dark";
 export type ThemeMode = Theme | "system";
 export const DEFAULT_COLORS = {
   "light": {
+    "bg-primary": "#f8f2e7",
+    "bg-secondary": "#fffcf5",
+    "bg-tertiary": "#f0e6d2",
+    "bg-elevated": "#e7dac2",
+    "text-primary": "#3e2f21",
+    "text-secondary": "#7d6851",
+    "text-tertiary": "#a5916f",
+    "text-on-accent": "#ffffff",
+    "text-on-brand": "#ffffff",
+    "border": "#e4d5bc",
+    "border-subtle": "#efe3cd",
+    "border-strong": "#cbb48e",
+    "brand": "#2f8f86",
+    "brand-hover": "#3fab9f",
+    "brand-active": "#237a72",
+    "accent": "#d97e42",
+    "accent-hover": "#e59457",
+    "accent-2": "#9a6fc0",
+    "accent-2-hover": "#ac85cf",
+    "success": "#4f9a5c",
+    "warning": "#c9922f",
+    "danger": "#c8524f",
+    "danger-hover": "#d56764",
+    "agent-researcher": "#4d86bd",
+    "agent-analyst": "#9a6fc0",
+    "agent-coder": "#4f9a5c",
+    "agent-writer": "#d98a2b",
+    "agent-plan_creater": "#0f92b5",
+    "code-bg": "#f5edda",
+    "code-border": "#e4d5bc",
+ 
+  },
+  "dark": {
+    "bg-primary": "#221b14",
+    "bg-secondary": "#2e251c",
+    "bg-tertiary": "#3b3025",
+    "bg-elevated": "#483b2e",
+    "text-primary": "#f4ebdc",
+    "text-secondary": "#c6b599",
+    "text-tertiary": "#99886c",
+    "text-on-accent": "#ffffff",
+    "text-on-brand": "#ffffff",
+    "border": "#483b2e",
+    "border-subtle": "#332a20",
+    "border-strong": "#5e4e3b",
+    "brand": "#43b3a6",
+    "brand-hover": "#5bc5b8",
+    "brand-active": "#2f9488",
+    "accent": "#e89a5e",
+    "accent-hover": "#f2ad76",
+    "accent-2": "#b993e2",
+    "accent-2-hover": "#c8a8ec",
+    "success": "#70c27c",
+    "warning": "#e7b95f",
+    "danger": "#f06e6c",
+    "danger-hover": "#f68886",
+    "agent-researcher": "#6ea4d6",
+    "agent-analyst": "#b993e2",
+    "agent-coder": "#70c27c",
+    "agent-writer": "#f0b45a",
+    "agent-plan_creater": "#2cc4de",
+    "code-bg": "#191309",
+    "code-border": "#332a20",
+ 
+  }
+} as const;
+export type ColorKey = keyof typeof DEFAULT_COLORS.light;
+export type ThemeColors = Record<ColorKey, string>;
+export interface CustomTheme { id: string; name: string; colors: Record<Theme, ThemeColors>; backgroundImage: string; backgroundOverlay?: number }
+const STORAGE_KEY = "crabagent.theme";
+const CUSTOM_KEY = "crabagent.customThemes";
+const ACTIVE_KEY = "crabagent.activeTheme";
+const colorKeys = Object.keys(DEFAULT_COLORS.light) as ColorKey[];
+
+/** 升级前的默认色板，用于识别并自动迁移仍使用旧配色的已存主题（如"新主题"） */
+export const LEGACY_DEFAULT_COLORS = {
+  "light": {
     "bg-primary": "#faf7f2",
     "bg-secondary": "#ffffff",
     "bg-tertiary": "#f0ebe2",
@@ -34,7 +111,7 @@ export const DEFAULT_COLORS = {
     "agent-writer": "#d97706",
     "agent-plan_creater": "#0891b2",
     "code-bg": "#f5f0e5",
-    "code-border": "#e0d8c8"
+    "code-border": "#e0d8c8",
   },
   "dark": {
     "bg-primary": "#1a1814",
@@ -66,16 +143,42 @@ export const DEFAULT_COLORS = {
     "agent-writer": "#fbbf24",
     "agent-plan_creater": "#22d3ee",
     "code-bg": "#14120f",
-    "code-border": "#2e2c28"
+    "code-border": "#2e2c28",
   }
 } as const;
-export type ColorKey = keyof typeof DEFAULT_COLORS.light;
-export type ThemeColors = Record<ColorKey, string>;
-export interface CustomTheme { id: string; name: string; colors: Record<Theme, ThemeColors>; backgroundImage: string }
-const STORAGE_KEY = "crabagent.theme";
-const CUSTOM_KEY = "crabagent.customThemes";
-const ACTIVE_KEY = "crabagent.activeTheme";
-const colorKeys = Object.keys(DEFAULT_COLORS.light) as ColorKey[];
+
+/** 主题浅色或深色色板与旧默认完全一致时返回 true；用户改过颜色的主题不受影响 */
+export function migrateLegacyDefaultThemes(themes: CustomTheme[]): CustomTheme[] {
+  const isLegacyPalette = (mode: Theme, palette: ThemeColors) => colorKeys.every(key => palette[key] === LEGACY_DEFAULT_COLORS[mode][key]);
+  return themes.map(item => (["light", "dark"] as const).some(mode => isLegacyPalette(mode, item.colors[mode]))
+    ? { ...item, colors: { light: { ...DEFAULT_COLORS.light }, dark: { ...DEFAULT_COLORS.dark } } }
+    : item);
+}
+
+export interface ThemeScheme { name: string; backgroundOverlay: number; colors: Record<Theme, ThemeColors> }
+
+/** 导出主题配色为可移植 JSON（不含背景图片，二进制无法跨设备共享） */
+export function exportThemeJSON(item: CustomTheme): string {
+  return JSON.stringify({ name: item.name, backgroundOverlay: item.backgroundOverlay ?? 0, colors: item.colors }, null, 2);
+}
+
+/** 解析导入的配色 JSON：要求 name 及完整的浅色/深色色板，遮罩可选（0-100） */
+export function parseThemeScheme(raw: string): ThemeScheme | null {
+  try {
+    const item: unknown = JSON.parse(raw);
+    if (!item || typeof item !== "object") return null;
+    const scheme = item as { name?: unknown; backgroundOverlay?: unknown; colors?: unknown };
+    if (typeof scheme.name !== "string" || !scheme.name.trim() || !scheme.colors) return null;
+    const palettes = {} as Record<Theme, ThemeColors>;
+    for (const mode of ["light", "dark"] as const) {
+      const palette = (scheme.colors as Record<string, unknown>)[mode];
+      if (!palette || !colorKeys.every(key => isColor((palette as Record<string, unknown>)[key]))) return null;
+      palettes[mode] = Object.fromEntries(colorKeys.map(key => [key, (palette as Record<string, unknown>)[key]])) as ThemeColors;
+    }
+    const backgroundOverlay = typeof scheme.backgroundOverlay === "number" && Number.isFinite(scheme.backgroundOverlay) && scheme.backgroundOverlay >= 0 && scheme.backgroundOverlay <= 100 ? scheme.backgroundOverlay : 0;
+    return { name: scheme.name, backgroundOverlay, colors: palettes };
+  } catch { return null; }
+}
 const isColor = (value: unknown): value is string => typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value);
 export function validImage(value: string): boolean {
   if (!value || /^indexeddb:[a-z0-9-]+$/i.test(value)) return true;
@@ -99,7 +202,8 @@ export function parseThemes(raw: string | null): CustomTheme[] {
           palettes[mode] = Object.fromEntries(colorKeys.map(key => [key, palette[key]])) as ThemeColors;
         }
       }
-      return [{ id: item.id, name: item.name, backgroundImage: item.backgroundImage, colors: palettes }];
+      const backgroundOverlay = typeof item.backgroundOverlay === "number" && Number.isFinite(item.backgroundOverlay) && item.backgroundOverlay >= 0 && item.backgroundOverlay <= 100 ? item.backgroundOverlay : 40;
+      return [{ id: item.id, name: item.name, backgroundImage: item.backgroundImage, backgroundOverlay, colors: palettes }];
     });
   } catch { return []; }
 }
@@ -114,7 +218,14 @@ function systemTheme(): Theme { return typeof window !== "undefined" && window.m
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [mode, setModeState] = useState<ThemeMode>(initialMode);
   const [system, setSystem] = useState<Theme>(systemTheme);
-  const [themes, setThemes] = useState<CustomTheme[]>(() => parseThemes(read(CUSTOM_KEY)));
+  const [themes, setThemes] = useState<CustomTheme[]>(() => {
+    const stored = parseThemes(read(CUSTOM_KEY));
+    const migrated = migrateLegacyDefaultThemes(stored);
+    if (migrated.some((item, i) => item !== stored[i])) {
+      try { localStorage.setItem(CUSTOM_KEY, JSON.stringify(migrated)); } catch { /* 迁移失败时本次会话仍使用新配色 */ }
+    }
+    return migrated;
+  });
   const [activeId, setActiveId] = useState(() => read(ACTIVE_KEY) || "");
   const [imageUrl, setImageUrl] = useState("");
   const [imageError, setImageError] = useState("");
@@ -157,13 +268,19 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     for (const [key, [base, opacity]] of Object.entries(derived)) {
       if (colors) root.style.setProperty(`--${key}`, `color-mix(in srgb, var(--${base}) ${opacity}%, transparent)`); else root.style.removeProperty(`--${key}`);
     }
-    if (imageUrl) root.style.setProperty("--custom-background-image", `url(${JSON.stringify(imageUrl)})`);
-    else root.style.removeProperty("--custom-background-image");
+    if (imageUrl) {
+      root.style.setProperty("--custom-background-image", `url(${JSON.stringify(imageUrl)})`);
+      const opacity = active?.backgroundOverlay ?? 0;
+      root.style.setProperty("--custom-background-overlay", `linear-gradient(color-mix(in srgb, var(--bg-primary) ${opacity}%, transparent), color-mix(in srgb, var(--bg-primary) ${opacity}%, transparent))`);
+    } else {
+      root.style.removeProperty("--custom-background-image");
+      root.style.removeProperty("--custom-background-overlay");
+    }
   }, [theme, active, imageUrl]);
   const setMode = (value: ThemeMode) => { localStorage.setItem(STORAGE_KEY, value); setModeState(value); };
   const selectTheme = (id: string) => { localStorage.setItem(ACTIVE_KEY, id); setActiveId(id); };
   const saveTheme = async (item: CustomTheme, image?: Blob) => {
-    if (!item.name.trim() || !validImage(item.backgroundImage) || !( ["light", "dark"] as const).every(mode => item.colors[mode] && colorKeys.every(key => isColor(item.colors[mode][key])))) throw new Error("Invalid theme");
+    if (!item.name.trim() || (item.backgroundOverlay !== undefined && (!Number.isFinite(item.backgroundOverlay) || item.backgroundOverlay < 0 || item.backgroundOverlay > 100)) || !validImage(item.backgroundImage) || !( ["light", "dark"] as const).every(mode => item.colors[mode] && colorKeys.every(key => isColor(item.colors[mode][key])))) throw new Error("Invalid theme");
     const previous = themes.find(t => t.id === item.id)?.backgroundImage || "";
     let newKey = "";
     // Migrate legacy data URLs only when the theme is saved, preserving them on failure.

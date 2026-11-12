@@ -1062,7 +1062,7 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
   };
 
   return (
-    <div className="relative flex h-full overflow-hidden bg-[var(--bg-primary)]">
+    <div className="chat-page-background relative flex h-full overflow-hidden bg-[var(--bg-primary)]">
       {/* ── Session List ── */}
       {mode === "chat" && (
         <SessionList
@@ -1104,7 +1104,7 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
         /* ── WORK MODE ───────────────────────────────────────── */
         <>
           {/* AI Chat — left sidebar (350px) */}
-          <div className={cn("w-[350px] shrink-0 min-h-0 overflow-hidden border-r border-[var(--border)] bg-[var(--bg-primary)] flex-col md:flex", mobileWorkChat ? "flex max-md:flex-1 max-md:w-0" : "hidden")}>
+          <div className={cn("w-[350px] shrink-0 min-h-0 overflow-hidden border-r border-[var(--border)] flex-col md:flex", mobileWorkChat ? "flex max-md:flex-1 max-md:w-0" : "hidden")}>
             <div className="flex-1 min-h-0 flex flex-col">
               {activeSession ? (
                 <>

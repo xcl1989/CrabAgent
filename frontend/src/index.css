@@ -185,7 +185,7 @@ html {
 
 body {
   background-color: var(--bg-primary);
-  background-image: var(--custom-background-image, none);
+  background-image: var(--custom-background-overlay, linear-gradient(transparent, transparent)), var(--custom-background-image, none);
   background-size: cover;
   background-position: center;
   background-attachment: fixed;
@@ -198,6 +198,13 @@ body {
   text-rendering: optimizeLegibility;
   font-size: 14px;
   line-height: 1.55;
+}
+
+.chat-page-background {
+  background-image: var(--custom-background-overlay, linear-gradient(transparent, transparent)), var(--custom-background-image, none);
+  background-size: cover;
+  background-position: center;
+  background-attachment: fixed;
 }
 
 * {

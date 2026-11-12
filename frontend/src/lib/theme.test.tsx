@@ -3,7 +3,7 @@ import "fake-indexeddb/auto";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_COLORS, parseThemes, ThemeProvider, useTheme, validImage } from "./theme";
+import { DEFAULT_COLORS, exportThemeJSON, LEGACY_DEFAULT_COLORS, migrateLegacyDefaultThemes, parseThemeScheme, parseThemes, ThemeProvider, useTheme, validImage, type CustomTheme } from "./theme";
 
 describe("custom themes", () => {
   let container: HTMLDivElement;
@@ -23,6 +23,43 @@ describe("custom themes", () => {
     expect(parseThemes(JSON.stringify([{ id: "1", name: "test", colors: DEFAULT_COLORS.dark, backgroundImage: "javascript:alert(1)" }]))).toEqual([]);
     expect(validImage("https://example.com/a.png")).toBe(true);
     expect(validImage("data:image/svg+xml;base64,PHN2Zz4=")).toBe(false);
+  });
+  it("preserves and validates background overlay settings", () => {
+    const theme = { id: "one", name: "One", colors: DEFAULT_COLORS, backgroundImage: "https://example.com/a.png" };
+    expect(parseThemes(JSON.stringify([theme]))[0].backgroundOverlay).toBe(40);
+    expect(parseThemes(JSON.stringify([{ ...theme, backgroundOverlay: 65 }]))[0].backgroundOverlay).toBe(65);
+    expect(parseThemes(JSON.stringify([{ ...theme, backgroundOverlay: 101 }]))[0].backgroundOverlay).toBe(40);
+  });
+  it("applies and clears the background overlay with the selected theme", async () => {
+    let value!: ReturnType<typeof useTheme>;
+    function Probe() { value = useTheme(); return null; }
+    act(() => root.render(<ThemeProvider><Probe /></ThemeProvider>));
+    await act(async () => value.saveTheme({ id: "overlay", name: "Overlay", colors: DEFAULT_COLORS, backgroundImage: "https://example.com/a.png", backgroundOverlay: 65 }));
+    expect(document.documentElement.style.getPropertyValue("--custom-background-overlay")).toContain("65%");
+    expect(JSON.parse(localStorage.getItem("crabagent.customThemes")!)[0].backgroundOverlay).toBe(65);
+    act(() => value.selectTheme(""));
+    expect(document.documentElement.style.getPropertyValue("--custom-background-overlay")).toBe("");
+  });
+  it("upgrades stored themes that still use the old default palette", () => {
+    const theme = { id: "mine", name: "新主题", colors: DEFAULT_COLORS, backgroundImage: "indexeddb:abc", backgroundOverlay: 40 };
+    expect(parseThemes(JSON.stringify([{ ...theme, colors: LEGACY_DEFAULT_COLORS }]))[0].colors.light["bg-primary"]).toBe("#faf7f2");
+    const upgraded = migrateLegacyDefaultThemes([{ ...theme, colors: LEGACY_DEFAULT_COLORS }]);
+    expect(upgraded[0].colors.light["bg-primary"]).toBe(DEFAULT_COLORS.light["bg-primary"]);
+    expect(upgraded[0].colors.dark["brand"]).toBe(DEFAULT_COLORS.dark["brand"]);
+    expect(upgraded[0].backgroundImage).toBe("indexeddb:abc");
+    const untouched = migrateLegacyDefaultThemes([{ ...theme, colors: { ...DEFAULT_COLORS, light: { ...DEFAULT_COLORS.light, brand: "#123456" } } }]);
+    expect(untouched[0].colors.light.brand).toBe("#123456");
+  });
+  it("exports and imports theme color schemes", () => {
+    const theme: CustomTheme = { id: "t", name: "新主题", colors: DEFAULT_COLORS, backgroundImage: "indexeddb:abc", backgroundOverlay: 40 };
+    const round = parseThemeScheme(exportThemeJSON(theme));
+    expect(round).toEqual({ name: "新主题", backgroundOverlay: 40, colors: DEFAULT_COLORS });
+    expect(parseThemeScheme(exportThemeJSON({ ...theme, backgroundOverlay: 150 }))!.backgroundOverlay).toBe(0);
+    expect(parseThemeScheme("not json")).toBeNull();
+    const partial = JSON.parse(exportThemeJSON(theme));
+    delete partial.colors.dark["brand"];
+    expect(parseThemeScheme(JSON.stringify(partial))).toBeNull();
+    expect(parseThemeScheme(JSON.stringify({ ...partial, colors: { ...partial.colors, dark: { ...partial.colors.dark, "brand": "red" } } }))).toBeNull();
   });
   it("migrates legacy themes and rejects incomplete palettes", () => {
     const old = { id: "old", name: "Old", backgroundImage: "", colors: { brand: "#123456", accent: "#abcdef", background: "#111111", text: "#eeeeee" } };
