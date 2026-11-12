@@ -29,6 +29,7 @@ async def request_user_input(
     question: str,
     options: list[str] | None = None,
     user_id: int = 1,
+    multiple: bool = False,
 ) -> asyncio.Future[str]:
     input_id = uuid.uuid4().hex[:12]
     future: asyncio.Future[str] = asyncio.Future()
@@ -83,6 +84,8 @@ async def request_user_input(
     }
     if options:
         data["options"] = options
+    if multiple:
+        data["multiple"] = True
     await event_bus.emit(
         AgentEvent(
             type=EventType.USER_INPUT_REQUEST,

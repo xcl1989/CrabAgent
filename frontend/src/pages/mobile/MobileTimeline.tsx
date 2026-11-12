@@ -21,6 +21,7 @@ import { listWorkspaces, WorkspaceInfo } from "../../api/sessions";
 import { listProviders, getProviderModels, Provider } from "../../api/providers";
 import { listAgentProfiles, AgentProfile } from "../../api/agents";
 import { connectSSE } from "../../api/events";
+import { BackgroundTasks } from "../../components/BackgroundTasks";
 import "./mobile.css";
 
 interface LiveItem {
@@ -319,6 +320,8 @@ export function MobileTimeline({ sessionId, onSessionChange }: Props) {
           </button>
         </div>
       </div>
+
+      {sessionId && <BackgroundTasks key={sessionId} sessionId={sessionId} mobile />}
 
       {/* 时间线 */}
       <div className="flex-1 overflow-y-auto px-4 pt-3 pb-4">

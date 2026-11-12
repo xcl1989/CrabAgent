@@ -281,6 +281,7 @@ export function sseEventToMessages(event: SSEEvent, messages: ChatMessage[]): Ch
       content: (event.data.question as string) || "",
       confirm_id: event.data.input_id as string,
       options: opts && opts.length > 0 ? opts : undefined,
+      input_multiple: event.data.multiple === true || undefined,
     });
     return updated;
   }

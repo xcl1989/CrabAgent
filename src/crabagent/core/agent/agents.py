@@ -3,6 +3,7 @@ from __future__ import annotations
 import json as _json
 import logging
 import time
+from dataclasses import dataclass
 
 from sqlalchemy import select
 
@@ -606,6 +607,12 @@ async def _persist_sub_agent_usage(sub_context, parent_context, agent_name: str)
     await token_usage_batch_create(records)
 
 
+
+@dataclass(frozen=True)
+class BackgroundAgentResult:
+    status: str
+    result: str
+
 async def spawn_sub_agent(
     agent_name: str,
     task: str,
@@ -614,7 +621,9 @@ async def spawn_sub_agent(
     max_depth: int = 1,
     pipeline_run_id: int | None = None,
     pipeline_step_id: str | None = None,
-) -> str:
+    background: bool = False,
+    structured_result: bool = False,
+) -> str | BackgroundAgentResult:
     from crabagent.core.agent.context import AgentContext
     from crabagent.core.agent.loop import run_agent
     from crabagent.core.agent.tools.registry import ToolRegistry
@@ -622,7 +631,8 @@ async def spawn_sub_agent(
 
     agent_def = await get_agent(agent_name)
     if not agent_def:
-        return f"Error: agent '{agent_name}' not found"
+        error = f"Error: agent '{agent_name}' not found"
+        return BackgroundAgentResult("failed", error) if background or structured_result else error
 
     sub_registry = ToolRegistry()
 
@@ -638,6 +648,10 @@ async def spawn_sub_agent(
 
     for name, tool in base_registry._tools.items():
         if name in _DELEGATION_TOOLS:
+            continue
+        # Background jobs cannot request interactive confirmation. Recheck the
+        # current profile here in case it changed after the job was queued.
+        if background and (agent_tool_perms.get(name, "auto") != "auto" or tool.requires_permission):
             continue
         if name in _MEMORY_TOOLS:
             sub_registry._tools[name] = tool
@@ -756,19 +770,24 @@ async def spawn_sub_agent(
         )
     )
 
-    _running_sub_agents[sub_id] = {
-        "session_id": session_id,
-        "agent_name": agent_name,
-        "display_name": agent_def["display_name"],
-        "task": task[:200],
-        "started_at": time.time(),
-    }
+    if not background:
+        _running_sub_agents[sub_id] = {
+            "session_id": session_id,
+            "agent_name": agent_name,
+            "display_name": agent_def["display_name"],
+            "task": task[:200],
+            "started_at": time.time(),
+        }
 
     _last_text_flush = [0.0]
     _text_buffer = [""]
     _detail_lines: list[str] = []
 
+    _background_errors = []
+
     async def _bridge_events(event: AgentEvent):
+        if (background or structured_result) and event.type == EventType.AGENT_ERROR:
+            _background_errors.append(str(event.data.get("error", "Agent failed")))
         if event.type in (EventType.TEXT_DELTA,):
             _text_buffer[0] += event.data.get("text", "")
             now = time.time()
@@ -864,6 +883,10 @@ async def spawn_sub_agent(
         t0 = time.time()
         await run_agent(sub_context, task)
         elapsed = round(time.time() - t0, 1)
+        if _background_errors:
+            raise RuntimeError(_background_errors[-1])
+        if (background or structured_result) and sub_context.budget_exhausted:
+            raise RuntimeError("Agent iteration budget exhausted")
 
         if _text_buffer[0]:
             await parent_context.event_bus.emit(
@@ -885,7 +908,7 @@ async def spawn_sub_agent(
                 last_text = msg["content"]
                 break
 
-        if session_id and last_text:
+        if session_id and last_text and not background:
             summary = last_text[:2000]
             try:
                 from crabagent.core.database import shared_memory_put
@@ -902,7 +925,7 @@ async def spawn_sub_agent(
                     agent_name,
                 )
 
-        if parent_user_id:
+        if parent_user_id and not background:
             try:
                 from crabagent.core.database import agent_memory_upsert, task_record_create
 
@@ -1025,24 +1048,19 @@ async def spawn_sub_agent(
             ensure_ascii=False,
         )
 
-        pending = parent_context.metadata.setdefault(
-            "_pending_sub_agent_messages",
-            [],
-        )
-        pending.append(
-            {
-                "role": "sub_agent",
-                "content": sub_content,
-                "name": agent_name,
-            }
-        )
+        if not background:
+            pending = parent_context.metadata.setdefault("_pending_sub_agent_messages", [])
+            pending.append({"role": "sub_agent", "content": sub_content, "name": agent_name})
 
+        if background or structured_result:
+            return BackgroundAgentResult("succeeded" if last_text else "failed",
+                                         last_text or "(sub-agent produced no output)")
         return last_text or "(sub-agent produced no output)"
     except Exception as e:
         logger.exception("Sub-agent %s failed", agent_name)
         error_elapsed = round(time.time() - t0, 1)
 
-        if parent_context.metadata.get("user_id", 0):
+        if parent_context.metadata.get("user_id", 0) and not background:
             try:
                 from crabagent.core.database import task_record_create
 
@@ -1104,7 +1122,8 @@ async def spawn_sub_agent(
         )
         if sub_id in _running_sub_agents:
             _running_sub_agents[sub_id].update({"status": "error"})
-        return f"Error: sub-agent '{agent_name}' failed: {e}"
+        error = f"Error: sub-agent '{agent_name}' failed: {e}"
+        return BackgroundAgentResult("failed", error) if background or structured_result else error
     finally:
         try:
             await _persist_sub_agent_usage(sub_context, parent_context, agent_name)

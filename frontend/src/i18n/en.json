@@ -373,6 +373,10 @@
   "chatPanel": {
     "toolRequiresPermission": "{{tool}} requires permission",
     "typeAnswer": "Type your answer…",
+    "orCustomAnswer": "None of these fit? Type your own answer",
+    "answeredLabel": "Answered: ",
+    "confirmMulti": "Confirm selection",
+    "multiSelectHint": "multi-select",
     "branchFromHere": "Branch from here",
     "reconnecting": "Reconnecting…",
     "thinking": "Thinking…"
@@ -665,6 +669,12 @@
     "sectionPets": "Pets"
   },
   "usage": {
+    "heatmapTitle": "Yearly Usage Heatmap",
+    "heatmapDaily": "Daily",
+    "heatmapWeekly": "Weekly",
+    "heatmapCumulative": "Cumulative",
+    "heatmapLess": "Less",
+    "heatmapMore": "More",
     "title": "Token Usage",
     "totalTokens": "Total Tokens",
     "todayTokens": "Today",

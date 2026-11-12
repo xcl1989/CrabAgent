@@ -82,7 +82,7 @@ const STARTER_PROMPTS = [
   { icon: <MessageSquare size={14} />, labelKey: "chat.writeDocLabel", promptKey: "chat.writeDocPrompt" },
 ];
 
-export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: { onActiveSessionChange?: (sessionId: string | null) => void; enterBrowserSignal?: number }) {
+export default function ChatPage({ onActiveSessionChange, onActiveBranchChange, enterBrowserSignal }: { onActiveSessionChange?: (sessionId: string | null) => void; onActiveBranchChange?: (branch: string) => void; enterBrowserSignal?: number }) {
   const { t, i18n } = useTranslation();
   const [workspace, setWorkspace] = useState<string>("");
   const [goal, setGoal] = useState<GoalData | null>(null);
@@ -390,6 +390,10 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
   }, [activeSession?.workspace, workspace]);
 
   // Sync active session ID to parent (for NavBar language switcher reset)
+  useEffect(() => {
+    onActiveBranchChange?.(activeBranch);
+  }, [activeBranch, onActiveBranchChange]);
+
   useEffect(() => {
     onActiveSessionChange?.(activeSession?.session_id || null);
   }, [activeSession?.session_id, onActiveSessionChange]);
@@ -887,7 +891,7 @@ export default function ChatPage({ onActiveSessionChange, enterBrowserSignal }: 
     if (!activeSession) return;
     setMessages((prev) =>
       prev.map((m) =>
-        m.confirm_id === inputId ? { ...m, confirmed: true, content: answer } : m,
+        m.confirm_id === inputId ? { ...m, confirmed: true, input_answer: answer } : m,
       ),
     );
     try {

@@ -14,6 +14,7 @@ import {
   Zap,
 } from "lucide-react";
 import { MeasuredChartContainer } from "../components/charts/MeasuredChartContainer";
+import UsageHeatmap from "../components/UsageHeatmap";
 import { cn } from "../lib/cn";
 import {
   getOverview,
@@ -155,6 +156,8 @@ export default function UsagePage() {
             <MetricCard icon={<Database size={16} />} label={t("usage.cacheHitRate")} value={`${(overview.cache_hit_rate * 100).toFixed(0)}%`} detail={`${cacheStatus} - ${formatTokens(overview.cached_tokens)} ${t("usage.cached")}`} progress={overview.cache_hit_rate} />
             <MetricCard icon={<TrendingUp size={16} />} label={t("usage.activeSessions")} value={String(overview.sessions_count)} detail={largestSessionShare > 0 ? `${t("usage.topSession")} ${(largestSessionShare * 100).toFixed(0)}%` : undefined} />
           </section>
+
+          <UsageHeatmap workspace={workspace} />
 
           {overview.trend.length > 0 && <Card title={overview.hourly ? t("usage.hourlyTrend") : t("usage.dailyTrend")} action={<TrendTabs mode={trendMode} onChange={setTrendMode} t={t} />}>
             <MeasuredChartContainer height={260}>{({ width, height }) => <AreaChart width={width} height={height} data={overview.trend} margin={{ top: 12, right: 8, left: 8, bottom: 0 }}>

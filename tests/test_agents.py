@@ -397,6 +397,28 @@ class TestSpawnSubAgent:
         assert "task done" in result or "Code Expert" in result
 
     @pytest.mark.asyncio
+    async def test_background_not_in_sync_running_table(self, monkeypatch: pytest.MonkeyPatch):
+        agent_def = {
+            "name": "coder", "display_name": "Coder", "role": "Code", "goal": "Code",
+            "backstory": "", "model": "", "allow_delegation": False, "tool_permissions": {},
+        }
+        monkeypatch.setattr(agents_module, "get_agent", _async_return(agent_def))
+        monkeypatch.setattr(agents_module, "_classify_task", lambda task: "code")
+        monkeypatch.setattr(agents_module, "inject_agent_lessons", _async_return("prompt"))
+        monkeypatch.setattr(agents_module, "_load_shared_context", _async_return(""))
+
+        async def fake_run_agent(context, query):
+            assert not agents_module.get_running_subs("background-test-session")
+            context.messages.append({"role": "assistant", "content": "done"})
+            return context.messages
+
+        monkeypatch.setattr("crabagent.core.agent.loop.run_agent", fake_run_agent)
+        parent = AgentContext(workspace=Path.cwd(), tool_registry=ToolRegistry())
+        parent.metadata["session_id"] = "background-test-session"
+        await agents_module.spawn_sub_agent("coder", "task", parent, background=True)
+        assert not agents_module.get_running_subs("background-test-session")
+
+    @pytest.mark.asyncio
     async def test_spawn_sub_agent_includes_history_and_shared_context(self, monkeypatch: pytest.MonkeyPatch):
         agents_module._running_sub_agents.clear()
         agent_def = {

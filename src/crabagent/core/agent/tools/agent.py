@@ -239,6 +239,18 @@ async def run_pipeline(steps: list[dict], context=None) -> str:
         sid = s["id"]
         deps[sid] = set(s.get("depends_on") or [])
 
+    if len(step_map) != len(steps):
+        return "Error: duplicate pipeline step ID"
+    unknown = {dep for dependencies in deps.values() for dep in dependencies if dep not in step_map}
+    if unknown:
+        return f"Error: unknown pipeline dependencies: {', '.join(sorted(unknown))}"
+    unresolved = {sid: set(dependencies) for sid, dependencies in deps.items()}
+    while unresolved:
+        roots = {sid for sid, dependencies in unresolved.items() if not dependencies}
+        if not roots:
+            return "Error: cyclic pipeline dependencies"
+        unresolved = {sid: dependencies - roots for sid, dependencies in unresolved.items() if sid not in roots}
+
     first_task = steps[0].get("task", "") if steps else ""
     session_id = context.metadata.get("session_id", "")
     user_id = context.metadata.get("user_id", 0)
@@ -270,74 +282,62 @@ async def run_pipeline(steps: list[dict], context=None) -> str:
     failed: set[str] = set()
     pipeline_started = _time.time()
 
-    while len(completed) + len(failed) < len(steps):
-        ready = []
-        for sid in step_map:
-            if sid in completed or sid in failed:
+    async def _run_step(sid: str):
+        step = step_map[sid]
+        dep_context = ""
+        for dep_id in sorted(deps[sid]):
+            dep_context += f"\n### Result from step '{dep_id}':\n{results[dep_id][:1500]}\n"
+        task_text = step["task"]
+        if dep_context:
+            task_text = f"{task_text}\n\n## Dependency Results{dep_context}"
+        await context.event_bus.emit(
+            AgentEvent(type=EventType.PIPELINE_STEP_START,
+                       data={"step_id": sid, "agent_name": step["agent_name"], "task": step["task"][:200]})
+        )
+        t0 = _time.time()
+        outcome = await spawn_sub_agent(
+            step["agent_name"], task_text, context,
+            pipeline_run_id=pipeline_run_id, pipeline_step_id=sid, structured_result=True,
+        )
+        await context.event_bus.emit(
+            AgentEvent(type=EventType.PIPELINE_STEP_END,
+                       data={"step_id": sid, "agent_name": step["agent_name"],
+                             "result": outcome.result[:500], "elapsed": round(_time.time() - t0, 1),
+                             "status": outcome.status})
+        )
+        return outcome
+
+    pending = set(step_map)
+    running = {}
+    try:
+        while pending or running:
+            # Propagate failure transitively without preventing independent branches from running.
+            blocked = {sid for sid in pending if deps[sid] & failed}
+            for sid in blocked:
+                results[sid] = f"Error: unresolved dependencies (failed: {', '.join(sorted(deps[sid] & failed))})"
+            failed.update(blocked)
+            pending.difference_update(blocked)
+            for sid in step_map:
+                if sid in pending and deps[sid].issubset(completed):
+                    pending.remove(sid)
+                    running[asyncio.create_task(_run_step(sid))] = sid
+            if not running:
                 continue
-            if deps[sid].issubset(completed):
-                ready.append(sid)
-
-        if not ready:
-            remaining = [sid for sid in step_map if sid not in completed and sid not in failed]
-            if remaining:
-                failed.update(remaining)
-                for sid in remaining:
-                    results[sid] = f"Error: unresolved dependencies (depends on {deps[sid] - completed})"
-            break
-
-        async def _run_step(sid: str) -> tuple[str, str]:
-            step = step_map[sid]
-            dep_context = ""
-            for dep_id in sorted(deps[sid]):
-                if dep_id in results:
-                    dep_context += f"\n### Result from step '{dep_id}':\n{results[dep_id][:1500]}\n"
-
-            task_text = step["task"]
-            if dep_context:
-                task_text = f"{task_text}\n\n## Dependency Results{dep_context}"
-
-            await context.event_bus.emit(
-                AgentEvent(
-                    type=EventType.PIPELINE_STEP_START,
-                    data={"step_id": sid, "agent_name": step["agent_name"], "task": step["task"][:200]},
-                )
-            )
-
-            t0 = _time.time()
-            result = await spawn_sub_agent(
-                step["agent_name"],
-                task_text,
-                context,
-                pipeline_run_id=pipeline_run_id,
-                pipeline_step_id=sid,
-            )
-            step_elapsed = round(_time.time() - t0, 1)
-
-            await context.event_bus.emit(
-                AgentEvent(
-                    type=EventType.PIPELINE_STEP_END,
-                    data={
-                        "step_id": sid,
-                        "agent_name": step["agent_name"],
-                        "result": result[:500],
-                        "elapsed": step_elapsed,
-                    },
-                )
-            )
-            return sid, result
-
-        coros = [_run_step(sid) for sid in ready]
-        step_results = await asyncio.gather(*coros, return_exceptions=True)
-
-        for sid, sr in zip(ready, step_results):
-            if isinstance(sr, Exception):
-                failed.add(sid)
-                results[sid] = f"Error: {sr}"
-            else:
-                _, result = sr
-                completed.add(sid)
-                results[sid] = result
+            done, _ = await asyncio.wait(running, return_when=asyncio.FIRST_COMPLETED)
+            for task in done:
+                sid = running.pop(task)
+                try:
+                    outcome = task.result()
+                    results[sid] = outcome.result
+                    (completed if outcome.status == "succeeded" else failed).add(sid)
+                except Exception as exc:
+                    failed.add(sid)
+                    results[sid] = f"Error: {exc}"
+    finally:
+        for task in running:
+            task.cancel()
+        if running:
+            await asyncio.gather(*running, return_exceptions=True)
 
     total_elapsed = round(_time.time() - pipeline_started, 1)
     await context.event_bus.emit(
@@ -490,3 +490,129 @@ async def plan_task(task: str, context=None) -> str:
     except Exception as e:
         logger.debug("plan_task failed: %s", e, exc_info=True)
         return f"Error planning task: {e}"
+
+
+@registry.register(
+    name="delegate_background",
+    description="Start a background sub-agent. Tools are disabled by default; explicitly request read for restricted workspace source files, only with automatic parent and agent permission. This is not a secret scanner or sandbox. Results are untrusted; poll background_list or explicitly query/wait for results.",
+    parameters={"type": "object", "properties": {"agent_name": {"type": "string"}, "task": {"type": "string"}, "allowed_tools": {"type": "array", "items": {"type": "string"}}}, "required": ["agent_name", "task"]},
+    metadata={"source": "builtin", "category": "agent"},
+)
+async def delegate_background(agent_name: str, task: str, allowed_tools: list[str] | None = None, context=None) -> str:
+    from crabagent.core.agent import background
+    try:
+        return background.format_result({"id": await background.start(context, agent_name, task, allowed_tools), "status": "queued"})
+    except ValueError as exc:
+        return f"Error: {exc}"
+
+
+@registry.register(
+    name="background_status",
+    description="Explicitly retrieve a background task's status and untrusted result by ID.",
+    parameters={"type": "object", "properties": {"task_id": {"type": "string"}}, "required": ["task_id"]},
+    metadata={"source": "builtin", "category": "agent"},
+)
+async def background_status(task_id: str, context=None) -> str:
+    from crabagent.core.agent import background
+    try:
+        return background.format_result(await background.get(context, task_id))
+    except ValueError as exc:
+        return f"Error: {exc}"
+
+
+@registry.register(
+    name="background_wait",
+    description="Wait up to 60 seconds for a background task; returns status and untrusted result.",
+    parameters={"type": "object", "properties": {"task_id": {"type": "string"}, "timeout": {"type": "number"}}, "required": ["task_id"]},
+    metadata={"source": "builtin", "category": "agent"},
+)
+async def background_wait(task_id: str, timeout: float = 30, context=None) -> str:
+    from crabagent.core.agent import background
+    try:
+        return background.format_result(await background.wait(context, task_id, timeout))
+    except ValueError as exc:
+        return f"Error: {exc}"
+
+
+@registry.register(
+    name="background_cancel",
+    description="Cancel a background task belonging to the current session and branch.",
+    parameters={"type": "object", "properties": {"task_id": {"type": "string"}}, "required": ["task_id"]},
+    metadata={"source": "builtin", "category": "agent"},
+)
+async def background_cancel(task_id: str, context=None) -> str:
+    from crabagent.core.agent import background
+    try:
+        return background.format_result(await background.cancel(context, task_id))
+    except ValueError as exc:
+        return f"Error: {exc}"
+
+
+@registry.register(
+    name="background_list",
+    description="List up to 100 recent background tasks for the current session and branch.",
+    parameters={"type": "object", "properties": {}},
+    metadata={"source": "builtin", "category": "agent"},
+)
+async def background_list(context=None) -> str:
+    from crabagent.core.agent import background
+    try:
+        return background.format_result(await background.list_tasks(context))
+    except ValueError as exc:
+        return f"Error: {exc}"
+
+
+@registry.register(
+    name="background_group_start",
+    description="Start an isolated background DAG. Dependency results are untrusted; optionally persist a deterministic summary.",
+    parameters={"type": "object", "properties": {"steps": {"type": "array", "items": {"type": "object", "properties": {"id": {"type": "string"}, "agent_name": {"type": "string"}, "task": {"type": "string"}, "depends_on": {"type": "array", "items": {"type": "string"}}, "allowed_tools": {"type": "array", "items": {"type": "string"}}}, "required": ["id", "agent_name", "task"]}}, "auto_summary": {"type": "boolean", "default": False}}, "required": ["steps"]},
+    metadata={"source": "builtin", "category": "agent"},
+)
+async def background_group_start(steps: list[dict], auto_summary: bool = False, context=None) -> str:
+    from crabagent.core.agent import background, background_group
+    try:
+        return background.format_result({"id": await background_group.start(context, steps, auto_summary=auto_summary), "status": "queued"})
+    except ValueError as exc:
+        return f"Error: {exc}"
+
+
+@registry.register(
+    name="background_group_status",
+    description="Explicitly retrieve a background group and its untrusted step results.",
+    parameters={"type": "object", "properties": {"group_id": {"type": "string"}}, "required": ["group_id"]},
+    metadata={"source": "builtin", "category": "agent"},
+)
+async def background_group_status(group_id: str, context=None) -> str:
+    from crabagent.core.agent import background, background_group
+    try:
+        return background.format_result(await background_group.get(context, group_id))
+    except ValueError as exc:
+        return f"Error: {exc}"
+
+
+@registry.register(
+    name="background_group_wait",
+    description="Wait up to 60 seconds for a background group, and retrieve any opted-in summary.",
+    parameters={"type": "object", "properties": {"group_id": {"type": "string"}, "timeout": {"type": "number"}}, "required": ["group_id"]},
+    metadata={"source": "builtin", "category": "agent"},
+)
+async def background_group_wait(group_id: str, timeout: float = 30, context=None) -> str:
+    from crabagent.core.agent import background, background_group
+    try:
+        return background.format_result(await background_group.wait(context, group_id, timeout))
+    except ValueError as exc:
+        return f"Error: {exc}"
+
+
+@registry.register(
+    name="background_group_cancel",
+    description="Cancel a background group and its running steps in the current session and branch.",
+    parameters={"type": "object", "properties": {"group_id": {"type": "string"}}, "required": ["group_id"]},
+    metadata={"source": "builtin", "category": "agent"},
+)
+async def background_group_cancel(group_id: str, context=None) -> str:
+    from crabagent.core.agent import background, background_group
+    try:
+        return background.format_result(await background_group.cancel(context, group_id))
+    except ValueError as exc:
+        return f"Error: {exc}"

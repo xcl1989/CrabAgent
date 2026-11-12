@@ -12,6 +12,8 @@ export interface ChatMessage {
   args_summary?: string;
   confirmed?: boolean;
   options?: string[];
+  input_answer?: string;
+  input_multiple?: boolean;
   source?: "builtin" | "mcp";
   server_name?: string;
   images?: string[];

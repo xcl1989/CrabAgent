@@ -451,6 +451,7 @@ def create_app() -> FastAPI:
 
     from crabagent.serve.api.agent import router as agent_router
     from crabagent.serve.api.auth import router as auth_router
+    from crabagent.serve.api.background_tasks import router as background_tasks_router
     from crabagent.serve.api.branch import router as branch_router
     from crabagent.serve.api.browser_tasks import router as browser_tasks_router
     from crabagent.serve.api.calendar import router as calendar_router
@@ -487,6 +488,7 @@ def create_app() -> FastAPI:
 
     app.include_router(agent_router, prefix="/api")
     app.include_router(auth_router, prefix="/api")
+    app.include_router(background_tasks_router, prefix="/api")
     app.include_router(session_router, prefix="/api")
     app.include_router(browser_tasks_router, prefix="/api")
     app.include_router(goals_router, prefix="/api")

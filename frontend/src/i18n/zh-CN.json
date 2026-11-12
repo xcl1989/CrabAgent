@@ -373,6 +373,16 @@
   "chatPanel": {
     "toolRequiresPermission": "{{tool}} 需要授权",
     "typeAnswer": "输入你的回答…",
+    "orCustomAnswer": "都不合适？直接输入你的答案",
+    "answeredLabel": "已回答：",
+    "confirmMulti": "确认选择",
+    "multiSelectHint": "可多选",
+    "heatmapTitle": "全年用量热力图",
+    "heatmapDaily": "每日",
+    "heatmapWeekly": "每周",
+    "heatmapCumulative": "累计",
+    "heatmapLess": "少",
+    "heatmapMore": "多",
     "branchFromHere": "从此处分支",
     "reconnecting": "重新连接中…",
     "thinking": "思考中…"
@@ -665,6 +675,12 @@
     "sectionPets": "桌宠"
   },
   "usage": {
+    "heatmapTitle": "全年用量热力图",
+    "heatmapDaily": "每日",
+    "heatmapWeekly": "每周",
+    "heatmapCumulative": "累计",
+    "heatmapLess": "少",
+    "heatmapMore": "多",
     "title": "Token 用量",
     "totalTokens": "总消耗",
     "todayTokens": "今日",

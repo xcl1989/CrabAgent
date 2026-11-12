@@ -38,6 +38,101 @@ class ProviderConfig(Base):
     updated_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
 
+class BackgroundDelegation(Base):
+    __tablename__ = "background_delegations"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    session_id: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    branch_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    agent_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    task: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    result: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class BackgroundGroup(Base):
+    __tablename__ = "background_groups"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    session_id: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    branch_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class BackgroundDelivery(Base):
+    """Opt-in UI-only outbox record and durable acknowledgement."""
+    __tablename__ = "background_deliveries"
+    group_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    session_id: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    branch_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    terminal_status: Mapped[str] = mapped_column(String(20), nullable=False, default="")
+    acknowledged_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class BackgroundGroupSummary(Base):
+    """Opt-in summary stored separately from conversation messages."""
+    __tablename__ = "background_group_summaries"
+    group_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False, default="")
+
+
+class BackgroundSemanticSummary(Base):
+    """A frozen, explicitly authorized semantic summary request."""
+    __tablename__ = "background_semantic_summaries"
+    group_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    snapshot: Mapped[str] = mapped_column(Text, nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    run_id: Mapped[str] = mapped_column(String(32), nullable=False)
+
+
+class BackgroundStartCommand(Base):
+    """Durable start request forwarded to whichever process owns the executor.
+
+    Payloads carry only non-secret execution parameters (workspace path, model
+    and provider names, locale, agent name, task text, allowed tools); API keys
+    are re-resolved from the provider store by the executing process.
+    """
+    __tablename__ = "background_start_commands"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    record_id: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    session_id: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    branch_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    payload: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    note: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class BackgroundGroupStep(Base):
+    __tablename__ = "background_group_steps"
+
+    group_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    step_id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    agent_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    task: Mapped[str] = mapped_column(Text, nullable=False)
+    depends_on: Mapped[list] = mapped_column(JSON, nullable=False)
+    allowed_tools: Mapped[list] = mapped_column(JSON, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    job_id: Mapped[str] = mapped_column(String(32), default="")
+    result: Mapped[str] = mapped_column(Text, default="")
+    updated_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
 class User(Base):
     __tablename__ = "users"
 

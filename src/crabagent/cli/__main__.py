@@ -458,12 +458,29 @@ def _make_cli_confirm_callback(console):
 
 
 def _make_cli_ask_callback(console):
-    async def ask(question: str, options: list[str] | None = None) -> str:
+    async def ask(question: str, options: list[str] | None = None, multiple: bool = False) -> str:
         try:
             if options:
                 print(f"\n  {question}")
                 for i, opt in enumerate(options, 1):
                     print(f"    {i}. {opt}")
+                if multiple:
+                    print(
+                        f"  Choice (1-{len(options)}, comma-separated for multiple, or custom): ",
+                        end="", flush=True,
+                    )
+                    answer = await asyncio.get_event_loop().run_in_executor(
+                        None, lambda: input().strip()
+                    )
+                    parts = [p.strip() for p in answer.split(",") if p.strip()]
+                    mapped = []
+                    for p in parts:
+                        try:
+                            idx = int(p) - 1
+                            mapped.append(options[idx] if 0 <= idx < len(options) else p)
+                        except ValueError:
+                            mapped.append(p)
+                    return ", ".join(mapped)
                 print(f"  Choice (1-{len(options)} or custom): ", end="", flush=True)
                 answer = await asyncio.get_event_loop().run_in_executor(None, lambda: input().strip())
                 try:
@@ -686,15 +703,24 @@ async def _setup_agent_context(
                     "items": {"type": "string"},
                     "description": "Optional list of choices for the user to pick from",
                 },
+                "multiple": {
+                    "type": "boolean",
+                    "description": (
+                        "Set true to let the user select several options at once. "
+                        "The answer is then the selected options joined by ', '."
+                    ),
+                },
             },
             "required": ["question"],
         },
     )
-    async def ask_question(question: str, options: list[str] | None = None, context=None) -> str:
+    async def ask_question(
+        question: str, options: list[str] | None = None, multiple: bool = False, context=None
+    ) -> str:
         cb = getattr(context, "ask_callback", None)
         if not cb:
             return "Error: no ask callback available"
-        return await cb(question, options)
+        return await cb(question, options, multiple)
 
     return context
 

@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.18.1] — Asynchronous Sub-Agent Teams (2026-11-12)
+
+### Added
+- Background task groups: durable DAGs with dynamic dependency scheduling, per-group cancellation, resource budgets (active groups, step/group/dependency input sizes) and dependency-failure propagation.
+- Opt-in, explicitly authorized semantic summaries of completed groups: provider+model consent binding, re-authentication, independent state machine with run-id fencing, retry after failure/cancel, and local deletion of terminal summaries.
+- Transactional opt-in delivery outbox and desktop/mobile result cards; background results never enter model messages.
+- Cross-process start forwarding: non-executor processes persist authorized start commands (single tasks, groups, semantic summaries) that the executor-owning process claims and runs; flock is the fence and orphan recovery marks interrupted work.
+
+### Changed
+- Background waits poll the database with a bounded timeout; single tasks, groups and semantic summaries accept cross-process cancellation via persisted `cancelling` states.
+- Semantic summaries now use exactly the same provider path as regular chats (all provider types including ChatGPT; consent binds provider configuration and model only).
+
+### Fixed
+- Cancellation racing: cancel requests are bound to run ids and cleaning tasks, stale cancels cannot overwrite retried runs, and terminal states are only committed after cleanup finishes.
+- Group coordinator no longer fails when the active branch switches while it runs.
+
+---
 ## [0.18.0] — Language Synchronization
 
 ### Added

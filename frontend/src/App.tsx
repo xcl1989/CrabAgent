@@ -13,6 +13,7 @@ import { connectGlobalSSE } from "./api/monitor";
 import { toast } from "./components/ui/Toast";
 import { FtsStatusBar } from "./components/FtsStatusBar";
 import { DesktopPet } from "./components/DesktopPet";
+import { BackgroundTasks } from "./components/BackgroundTasks";
 import { MobileConsole } from "./pages/mobile/MobileConsole";
 
 export type PageId = "chat" | "browser" | "agents" | "memory" | "usage" | "calendar" | "settings";
@@ -33,6 +34,7 @@ interface FtsRebuild {
 function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
   const [page, setPage] = useState<PageId>(() => pageFromHash() ?? "chat");
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [activeBranch, setActiveBranch] = useState<string | undefined>();
   const [enterBrowser, setEnterBrowser] = useState(0);
   const [ftsStatus, setFtsStatus] = useState<FtsRebuild | null>(null);
 
@@ -100,10 +102,12 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
   return (
     <div className="flex flex-col h-dvh overflow-hidden">
       <NavBar currentPage={page} onNavigate={handleNavigate} onLogout={onLogout} sessionId={activeSessionId} />
+      {page === "chat" && activeSessionId && <BackgroundTasks key={`${activeSessionId}:${activeBranch}`} sessionId={activeSessionId} activeBranch={activeBranch} />}
       <div className="flex-1 relative overflow-hidden">
         <div className={cn("absolute inset-0", page !== "chat" && "hidden")}>
           <ChatPage
             onActiveSessionChange={setActiveSessionId}
+            onActiveBranchChange={setActiveBranch}
             enterBrowserSignal={enterBrowser}
           />
         </div>

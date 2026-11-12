@@ -57,6 +57,8 @@ export interface ChatMessage {
   args_summary?: string;
   confirmed?: boolean;
   options?: string[];
+  input_answer?: string;
+  input_multiple?: boolean;
   source?: "builtin" | "mcp";
   server_name?: string;
   images?: string[];
@@ -398,9 +400,15 @@ const UserInputItem = memo(function UserInputItem({
   msg: ChatMessage;
   onUserInput?: (inputId: string, answer: string) => void;
 }) {
+  const { t } = useTranslation();
   if (!msg.confirm_id) return null;
   const resolved = msg.confirmed !== undefined;
   const options = msg.options;
+  const answer = msg.input_answer;
+  const multiple = msg.input_multiple === true;
+  // Multi-select answers arrive as the chosen options joined by ", "
+  const multiAnswers =
+    multiple && answer ? answer.split(/,\s*/).map((s) => s.trim()) : null;
   return (
     <div className="mb-3 ml-3">
       <div
@@ -411,22 +419,65 @@ const UserInputItem = memo(function UserInputItem({
             : "3px solid var(--accent)",
         }}
       >
-        <div className="flex items-center gap-2 mb-1.5">
-          <MessageSquare size={14} className="text-[var(--accent)]" />
-          <span className="font-medium text-[var(--text-primary)]">
+        {/* Question stays visible after answering — never overwritten */}
+        <div className="flex items-start gap-2">
+          <MessageSquare size={14} className="text-[var(--accent)] mt-0.5 shrink-0" />
+          <span className="font-medium text-[var(--text-primary)] leading-5">
             {msg.content}
           </span>
+          {multiple && (
+            <span className="shrink-0 mt-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-[var(--brand-bg)] text-[var(--brand)] border border-[var(--brand-border)]">
+              {t("chatPanel.multiSelectHint")}
+            </span>
+          )}
         </div>
-        {!resolved && onUserInput && options && options.length > 0 && (
-          <UserInputOptions options={options} inputId={msg.confirm_id} onSubmit={onUserInput} />
-        )}
-        {!resolved && onUserInput && (!options || options.length === 0) && (
-          <UserInputField inputId={msg.confirm_id} onSubmit={onUserInput} />
-        )}
-        {resolved && (
-          <div className="text-xs mt-1 text-[var(--text-secondary)]">
-            → {msg.content}
+        {resolved ? (
+          <div className="mt-2.5 pt-2 border-t border-[var(--border)]">
+            <div className="flex items-start gap-1.5 text-xs">
+              <Check size={13} className="text-[var(--success)] shrink-0 mt-0.5" />
+              <span className="text-[var(--text-secondary)] shrink-0">
+                {t("chatPanel.answeredLabel")}
+              </span>
+              <span className="font-medium text-[var(--text-primary)] break-all">
+                {answer ?? msg.content}
+              </span>
+            </div>
+            {options && options.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {options.map((opt, i) => {
+                  const chosen = multiAnswers
+                    ? multiAnswers.includes(opt)
+                    : answer === opt;
+                  return (
+                    <span
+                      key={i}
+                      className={
+                        chosen
+                          ? "px-2 py-0.5 rounded-md text-xs font-medium text-[var(--success)] border border-[var(--success)]/40 bg-[var(--bg-tertiary)]"
+                          : "px-2 py-0.5 rounded-md text-xs text-[var(--text-tertiary)] border border-[var(--border)] opacity-60"
+                      }
+                    >
+                      {chosen ? `✓ ${opt}` : opt}
+                    </span>
+                  );
+                })}
+              </div>
+            )}
           </div>
+        ) : (
+          <>
+            {onUserInput && options && options.length > 0 && (
+              <UserInputOptions
+                options={options}
+                inputId={msg.confirm_id}
+                onSubmit={onUserInput}
+                multiple={multiple}
+              />
+            )}
+            {onUserInput && (!options || options.length === 0) && (
+              <UserInputField inputId={msg.confirm_id} onSubmit={onUserInput} />
+            )}
+          </>
         )}
       </div>
     </div>
@@ -744,9 +795,12 @@ const AssistantMessageItem = memo(function AssistantMessageItem({
 function UserInputField({
   inputId,
   onSubmit,
+  autoFocusInput = true,
 }: {
   inputId: string;
   onSubmit: (id: string, answer: string) => void;
+  /** false when embedded below option buttons — don't steal focus */
+  autoFocusInput?: boolean;
 }) {
   const { t } = useTranslation();
   const [value, setValue] = useState("");
@@ -772,7 +826,7 @@ function UserInputField({
           submit();
         }}
         placeholder={t("chatPanel.typeAnswer")}
-        autoFocus
+        autoFocus={autoFocusInput}
         className="flex-1 h-8 px-3 text-xs rounded-md bg-[var(--bg-tertiary)] border border-[var(--border)] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--brand)] focus:ring-2 focus:ring-[var(--brand)]/30"
       />
       <button
@@ -790,22 +844,74 @@ function UserInputOptions({
   options,
   inputId,
   onSubmit,
+  multiple = false,
 }: {
   options: string[];
   inputId: string;
   onSubmit: (id: string, answer: string) => void;
+  /** true → checkbox rows with a confirm button; false → radio rows, click to submit */
+  multiple?: boolean;
 }) {
+  const { t } = useTranslation();
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const toggle = (i: number) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
+      return next;
+    });
+  };
+  const submitMulti = () => {
+    if (selected.size === 0) return;
+    const chosen = Array.from(selected)
+      .sort((a, b) => a - b)
+      .map((i) => options[i])
+      .join(", ");
+    onSubmit(inputId, chosen);
+  };
   return (
-    <div className="flex flex-wrap gap-1.5 mt-2">
-      {options.map((opt, i) => (
+    <div className="mt-2.5 space-y-1.5">
+      {options.map((opt, i) => {
+        const checked = selected.has(i);
+        return (
+          <button
+            key={i}
+            onClick={() => (multiple ? toggle(i) : onSubmit(inputId, opt))}
+            className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs text-left bg-[var(--bg-tertiary)] text-[var(--text-primary)] border border-[var(--border)] hover:border-[var(--brand)] hover:bg-[var(--brand-bg)] transition-colors"
+          >
+            {multiple ? (
+              <span
+                className={
+                  checked
+                    ? "w-3.5 h-3.5 rounded-sm border border-[var(--brand)] bg-[var(--brand)] shrink-0 flex items-center justify-center"
+                    : "w-3.5 h-3.5 rounded-sm border border-[var(--border)] bg-[var(--bg-secondary)] shrink-0"
+                }
+              >
+                {checked && <Check size={10} className="text-white" strokeWidth={3} />}
+              </span>
+            ) : (
+              <span className="w-3.5 h-3.5 rounded-full border border-[var(--border)] bg-[var(--bg-secondary)] shrink-0" />
+            )}
+            <span className="flex-1">{opt}</span>
+          </button>
+        );
+      })}
+      {multiple && (
         <button
-          key={i}
-          onClick={() => onSubmit(inputId, opt)}
-          className="px-2.5 py-1 rounded-md text-xs font-medium bg-[var(--brand-bg)] text-[var(--brand)] border border-[var(--brand-border)] hover:bg-[var(--brand-bg-strong)] transition-colors"
+          onClick={submitMulti}
+          disabled={selected.size === 0}
+          className="w-full h-8 rounded-lg text-xs font-medium bg-[var(--brand)] text-white disabled:opacity-40 hover:bg-[var(--brand-hover)] transition-colors"
         >
-          {opt}
+          {t("chatPanel.confirmMulti")} ({selected.size})
         </button>
-      ))}
+      )}
+      <div className="pt-2.5 mt-2.5 border-t border-[var(--border)]">
+        <div className="text-[11px] text-[var(--text-tertiary)] mb-1.5">
+          {t("chatPanel.orCustomAnswer")}
+        </div>
+        <UserInputField inputId={inputId} onSubmit={onSubmit} autoFocusInput={false} />
+      </div>
     </div>
   );
 }

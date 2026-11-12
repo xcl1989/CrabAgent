@@ -1081,9 +1081,11 @@ Use ordinary Markdown when a visualization is not helpful.
 
     from crabagent.serve.api.input import request_user_input
 
-    async def _serve_ask(question: str, options: list[str] | None = None) -> str:
+    async def _serve_ask(
+        question: str, options: list[str] | None = None, multiple: bool = False
+    ) -> str:
         future = await request_user_input(
-            context.event_bus, session_id, question, options=options, user_id=user.id
+            context.event_bus, session_id, question, options=options, multiple=multiple, user_id=user.id
         )
         try:
             return await asyncio.wait_for(future, timeout=300.0)
@@ -1122,15 +1124,24 @@ Use ordinary Markdown when a visualization is not helpful.
                     "items": {"type": "string"},
                     "description": "Optional list of choices for the user to pick from",
                 },
+                "multiple": {
+                    "type": "boolean",
+                    "description": (
+                        "Set true to let the user select several options at once. "
+                        "The answer is then the selected options joined by ', '."
+                    ),
+                },
             },
             "required": ["question"],
         },
     )
-    async def ask_question(question: str, options: list[str] | None = None, context=None) -> str:
+    async def ask_question(
+        question: str, options: list[str] | None = None, multiple: bool = False, context=None
+    ) -> str:
         cb = getattr(context, "ask_callback", None)
         if not cb:
             return "Error: no ask callback available"
-        return await cb(question, options)
+        return await cb(question, options, multiple)
 
     async def _run():
         t0 = time.time()
