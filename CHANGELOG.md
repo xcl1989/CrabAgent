@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.18.3] — Bounded Game Input for Browser and macOS (2026-11-13)
+
+### Added
+- Game key tools for the collaboration browser: `computer_hold_game_keys` and `computer_game_plan` hold 1–4 whitelisted keys (or a bounded plan of holds and waits, at most 8 steps / 2 s) inside the visible browser, with per-step focus checks and reverse-order best-effort key-up.
+- Native macOS game keys: `macos_hold_game_keys` and `macos_game_plan` run the same bounded plans inside one Swift helper process, with plan-level cancellation via a dedicated bridge command, parent-disconnect and focus-loss abort, and pre-allocated reverse release events.
+- Safety gates verified in the packaged app: injections are refused while a sensitive input field has focus (`UNSAFE_GAME_TARGET`), stale observations must be refreshed before input, duplicate action ids are rejected, and helper hangs fall back to a bounded cancel-then-kill path that reports unconfirmed releases.
+- Integration coverage: plan validation unit tests, Node tests for the key transaction module, browser bridge integration including cancellation and duplicate-id refusal, and a native bridge integration script (`src/crabagent/electron/test/macos-game-bridge.js`).
+
+### Changed
+- `computer_act` may now chain independent `type_text`/`select_option` fields in one call after automatic target revalidation; other actions still end the batch.
+- New `macos_click_and_type` tool performs an observed click and single-line typing in one operation.
+
+---
+
 ## [0.18.2] — Background Task Visibility and ChatGPT Proxy (2026-11-13)
 
 ### Changed

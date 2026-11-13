@@ -256,3 +256,82 @@ async def test_capture_sets_input_precondition(monkeypatch):
     ctx = fresh_context()
     await macos_computer.macos_capture(7, context=ctx)
     assert ctx.metadata["_macos_input_confirmed"] is True
+
+
+@pytest.mark.asyncio
+async def test_click_and_type_executes_in_order(monkeypatch):
+    calls = []
+
+    async def bridge(command, payload, context=None):
+        calls.append((command, payload))
+        return {"ok": True}
+
+    monkeypatch.setattr(macos_computer, "_call_bridge", bridge)
+    ctx = context()
+    ctx.metadata["_macos_batch_observation"] = (7, 42, macos_computer.time.monotonic())
+    result = json.loads(await macos_computer.macos_click_and_type(7, 42, 10, 20, "hello", ctx))
+    assert [item[0] for item in calls] == ["macos_click", "macos_type"]
+    assert calls[1][1]["text"] == "hello"
+    assert result["needs_observation"] is True
+    assert "_macos_batch_observation" not in ctx.metadata
+
+
+@pytest.mark.asyncio
+async def test_click_and_type_stops_on_denial(monkeypatch):
+    calls = []
+
+    async def bridge(command, payload, context=None):
+        calls.append(command)
+        return {"ok": False, "status": "blocked", "error": "denied"}
+
+    monkeypatch.setattr(macos_computer, "_call_bridge", bridge)
+    ctx = context()
+    ctx.metadata["_macos_batch_observation"] = (7, 42, macos_computer.time.monotonic())
+    result = json.loads(await macos_computer.macos_click_and_type(7, 42, 10, 20, "hello", ctx))
+    assert calls == ["macos_click"]
+    assert result["type"]["status"] == "not_executed"
+
+
+@pytest.mark.asyncio
+async def test_click_and_type_rejects_other_or_stale_window(monkeypatch):
+    monkeypatch.setattr(macos_computer, "_call_bridge", lambda *a, **k: pytest.fail("bridge reached"))
+    ctx = context()
+    ctx.metadata["_macos_batch_observation"] = (8, 42, macos_computer.time.monotonic())
+    with pytest.raises(RuntimeError, match="STALE_OBSERVATION"):
+        await macos_computer.macos_click_and_type(7, 42, 10, 20, "hello", ctx)
+    ctx.metadata["_macos_batch_observation"] = (7, 42, macos_computer.time.monotonic() - 31)
+    with pytest.raises(RuntimeError, match="STALE_OBSERVATION"):
+        await macos_computer.macos_click_and_type(7, 42, 10, 20, "hello", ctx)
+
+
+@pytest.mark.asyncio
+async def test_game_hold_requires_matching_fresh_observation(monkeypatch):
+    import time
+
+    monkeypatch.setattr(macos_computer, "_call_bridge", lambda *a, **k: pytest.fail("bridge reached"))
+    ctx = context()
+    ctx.metadata["_macos_batch_observation"] = (7, 42, time.monotonic())
+    with pytest.raises(RuntimeError, match="STALE_OBSERVATION"):
+        await macos_computer.macos_hold_game_keys(8, 42, ["KeyW"], 100, context=ctx)
+    with pytest.raises(ValueError):
+        await macos_computer.macos_hold_game_keys(7, 42, ["KeyW", "KeyW"], 100, context=ctx)
+
+
+@pytest.mark.asyncio
+async def test_game_hold_dispatches_once_without_auto_activation(monkeypatch):
+    import time
+
+    calls = []
+
+    async def bridge(command, payload, context=None):
+        calls.append((command, payload))
+        return {"ok": False, "error": "WINDOW_NOT_FRONTMOST: com.example.app"}
+
+    monkeypatch.setattr(macos_computer, "_call_bridge", bridge)
+    ctx = context()
+    ctx.metadata["_macos_batch_observation"] = (7, 42, time.monotonic())
+    result = json.loads(await macos_computer.macos_hold_game_keys(7, 42, ["KeyW", "Space"], 100, context=ctx))
+    assert not result["ok"]
+    assert len(calls) == 1 and calls[0][0] == "macos_hold_game_keys"
+    assert calls[0][1]["keys"] == ["KeyW", "Space"]
+    assert calls[0][1]["action_id"]

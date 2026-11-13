@@ -8,6 +8,20 @@ English version: [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
+## [0.18.3] — 浏览器与 macOS 有界游戏输入（2026-11-13）
+
+### 新增
+- 协作浏览器游戏按键工具：`computer_hold_game_keys` 与 `computer_game_plan`，可在可见浏览器中同时按住 1–4 个白名单按键，或执行有界按键/等待计划（最多 8 步、总时长 2 秒），每步执行焦点检查并按逆序尽力释放按键。
+- macOS 原生游戏按键：`macos_hold_game_keys` 与 `macos_game_plan` 在同一 Swift helper 进程内执行同样的有界计划，支持计划级独立取消命令、父进程断连与焦点丢失中止，以及预先分配的逆序释放事件。
+- 已在打包版中验证的安全闸门：敏感输入框持有焦点时拒绝注入（`UNSAFE_GAME_TARGET`）、输入前必须刷新过期观察、重复 action id 拒绝，helper 无响应时走有界的"先取消后终止"路径并如实报告未确认的释放。
+- 集成测试覆盖：计划校验单测、按键事务模块 Node 测试、浏览器桥接集成（含取消与重复 ID 拒绝），以及原生桥接集成脚本（`src/crabagent/electron/test/macos-game-bridge.js`）。
+
+### 变更
+- `computer_act` 现可在自动目标重校验后，一次调用连续填写独立的 `type_text`/`select_option` 字段；其他动作仍会结束批量执行。
+- 新增 `macos_click_and_type` 工具，一次完成已观察窗口内的点击与单行输入。
+
+---
+
 ## [0.18.2] — 后台任务显示与 ChatGPT 代理（2026-11-13）
 
 ### 变更

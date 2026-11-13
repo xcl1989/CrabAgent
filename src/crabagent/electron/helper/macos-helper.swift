@@ -545,6 +545,162 @@ let keyCodes: [String: UInt16] = [
     "0": 29, "1": 18, "2": 19, "3": 20, "4": 21, "5": 23, "6": 22, "7": 26, "8": 28, "9": 25,
 ]
 
+// The parent keeps stdin open during a hold; EOF cancels even if the parent dies.
+func gameParentDisconnected() -> Bool {
+    var descriptor = pollfd(fd: STDIN_FILENO, events: Int16(POLLIN | POLLHUP), revents: 0)
+    return poll(&descriptor, 1, 0) > 0 && descriptor.revents != 0
+}
+
+func gameWindowFocused(_ windowId: Int, _ pid: Int) -> Bool {
+    guard preflightAccessibility(),
+          NSWorkspace.shared.frontmostApplication?.processIdentifier == pid_t(pid),
+          let entry = windowEntries().first(where: { $0["windowId"] as? Int == windowId && $0["pid"] as? Int == pid }),
+          let bounds = entry["bounds"] as? [String: Int] else { return false }
+    var value: CFTypeRef?
+    let app = AXUIElementCreateApplication(pid_t(pid))
+    guard AXUIElementCopyAttributeValue(app, kAXFocusedWindowAttribute as CFString, &value) == .success,
+          let value = value, CFGetTypeID(value) == AXUIElementGetTypeID() else { return false }
+    let focused = unsafeBitCast(value, to: AXUIElement.self)
+    guard let frame = axFrame(focused), frame == bounds else { return false }
+    // Geometry is not an identity when two windows overlap exactly.
+    return windowEntries().filter { ($0["pid"] as? Int) == pid && ($0["bounds"] as? [String: Int]) == bounds }.count == 1
+}
+
+func performGameHold(_ request: [String: Any]) -> Result<[String: Any], HelperError> {
+    guard let keys = request["keys"] as? [String], (1...4).contains(keys.count),
+          Set(keys).count == keys.count,
+          let duration = request["duration_ms"] as? Int, (1...1000).contains(duration),
+          let windowId = request["windowId"] as? Int, let pid = request["pid"] as? Int, pid > 0 else {
+        return .failure(.badRequest("invalid game hold"))
+    }
+    func code(_ key: String) -> UInt16? {
+        if key.hasPrefix("Key"), key.count == 4 { return keyCodes[String(key.suffix(1)).lowercased()] }
+        if key.hasPrefix("Digit"), key.count == 6 { return keyCodes[String(key.suffix(1))] }
+        let names = ["ArrowUp": "up", "ArrowDown": "down", "ArrowLeft": "left", "ArrowRight": "right", "Space": "space"]
+        return names[key].flatMap { keyCodes[$0] }
+    }
+    guard keys.allSatisfy({ key in
+        key.range(of: "^(Key[A-Z]|Digit[0-9]|ArrowUp|ArrowDown|ArrowLeft|ArrowRight|Space)$", options: .regularExpression) != nil && code(key) != nil
+    }) else { return .failure(.badRequest("unsupported game key")) }
+    guard case .success = inputPreconditions(request), gameWindowFocused(windowId, pid) else {
+        return .failure(.preconditionFailed("target window not focused or input unavailable"))
+    }
+    // Preallocate releases before posting any down event.
+    var events: [(CGEvent, CGEvent)] = []
+    for key in keys {
+        guard let virtualKey = code(key),
+              let down = CGEvent(keyboardEventSource: nil, virtualKey: virtualKey, keyDown: true),
+              let up = CGEvent(keyboardEventSource: nil, virtualKey: virtualKey, keyDown: false) else {
+            return .failure(.preconditionFailed("cannot create keyboard events"))
+        }
+        events.append((down, up))
+    }
+    let parent = getppid()
+    let deadline = ProcessInfo.processInfo.systemUptime + Double(duration) / 1000
+    var pressed = 0
+    var failure: String?
+    func valid() -> Bool {
+        !gameParentDisconnected() && getppid() == parent && parent != 1 &&
+        (try? inputPreconditions(request).get()) != nil && gameWindowFocused(windowId, pid)
+    }
+    for (down, _) in events {
+        guard valid(), ProcessInfo.processInfo.systemUptime < deadline else { failure = "cancelled or focus lost"; break }
+        pressed += 1
+        down.post(tap: .cghidEventTap)
+    }
+    while failure == nil && ProcessInfo.processInfo.systemUptime < deadline {
+        if !valid() { failure = "cancelled or focus lost"; break }
+        usleep(10000)
+    }
+    for index in (0..<pressed).reversed() { events[index].1.post(tap: .cghidEventTap) }
+    if let failure = failure { return .failure(.preconditionFailed("game hold \(failure); key-up attempted")) }
+    return .success(["held": keys, "duration_ms": duration, "released": true])
+}
+
+// Execute the whole plan in one helper so cancellation and focus checks span waits.
+func performGamePlan(_ request: [String: Any]) -> Result<[String: Any], HelperError> {
+    guard let rawSteps = request["steps"] as? [[String: Any]], (1...8).contains(rawSteps.count),
+          let windowId = request["windowId"] as? Int, windowId > 0,
+          let pid = request["pid"] as? Int, pid > 0 else {
+        return .failure(.badRequest("invalid game plan"))
+    }
+    struct Step {
+        let kind: String
+        let duration: Int
+        let events: [(CGEvent, CGEvent)]
+    }
+    var steps: [Step] = []
+    var total = 0
+    let names = ["ArrowUp": "up", "ArrowDown": "down", "ArrowLeft": "left", "ArrowRight": "right", "Space": "space"]
+    for raw in rawSteps {
+        guard let kind = raw["type"] as? String, kind == "wait" || kind == "hold_keys",
+              let number = raw["duration_ms"] as? NSNumber,
+              CFGetTypeID(number) != CFBooleanGetTypeID(),
+              number.doubleValue == Double(number.intValue), (1...1000).contains(number.intValue) else {
+            return .failure(.badRequest("invalid game plan step"))
+        }
+        let allowed: Set<String> = kind == "wait" ? ["type", "duration_ms"] : ["type", "duration_ms", "keys"]
+        guard Set(raw.keys).isSubset(of: allowed) else { return .failure(.badRequest("unexpected game plan field")) }
+        total += number.intValue
+        guard total <= 2000 else { return .failure(.badRequest("game plan exceeds 2000 ms")) }
+        var events: [(CGEvent, CGEvent)] = []
+        if kind == "hold_keys" {
+            guard let keys = raw["keys"] as? [String], (1...4).contains(keys.count), Set(keys).count == keys.count else {
+                return .failure(.badRequest("invalid game keys"))
+            }
+            for key in keys {
+                guard key.range(of: "^(Key[A-Z]|Digit[0-9]|ArrowUp|ArrowDown|ArrowLeft|ArrowRight|Space)$", options: .regularExpression) != nil else {
+                    return .failure(.badRequest("unsupported game key"))
+                }
+                let name = key.hasPrefix("Key") ? String(key.suffix(1)).lowercased() :
+                    key.hasPrefix("Digit") ? String(key.suffix(1)) : names[key] ?? ""
+                guard let code = keyCodes[name],
+                      let down = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: true),
+                      let up = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: false) else {
+                    return .failure(.preconditionFailed("cannot create keyboard events"))
+                }
+                events.append((down, up))
+            }
+        }
+        steps.append(Step(kind: kind, duration: number.intValue, events: events))
+    }
+    guard case .success = inputPreconditions(request), gameWindowFocused(windowId, pid) else {
+        return .failure(.preconditionFailed("target window not focused or input unavailable"))
+    }
+    let parent = getppid()
+    let deadline = ProcessInfo.processInfo.systemUptime + 2.0
+    var completed = 0
+    func valid() -> Bool {
+        !gameParentDisconnected() && getppid() == parent && parent != 1 &&
+        (try? inputPreconditions(request).get()) != nil && gameWindowFocused(windowId, pid)
+    }
+    for step in steps {
+        let start = ProcessInfo.processInfo.systemUptime
+        if !valid() || ProcessInfo.processInfo.systemUptime >= deadline {
+            return .success(["ok": false, "error": "game plan cancelled, focus lost or deadline exceeded", "completed_steps": completed])
+        }
+        let requestedEnd = start + Double(step.duration) / 1000
+        let stepDeadline = min(deadline, requestedEnd)
+        var pressed = 0
+        var failed = false
+        for (down, _) in step.events {
+            if !valid() || ProcessInfo.processInfo.systemUptime >= stepDeadline { failed = true; break }
+            pressed += 1
+            down.post(tap: .cghidEventTap)
+        }
+        while !failed && ProcessInfo.processInfo.systemUptime < stepDeadline {
+            if !valid() { failed = true; break }
+            usleep(10000)
+        }
+        for index in (0..<pressed).reversed() { step.events[index].1.post(tap: .cghidEventTap) }
+        if failed || requestedEnd > deadline || !valid() {
+            return .success(["ok": false, "error": "game plan cancelled, focus lost or deadline exceeded; key-up attempted", "completed_steps": completed])
+        }
+        completed += 1
+    }
+    return .success(["completed_steps": completed, "released": true])
+}
+
 // Parse "key" or "mod+key" (cmd/ctrl/alt/shift). Denies combos that escape the allowlisted
 // surface or destroy it: Cmd+Tab (app switcher) and Cmd+Q (quit).
 func parseKeyCombo(_ raw: String) -> Result<(CGEventFlags, String), HelperError> {
@@ -676,6 +832,10 @@ func handleRequest(_ request: [String: Any]) async -> Result<[String: Any], Help
         return performType(request)
     case "key":
         return performKey(request)
+    case "hold_game_keys":
+        return performGameHold(request)
+    case "game_plan":
+        return performGamePlan(request)
     case "scroll":
         return performScroll(request)
     default:
@@ -720,7 +880,7 @@ guard let request = try? JSONSerialization.jsonObject(with: requestData) as? [St
 
 // Input commands require explicit opt-in per Electron config; the helper double-checks a
 // marker so an allowlist can never authorize input while macOS input is disabled.
-let inputCommands: Set<String> = ["activate", "click", "double_click", "right_click", "move", "drag", "type", "key", "scroll"]
+let inputCommands: Set<String> = ["activate", "click", "double_click", "right_click", "move", "drag", "type", "key", "hold_game_keys", "game_plan", "scroll"]
 if inputCommands.contains(request["command"] as? String ?? "")
     && ProcessInfo.processInfo.environment["CRAB_MACOS_INPUT"] != "1" {
     respond(["ok": false, "error": "macos input is disabled (opt-in required)"]); exit(1)

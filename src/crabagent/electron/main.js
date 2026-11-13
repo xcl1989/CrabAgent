@@ -8,6 +8,7 @@ const crypto = require('crypto');
 const { parseBrowserUrl, allowedNetworkUrl, createLocalPreviewPolicy } = require('./computer-url-policy');
 const { createComputerNetworkProxy, parseProxyResolution } = require('./computer-network-proxy');
 const { stopBackend } = require('./backend-lifecycle');
+const { validateGameKeys, validateGamePlan, holdGameKeys, waitGameStep } = require('./computer-game-keys');
 
 // Allow isolated desktop verification without touching the normal profile.
 if (process.env.CRAB_APP_USER_DATA_DIR) app.setPath('userData', path.resolve(process.env.CRAB_APP_USER_DATA_DIR));
@@ -42,13 +43,18 @@ let collaborationObservation = null;
 let collaborationTaskId = null;
 let collaborationStopped = false;
 let collaborationStopEpoch = 0;
+let collaborationGameHold = null;
+let collaborationGameDispatching = false;
 let collaborationActionQueue = Promise.resolve();
 const collaborationPending = new Map();
 const collaborationActionIds = new Map();
+const collaborationGameCancellations = new Map();
+let collaborationGameAction = null;
 const CONFIRM_TTL_MS = 120_000;
 const ACTION_ID_TTL_MS = 15 * 60_000;
 
 function invalidateCollaborationObservation(reason) {
+  collaborationGameHold?.abort();
   if (DIAG) log(`invalidate reason=${reason || 'unspecified'} -> page_version=${collaborationPageVersion + 1}`);
   collaborationPageVersion += 1;
   collaborationObservation = null;
@@ -191,8 +197,11 @@ function ensureCollaborationView() {
     }
     return { action: 'deny' };
   });
+  collaborationView.webContents.on('blur', () => collaborationGameHold?.abort());
   collaborationView.webContents.on('render-process-gone', () => invalidateCollaborationObservation('render-process-gone'));
-  collaborationView.webContents.on('before-input-event', () => invalidateCollaborationObservation('before-input-event'));
+  collaborationView.webContents.on('before-input-event', () => {
+    if (!collaborationGameDispatching) invalidateCollaborationObservation('before-input-event');
+  });
   collaborationView.webContents.on('will-navigate', (event, url) => {
     try {
       normalizeBrowserUrl(url);
@@ -436,6 +445,7 @@ async function handleCollaborationBridge(command, payload) {
     return { released: true };
   }
   if (command === 'stop') {
+    cancelMacosGameHold();
     collaborationStopped = true;
     await revokeLocalPreviews();
     collaborationTaskId = null;
@@ -748,6 +758,144 @@ async function handleCollaborationBridge(command, payload) {
     collaborationPending.clear();
     return { ...outcome, page_version: collaborationPageVersion };
   }
+  if (command === 'hold_game_keys' || command === 'game_plan') {
+    const steps = command === 'game_plan' ? validateGamePlan(payload).steps : [{ type: 'hold_keys', ...payload }];
+    if (command === 'hold_game_keys') validateGameKeys(payload);
+    requireCurrentPageVersion(payload);
+    const observation = collaborationObservation;
+    const epoch = collaborationStopEpoch;
+    const monitorKey = `__crabGameFocus_${crypto.randomBytes(16).toString('hex')}`;
+    const monitorName = JSON.stringify(monitorKey);
+    let controller;
+    let pollTimer;
+    let watchdog;
+    let planTimer;
+    let monitoring = true;
+    try {
+      const target = await contents.executeJavaScript(`(() => {
+        const el = document.activeElement;
+        const safe = Boolean(el && (el === document.body || el.tagName === 'CANVAS')
+          && !el.isContentEditable && !el.closest('form, [contenteditable], [role="textbox"]'));
+        if (safe && document.hasFocus()) {
+          const state = { el, lost: false };
+          state.onFocus = () => {
+            if (!document.hasFocus() || document.activeElement !== state.el || !state.el.isConnected) state.lost = true;
+          };
+          state.onBlur = () => { state.lost = true; };
+          document.addEventListener('focusin', state.onFocus, true);
+          document.addEventListener('focusout', state.onBlur, true);
+          window.addEventListener('blur', state.onBlur, true);
+          window[${monitorName}] = state;
+        }
+        return { url: location.href, focused: document.hasFocus(), safe };
+      })()`, true);
+      requireCurrentPageVersion(payload);
+      if (observation !== collaborationObservation || target.url !== contents.getURL()
+          || !target.focused || !target.safe || !contents.isFocused()) throw new Error('UNSAFE_GAME_TARGET');
+      if (collaborationStopped || epoch !== collaborationStopEpoch) throw new Error('STOPPED');
+      // Verify the exact original element after the asynchronous setup, before dispatch.
+      const focused = await contents.executeJavaScript(`(() => {
+        const state = window[${monitorName}];
+        return Boolean(state && !state.lost && state.el.isConnected && document.hasFocus()
+          && document.activeElement === state.el);
+      })()`, true);
+      requireCurrentPageVersion(payload);
+      if (!focused || observation !== collaborationObservation || contents.isDestroyed()
+          || contents.getURL() !== target.url || !contents.isFocused()) throw new Error('UNSAFE_GAME_TARGET');
+      if (collaborationStopped || epoch !== collaborationStopEpoch) throw new Error('STOPPED');
+      invalidateCollaborationObservation('game-keys-dispatch');
+      controller = new AbortController();
+      collaborationGameHold = controller;
+      const planDeadline = performance.now() + 2000;
+      if (command === 'game_plan') planTimer = setTimeout(() => controller.abort(), 2000);
+      if (collaborationGameAction) collaborationGameAction.controller = controller;
+      if (collaborationGameCancellations.has(`${collaborationTaskId}:${payload.action_id}`)) controller.abort();
+      const check = () => {
+        if (controller.signal.aborted || collaborationStopped || epoch !== collaborationStopEpoch ||
+            collaborationView !== view || contents.isDestroyed() || !contents.isFocused() ||
+            contents.getURL() !== target.url || (command === 'game_plan' && performance.now() >= planDeadline)) throw new Error('GAME_KEYS_CANCELLED');
+      };
+      // Never await a renderer check while keys are down: a stalled renderer must not delay key-up.
+      const pollFocus = () => {
+        if (!monitoring || controller.signal.aborted) return;
+        watchdog = setTimeout(() => controller.abort(), 100);
+        let request;
+        try {
+          request = contents.executeJavaScript(`(() => {
+            const state = window[${monitorName}];
+            return Boolean(state && !state.lost && state.el.isConnected && document.hasFocus()
+              && document.activeElement === state.el);
+          })()`, true);
+        } catch (_) {
+          clearTimeout(watchdog);
+          controller.abort();
+          return;
+        }
+        Promise.resolve(request).then(ok => {
+          clearTimeout(watchdog);
+          if (!monitoring) return;
+          if (!ok) controller.abort();
+          else pollTimer = setTimeout(pollFocus, 20);
+        }, () => {
+          clearTimeout(watchdog);
+          if (monitoring) controller.abort();
+        });
+      };
+      pollFocus();
+      const results = [];
+      const send = (type, keyCode) => {
+        collaborationGameDispatching = true;
+        try { contents.sendInputEvent({ type, keyCode }); }
+        finally { collaborationGameDispatching = false; }
+      };
+      for (const step of steps) {
+        check();
+        // Bound renderer verification; no key is down while awaiting it.
+        let timeout;
+        try {
+          const focused = await Promise.race([
+            contents.executeJavaScript(`(() => {
+              const state = window[${monitorName}];
+              return Boolean(state && !state.lost && state.el.isConnected && document.hasFocus()
+                && document.activeElement === state.el);
+            })()`, true),
+            new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error('GAME_FOCUS_TIMEOUT')), 100); }),
+          ]);
+          check();
+          if (!focused) throw new Error('UNSAFE_GAME_TARGET');
+        } finally { clearTimeout(timeout); }
+        if (command === 'game_plan' && performance.now() + step.duration_ms > planDeadline) throw new Error('GAME_PLAN_TIMEOUT');
+        if (step.type === 'wait') {
+          await waitGameStep(step.duration_ms, controller.signal);
+          check();
+          results.push({ type: 'wait', duration_ms: step.duration_ms });
+        } else {
+          const result = await holdGameKeys({ keys: step.keys, duration: step.duration_ms, signal: controller.signal, check, send });
+          results.push({ type: 'hold_keys', ...result });
+        }
+      }
+      return { ...(command === 'hold_game_keys' ? results[0] : { steps: results }), url: target.url, page_version: collaborationPageVersion };
+    } finally {
+      monitoring = false;
+      clearTimeout(pollTimer);
+      clearTimeout(watchdog);
+      clearTimeout(planTimer);
+      if (collaborationGameHold === controller) collaborationGameHold = null;
+      // Cleanup is best-effort and must not delay release or the bridge response.
+      if (!contents.isDestroyed()) {
+        try {
+          Promise.resolve(contents.executeJavaScript(`(() => {
+            const state = window[${monitorName}];
+            if (!state) return;
+            document.removeEventListener('focusin', state.onFocus, true);
+            document.removeEventListener('focusout', state.onBlur, true);
+            window.removeEventListener('blur', state.onBlur, true);
+            delete window[${monitorName}];
+          })()`, true)).catch(() => {});
+        } catch (_) { /* The renderer may already be gone. */ }
+      }
+    }
+  }
   if (command === 'press_key') {
     requireCurrentPageVersion(payload);
     const key = String(payload.key || '');
@@ -805,10 +953,10 @@ async function startCollaborationBridge() {
         }
         const command = String(body.command || '');
         const commands = new Set(['status', 'stop', 'resume', 'release', 'authorize_local_preview', 'navigate', 'observe', 'computer_observe', 'screenshot',
-          'click', 'commit_click', 'point', 'commit_point', 'type', 'scroll', 'select', 'press_key', 'wait_for',
+          'click', 'commit_click', 'point', 'commit_point', 'type', 'scroll', 'select', 'press_key', 'hold_game_keys', 'game_plan', 'cancel_game_plan', 'wait_for',
           'macos_permissions', 'macos_windows', 'macos_allow_app',
           'macos_observe', 'macos_capture', 'macos_click', 'macos_double_click', 'macos_right_click',
-          'macos_move', 'macos_drag', 'macos_type', 'macos_key', 'macos_scroll',
+          'macos_move', 'macos_drag', 'macos_type', 'macos_key', 'macos_scroll', 'macos_hold_game_keys', 'macos_game_plan', 'macos_cancel_game_keys',
           'macos_activate']);
         if (!commands.has(command) || !body.payload || typeof body.payload !== 'object' || Array.isArray(body.payload)) {
           throw new Error('Invalid bridge command or payload');
@@ -836,7 +984,40 @@ async function startCollaborationBridge() {
           collaborationBridgeJson(res, 200, { result });
           return;
         }
+        if (command === 'release') cancelMacosGameHold(body.task_id);
+        if (command === 'macos_cancel_game_keys') {
+          const actionId = body.payload.action_id;
+          if (typeof actionId !== 'string' || !/^[0-9a-f-]{36}$/i.test(actionId)) throw new Error('INVALID_ACTION_ID');
+          for (const [id, timestamp] of macosGameCancellations) if (Date.now() - timestamp > ACTION_ID_TTL_MS) macosGameCancellations.delete(id);
+          if (macosGameCancellations.size >= 4096) throw new Error('CANCELLATION_CAPACITY');
+          macosGameCancellations.set(`${body.task_id}:${actionId}`, Date.now());
+          if (macosGameHold?.actionId === actionId) cancelMacosGameHold(body.task_id);
+          collaborationBridgeJson(res, 200, { result: { cancellation_requested: true } });
+          return;
+        }
+        if (command === 'macos_hold_game_keys' || command === 'macos_game_plan') {
+          if (collaborationStopped) throw new Error('STOPPED');
+          if (macosGameHold) throw new Error('GAME_HOLD_BUSY');
+          if (command === 'macos_game_plan') validateGamePlan(body.payload);
+          else validateGameKeys(body.payload);
+          const { action_id: actionId, windowId, pid } = body.payload;
+          if (!Number.isSafeInteger(windowId) || windowId <= 0 || !Number.isSafeInteger(pid) || pid <= 0 ||
+              typeof actionId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(actionId)) throw new Error('INVALID_GAME_HOLD');
+          for (const [id, timestamp] of macosGameActionIds) if (Date.now() - timestamp > ACTION_ID_TTL_MS) macosGameActionIds.delete(id);
+          if (macosGameCancellations.has(`${body.task_id}:${actionId}`)) throw new Error('GAME_KEYS_CANCELLED');
+          if (macosGameActionIds.has(actionId)) throw new Error('DUPLICATE_ACTION');
+          if (macosGameActionIds.size >= 4096) throw new Error('ACTION_ID_CAPACITY');
+          macosGameActionIds.set(actionId, Date.now());
+          const hold = { taskId: body.task_id, actionId, child: null };
+          macosGameHold = hold;
+          try {
+            const result = await runMacosHelper({ command: command === 'macos_game_plan' ? 'game_plan' : 'hold_game_keys', ...body.payload }, child => { hold.child = child; });
+            collaborationBridgeJson(res, 200, { result });
+          } finally { if (macosGameHold === hold) macosGameHold = null; }
+          return;
+        }
         if (command.startsWith('macos_')) {
+          if (macosGameHold && !['macos_observe', 'macos_capture'].includes(command)) throw new Error('GAME_HOLD_BUSY');
           // M1 macOS surface commands: the helper enforces its own gates (opt-in via
           // macos-computer-config.json inputEnabled + allowlist + frontmost + secure
           // input/lock). Browser pause state must NOT gate macOS actions — they have
@@ -850,6 +1031,16 @@ async function startCollaborationBridge() {
           collaborationBridgeJson(res, 200, { result });
           return;
         }
+        if (command === 'cancel_game_plan') {
+          const actionId = body.payload.action_id;
+          if (typeof actionId !== 'string' || !/^[0-9a-f-]{36}$/i.test(actionId)) throw new Error('INVALID_ACTION_ID');
+          for (const [id, timestamp] of collaborationGameCancellations) if (Date.now() - timestamp > ACTION_ID_TTL_MS) collaborationGameCancellations.delete(id);
+          if (collaborationGameCancellations.size >= 4096) throw new Error('CANCELLATION_CAPACITY');
+          collaborationGameCancellations.set(`${body.task_id}:${actionId}`, Date.now());
+          if (collaborationGameAction?.taskId === body.task_id && collaborationGameAction.actionId === actionId) collaborationGameAction.controller?.abort();
+          collaborationBridgeJson(res, 200, { result: { cancellation_requested: true } });
+          return;
+        }
         const queuedAtEpoch = collaborationStopEpoch;
         const execute = () => {
           if (collaborationTaskId && collaborationTaskId !== body.task_id && !['stop', 'resume', 'status'].includes(command)) {
@@ -860,7 +1051,7 @@ async function startCollaborationBridge() {
           }
           if (!collaborationTaskId && !collaborationStopped && !['stop', 'resume', 'status', 'release'].includes(command)) collaborationTaskId = body.task_id;
           const actionId = body.payload.action_id;
-          const mutating = new Set(['navigate', 'click', 'commit_click', 'point', 'commit_point', 'type', 'scroll', 'select', 'press_key']);
+          const mutating = new Set(['navigate', 'click', 'commit_click', 'point', 'commit_point', 'type', 'scroll', 'select', 'press_key', 'hold_game_keys', 'game_plan']);
           if (mutating.has(command)) {
             if (typeof actionId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(actionId)) {
               throw new Error('Invalid action_id');
@@ -872,6 +1063,16 @@ async function startCollaborationBridge() {
             // Reserve before dispatch: a lost response must not cause a second injection.
             collaborationActionIds.set(actionId, Date.now());
             if (collaborationActionIds.size > 4096) collaborationActionIds.delete(collaborationActionIds.keys().next().value);
+          }
+          if (command === 'game_plan') {
+            validateGamePlan(body.payload);
+            if (collaborationGameCancellations.has(`${body.task_id}:${actionId}`)) throw new Error('GAME_KEYS_CANCELLED');
+            if (collaborationGameAction) throw new Error('GAME_PLAN_BUSY');
+            const action = { taskId: body.task_id, actionId, controller: null };
+            collaborationGameAction = action;
+            return handleCollaborationBridge(command, body.payload).finally(() => {
+              if (collaborationGameAction === action) collaborationGameAction = null;
+            });
           }
           return handleCollaborationBridge(command, body.payload);
         };
@@ -935,6 +1136,14 @@ function macosHelperAvailable() {
 }
 const MACOS_CONFIG_PATH = path.join(app.getPath('userData'), 'macos-computer-config.json');
 let macosHelperSecret = null;
+let macosGameHold = null;
+const macosGameActionIds = new Map();
+const macosGameCancellations = new Map();
+function cancelMacosGameHold(taskId = null) {
+  if (macosGameHold && (!taskId || macosGameHold.taskId === taskId)) {
+    macosGameHold.child?.stdin.end();
+  }
+}
 
 function macosComputerConfig() {
   // { "inputEnabled": bool, "allowlist": ["com.bundle.id", ...] }
@@ -949,7 +1158,7 @@ function macosComputerConfig() {
   }
 }
 
-function runMacosHelper(request) {
+function runMacosHelper(request, onSpawn = null) {
   return new Promise((resolve) => {
     if (!macosHelperAvailable()) { resolve({ ok: false, error: 'helper not built' }); return; }
     if (!macosHelperSecret) macosHelperSecret = crypto.randomBytes(16).toString('hex');
@@ -968,15 +1177,27 @@ function runMacosHelper(request) {
       if (settled) return;
       settled = true;
       try { fs.unlinkSync(requestPath); } catch {}
-      try { resolve(JSON.parse(out)); } catch { resolve({ ok: false, error: 'bad helper output' }); }
+      try { resolve(JSON.parse(out)); } catch { resolve(payload); }
     };
     const childEnv = { ...process.env };
     if (config.inputEnabled) childEnv.CRAB_MACOS_INPUT = '1';
     const child = spawn(MACOS_HELPER_PATH, ['--request-file', requestPath, '--secret', macosHelperSecret], { env: childEnv });
+    if (onSpawn) onSpawn(child);
     child.stdout.on('data', (d) => { out += d; });
     child.on('error', (e) => finish({ ok: false, error: `helper spawn failed: ${e.message}` }));
     child.on('close', () => finish({ ok: false, error: 'helper produced no output' }));
-    setTimeout(() => { if (!settled) { child.kill(); } }, 15000);
+    const timeout = setTimeout(() => {
+      if (settled) return;
+      if (!onSpawn) { child.kill(); return; }
+      child.stdin.end();
+      setTimeout(() => {
+        if (!settled) {
+          child.kill('SIGKILL');
+          finish({ ok: false, error: 'GAME_KEYS_RELEASE_UNCONFIRMED: helper did not respond to cancellation' });
+        }
+      }, 1000).unref();
+    }, onSpawn ? 5000 : 15000);
+    timeout.unref();
   });
 }
 
@@ -1741,7 +1962,7 @@ ipcMain.handle('collaboration-browser-action', async (event, action) => {
   if (action === 'forward' && contents.canGoForward()) contents.goForward();
   if (action === 'reload') contents.reload();
   if (action === 'stop') contents.stop();
-  if (action === 'computer-stop') { collaborationStopped = true; await revokeLocalPreviews(); collaborationTaskId = null; invalidateCollaborationObservation(); }
+  if (action === 'computer-stop') { cancelMacosGameHold(); collaborationStopped = true; await revokeLocalPreviews(); collaborationTaskId = null; invalidateCollaborationObservation(); }
   if (action === 'computer-resume') { collaborationStopped = false; collaborationTaskId = null; invalidateCollaborationObservation(); }
   sendCollaborationBrowserState();
 });
@@ -1923,6 +2144,7 @@ app.on('window-all-closed', () => {
 
 let backendStopped = false;
 app.on('before-quit', (event) => {
+  cancelMacosGameHold();
   forceQuit = true;
   if (backendStopped || !python) return;
   event.preventDefault();

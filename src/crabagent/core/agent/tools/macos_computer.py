@@ -10,11 +10,13 @@ from __future__ import annotations
 
 import asyncio
 import time
+import uuid
 from typing import Any
 
 from crabagent.core.agent.tools.collaboration_browser import _bridge_request, _result
 from crabagent.core.agent.tools.registry import registry
 from crabagent.core.computer.audit import record_browser_event
+from crabagent.core.computer.game_plan import validate_game_plan
 from crabagent.core.computer.session import get_session
 
 
@@ -103,6 +105,7 @@ async def macos_observe(window_id: int, pid: int, context=None) -> str:
     session.record(value, observe=True)
     # Mark the input precondition: a fresh macOS observation happened in this context.
     context.metadata["_macos_input_confirmed"] = True
+    context.metadata["_macos_batch_observation"] = (window_id, pid, time.monotonic())
     await record_browser_event(context, "observed", action="macos_observe", decision="executed", url="")
     return _result(value)
 
@@ -130,6 +133,7 @@ async def macos_capture(window_id: int, context=None) -> list[dict[str, Any]]:
         raise RuntimeError(str(exc)) from exc
     session.record(value, observe=True)
     context.metadata["_macos_input_confirmed"] = True
+    context.metadata["_macos_batch_observation"] = (window_id, None, time.monotonic())
     await record_browser_event(context, "observed", action="macos_capture", decision="executed", url="")
     data_url = value.pop("dataUrl", "")
     text = _result(value)
@@ -151,6 +155,7 @@ async def macos_capture(window_id: int, context=None) -> list[dict[str, Any]]:
 def _input_preconditions(context: Any, window_id: int) -> dict[str, Any]:
     session = get_session(context)
     session.check()
+    context.metadata.pop("_macos_batch_observation", None)
     if context.metadata.get("_collab_browser_observation_id") is None and not context.metadata.get(
         "_macos_input_confirmed"
     ):
@@ -441,6 +446,133 @@ async def macos_key(window_id: int, key: str, context=None) -> str:
 
 
 @registry.register(
+    name="macos_hold_game_keys",
+    description="Hold 1-4 game keys in a focused local macOS window for 1-1000 ms. "
+    "Requires a fresh observation of the same window and PID. Releases are best effort; "
+    "process crashes and system failures cannot guarantee key-up.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "window_id": {"type": "integer"},
+            "pid": {"type": "integer"},
+            "keys": {"type": "array", "items": {"type": "string"}},
+            "duration_ms": {"type": "integer"},
+        },
+        "required": ["window_id", "pid", "keys", "duration_ms"],
+    },
+    metadata={"source": "builtin", "category": "computer"},
+)
+async def macos_hold_game_keys(window_id: int, pid: int, keys: list[str], duration_ms: int, context=None) -> str:
+    validate_game_plan([{"type": "hold_keys", "keys": keys, "duration_ms": duration_ms}])
+    if type(window_id) is not int or window_id <= 0 or type(pid) is not int or pid <= 0:
+        raise ValueError("window_id and pid must be positive integers")
+    session = get_session(context)
+    observation = context.metadata.get("_macos_batch_observation")
+    if not observation or observation[:2] != (window_id, pid) or time.monotonic() - observation[2] > 30:
+        raise RuntimeError("STALE_OBSERVATION: observe the target window and pid first")
+    started = time.monotonic()
+    payload = _input_preconditions(context, window_id)
+    action_id = str(uuid.uuid4())
+    payload.update(pid=pid, keys=keys, duration_ms=duration_ms, action_id=action_id)
+    try:
+        # Do not auto-activate or retry: an ambiguous result may already have injected keys.
+        value = await _call_bridge("macos_hold_game_keys", payload, context)
+    except asyncio.CancelledError:
+        try:
+            await asyncio.shield(
+                asyncio.to_thread(_bridge_request, "macos_cancel_game_keys", {"action_id": action_id}, context=context)
+            )
+        except Exception:
+            pass
+        raise
+    except Exception:
+        session.failures += 1
+        await record_browser_event(
+            context, "action_result", action="macos_hold_game_keys", decision="failed", started=started
+        )
+        raise
+    if not value.get("ok"):
+        session.failures += 1
+    else:
+        session.record(value)
+    await record_browser_event(
+        context,
+        "action_result",
+        action="macos_hold_game_keys",
+        decision="executed" if value.get("ok") else "failed",
+        started=started,
+    )
+    return _result(value)
+
+
+@registry.register(
+    name="macos_game_plan",
+    description="Execute a bounded sequence of game key holds and waits in one focused macOS "
+    "window. Requires a fresh observation of the same window and PID. Key releases are best "
+    "effort and cannot be guaranteed after process or system failure. Requires bridge support.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "window_id": {"type": "integer"},
+            "pid": {"type": "integer"},
+            "steps": {"type": "array", "items": {"type": "object"}},
+        },
+        "required": ["window_id", "pid", "steps"],
+    },
+    metadata={"source": "builtin", "category": "computer"},
+)
+async def macos_game_plan(window_id: int, pid: int, steps: list[dict[str, Any]], context=None) -> str:
+    plan = validate_game_plan(steps)
+    if type(window_id) is not int or window_id <= 0 or type(pid) is not int or pid <= 0:
+        raise ValueError("window_id and pid must be positive integers")
+    session = get_session(context)
+    observation = context.metadata.get("_macos_batch_observation")
+    if not observation or observation[:2] != (window_id, pid) or time.monotonic() - observation[2] > 30:
+        raise RuntimeError("STALE_OBSERVATION: observe the target window and pid first")
+    started = time.monotonic()
+    payload = _input_preconditions(context, window_id)
+    action_id = str(uuid.uuid4())
+    normalized = [
+        {
+            "type": step.kind,
+            "duration_ms": step.duration_ms,
+            **({"keys": list(step.keys)} if step.kind == "hold_keys" else {}),
+        }
+        for step in plan.steps
+    ]
+    payload.update(pid=pid, steps=normalized, action_id=action_id)
+    try:
+        # Never retry: the helper may have already posted input.
+        value = await _call_bridge("macos_game_plan", payload, context)
+    except asyncio.CancelledError:
+        try:
+            await asyncio.shield(
+                asyncio.to_thread(_bridge_request, "macos_cancel_game_keys", {"action_id": action_id}, context=context)
+            )
+        except Exception:
+            pass
+        raise
+    except Exception:
+        session.failures += 1
+        await record_browser_event(
+            context, "action_result", action="macos_game_plan", decision="failed", started=started
+        )
+        raise
+    if value.get("ok"):
+        session.record(value)
+    else:
+        session.failures += 1
+    await record_browser_event(
+        context,
+        "action_result",
+        action="macos_game_plan",
+        decision="executed" if value.get("ok") else "failed",
+        started=started,
+    )
+    return _result(value)
+
+
+@registry.register(
     name="macos_scroll",
     description="Scroll inside a local macOS app window on the user's behalf. Positive amounts "
     "scroll down (-2000..2000 pixels). By default the scroll happens at the window center; "
@@ -475,3 +607,36 @@ async def macos_scroll(window_id: int, amount: int, context=None, x: int | None 
     session.record(value)
     await record_browser_event(context, "action_result", action="macos_scroll", decision="executed", url="")
     return _result(value)
+
+
+@registry.register(
+    name="macos_click_and_type",
+    description="Click an observed text field and type text in one operation. Use after "
+    "macos_observe or macos_capture of the same window. Coordinates are global screen "
+    "points. This does not press Enter or submit; inspect again before further actions. "
+    "Existing application permissions and secure input restrictions apply.",
+    parameters={
+        "type": "object",
+        "properties": {**_COORD_POINT, "text": {"type": "string"}},
+        "required": ["window_id", "pid", "x", "y", "text"],
+    },
+    metadata={"source": "builtin", "category": "computer"},
+)
+async def macos_click_and_type(window_id: int, pid: int, x: int, y: int, text: str, context=None) -> str:
+    import json
+
+    if not text or any(char in text for char in "\r\n\t") or len(text.encode("utf-8")) > 10_000:
+        raise ValueError("Text must be nonempty, single-line and at most 10000 bytes")
+    observation = context.metadata.pop("_macos_batch_observation", None) if context else None
+    if (
+        not observation
+        or observation[0] != window_id
+        or observation[1] not in (None, pid)
+        or time.monotonic() - observation[2] > 30
+    ):
+        raise RuntimeError("STALE_OBSERVATION: observe this window again before click and type")
+    click = json.loads(await macos_click(window_id, pid, x, y, context=context))
+    if click.get("ok") is not True or click.get("status") in {"failed", "blocked"} or click.get("error"):
+        return _result({"click": click, "type": {"status": "not_executed"}, "needs_observation": True})
+    typed = json.loads(await macos_type(window_id, text, context=context))
+    return _result({"click": click, "type": typed, "needs_observation": True})

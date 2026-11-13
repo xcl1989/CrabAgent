@@ -131,3 +131,105 @@ async def test_action_invalidates_python_observation(monkeypatch):
     with pytest.raises(RuntimeError, match="STALE_OBSERVATION"):
         await computer.computer_act("obs", [{"type": "move", "x": 10, "y": 10}], ctx)
     assert calls == ["point"]
+
+
+def batch_snapshot():
+    return {
+        "url": "https://example.test/",
+        "page_version": 1,
+        "viewport": {"width": 800, "height": 600, "scrollY": 0},
+        "elements": [
+            {
+                "index": i,
+                "fingerprint": f"INPUT|text|field{i}",
+                "bounds": {"x": i * 20},
+                "tag": "input",
+                "type": "text",
+                "sensitive": False,
+            }
+            for i in (1, 2, 3)
+        ],
+    }
+
+
+@pytest.mark.asyncio
+async def test_independent_fields_are_refreshed_between_actions(monkeypatch):
+    calls = []
+
+    def bridge(command, payload=None, **kwargs):
+        calls.append((command, payload))
+        if command == "observe":
+            return {**batch_snapshot(), "observation_id": "fresh"}
+        return {"typed": payload["index"]}
+
+    monkeypatch.setattr(computer, "_bridge_request", bridge)
+    ctx = context()
+    ctx.metadata["_computer_batch_snapshot"] = batch_snapshot()
+    result = json.loads(
+        await computer.computer_act(
+            "obs",
+            [
+                {"type": "type_text", "index": 1, "text": "a"},
+                {"type": "type_text", "index": 2, "text": "b"},
+            ],
+            ctx,
+        )
+    )
+    assert [a["status"] for a in result["actions"]] == ["executed", "executed"]
+    assert [c[0] for c in calls] == ["type", "observe", "type"]
+    assert calls[-1][1]["observation_id"] == "fresh"
+    assert "_collab_browser_observation_id" not in ctx.metadata
+
+
+@pytest.mark.asyncio
+async def test_batch_stops_when_field_changes(monkeypatch):
+    calls = []
+
+    def bridge(command, payload=None, **kwargs):
+        calls.append(command)
+        if command == "observe":
+            snapshot = batch_snapshot()
+            snapshot["elements"][1]["fingerprint"] = "changed"
+            return {**snapshot, "observation_id": "fresh"}
+        return {"typed": 1}
+
+    monkeypatch.setattr(computer, "_bridge_request", bridge)
+    ctx = context()
+    ctx.metadata["_computer_batch_snapshot"] = batch_snapshot()
+    result = json.loads(
+        await computer.computer_act(
+            "obs",
+            [
+                {"type": "type_text", "index": 1, "text": "a"},
+                {"type": "type_text", "index": 2, "text": "b"},
+            ],
+            ctx,
+        )
+    )
+    assert [a["status"] for a in result["actions"]] == ["executed", "not_executed"]
+    assert calls == ["type", "observe"]
+
+
+@pytest.mark.asyncio
+async def test_hold_game_keys_consumes_observation_and_dispatches(monkeypatch):
+    calls = []
+
+    def bridge(command, payload=None, **kwargs):
+        calls.append((command, payload))
+        return {"released": True}
+
+    monkeypatch.setattr(computer, "_bridge_request", bridge)
+    ctx = context()
+    result = json.loads(await computer.computer_hold_game_keys("obs", ["KeyW", "ArrowRight"], 100, ctx))
+    assert result["released"] and result["needs_observation"]
+    assert calls[0][0] == "hold_game_keys"
+    assert "_collab_browser_observation_id" not in ctx.metadata
+
+
+@pytest.mark.asyncio
+async def test_hold_game_keys_rejects_invalid_and_stale(monkeypatch):
+    monkeypatch.setattr(computer, "_bridge_request", lambda *a, **k: pytest.fail("bridge reached"))
+    with pytest.raises(ValueError):
+        await computer.computer_hold_game_keys("obs", ["Command"], 100, context())
+    with pytest.raises(RuntimeError, match="STALE_OBSERVATION"):
+        await computer.computer_hold_game_keys("old", ["KeyW"], 100, context())

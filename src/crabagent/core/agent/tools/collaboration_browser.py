@@ -37,6 +37,8 @@ def _bridge_request(command: str, payload: dict[str, Any] | None = None, *, cont
         "scroll",
         "select",
         "press_key",
+        "hold_game_keys",
+        "game_plan",
     }
     if command in mutating_commands:
         action_payload.setdefault("action_id", str(uuid.uuid4()))

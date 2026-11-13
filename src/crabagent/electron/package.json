@@ -1,6 +1,6 @@
 {
   "name": "crabagent-desktop",
-  "version": "0.18.2",
+  "version": "0.18.3",
   "description": "CrabAgent Desktop - AI Agent Platform",
   "main": "main.js",
   "author": "Xie Congling",
@@ -32,6 +32,7 @@
       "backend-lifecycle.js",
       "computer-url-policy.js",
       "computer-network-proxy.js",
+      "computer-game-keys.js",
       "preload.js",
       "build/icon.png",
       "build/trayTemplate.png",

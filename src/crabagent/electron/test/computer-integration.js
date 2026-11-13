@@ -32,7 +32,7 @@ async function run() {
   const prelude = main.slice(0, main.indexOf('// ── Window state persistence ──'))
     .replace("const COLLABORATION_START_URL = 'https://www.google.com/';", `const COLLABORATION_START_URL = '${url}';`);
   const mainRequire = (name) => name.startsWith('./') ? require(path.join(__dirname, '..', name)) : require(name);
-  const sandbox = { require: mainRequire, process, console, Buffer, URL, setTimeout, clearTimeout,
+  const sandbox = { require: mainRequire, process, console, Buffer, URL, AbortController, performance, setTimeout, clearTimeout,
     __dirname: path.join(__dirname, '..'), log: () => {}, window: null };
   vm.createContext(sandbox);
   vm.runInContext(prelude + `\nlocalPreviewPolicy.grant('${url}');` + '\nthis.bridge = handleCollaborationBridge; this.setWindow = (value) => { win = value; }; this.pending = collaborationPending; this.startBridge = startCollaborationBridge; this.token = collaborationBridgeToken; this.localPreviewPolicy = localPreviewPolicy;', sandbox);
@@ -208,6 +208,40 @@ async function run() {
       });
       req.on('error', reject); req.end(JSON.stringify({ protocol_version: 1, runtime_id: 'browser:collaboration', task_id: binding, trace_id: require('node:crypto').randomUUID(), command, payload }));
     });
+    sandbox.setCollaborationViewBounds({ x: 0, y: 0, width: 600, height: 500 }, true);
+    await new Promise(resolve => setTimeout(resolve, 200));
+    await view.webContents.executeJavaScript(`document.body.tabIndex = 0; document.body.focus(); window.gameEvents = []; for (const type of ['keydown', 'keyup']) document.addEventListener(type, e => window.gameEvents.push([type, e.code]));`);
+    window.show(); window.focus(); view.webContents.focus();
+    await new Promise(resolve => setTimeout(resolve, 300));
+    await view.webContents.executeJavaScript("document.body.focus()");
+    const gameObservation = await request('computer_observe');
+    const gameId = require('node:crypto').randomUUID();
+    const gameResult = await request('game_plan', { page_version: gameObservation.page_version,
+      observation_id: gameObservation.observation_id, action_id: gameId,
+      steps: [{ type: 'hold_keys', keys: ['KeyW', 'ArrowRight'], duration_ms: 150 },
+        { type: 'wait', duration_ms: 30 }, { type: 'hold_keys', keys: ['Space'], duration_ms: 100 }] });
+    await new Promise(resolve => setTimeout(resolve, 100));
+    const gameEvents = await view.webContents.executeJavaScript('window.gameEvents');
+    assert.deepEqual(gameEvents, [['keydown', 'KeyW'], ['keydown', 'ArrowRight'],
+      ['keyup', 'ArrowRight'], ['keyup', 'KeyW'], ['keydown', 'Space'], ['keyup', 'Space']]);
+    assert.equal(gameResult.steps.length, 3);
+    await assert.rejects(request('game_plan', { page_version: gameObservation.page_version,
+      observation_id: gameObservation.observation_id, action_id: gameId,
+      steps: [{type: 'wait', duration_ms: 1}] }), /DUPLICATE_ACTION/);
+    await view.webContents.executeJavaScript('window.gameEvents = []');
+    const cancelId = require('node:crypto').randomUUID();
+    const cancelObservation = await request('computer_observe');
+    const cancelled = request('game_plan', { page_version: cancelObservation.page_version,
+      observation_id: cancelObservation.observation_id, action_id: cancelId,
+      steps: [{ type: 'hold_keys', keys: ['KeyW'], duration_ms: 800 },
+        { type: 'hold_keys', keys: ['Space'], duration_ms: 100 }] });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    await request('cancel_game_plan', { action_id: cancelId });
+    const cancelOutcome = await cancelled.catch((error) => ({ error: error.message }));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const cancelEvents = await view.webContents.executeJavaScript('window.gameEvents');
+    console.log('PASS game plan cancellation', JSON.stringify({ outcome: cancelOutcome.error || 'completed', events: cancelEvents }));
+    console.log('PASS game plan HTTP bridge and native input');
     await assert.rejects(request('not-a-command'), /Invalid bridge command/);
     await request('observe');
     sandbox.setCollaborationViewBounds(null, false);
