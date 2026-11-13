@@ -58,8 +58,11 @@ async def _resolve_provider(provider_name: str | None = None) -> ProviderInfo:
 def _litellm_params(provider: ProviderInfo, proxy: str = "", session_id: str | None = None) -> dict:
     # ChatGPT subscription provider uses litellm's built-in OAuth flow.
     # No api_key / api_base needed — litellm's ChatGPTConfig handles everything.
+    # BUT proxy must still be forwarded: chatgpt.com is unreachable from some
+    # networks without it, and a blocked connect would silently yield an empty
+    # stream (0 tokens, empty assistant message).
     if provider.provider_type == "chatgpt":
-        return {}
+        return {"proxy": proxy} if proxy else {}
     params: dict = {"api_key": provider.api_key}
     if provider.base_url:
         params["api_base"] = provider.base_url

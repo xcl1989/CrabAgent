@@ -158,10 +158,14 @@ export function BackgroundTasks({ sessionId, activeBranch, mobile = false }: { s
     }
   };
 
-  return <section className={mobile ? "border-b border-zinc-800 bg-zinc-950 px-4 py-2 text-sm text-zinc-100" : "border-b border-[var(--border)] bg-[var(--bg-secondary)] px-4 py-2 text-sm"}>
-    <button onClick={() => setOpen(!open)} aria-expanded={open} className={mobile ? "font-medium text-zinc-100" : "font-medium text-[var(--text-primary)]"}>
-      后台子任务 ({tasks.length}) · 任务组 ({groups.length}) {open ? "▴" : "▾"}
-    </button>
+  if (tasks.length === 0 && groups.length === 0 && deliveries.length === 0 && !error && !deliveryNotice) return null;
+
+  return <section className={mobile ? "border-b border-zinc-800 bg-zinc-950 px-4 py-1 text-sm text-zinc-100" : "border-b border-[var(--border)] bg-[var(--bg-secondary)] px-4 py-1 text-sm"}>
+    <div className="flex justify-end">
+      <button onClick={() => setOpen(!open)} aria-expanded={open} className={mobile ? "rounded px-2 py-1 text-xs text-zinc-400 hover:text-zinc-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2" : "rounded px-2 py-1 text-xs text-[var(--text-tertiary)] hover:text-[var(--text-primary)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"}>
+        后台子任务 ({tasks.length}) · 任务组 ({groups.length}) {open ? "▴" : "▾"}
+      </button>
+    </div>
     {error && <p role="alert" className="text-red-500">{error}</p>}
     {deliveryNotice && <p role="status">{deliveryNotice}</p>}
     {deliveries.map((card) => <article key={card.id} className="my-2 rounded border border-[var(--border)] p-3" aria-label="后台结果卡">

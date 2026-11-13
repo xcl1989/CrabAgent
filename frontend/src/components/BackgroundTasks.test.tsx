@@ -22,6 +22,19 @@ beforeEach(() => {
 afterEach(() => { document.body.innerHTML = ""; vi.resetAllMocks(); });
 
 describe("background tasks", () => {
+  it("hides the panel when there are no tasks and shows it after polling finds one", async () => {
+    vi.useFakeTimers();
+    vi.mocked(listBackgroundTasks).mockResolvedValueOnce({ branch: "main", tasks: [] })
+      .mockResolvedValue({ branch: "main", tasks: [task] });
+    const container = document.createElement("div"); document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => { root.render(<BackgroundTasks sessionId="session" />); });
+    expect(container.textContent).toBe("");
+    await act(async () => { vi.advanceTimersByTime(5000); });
+    expect(container.textContent).toContain("后台子任务 (1)");
+    await act(async () => root.unmount());
+    vi.useRealTimers();
+  });
   it("shows status, untrusted result and cancellation", async () => {
     vi.mocked(listBackgroundTasks).mockResolvedValue({ branch: "main", tasks: [task] });
     vi.mocked(getBackgroundTask).mockResolvedValue({ ...task, result: "<script>unsafe</script>" });
@@ -62,8 +75,10 @@ describe("background polling races", () => {
     const container = document.createElement("div"); document.body.appendChild(container);
     const root = createRoot(container);
     await act(async () => { root.render(<BackgroundTasks sessionId="s" />); });
-    await act(async () => { container.querySelector("button")!.click(); vi.advanceTimersByTime(5000); });
+    expect(container.querySelector("button")).toBeNull();
+    await act(async () => { vi.advanceTimersByTime(5000); });
     await act(async () => { second.resolve({ branch: "new", tasks: [{ ...task, task: "new branch" }] }); });
+    await act(async () => { container.querySelector("button")!.click(); });
     await act(async () => { first.reject(new Error("late")); });
     expect(container.textContent).toContain("new branch");
     expect(container.textContent).not.toContain("无法获取");

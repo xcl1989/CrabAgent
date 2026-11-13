@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.18.2] — Background Task Visibility and ChatGPT Proxy (2026-11-13)
+
+### Changed
+- Hide the background task panel when the current branch has no tasks, groups, deliveries, or errors; show it automatically when work appears.
+
+### Fixed
+- Forward the configured proxy to the ChatGPT provider to prevent connection failures on restricted networks.
+
+---
+
 ## [0.18.1] — Asynchronous Sub-Agent Teams (2026-11-12)
 
 ### Added
