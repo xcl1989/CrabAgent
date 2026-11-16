@@ -198,6 +198,8 @@ class ReflectMiddleware:
                         preferences=prefs,
                         source_session=session_id,
                         workspace_path=workspace_path,
+                        model=model,
+                        provider_name=provider_name,
                     )
                     if saved:
                         logger.info(

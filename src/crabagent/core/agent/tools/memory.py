@@ -13,7 +13,10 @@ _CATEGORY_DESC = (
 @registry.register(
     name="memory_save",
     description=(
-        "Save a memory to long-term storage. "
+        "Save a memory to long-term storage. Before saving, search existing memories and prefer "
+        "updating the same relevant memory rather than creating a new key. Preserve useful old "
+        "details and project/agent scope; do not merge merely similar but unrelated facts. "
+        "Create a new memory only when no related entry exists. "
         "Use 'team' type for project knowledge all agents should know "
         "(tech stack, architecture, conventions, decisions). "
         "Use 'lesson' type for behavioral patterns "
@@ -81,7 +84,7 @@ async def memory_save(
     from crabagent.core.database import agent_memory_upsert
 
     workspace_path = context.metadata.get("workspace_path") or str(getattr(context, "workspace", "") or "")
-    default_scope = "global" if memory_type == "team" else "agent"
+    default_scope = ("workspace" if workspace_path else "global") if memory_type == "team" else "agent"
     default_recall = "always" if memory_type == "team" else "query_only"
 
     await agent_memory_upsert(
@@ -144,7 +147,10 @@ async def memory_recall(
     from crabagent.core.database import agent_memory_search_vector
 
     results = await agent_memory_search_vector(
-        user_id, query, memory_type=memory_type, limit=limit, fallback=True
+        user_id, query, memory_type=memory_type, limit=limit, fallback=True,
+        visible_only=True,
+        workspace_path=context.metadata.get("workspace_path") or str(getattr(context, "workspace", "") or ""),
+        agent_name=context.metadata.get("_sub_agent_name", ""),
     )
     if not results:
         return f"No memories found for '{query}'."
@@ -156,7 +162,7 @@ async def memory_recall(
             f", similarity={r['_similarity']:.2f}" if "_similarity" in r else ""
         )
         lines.append(
-            f"- **{r['key']}** ({type_tag}{agent_tag}, "
+            f"- **{r['key']}** (id={r.get('id', '?')}, {type_tag}{agent_tag}, "
             f"importance={r['importance']:.1f}{sim_tag}): {r['content']}"
         )
     return "\n".join(lines)
@@ -175,6 +181,7 @@ async def memory_recall(
                 "type": "string",
                 "description": "The memory key to update",
             },
+            "memory_id": {"type": "integer", "description": "Memory ID to disambiguate matching keys"},
             "old_text": {
                 "type": "string",
                 "description": "The exact text to find and replace",
@@ -188,7 +195,7 @@ async def memory_recall(
     },
     metadata={"source": "builtin", "category": "memory"},
 )
-async def memory_replace(key: str, old_text: str, new_text: str, context=None) -> str:
+async def memory_replace(key: str, old_text: str, new_text: str, context=None, memory_id: int | None = None) -> str:
     if context is None:
         return "Error: memory_replace requires an active session"
     user_id = context.metadata.get("user_id", 0)
@@ -196,10 +203,13 @@ async def memory_replace(key: str, old_text: str, new_text: str, context=None) -
         return "Error: no user_id in context"
     from crabagent.core.database import agent_memory_replace as _replace
 
-    ok = await _replace(user_id, key, old_text, new_text)
+    ok = await _replace(user_id, key, old_text, new_text, memory_id=memory_id,
+        visible_only=True,
+        workspace_path=context.metadata.get("workspace_path") or str(getattr(context, "workspace", "") or ""),
+        agent_name=context.metadata.get("_sub_agent_name", ""))
     if ok:
         return f"Memory updated: {key}"
-    return f"Error: memory '{key}' not found or old_text not matched"
+    return f"Error: memory '{key}' not found, ambiguous, or old_text not matched"
 
 
 @registry.register(
@@ -228,7 +238,11 @@ async def memory_list(memory_type: str = "", category: str = "", context=None) -
         return "Error: no user_id in context"
     from crabagent.core.database import agent_memory_list_all
 
-    items = await agent_memory_list_all(user_id, memory_type=memory_type, category=category)
+    items = await agent_memory_list_all(
+        user_id, memory_type=memory_type, category=category, visible_only=True,
+        workspace_path=context.metadata.get("workspace_path") or str(getattr(context, "workspace", "") or ""),
+        agent_name=context.metadata.get("_sub_agent_name", ""),
+    )
     if not items:
         return "No memories stored yet."
     lines = [f"# Memories ({len(items)} total)\n"]
@@ -237,7 +251,10 @@ async def memory_list(memory_type: str = "", category: str = "", context=None) -
         preview = item["content"]
         if len(preview) > 120:
             preview = preview[:120] + "..."
-        lines.append(f"- **{item['key']}** ({item['memory_type']}{agent_tag}, imp={item['importance']:.1f}): {preview}")
+        lines.append(
+            f"- **{item['key']}** (id={item.get('id', '?')}, {item['memory_type']}{agent_tag}, "
+            f"imp={item['importance']:.1f}): {preview}"
+        )
     return "\n".join(lines)
 
 
@@ -251,12 +268,13 @@ async def memory_list(memory_type: str = "", category: str = "", context=None) -
                 "type": "string",
                 "description": "The memory key to delete",
             },
+            "memory_id": {"type": "integer", "description": "Memory ID to disambiguate matching keys"},
         },
         "required": ["key"],
     },
     metadata={"source": "builtin", "category": "memory"},
 )
-async def memory_forget(key: str, context=None) -> str:
+async def memory_forget(key: str, context=None, memory_id: int | None = None) -> str:
     if context is None:
         return "Error: memory_forget requires an active session"
     user_id = context.metadata.get("user_id", 0)
@@ -264,7 +282,9 @@ async def memory_forget(key: str, context=None) -> str:
         return "Error: no user_id in context"
     from crabagent.core.database import agent_memory_delete
 
-    ok = await agent_memory_delete(user_id, key)
+    ok = await agent_memory_delete(user_id, key, memory_id=memory_id, visible_only=True,
+        workspace_path=context.metadata.get("workspace_path") or str(getattr(context, "workspace", "") or ""),
+        agent_name=context.metadata.get("_sub_agent_name", ""))
     if ok:
         return f"Memory deleted: {key}"
-    return f"Error: memory '{key}' not found"
+    return f"Error: memory '{key}' not found or ambiguous; specify memory_id"

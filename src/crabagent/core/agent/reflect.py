@@ -18,8 +18,6 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import time
-from typing import Any
 
 import litellm
 
@@ -192,12 +190,12 @@ async def llm_reflect_lesson(
         # Inject existing lessons to avoid duplicates
         if existing_lessons:
             existing_text = "\n".join(
-                f"- {l.get('content','')[:200]}"
-                for l in existing_lessons
+                f"- {item.get('content','')[:200]}"
+                for item in existing_lessons
             )
             prompt += (
                 "IMPORTANT — These lessons are ALREADY KNOWN. "
-                "Do NOT extract them again:\n"
+                "Use these as merge candidates:\n"
                 f"{existing_text}\n\n"
                 "Only extract a NEW lesson that is distinct from the above.\n"
             )
@@ -249,7 +247,7 @@ async def llm_reflect_lesson(
             # like meta-reflection rather than a lesson.
             from crabagent.core.agent.lesson_dedup import looks_like_meta_lesson
 
-            lines = [l.strip() for l in text.strip().splitlines() if l.strip()]
+            lines = [line.strip() for line in text.strip().splitlines() if line.strip()]
             candidate = lines[-1] if lines else ""
             if candidate and not looks_like_meta_lesson(candidate):
                 insight = candidate
@@ -357,20 +355,24 @@ async def llm_extract_user_preferences(
         # Inject existing preferences to avoid duplicates
         if existing_preferences:
             existing_text = "\n".join(
-                f"- [{p.get('category','?')}] {p.get('content','')[:200]}"
+                f"- key={p.get('key','')} [{p.get('category','?')}] {p.get('content','')[:200]}"
                 for p in existing_preferences
             )
             prompt += (
                 "\nIMPORTANT — These preferences are ALREADY KNOWN. "
                 "Do NOT extract them again:\n"
                 f"{existing_text}\n\n"
-                "Only extract NEW preferences that are distinct from the above.\n"
+                "Do not generate a new preference for the same subject. "
+                "If new information refines an existing preference, include the existing key "
+                "and return a complete updated preference retaining still-valid details. "
+                "Only extract a new preference when no existing preference is related.\n"
             )
 
         prompt += (
             "Conversation:\n"
             f"{conversation_text[:4000]}\n\n"
             "Respond in this exact format (one preference per block):\n"
+            "Key: <existing key if updating, otherwise NEW>\n"
             "Category: <one-word tag>\n"
             "Preference: <one sentence, actionable>\n"
             "\n"
@@ -404,10 +406,13 @@ async def llm_extract_user_preferences(
         blocks = [b.strip() for b in text.split("\n\n") if b.strip()]
         for block in blocks:
             cat = "general"
+            existing_key = ""
             pref = ""
             for line in block.splitlines():
                 line = line.strip()
-                if line.lower().startswith("category:") or line.startswith("类别:"):
+                if line.lower().startswith("key:"):
+                    existing_key = line.split(":", 1)[1].strip()
+                elif line.lower().startswith("category:") or line.startswith("类别:"):
                     cat = line.split(":", 1)[1].strip().lower() or "general"
                 elif line.lower().startswith("preference:") or line.startswith("偏好:"):
                     pref = line.split(":", 1)[1].strip()
@@ -417,9 +422,14 @@ async def llm_extract_user_preferences(
                 continue
             if len(pref) < 8:
                 continue
+            known_keys = {p.get("key") for p in existing_preferences or []}
+            if existing_key and existing_key.upper() != "NEW" and existing_key not in known_keys:
+                logger.warning("Ignoring unrecognized preference key %s", existing_key)
+                continue
             prefs.append(
                 {
-                    "key": f"user_pref:{cat}:{hashlib.md5(pref.encode()).hexdigest()[:12]}",
+                    "key": (existing_key if existing_key in known_keys else
+                            f"user_pref:{cat}:{hashlib.md5(pref.encode()).hexdigest()[:12]}"),
                     "content": pref[:500],
                     "category": cat[:50],
                     "importance": 0.7,
@@ -445,6 +455,7 @@ async def persist_lesson(
     agent_name: str,
     lesson: dict,
     source_session: str = "",
+    workspace_path: str = "",
 ) -> bool:
     if not user_id or not lesson:
         return False
@@ -462,7 +473,9 @@ async def persist_lesson(
         return False
 
     task_category = (lesson.get("task_category") or "").strip()
-    existing_lessons = await agent_memory_get_by_agent(user_id, agent_name, limit=80)
+    existing_lessons = await agent_memory_get_by_agent(
+        user_id, agent_name, limit=80, workspace_path=workspace_path
+    )
     same_task_lessons = [
         item for item in existing_lessons if (item.get("task_category") or "").strip() == task_category
     ]
@@ -485,6 +498,9 @@ async def persist_lesson(
     key = lesson["key"]
     if best_match and best_score >= STRING_DEDUP_THRESHOLD:
         key = best_match["key"]
+        previous = (best_match.get("content") or "").strip()
+        if previous and previous != content and previous not in content:
+            content = f"{previous}\n{content}"
     elif candidate_lessons:
         embedding_best_match = None
         embedding_best_score = 0.0
@@ -498,11 +514,14 @@ async def persist_lesson(
                 embedding_best_score = score
         if embedding_best_match and embedding_best_score >= EMBEDDING_DEDUP_THRESHOLD:
             key = embedding_best_match["key"]
+            previous = (embedding_best_match.get("content") or "").strip()
+            if previous and previous != content and previous not in content:
+                content = f"{previous}\n{content}"
 
     memory_type = lesson.get("memory_type", "agent_lesson")
     scope = "agent" if memory_type == "agent_lesson" else "global"
     recall_policy = "query_only" if scope == "agent" else "always"
-    workspace_path = (lesson.get("workspace_path") or "").strip()
+    workspace_path = (workspace_path or lesson.get("workspace_path") or "").strip()
 
     await agent_memory_upsert(
         user_id=user_id,
@@ -521,8 +540,6 @@ async def persist_lesson(
         recall_policy=recall_policy,
     )
 
-    # Enforce per-agent lesson cap to prevent unbounded growth
-    await _enforce_lesson_cap(user_id, agent_name, cap=30)
     return True
 
 
@@ -554,10 +571,9 @@ async def _enforce_lesson_cap(user_id: int, agent_name: str, cap: int = 30) -> N
     if not to_evict:
         return
 
-    from crabagent.core.database import async_session_factory
     from sqlalchemy import delete as sa_delete
 
-    from crabagent.core.database import AgentMemory, MemoryEmbedding
+    from crabagent.core.database import AgentMemory, MemoryEmbedding, async_session_factory
 
     evict_ids = [item["id"] for item in to_evict]
     logger.info(
@@ -579,6 +595,8 @@ async def persist_preferences(
     preferences: list[dict],
     source_session: str = "",
     workspace_path: str = "",
+    model: str = "",
+    provider_name: str | None = None,
 ) -> int:
     if not user_id or not preferences:
         return 0
@@ -587,6 +605,11 @@ async def persist_preferences(
     saved = 0
     for pref in preferences:
         try:
+            from crabagent.core.agent.memory_merge import merge_preference
+
+            if await merge_preference(user_id, pref, model, provider_name):
+                saved += 1
+                continue
             await agent_memory_upsert(
                 user_id=user_id,
                 memory_type=pref.get("memory_type", "user_preference"),

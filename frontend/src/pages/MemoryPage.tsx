@@ -16,9 +16,13 @@ import {
 } from "lucide-react";
 import {
   listMemories,
+  listMemoryArchives,
+  consolidateMemories,
+  listArchivedMemories,
+  restoreArchivedMemory,
   createMemory,
   updateMemory,
-  deleteAgentMemory,
+  deleteMemoryEntry,
   getProjectMemory,
   listAgentProfiles,
   type MemoryEntry,
@@ -60,6 +64,14 @@ export default function MemoryPage() {
   const [tab, setTab] = useState<MemoryTab>("project");
   const [entries, setEntries] = useState<MemoryEntry[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [archives, setArchives] = useState<{ name: string; count: number }[]>([]);
+  const [archiveName, setArchiveName] = useState("");
+  const [archiveEntries, setArchiveEntries] = useState<{ id: number; key: string; content: string }[]>([]);
+  const [consolidating, setConsolidating] = useState(false);
+  const [showArchives, setShowArchives] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<MemoryEntry | null>(null);
+  const requestId = useRef(0);
   const [search, setSearch] = useState("");
   const [agentFilter, setAgentFilter] = useState("");
 
@@ -93,25 +105,28 @@ export default function MemoryPage() {
   const [createForm, setCreateForm] = useState({ key: "", content: "", category: "" });
 
   const fetchEntries = useCallback(async () => {
+    const id = ++requestId.current;
     setLoading(true);
+    setLoadError(false);
     try {
       const type = TAB_TYPES[tab];
-      const params: Record<string, string> = {};
+      const params: Record<string, string | number> = { limit: 500 };
       if (type) params.memory_type = type;
       if (tab === "project" && selectedWorkspace) params.workspace = selectedWorkspace;
       if (search) params.q = search;
       if (agentFilter && tab === "agent_lesson") params.agent_name = agentFilter;
       const items = await listMemories(params);
-      setEntries(items);
+      if (id === requestId.current) setEntries(items);
     } catch {
-      setEntries([]);
+      if (id === requestId.current) setLoadError(true);
     } finally {
-      setLoading(false);
+      if (id === requestId.current) setLoading(false);
     }
   }, [tab, search, agentFilter, selectedWorkspace]);
 
   useEffect(() => {
-    fetchEntries();
+    const timer = setTimeout(fetchEntries, 250);
+    return () => clearTimeout(timer);
   }, [fetchEntries]);
 
   // Load workspaces, project memory, and agent names
@@ -142,6 +157,7 @@ export default function MemoryPage() {
   const handleSwitchWorkspace = async (ws: string) => {
     setSelectedWorkspace(ws);
     setWsOpen(false);
+    setProjectMemory(null);
     try {
       const pm = await getProjectMemory(ws);
       if (pm) setProjectMemory(pm);
@@ -150,7 +166,8 @@ export default function MemoryPage() {
 
   const handleDelete = async (entry: MemoryEntry) => {
     try {
-      await deleteAgentMemory(entry.key);
+      await deleteMemoryEntry(entry.key, entry.id);
+      setDeleteTarget(null);
       toast.success(t("memory.deleted"));
       fetchEntries();
     } catch {
@@ -161,7 +178,7 @@ export default function MemoryPage() {
   const handleEdit = async () => {
     if (!editingEntry) return;
     try {
-      await updateMemory(editingEntry.key, editContent);
+      await updateMemory(editingEntry.key, editContent, undefined, editingEntry.id);
       toast.success(t("memory.memoryUpdated"));
       setEditingEntry(null);
       fetchEntries();
@@ -177,12 +194,15 @@ export default function MemoryPage() {
     }
     try {
       await createMemory({
-        memory_type: TAB_TYPES[tab] || "agent_lesson",
+        memory_type: TAB_TYPES[tab] || "team",
         agent_name: tab === "user_preference" ? "" : agentFilter || "default",
         category: createForm.category || "general",
         key: createForm.key,
         content: createForm.content,
         importance: 0.5,
+        scope: tab === "project" ? (selectedWorkspace ? "workspace" : "global") : tab === "agent_lesson" ? "agent" : "global",
+        workspace_path: tab === "project" ? selectedWorkspace : "",
+        recall_policy: tab === "project" ? "always" : "query_only",
       });
       toast.success(t("memory.memoryCreated"));
       setShowCreate(false);
@@ -205,6 +225,18 @@ export default function MemoryPage() {
           {t("memory.title").toUpperCase()}
         </span>
         <div className="flex-1" />
+        <Button variant="ghost" size="xs" disabled={consolidating} onClick={async () => {
+          setConsolidating(true);
+          try { const result = await consolidateMemories();
+            if (result.status !== "ok") toast.error(`语义整理未完成：${result.reason || result.status}`);
+            else { toast.success(`语义整理完成：合并 ${result.merged} 组`); fetchEntries(); }
+          } catch { toast.error("语义整理失败，未确认的记忆不会合并"); }
+          finally { setConsolidating(false); }
+        }}>{consolidating ? "正在语义整理…" : "语义整理"}</Button>
+        <Button variant="ghost" size="xs" onClick={async () => {
+          try { setArchives(await listMemoryArchives()); setArchiveName(""); setArchiveEntries([]); setShowArchives(true); }
+          catch { toast.error("无法加载记忆归档"); }
+        }}>归档与恢复</Button>
         <span className="text-xs text-[var(--text-tertiary)]">
           {t("memory.entries", { count: entries.length })}
         </span>
@@ -234,7 +266,7 @@ export default function MemoryPage() {
       </div>
 
       {/* Project Memory Tab: Workspace selector + tech stack (fixed) */}
-      {tab === "project" && projectMemory && (
+      {tab === "project" && (
         <div className="px-5 pb-3">
           {workspaces.length > 1 && (
             <div className="relative mb-3" ref={wsAnchorRef}>
@@ -282,11 +314,11 @@ export default function MemoryPage() {
               )}
             </div>
           )}
-          {(projectMemory.tech_stack?.length ?? 0) > 0 && (
+          {(projectMemory?.tech_stack?.length ?? 0) > 0 && (
             <div className="flex items-center gap-2 mb-2">
               <span className="text-xs text-[var(--text-tertiary)] font-medium">Tech Stack:</span>
               <div className="flex flex-wrap gap-1.5">
-                {projectMemory.tech_stack!.map((t) => (
+                {projectMemory?.tech_stack!.map((t) => (
                   <span key={t} className="px-2 py-0.5 rounded-md text-[11px] font-mono font-medium bg-[var(--bg-tertiary)] text-[var(--text-secondary)]">
                     {t}
                   </span>
@@ -294,9 +326,9 @@ export default function MemoryPage() {
               </div>
             </div>
           )}
-          {projectMemory.last_active && (
+          {projectMemory?.last_active && (
             <div className="text-xs text-[var(--text-tertiary)] mb-2">
-              Last active: {projectMemory.last_active}
+              Last active: {projectMemory?.last_active}
             </div>
           )}
         </div>
@@ -348,6 +380,8 @@ export default function MemoryPage() {
           <div className="flex items-center justify-center py-16">
             <Loader2 size={20} className="animate-spin text-[var(--text-tertiary)]" />
           </div>
+        ) : loadError ? (
+          <div className="py-12 text-center text-sm text-[var(--text-secondary)]">加载失败 <button className="text-[var(--brand)] underline" onClick={fetchEntries}>重试</button></div>
         ) : entries.length === 0 ? (
           <EmptyState
             icon={<Brain size={28} className="text-[var(--text-tertiary)]" />}
@@ -366,7 +400,7 @@ export default function MemoryPage() {
           <div className="space-y-1.5">
             {entries.map((entry) => (
               <div
-                key={entry.key}
+                key={entry.id}
                 className="flex items-start gap-3 px-4 py-3 rounded-xl border border-[var(--border)] bg-[var(--bg-secondary)] group hover:border-[var(--border-strong)] transition-colors"
               >
                 {/* Category badge */}
@@ -383,6 +417,7 @@ export default function MemoryPage() {
 
                 {/* Content */}
                 <div className="flex-1 min-w-0">
+                  <div className="text-xs font-semibold text-[var(--text-primary)] break-all mb-1">{entry.key}</div>
                   <div className="text-xs leading-relaxed text-[var(--text-secondary)] whitespace-pre-wrap">
                     {entry.content}
                   </div>
@@ -404,7 +439,7 @@ export default function MemoryPage() {
                 </div>
 
                 {/* Actions */}
-                <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className="flex items-center gap-1 shrink-0 opacity-100 transition-opacity">
                   <button
                     onClick={() => {
                       setEditingEntry(entry);
@@ -416,7 +451,7 @@ export default function MemoryPage() {
                     <Pencil size={12} />
                   </button>
                   <button
-                    onClick={() => handleDelete(entry)}
+                    onClick={() => setDeleteTarget(entry)}
                     className="p-1 rounded text-[var(--danger)] hover:bg-[var(--danger-bg)]"
                     title={t("memory.delete")}
                   >
@@ -428,6 +463,39 @@ export default function MemoryPage() {
           </div>
         )}
       </div>
+
+      <Modal open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}
+        title={t("memory.delete")} size="md" footer={<div className="flex gap-2">
+          <Button variant="ghost" onClick={() => setDeleteTarget(null)}>{t("memory.cancel")}</Button>
+          <Button variant="brand" onClick={() => deleteTarget && handleDelete(deleteTarget)}>{t("memory.delete")}</Button>
+        </div>}>
+        <p className="text-sm text-[var(--text-secondary)]">确认删除这条记忆？此操作无法撤销。</p>
+        <p className="mt-3 break-all text-xs text-[var(--text-primary)]">{deleteTarget?.key}</p>
+      </Modal>
+
+      <Modal open={showArchives} onOpenChange={setShowArchives} title="记忆归档与恢复" size="md">
+        <div className="space-y-3">
+          <p className="text-xs text-[var(--text-secondary)]">包含自动整理和历史清理归档；恢复不会覆盖现有记忆。</p>
+          <select value={archiveName} onChange={async (event) => {
+            const name = event.target.value; setArchiveName(name); setArchiveEntries([]);
+            if (name) try { setArchiveEntries(await listArchivedMemories(name)); } catch { toast.error("无法读取归档"); }
+          }} className="w-full rounded-lg border border-[var(--border)] bg-[var(--bg-tertiary)] p-2 text-sm text-[var(--text-primary)]">
+            <option value="">{archives.length ? "选择归档" : "暂无归档"}</option>
+            {archives.map((archive) => <option key={archive.name} value={archive.name}>{archive.name} · {archive.count} 条</option>)}
+          </select>
+          <div className="max-h-80 space-y-2 overflow-y-auto">
+            {archiveEntries.map((entry) => <div key={entry.id} className="rounded-lg border border-[var(--border)] p-3">
+              <div className="break-all text-xs font-semibold text-[var(--text-primary)]">{entry.key}</div>
+              <p className="mt-1 whitespace-pre-wrap text-xs text-[var(--text-secondary)]">{entry.content}</p>
+              <Button variant="ghost" size="xs" onClick={async () => {
+                try { const result = await restoreArchivedMemory(archiveName, entry.id);
+                  toast.success(result.status === "exists" ? "活跃记忆中已有同名记录" : "已恢复"); fetchEntries();
+                } catch { toast.error("恢复失败"); }
+              }}>恢复</Button>
+            </div>)}
+          </div>
+        </div>
+      </Modal>
 
       {/* Edit modal */}
       <Modal

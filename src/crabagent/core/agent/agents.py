@@ -421,7 +421,7 @@ async def build_memory_prompt(
                 memory_type="",
                 limit=max_inject,
                 fallback=True,
-                scope="workspace" if workspace_path else "",
+                visible_only=True,
                 workspace_path=workspace_path,
             )
         except Exception:
@@ -454,6 +454,7 @@ async def inject_agent_lessons(
     user_id: int,
     agent_name: str,
     task_hint: str = "",
+    workspace_path: str = "",
 ) -> str:
     """Append a '## Your Past Experiences' block to ``system_prompt`` if the
     agent has previously persisted lessons.
@@ -475,7 +476,7 @@ async def inject_agent_lessons(
 
     lessons: list[dict] = []
     try:
-        lessons = await agent_memory_get_by_agent(user_id, agent_name, limit=5)
+        lessons = await agent_memory_get_by_agent(user_id, agent_name, limit=5, workspace_path=workspace_path)
     except Exception:
         logger.debug("Failed to load agent lessons for %s", agent_name, exc_info=True)
 
@@ -487,6 +488,9 @@ async def inject_agent_lessons(
                 memory_type="agent_lesson",
                 limit=3,
                 fallback=True,
+                visible_only=True,
+                workspace_path=workspace_path,
+                agent_name=agent_name,
             )
             existing_keys = {item["key"] for item in lessons}
             for s in similar:
@@ -506,6 +510,9 @@ async def inject_agent_lessons(
                 memory_type="agent_lesson",
                 limit=8,
                 fallback=True,
+                visible_only=True,
+                workspace_path=workspace_path,
+                agent_name=agent_name,
             )
             for g in general:
                 if g["key"] in existing_keys:
@@ -724,6 +731,7 @@ async def spawn_sub_agent(
                 user_id=parent_user_id,
                 agent_name=agent_name,
                 task_hint=task_category,
+                workspace_path=str(parent_context.workspace or ""),
             )
         except Exception:
             logger.debug("Failed to inject lessons for sub-agent %s", agent_name, exc_info=True)

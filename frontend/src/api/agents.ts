@@ -246,12 +246,36 @@ export function createMemory(req: {
   key: string;
   content: string;
   importance?: number;
+  scope?: string;
+  workspace_path?: string;
+  recall_policy?: string;
 }): Promise<{ status: string; key: string }> {
   return api.post("/memory", req);
 }
 
-export function updateMemory(key: string, content: string, importance?: number): Promise<{ status: string; key: string }> {
+export function updateMemory(key: string, content: string, importance?: number, memoryId?: number): Promise<{ status: string; key: string }> {
   const params = new URLSearchParams({ content });
   if (importance !== undefined) params.set("importance", String(importance));
+  if (memoryId !== undefined) params.set("memory_id", String(memoryId));
   return api.patch(`/memory/${encodeURIComponent(key)}?${params.toString()}`, {});
+}
+
+export function deleteMemoryEntry(key: string, memoryId: number): Promise<void> {
+  return api.del(`/memory/${encodeURIComponent(key)}?memory_id=${memoryId}`);
+}
+
+export function listMemoryArchives(): Promise<{ name: string; count: number }[]> {
+  return api.get("/memory/archives/list");
+}
+
+export function listArchivedMemories(name: string): Promise<{ id: number; key: string; content: string }[]> {
+  return api.get(`/memory/archives/${encodeURIComponent(name)}/entries`);
+}
+
+export function restoreArchivedMemory(name: string, id: number): Promise<{ status: string }> {
+  return api.post(`/memory/archives/${encodeURIComponent(name)}/restore/${id}`, {});
+}
+
+export function consolidateMemories(): Promise<{ status: string; merged: number; candidates?: number; reason?: string }> {
+  return api.post("/memory/semantic-consolidate", {});
 }

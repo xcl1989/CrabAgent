@@ -1441,21 +1441,37 @@ async def agent_memory_upsert(
     workspace_path: str = "",
     recall_policy: str = "",
 ) -> None:
-    from sqlalchemy import select
+    from sqlalchemy import delete, func, select
 
+    effective_scope = scope or ("workspace" if workspace_path else "global")
     async with async_session_factory() as db:
+        # Serialize the read-modify-write transaction across SQLite processes.
+        if db.bind.dialect.name == "sqlite":
+            from sqlalchemy import text
+
+            await db.execute(text("BEGIN IMMEDIATE"))
+        legacy_scope = func.coalesce(AgentMemory.scope, "") == ""
+        inferred = ((func.coalesce(AgentMemory.workspace_path, "") != "") if effective_scope == "workspace"
+                    else (func.coalesce(AgentMemory.workspace_path, "") == ""))
+        scope_match = AgentMemory.scope == effective_scope
+        if effective_scope in ("global", "workspace"):
+            scope_match = scope_match | (legacy_scope & inferred)
         result = await db.execute(
             select(AgentMemory).where(
-                AgentMemory.user_id == user_id,
-                AgentMemory.key == key,
-            )
+                AgentMemory.user_id == user_id, AgentMemory.key == key,
+                AgentMemory.memory_type == memory_type, scope_match,
+                func.coalesce(AgentMemory.workspace_path, "") == workspace_path,
+                func.coalesce(AgentMemory.agent_name, "") == agent_name,
+            ).order_by(AgentMemory.id)
         )
-        existing = result.scalar_one_or_none()
+        existing = result.scalars().first()
         mem_id: int | None = None
         if existing:
             existing.memory_type = memory_type
             existing.agent_name = agent_name
             existing.category = category
+            if existing.content != content:
+                await db.execute(delete(MemoryEmbedding).where(MemoryEmbedding.memory_id == existing.id))
             existing.content = content
             existing.importance = importance
             if confidence >= existing.confidence:
@@ -1491,18 +1507,18 @@ async def agent_memory_upsert(
                 recall_policy=recall_policy,
             )
             db.add(new_mem)
-        await db.commit()
-        # For new records, get the id after commit
+        await db.flush()
         if mem_id is None:
-            result2 = await db.execute(
-                select(AgentMemory).where(
-                    AgentMemory.user_id == user_id,
-                    AgentMemory.key == key,
-                )
-            )
-            fresh = result2.scalar_one_or_none()
-            if fresh:
-                mem_id = fresh.id
+            mem_id = new_mem.id
+        await db.commit()
+
+    # Compaction runs after commit so archive failures never lose the new memory.
+    try:
+        from crabagent.core.memory_compaction import compact_memories
+
+        await compact_memories(user_id, protected_id=mem_id)
+    except Exception:
+        logger.exception("Failed to compact memories for user %s", user_id)
 
     # Best-effort embedding generation (non-blocking)
     if mem_id is not None:
@@ -1516,15 +1532,42 @@ async def agent_memory_get_by_type(
     user_id: int,
     memory_type: str,
     limit: int = 15,
+    *,
+    scope: str = "",
+    workspace_path: str = "",
+    recall_policy: str = "",
 ) -> list[dict]:
-    from sqlalchemy import select
+    from sqlalchemy import and_, or_, select
+
+    stmt = select(AgentMemory).where(
+        AgentMemory.user_id == user_id, AgentMemory.memory_type == memory_type
+    )
+    # Infer the scope of legacy records from their workspace, if present.
+    legacy_scope = or_(AgentMemory.scope == "", AgentMemory.scope.is_(None))
+    if scope == "global":
+        stmt = stmt.where(or_(
+            AgentMemory.scope == scope,
+            and_(legacy_scope, or_(AgentMemory.workspace_path == "", AgentMemory.workspace_path.is_(None))),
+        ))
+    elif scope == "workspace":
+        if not workspace_path:
+            return []
+        stmt = stmt.where(
+            or_(AgentMemory.scope == scope, legacy_scope),
+            AgentMemory.workspace_path == workspace_path,
+        )
+    elif scope:
+        stmt = stmt.where(AgentMemory.scope == scope)
+    if recall_policy:
+        stmt = stmt.where(or_(
+            AgentMemory.recall_policy == recall_policy,
+            AgentMemory.recall_policy == "",
+            AgentMemory.recall_policy.is_(None),
+        ))
 
     async with async_session_factory() as db:
         result = await db.execute(
-            select(AgentMemory)
-            .where(AgentMemory.user_id == user_id, AgentMemory.memory_type == memory_type)
-            .order_by(AgentMemory.importance.desc())
-            .limit(limit)
+            stmt.order_by(AgentMemory.importance.desc()).limit(limit)
         )
         return [
             {
@@ -1549,6 +1592,8 @@ async def agent_memory_get_by_agent(
     user_id: int,
     agent_name: str,
     limit: int = 5,
+    *,
+    workspace_path: str | None = None,
 ) -> list[dict]:
     from sqlalchemy import select
 
@@ -1559,6 +1604,7 @@ async def agent_memory_get_by_agent(
                 AgentMemory.user_id == user_id,
                 AgentMemory.memory_type == "agent_lesson",
                 AgentMemory.agent_name == agent_name,
+                *([_memory_visible(workspace_path, agent_name)] if workspace_path is not None else []),
             )
             .order_by(AgentMemory.importance.desc())
             .limit(limit)
@@ -1621,6 +1667,18 @@ async def agent_memory_get_by_workspace(
         ]
 
 
+def _memory_visible(workspace_path: str, agent_name: str):
+    from sqlalchemy import and_, func, or_
+
+    scope = func.coalesce(AgentMemory.scope, "")
+    workspace = func.coalesce(AgentMemory.workspace_path, "")
+    agent = func.coalesce(AgentMemory.agent_name, "")
+    global_memory = and_(scope.in_(["global", ""]), workspace == "")
+    project_memory = and_(scope.in_(["workspace", ""]), workspace == workspace_path, workspace != "")
+    agent_memory = and_(scope == "agent", workspace == workspace_path, agent == agent_name)
+    return or_(global_memory, project_memory, agent_memory)
+
+
 async def agent_memory_search(
     user_id: int,
     query: str,
@@ -1628,6 +1686,8 @@ async def agent_memory_search(
     limit: int = 5,
     scope: str = "",
     workspace_path: str = "",
+    visible_only: bool = False,
+    agent_name: str = "",
 ) -> list[dict]:
     from sqlalchemy import or_, select
 
@@ -1635,9 +1695,11 @@ async def agent_memory_search(
         conditions = [AgentMemory.user_id == user_id]
         if memory_type:
             conditions.append(AgentMemory.memory_type == memory_type)
+        if visible_only:
+            conditions.append(_memory_visible(workspace_path, agent_name))
         if scope:
             conditions.append(AgentMemory.scope == scope)
-        if workspace_path:
+        if workspace_path and not visible_only:
             conditions.append(AgentMemory.workspace_path == workspace_path)
         terms = [t for t in query.split() if len(t) >= 2]
         term_filters = []
@@ -1690,6 +1752,8 @@ async def agent_memory_search_vector(
     fallback: bool = True,
     scope: str = "",
     workspace_path: str = "",
+    visible_only: bool = False,
+    agent_name: str = "",
 ) -> list[dict]:
     """Semantic vector search over AgentMemory.
 
@@ -1714,12 +1778,36 @@ async def agent_memory_search_vector(
                 limit=limit,
                 scope=scope,
                 workspace_path=workspace_path,
+                visible_only=visible_only,
+                agent_name=agent_name,
             )
         return []
 
     import base64
 
     from sqlalchemy import select
+
+    # Rebuild a bounded batch of missing embeddings on demand.
+    async with async_session_factory() as db:
+        missing_stmt = (select(AgentMemory).outerjoin(
+            MemoryEmbedding, MemoryEmbedding.memory_id == AgentMemory.id
+        ).where(AgentMemory.user_id == user_id, MemoryEmbedding.memory_id.is_(None)))
+        if memory_type:
+            missing_stmt = missing_stmt.where(AgentMemory.memory_type == memory_type)
+        if visible_only:
+            missing_stmt = missing_stmt.where(_memory_visible(workspace_path, agent_name))
+        if scope:
+            missing_stmt = missing_stmt.where(AgentMemory.scope == scope)
+        if workspace_path and not visible_only:
+            missing_stmt = missing_stmt.where(AgentMemory.workspace_path == workspace_path)
+        missing_rows = (await db.execute(missing_stmt.order_by(
+            AgentMemory.updated_at.desc()).limit(10))).scalars().all()
+        missing_data = [(row.id, row.key, row.content) for row in missing_rows]
+    for memory_id, key, content in missing_data:
+        try:
+            await agent_memory_ensure_embedding(memory_id, key, content)
+        except Exception:
+            logger.warning("Failed to rebuild embedding for memory %s", memory_id, exc_info=True)
 
     async with async_session_factory() as db:
         stmt = (
@@ -1729,9 +1817,11 @@ async def agent_memory_search_vector(
         )
         if memory_type:
             stmt = stmt.where(AgentMemory.memory_type == memory_type)
+        if visible_only:
+            stmt = stmt.where(_memory_visible(workspace_path, agent_name))
         if scope:
             stmt = stmt.where(AgentMemory.scope == scope)
-        if workspace_path:
+        if workspace_path and not visible_only:
             stmt = stmt.where(AgentMemory.workspace_path == workspace_path)
 
         result = await db.execute(stmt)
@@ -1746,6 +1836,8 @@ async def agent_memory_search_vector(
                 limit=limit,
                 scope=scope,
                 workspace_path=workspace_path,
+                visible_only=visible_only,
+                agent_name=agent_name,
             )
         return []
 
@@ -1797,6 +1889,15 @@ async def agent_memory_search_vector(
         except Exception:
             pass
 
+    # Include keyword matches without an embedding, including newly edited records.
+    if fallback:
+        keyword = await agent_memory_search(
+            user_id, query, memory_type=memory_type, limit=limit, scope=scope,
+            workspace_path=workspace_path, visible_only=visible_only, agent_name=agent_name,
+        )
+        seen = {item["id"] for item in output}
+        missing = [item for item in keyword if item["id"] not in seen]
+        output = (missing + output)[:limit]
     return output
 
 
@@ -1819,6 +1920,9 @@ async def agent_memory_ensure_embedding(memory_id: int, key: str, content: str) 
     b64_str = base64.b64encode(blob).decode("ascii")
 
     async with async_session_factory() as db:
+        current = await db.get(AgentMemory, memory_id)
+        if current is None or current.key != key or current.content != content:
+            return
         result = await db.execute(
             select(MemoryEmbedding).where(MemoryEmbedding.memory_id == memory_id)
         )
@@ -1841,11 +1945,17 @@ async def agent_memory_list_all(
     user_id: int,
     memory_type: str = "",
     category: str = "",
+    *,
+    visible_only: bool = False,
+    workspace_path: str = "",
+    agent_name: str = "",
 ) -> list[dict]:
     from sqlalchemy import select
 
     async with async_session_factory() as db:
         conditions = [AgentMemory.user_id == user_id]
+        if visible_only:
+            conditions.append(_memory_visible(workspace_path, agent_name))
         if memory_type:
             conditions.append(AgentMemory.memory_type == memory_type)
         if category:
@@ -1868,25 +1978,24 @@ async def agent_memory_list_all(
         ]
 
 
-async def agent_memory_delete(user_id: int, key: str) -> bool:
+async def agent_memory_delete(user_id: int, key: str, *, memory_id: int | None = None,
+                              visible_only: bool = False, workspace_path: str = "",
+                              agent_name: str = "") -> bool:
     from sqlalchemy import delete as sa_delete
     from sqlalchemy import select
 
     async with async_session_factory() as db:
-        result = await db.execute(
-            select(AgentMemory).where(
-                AgentMemory.user_id == user_id,
-                AgentMemory.key == key,
-            )
-        )
-        if not result.scalar_one_or_none():
+        stmt = select(AgentMemory).where(AgentMemory.user_id == user_id, AgentMemory.key == key)
+        if memory_id is not None:
+            stmt = stmt.where(AgentMemory.id == memory_id)
+        if visible_only:
+            stmt = stmt.where(_memory_visible(workspace_path, agent_name))
+        result = await db.execute(stmt)
+        rows = result.scalars().all()
+        if len(rows) != 1:
             return False
-        await db.execute(
-            sa_delete(AgentMemory).where(
-                AgentMemory.user_id == user_id,
-                AgentMemory.key == key,
-            )
-        )
+        await db.execute(sa_delete(MemoryEmbedding).where(MemoryEmbedding.memory_id == rows[0].id))
+        await db.execute(sa_delete(AgentMemory).where(AgentMemory.id == rows[0].id))
         await db.commit()
         return True
 
@@ -1900,6 +2009,8 @@ async def agent_memory_clear(user_id: int) -> int:
             select(func.count()).select_from(AgentMemory).where(AgentMemory.user_id == user_id)
         )
         count = count_result.scalar() or 0
+        ids = select(AgentMemory.id).where(AgentMemory.user_id == user_id)
+        await db.execute(sa_delete(MemoryEmbedding).where(MemoryEmbedding.memory_id.in_(ids)))
         await db.execute(sa_delete(AgentMemory).where(AgentMemory.user_id == user_id))
         await db.commit()
         return count
@@ -1910,21 +2021,26 @@ async def agent_memory_replace(
     key: str,
     old_text: str,
     new_text: str,
+    *, memory_id: int | None = None, visible_only: bool = False,
+    workspace_path: str = "", agent_name: str = "",
 ) -> bool:
     from sqlalchemy import select
 
     async with async_session_factory() as db:
-        result = await db.execute(
-            select(AgentMemory).where(
-                AgentMemory.user_id == user_id,
-                AgentMemory.key == key,
-            )
-        )
-        row = result.scalar_one_or_none()
-        if not row:
+        stmt = select(AgentMemory).where(AgentMemory.user_id == user_id, AgentMemory.key == key)
+        if memory_id is not None:
+            stmt = stmt.where(AgentMemory.id == memory_id)
+        if visible_only:
+            stmt = stmt.where(_memory_visible(workspace_path, agent_name))
+        result = await db.execute(stmt)
+        rows = result.scalars().all()
+        if len(rows) != 1:
             return False
+        row = rows[0]
         if old_text not in row.content:
             return False
+        from sqlalchemy import delete
+        await db.execute(delete(MemoryEmbedding).where(MemoryEmbedding.memory_id == row.id))
         row.content = row.content.replace(old_text, new_text, 1)
         row.updated_at = utcnow()
         await db.commit()

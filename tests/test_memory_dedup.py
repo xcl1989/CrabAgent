@@ -29,7 +29,7 @@ def test_string_similarity_score_handles_exact_and_containment_matches():
 async def test_persist_lesson_reuses_existing_key_for_similar_content(monkeypatch):
     saved = []
 
-    async def fake_get_by_agent(user_id, agent_name, limit=50):
+    async def fake_get_by_agent(user_id, agent_name, limit=50, **kwargs):
         return [
             {
                 "key": "lesson:coder:llm:existing",
@@ -70,7 +70,7 @@ async def test_persist_lesson_reuses_existing_key_for_similar_content(monkeypatc
 async def test_persist_lesson_keeps_new_key_for_distinct_content(monkeypatch):
     saved = []
 
-    async def fake_get_by_agent(user_id, agent_name, limit=50):
+    async def fake_get_by_agent(user_id, agent_name, limit=50, **kwargs):
         return [
             {
                 "key": "lesson:coder:llm:existing",
@@ -111,7 +111,7 @@ async def test_persist_lesson_keeps_new_key_for_distinct_content(monkeypatch):
 async def test_persist_lesson_skips_meta_reflection_content(monkeypatch):
     saved = []
 
-    async def fake_get_by_agent(user_id, agent_name, limit=80):
+    async def fake_get_by_agent(user_id, agent_name, limit=80, **kwargs):
         return []
 
     async def fake_upsert(**kwargs):
@@ -147,7 +147,7 @@ async def test_persist_lesson_skips_meta_reflection_content(monkeypatch):
 async def test_persist_lesson_skips_analyze_request_meta_content(monkeypatch):
     saved = []
 
-    async def fake_get_by_agent(user_id, agent_name, limit=80):
+    async def fake_get_by_agent(user_id, agent_name, limit=80, **kwargs):
         return []
 
     async def fake_upsert(**kwargs):
@@ -183,7 +183,7 @@ async def test_persist_lesson_skips_analyze_request_meta_content(monkeypatch):
 async def test_persist_lesson_reuses_embedding_match_with_same_task_category(monkeypatch):
     saved = []
 
-    async def fake_get_by_agent(user_id, agent_name, limit=80):
+    async def fake_get_by_agent(user_id, agent_name, limit=80, **kwargs):
         return [
             {
                 "key": "lesson:coder:llm:existing",
@@ -238,12 +238,12 @@ async def test_persist_lesson_reuses_embedding_match_with_same_task_category(mon
 
 
 @pytest.mark.asyncio
-async def test_persist_lesson_evicts_when_cap_exceeded(monkeypatch):
-    """When an agent has more than 30 lessons, the lowest-quality ones get evicted."""
+async def test_persist_lesson_defers_eviction_to_compaction(monkeypatch):
+    """Lessons are not deleted by the old per-agent cap."""
     saved = []
 
     # Simulate 33 existing lessons
-    async def fake_get_by_agent(user_id, agent_name, limit=80):
+    async def fake_get_by_agent(user_id, agent_name, limit=80, **kwargs):
         return [
             {"id": i, "key": f"lesson:coder:llm:{i}", "content": f"Tip number {i}.", "importance": 0.5, "task_category": "code"}
             for i in range(1, 34)
@@ -280,7 +280,7 @@ async def test_persist_lesson_evicts_when_cap_exceeded(monkeypatch):
     )
 
     assert ok is True
-    assert evicted  # cap enforcement was called
+    assert not evicted
 
 
 def test_meta_lesson_patterns_block_analyze_request_variant():

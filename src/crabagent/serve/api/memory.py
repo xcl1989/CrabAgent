@@ -2,13 +2,12 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel
-
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from pydantic import BaseModel
+from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from crabagent.core.database import AgentMemory, User, agent_memory_delete, agent_memory_upsert, get_db
+from crabagent.core.database import AgentMemory, MemoryEmbedding, User, agent_memory_upsert, get_db
 from crabagent.serve.deps import get_current_user
 
 router = APIRouter(prefix="/memory", tags=["memory"])
@@ -73,19 +72,53 @@ async def list_memories(
     if recall_policy:
         query = query.where(AgentMemory.recall_policy == recall_policy)
 
+    if q:
+        query = query.where(or_(
+            AgentMemory.content.icontains(q, autoescape=True),
+            AgentMemory.key.icontains(q, autoescape=True),
+        ))
     query = query.order_by(AgentMemory.updated_at.desc()).limit(limit)
 
     result = await db.execute(query)
     items = [_memory_to_dict(r) for r in result.scalars().all()]
 
-    if q:
-        q_lower = q.lower()
-        items = [
-            i for i in items
-            if q_lower in i.get("content", "").lower() or q_lower in i.get("key", "").lower()
-        ]
-
     return items
+
+
+@router.post("/semantic-consolidate")
+async def semantic_consolidate_memories(user: User = Depends(get_current_user)):
+    from crabagent.core.memory_batch_merge import semantic_consolidate
+
+    return await semantic_consolidate(user.id)
+
+
+@router.get("/archives/list")
+async def memory_archives(user: User = Depends(get_current_user)):
+    from crabagent.core.memory_compaction import list_archives
+
+    return list_archives(user.id)
+
+
+@router.get("/archives/{name}/entries")
+async def memory_archive_entries(name: str, user: User = Depends(get_current_user)):
+    from crabagent.core.memory_compaction import read_archive
+
+    try:
+        data = read_archive(user.id, name)
+        return [{"id": row["id"], "key": row["key"], "content": row["content"]}
+                for row in data["memories"] if row.get("user_id") == user.id]
+    except (ValueError, OSError):
+        raise HTTPException(status_code=404, detail="Archive not found") from None
+
+
+@router.post("/archives/{name}/restore/{memory_id}")
+async def memory_archive_restore(name: str, memory_id: int, user: User = Depends(get_current_user)):
+    from crabagent.core.memory_compaction import restore_archived_memory
+
+    try:
+        return {"status": await restore_archived_memory(user.id, name, memory_id)}
+    except (ValueError, OSError):
+        raise HTTPException(status_code=404, detail="Archive or memory not found") from None
 
 
 @router.get("/{key:path}")
@@ -101,7 +134,10 @@ async def get_memory(
             AgentMemory.key == key,
         )
     )
-    m = result.scalar_one_or_none()
+    rows = result.scalars().all()
+    if len(rows) > 1:
+        raise HTTPException(status_code=409, detail="Ambiguous memory key")
+    m = rows[0] if rows else None
     if not m:
         raise HTTPException(status_code=404, detail="Memory not found")
     return _memory_to_dict(m)
@@ -134,6 +170,7 @@ async def create_memory(
 async def update_memory(
     key: str,
     content: str = Query("", description="New content"),
+    memory_id: int | None = Query(None),
     importance: float = Query(None, ge=0.0, le=1.0),
     scope: str = Query("", description="New scope"),
     workspace_path: str = Query("", description="New workspace path"),
@@ -142,17 +179,19 @@ async def update_memory(
     db: AsyncSession = Depends(get_db),
 ):
     """Update a memory entry's fields."""
-    result = await db.execute(
-        select(AgentMemory).where(
-            AgentMemory.user_id == user.id,
-            AgentMemory.key == key,
-        )
-    )
-    m = result.scalar_one_or_none()
+    stmt = select(AgentMemory).where(AgentMemory.user_id == user.id, AgentMemory.key == key)
+    if memory_id is not None:
+        stmt = stmt.where(AgentMemory.id == memory_id)
+    result = await db.execute(stmt)
+    rows = result.scalars().all()
+    if len(rows) > 1:
+        raise HTTPException(status_code=409, detail="Ambiguous memory key")
+    m = rows[0] if rows else None
     if not m:
         raise HTTPException(status_code=404, detail="Memory not found")
 
-    if content:
+    if content and content != m.content:
+        await db.execute(delete(MemoryEmbedding).where(MemoryEmbedding.memory_id == m.id))
         m.content = content
     if importance is not None:
         m.importance = importance
@@ -171,10 +210,20 @@ async def update_memory(
 @router.delete("/{key:path}")
 async def delete_memory(
     key: str,
+    memory_id: int | None = Query(None),
     user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
     """Delete a memory entry."""
-    deleted = await agent_memory_delete(user.id, key)
-    if not deleted:
+    stmt = select(AgentMemory).where(AgentMemory.user_id == user.id, AgentMemory.key == key)
+    if memory_id is not None:
+        stmt = stmt.where(AgentMemory.id == memory_id)
+    rows = (await db.execute(stmt)).scalars().all()
+    if len(rows) > 1:
+        raise HTTPException(status_code=409, detail="Ambiguous memory key")
+    if not rows:
         raise HTTPException(status_code=404, detail="Memory not found")
+    await db.execute(delete(MemoryEmbedding).where(MemoryEmbedding.memory_id == rows[0].id))
+    await db.delete(rows[0])
+    await db.commit()
     return {"status": "deleted", "key": key}

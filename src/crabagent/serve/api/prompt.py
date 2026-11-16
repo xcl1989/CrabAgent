@@ -484,7 +484,7 @@ async def prompt_async(
             if mem_prompt:
                 base_prompt += "\n\n" + mem_prompt
         except Exception:
-            pass
+            logger.exception("Failed to build memory prompt for user %s", user.id)
 
         # Inject project memory
         try:
@@ -733,6 +733,7 @@ Use ordinary Markdown when a visualization is not helpful.
                 user_id=user.id,
                 agent_name=effective_agent,
                 task_hint=(req.message or "")[:120],
+                workspace_path=str(workspace),
             )
             if lessons_block.strip():
                 context.messages.append(

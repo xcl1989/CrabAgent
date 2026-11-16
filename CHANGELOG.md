@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.18.4] — Memory Management and Semantic Consolidation (2026-11-16)
+
+### Added
+- Memory management now offers semantic consolidation and archive browsing with individual recovery.
+- Batch semantic consolidation scopes candidates by user and workspace, confirms matches with a model, and archives originals before merging. SQLite users reaching 600 memories are consolidated and archived down to 300; automatic compaction stops if the model is unavailable.
+
+### Fixed
+- Fix memory prompt injection argument mismatch, log failures, and preserve compatibility with legacy scope values.
+- Improve workspace and agent visibility, ambiguous-key handling, embedding invalidation, and search filtering.
+- Add regression coverage for memory archives, recovery, consolidation, and scope isolation.
+
+---
+
 ## [0.18.3] — Bounded Game Input for Browser and macOS (2026-11-13)
 
 ### Added
