@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import functools
+import tempfile
 import os
 from pathlib import Path
 from typing import Any
@@ -217,6 +219,73 @@ async def _render_and_emit_preview(
         logger.debug("Preview render skipped (not critical): %s", preview.error)
 
 
+def _track_office_read(handler):
+    @functools.wraps(handler)
+    async def wrapped(file_path="", *args, context=None, **kwargs):
+        from crabagent.core.collaboration.write_coordinator import file_version
+
+        resolved, error = _resolve_path_or_current(file_path, context)
+        if error or not resolved or not os.path.isfile(resolved):
+            return await handler(file_path, *args, context=context, **kwargs)
+        before = file_version(Path(resolved))
+        result = await handler(file_path, *args, context=context, **kwargs)
+        after = file_version(Path(resolved))
+        versions = context.metadata.setdefault("_file_versions", {}) if context is not None else {}
+        if before != after:
+            versions.pop(str(Path(resolved).resolve()), None)
+            return "Document changed while reading; read it again before editing."
+        if not result.startswith(("读取失败", "查询失败", "Error", "File not found")):
+            versions[str(Path(resolved).resolve())] = after
+        else:
+            versions.pop(str(Path(resolved).resolve()), None)
+        return result
+    return wrapped
+
+
+def _guard_office_mutation(handler):
+    @functools.wraps(handler)
+    async def wrapped(file_path="", *args, context=None, **kwargs):
+        from crabagent.core.collaboration.write_coordinator import WriteConflict, replace_if_version, version_bytes
+
+        if context is None:
+            return await handler(file_path, *args, context=context, **kwargs)
+        resolved, error = _resolve_path_or_current(file_path, context)
+        if error or not resolved or not os.path.isfile(resolved):
+            return await handler(file_path, *args, context=context, **kwargs)
+        path = Path(resolved).resolve()
+        versions = context.metadata.setdefault("_file_versions", {})
+        expected = versions.get(str(path))
+        if not expected and context.metadata.get("_collaboration_bound"):
+            return "请先使用 office_read 或 office_query 读取文档，再进行修改。"
+        try:
+            original = path.read_bytes()
+            if not expected:
+                expected = version_bytes(original)
+            if version_bytes(original) != expected:
+                return "文档自上次读取后已变更，请重新读取再修改。"
+            with tempfile.TemporaryDirectory(prefix="crabagent-agent-office-") as directory:
+                draft = Path(directory) / path.name
+                draft.write_bytes(original)
+                # Keep workspace-dependent resolution, but do not publish an uncommitted preview.
+                import copy
+
+                draft_context = copy.copy(context)
+                draft_context.event_bus = None
+                result = await handler(str(draft), *args, context=draft_context, **kwargs)
+                if not result.startswith("✅"):
+                    return result
+                version = replace_if_version(path, draft.read_bytes(), expected,
+                    lock_root=Path.home() / ".crabagent" / "collaboration-locks")
+                versions[str(path)] = version
+            await _render_and_emit_preview(path.name, str(path), context)
+            return result
+        except WriteConflict as exc:
+            return f"文档编辑冲突，请重新读取。候选副本: {exc.candidate_path}"
+        except OSError as exc:
+            return f"文档编辑失败: {exc}"
+    return wrapped
+
+
 # ── tool: office_read ──────────────────────────────────────────────────
 
 
@@ -259,6 +328,7 @@ async def _render_and_emit_preview(
         "required": [],
     },
 )
+@_track_office_read
 async def office_read(
     file_path: str = "",
     mode: str = "text",
@@ -442,6 +512,7 @@ async def office_help(file_format: str = "", context: Any = None) -> str:
         "required": ["commands"],
     },
 )
+@_guard_office_mutation
 async def office_batch_edit(
     file_path: str = "",
     commands: list[dict[str, Any]] | None = None,
@@ -531,6 +602,10 @@ async def office_create(file_path: str = "", context: Any = None) -> str:
     result = await mgr.create(resolved)
 
     if result.success:
+        if context is not None:
+            from crabagent.core.collaboration.write_coordinator import file_version
+
+            context.metadata.setdefault("_file_versions", {})[str(Path(resolved).resolve())] = file_version(Path(resolved))
         await _emit(context, EventType.DOC_OP_DONE, {
             "file": file_path,
             "status": "ok",
@@ -686,6 +761,7 @@ def _describe_op(
         "required": ["command"],
     },
 )
+@_guard_office_mutation
 async def office_edit(
     file_path: str = "",
     command: str = "",
@@ -824,6 +900,7 @@ async def office_edit(
         "required": ["path_or_selector"],
     },
 )
+@_track_office_read
 async def office_query(
     file_path: str = "",
     path_or_selector: str = "",

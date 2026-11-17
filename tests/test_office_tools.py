@@ -431,3 +431,39 @@ class TestCollectFormulas:
         assert "SUM(B1:B3)" in result
         assert "42" in result
         assert "A1*2" in result
+
+
+@pytest.mark.asyncio
+async def test_office_read_then_edit_rejects_stale_version(fake_mgr, docx_file):
+    ctx = AgentContext(workspace=docx_file.parent)
+    await office_tools.office_read(str(docx_file), context=ctx)
+    docx_file.write_bytes(b"changed by another session")
+    result = await office_tools.office_edit(str(docx_file), command="set", element_path="/body/p[1]",
+                                            props={"text": "draft"}, context=ctx)
+    assert "上次读取后已变更" in result
+    assert docx_file.read_bytes() == b"changed by another session"
+
+
+@pytest.mark.asyncio
+async def test_bound_office_edit_requires_prior_read(fake_mgr, docx_file):
+    ctx = AgentContext(workspace=docx_file.parent, metadata={"_collaboration_bound": True})
+    result = await office_tools.office_edit(str(docx_file), command="set", element_path="/body/p[1]",
+                                            props={"text": "draft"}, context=ctx)
+    assert "先使用 office_read" in result
+
+
+@pytest.mark.asyncio
+async def test_office_read_race_invalidates_prior_version(fake_mgr, docx_file):
+    ctx = AgentContext(workspace=docx_file.parent, metadata={"_collaboration_bound": True})
+    await office_tools.office_read(str(docx_file), context=ctx)
+    real_view = fake_mgr.view_text
+
+    async def changing_view(*args, **kwargs):
+        result = await real_view(*args, **kwargs)
+        docx_file.write_bytes(b"changed while reading")
+        return result
+
+    fake_mgr.view_text = changing_view
+    result = await office_tools.office_read(str(docx_file), context=ctx)
+    assert "changed while reading" in result
+    assert str(docx_file.resolve()) not in ctx.metadata["_file_versions"]

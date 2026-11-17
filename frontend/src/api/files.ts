@@ -11,6 +11,7 @@ export interface FileContent {
   path: string;
   content: string;
   truncated: boolean;
+  version: string;
   message?: string;
 }
 
@@ -35,6 +36,13 @@ export async function readFile(path: string, absolute: boolean = false): Promise
   params.set("path", path);
   if (absolute) params.set("absolute", "true");
   return api.get<FileContent>(`/files/read?${params}`);
+}
+
+
+export async function getFileVersion(path: string, absolute = false): Promise<string> {
+  const params = new URLSearchParams({ path, absolute: String(absolute) });
+  const result = await api.get<{ version: string }>(`/files/version?${params}`);
+  return result.version;
 }
 
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".ico", ".bmp", ".avif"]);
@@ -118,8 +126,8 @@ export async function getGitDiff(path?: string, cached?: boolean, workspace?: st
   return api.get<GitDiffResult>(`/files/git-diff?${params}`);
 }
 
-export async function saveFile(path: string, content: string, absolute?: boolean): Promise<{ status: string; path: string; size: number }> {
-  return api.post("/files/write", { path, content, absolute });
+export async function saveFile(path: string, content: string, absolute?: boolean, expectedVersion?: string, sessionId?: string): Promise<{ status: string; path: string; size: number; version: string }> {
+  return api.post("/files/write", { path, content, absolute, expected_version: expectedVersion, session_id: sessionId });
 }
 
 // ── General file upload ────────────────────────────────────────────

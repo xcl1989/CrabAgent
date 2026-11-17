@@ -4,12 +4,14 @@ import { Save, Code, AlertTriangle } from "lucide-react";
 import { cn } from "../lib/cn";
 import { CodeTabs } from "./CodeTabs";
 import * as filesApi from "../api/files";
+import { useExternalFileVersion } from "../hooks/useExternalFileVersion";
 
 interface CodeTabState {
   path: string;
   name: string;
   content: string;
   originalContent: string;
+  version: string;
   modified: boolean;
   language: string;
 }
@@ -19,6 +21,7 @@ interface Props {
   initialContent?: string;
   className?: string;
   workMode?: boolean;
+  sessionId?: string;
 }
 
 function detectLanguage(name: string): string {
@@ -35,10 +38,10 @@ function detectLanguage(name: string): string {
   return langMap[ext] || "text";
 }
 
-export function CodePanel({ initialPath, initialContent, className, workMode }: Props) {
+export function CodePanel({ initialPath, initialContent, className, workMode, sessionId }: Props) {
   const { t } = useTranslation();
   const [tabs, setTabs] = useState<CodeTabState[]>(() => initialPath && initialContent !== undefined
-    ? [{ path: initialPath, name: initialPath.split("/").pop() || initialPath, content: initialContent, originalContent: initialContent, modified: false, language: detectLanguage(initialPath) }]
+    ? [{ path: initialPath, name: initialPath.split("/").pop() || initialPath, content: initialContent, originalContent: initialContent, version: "", modified: false, language: detectLanguage(initialPath) }]
     : [],
   );
   const [activePath, setActivePath] = useState<string | null>(initialPath || null);
@@ -47,6 +50,10 @@ export function CodePanel({ initialPath, initialContent, className, workMode }: 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const activeTab = tabs.find((t) => t.path === activePath);
+  const externalChange = useExternalFileVersion(activeTab?.path ?? null, activeTab?.version ?? "");
+  useEffect(() => {
+    if (externalChange) setError("文件已被其他程序修改；保存时会检查冲突，请先比较或重新读取。");
+  }, [externalChange]);
 
   const openFile = useCallback(async (path: string) => {
     try {
@@ -54,7 +61,7 @@ export function CodePanel({ initialPath, initialContent, className, workMode }: 
       const name = path.split("/").pop() || path;
       setTabs((prev) => {
         if (prev.some((t) => t.path === path)) return prev;
-        return [...prev, { path, name, content: result.content, originalContent: result.content, modified: false, language: detectLanguage(path) }];
+        return [...prev, { path, name, content: result.content, originalContent: result.content, version: result.version, modified: false, language: detectLanguage(path) }];
       });
       setActivePath(path);
       setError(null);
@@ -62,6 +69,17 @@ export function CodePanel({ initialPath, initialContent, className, workMode }: 
       setError(e?.message || "Failed to open file");
     }
   }, []);
+
+  useEffect(() => {
+    if (!initialPath) return;
+    let cancelled = false;
+    filesApi.readFile(initialPath).then((result) => {
+      if (cancelled) return;
+      setTabs((prev) => prev.map((tab) => tab.path === initialPath && !tab.modified
+        ? { ...tab, content: result.content, originalContent: result.content, version: result.version } : tab));
+    }).catch((e) => { if (!cancelled) setError(e?.message || "Failed to open file"); });
+    return () => { cancelled = true; };
+  }, [initialPath]);
 
   const closeTab = useCallback((path: string) => {
     setTabs((prev) => {
@@ -83,15 +101,15 @@ export function CodePanel({ initialPath, initialContent, className, workMode }: 
     if (!activeTab || !activeTab.modified) return;
     setSaving(true);
     try {
-      await filesApi.saveFile(activeTab.path, activeTab.content);
-      setTabs((prev) => prev.map((t) => t.path === activePath ? { ...t, originalContent: t.content, modified: false } : t));
+      const result = await filesApi.saveFile(activeTab.path, activeTab.content, false, activeTab.version, sessionId);
+      setTabs((prev) => prev.map((t) => t.path === activePath ? { ...t, originalContent: activeTab.content, version: result.version, modified: t.content !== activeTab.content } : t));
       setError(null);
     } catch (e: any) {
       setError(e?.message || "Save failed");
     } finally {
       setSaving(false);
     }
-  }, [activeTab, activePath]);
+  }, [activeTab, activePath, sessionId]);
 
   // Keyboard shortcuts
   useEffect(() => {

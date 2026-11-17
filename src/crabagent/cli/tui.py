@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import getpass
 import logging
 from pathlib import Path
 
@@ -736,7 +737,7 @@ class TuiSession:
             pt = input("Provider type: ").strip()
             nm = input("Name: ").strip()
             dp = input("Display (opt): ").strip()
-            ak = input("API key: ").strip()
+            ak = getpass.getpass("API key: ").strip()
             bu = input("Base URL (opt): ").strip()
             if not pt or not nm or not ak:
                 print("Required.")
@@ -1301,19 +1302,9 @@ class TuiSession:
         from crabagent.core.database import init_db
 
         await init_db()
-        from sqlalchemy import select
+        from crabagent.cli.__main__ import _ensure_cli_user
 
-        from crabagent.core.auth_utils import hash_password
-        from crabagent.core.database import User, async_session_factory
-
-        async with async_session_factory() as db:
-            r = await db.execute(select(User).where(User.username == "cli_user"))
-            self._user = r.scalar_one_or_none()
-            if not self._user:
-                self._user = User(username="cli_user", password_hash=hash_password("cli"), role="admin", enabled=True)
-                db.add(self._user)
-                await db.commit()
-                await db.refresh(self._user)
+        self._user = await _ensure_cli_user("cli_user")
         if not await self._epc():
             return
         (self.args.workspace or settings.workspace).resolve()
@@ -1327,8 +1318,8 @@ class TuiSession:
                 if cv:
                     cid = cv.id
                     sid = cv.session_id
-                if cv and cv.workspace:
-                    Path(cv.workspace).resolve()
+                if cv and cv.workspace and not self.args.workspace:
+                    self.args.workspace = Path(cv.workspace).resolve()
                 if cv and cv.model:
                     self.args.model = cv.model
         if not getattr(self.args, "model", None):
@@ -1428,7 +1419,7 @@ class TuiSession:
         ctx = AgentContext(
             workspace=ws,
             tool_registry=registry.clone(),
-            max_iterations=settings.max_iterations,
+            max_iterations=getattr(self.args, "max_iterations", None) or settings.max_iterations,
             model=getattr(self.args, "model", None),
             provider_name=getattr(self.args, "provider", None),
             system_prompt=base_prompt,
@@ -1523,7 +1514,7 @@ class TuiSession:
             if not PROVIDER_CATALOG.get(pt):
                 continue
             nm = input(f"Name [{pt}]: ").strip() or pt
-            ak = input("API key: ").strip()
+            ak = getpass.getpass("API key: ").strip()
             if not ak:
                 continue
             try:

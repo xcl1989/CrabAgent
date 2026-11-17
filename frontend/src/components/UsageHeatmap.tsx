@@ -28,6 +28,8 @@ interface DayEntry {
 
 const CELL = 11; // cell size in px
 const GAP = 3; // gap between cells in px
+const WEEK_GUTTER = 22; // left gutter width for weekday labels (daily mode only)
+const WEEKDAY_ROWS = [1, 3, 5]; // rows to label: Mon / Wed / Fri (dayIndex, 0 = Sunday)
 
 function formatTokens(value: number): string {
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
@@ -52,7 +54,13 @@ export default function UsageHeatmap({ workspace }: { workspace: string }) {
   const [mode, setMode] = useState<ViewMode>("daily");
   const [trend, setTrend] = useState<DayEntry[]>([]);
   const [loading, setLoading] = useState(true);
-  const [hover, setHover] = useState<{ label: string; x: number; y: number } | null>(null);
+  const [hover, setHover] = useState<{ label: string; cx: number; top: number; bottom: number } | null>(null);
+
+  // Anchor the tooltip to the hovered cell's rect (stable) instead of the mouse point
+  const showCellHover = (label: string, e: React.MouseEvent<HTMLElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    setHover({ label, cx: rect.left + rect.width / 2, top: rect.top, bottom: rect.bottom });
+  };
 
   const fetchTrend = useCallback(async () => {
     setLoading(true);
@@ -125,7 +133,8 @@ export default function UsageHeatmap({ workspace }: { workspace: string }) {
 
   const cellStyle = (tokens: number): React.CSSProperties => {
     const level = levelOf(tokens);
-    if (level === 0) return { background: "var(--bg-tertiary)" };
+    // Inset hairline on empty cells keeps the grid readable on light backgrounds
+    if (level === 0) return { background: "var(--bg-tertiary)", boxShadow: "inset 0 0 0 1px var(--border)" };
     return { background: "var(--brand)", opacity: [0, 0.28, 0.48, 0.7, 1][level] };
   };
 
@@ -137,6 +146,8 @@ export default function UsageHeatmap({ workspace }: { workspace: string }) {
     () => new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }),
     [],
   );
+  // Narrow weekday glyph ("一"/"M"), locale-aware; 2023-01-01 is a Sunday
+  const weekdayLabel = useMemo(() => new Intl.DateTimeFormat(undefined, { weekday: "narrow" }), []);
 
   // Month labels under the grid: show when the column's month changes
   const monthMarks = useMemo(() => {
@@ -254,14 +265,32 @@ export default function UsageHeatmap({ workspace }: { workspace: string }) {
         </MeasuredChartContainer>
       ) : (
         <div className="overflow-x-auto pb-1">
-          <div className="relative mx-auto" style={{ width: mode === "daily" ? grid.length * (CELL + GAP) : weekly.length * (CELL * 2 + GAP) }}>
+          <div
+            className="relative mx-auto"
+            style={{
+              width:
+                mode === "daily"
+                  ? WEEK_GUTTER + grid.length * (CELL + GAP)
+                  : weekly.length * (CELL * 2 + GAP),
+            }}
+          >
             {mode === "daily" ? (
-              <div className="relative" style={{ height: 7 * (CELL + GAP) }}>
+              <div className="relative" style={{ height: 7 * (CELL + GAP), marginLeft: WEEK_GUTTER }}>
+                {/* Weekday labels in the left gutter (Mon / Wed / Fri rows) */}
+                {WEEKDAY_ROWS.map((di) => (
+                  <span
+                    key={di}
+                    className="absolute text-[9px] leading-none text-[var(--text-tertiary)] select-none"
+                    style={{ left: -WEEK_GUTTER, top: di * (CELL + GAP) + (CELL - 9) / 2 }}
+                  >
+                    {weekdayLabel.format(new Date(2023, 0, 1 + di))}
+                  </span>
+                ))}
                 {grid.map((week, wi) =>
                   week.map((cell, di) => (
                     <div
                       key={`${wi}-${di}`}
-                      className="absolute rounded-[3px] cursor-pointer hover:ring-2 hover:ring-[var(--brand)]/40"
+                      className="absolute rounded-[3px] cursor-pointer transition-all duration-150 hover:ring-2 hover:ring-[var(--brand)]/40"
                       style={{
                         ...cellStyle(cell.tokens),
                         left: wi * (CELL + GAP),
@@ -272,27 +301,11 @@ export default function UsageHeatmap({ workspace }: { workspace: string }) {
                       }}
                       onMouseEnter={(e) =>
                         cell.tokens >= 0 &&
-                        setHover({
-                          label: `${dayLabel.format(new Date(cell.date))} · ${formatTokens(cell.tokens)} tokens`,
-                          x: e.clientX,
-                          y: e.clientY,
-                        })
+                        showCellHover(`${dayLabel.format(new Date(cell.date))} · ${formatTokens(cell.tokens)} tokens`, e)
                       }
                       onMouseLeave={() => setHover(null)}
                     />
                   )),
-                )}
-                {hover && (
-                  <div
-                    className="fixed z-50 pointer-events-none whitespace-nowrap px-2 py-1 rounded-md text-[11px] bg-[var(--bg-elevated)] border border-[var(--border-strong)] text-[var(--text-primary)] shadow-md"
-                    style={{
-                      left: hover.x,
-                      top: hover.y < 70 ? hover.y + 22 : hover.y - 36,
-                      transform: "translateX(-50%)",
-                    }}
-                  >
-                    {hover.label}
-                  </div>
                 )}
               </div>
             ) : (
@@ -300,33 +313,61 @@ export default function UsageHeatmap({ workspace }: { workspace: string }) {
                 {weekly.map((week, wi) => (
                   <div
                     key={wi}
-                    className="absolute rounded-[3px] cursor-pointer hover:ring-2 hover:ring-[var(--brand)]/40"
+                    className="absolute rounded-[5px] cursor-pointer transition-all duration-150 hover:ring-2 hover:ring-[var(--brand)]/40"
                     style={{ ...cellStyle(week.tokens), left: wi * (CELL * 2 + GAP), top: 0, width: CELL * 2, height: CELL * 2 }}
-                    title={`${week.label} · ${formatTokens(week.tokens)} tokens`}
+                    onMouseEnter={(e) => showCellHover(`${week.label} · ${formatTokens(week.tokens)} tokens`, e)}
+                    onMouseLeave={() => setHover(null)}
                   />
                 ))}
               </div>
             )}
-            {/* Month labels along the bottom (matching the reference layout) */}
-            <div className="relative mt-2" style={{ height: 14 }}>
-              {(mode === "daily" ? monthMarks : weeklyMonthMarks(weekly, monthLabel)).map((mark) => (
-                <span
-                  key={mark.weekIndex}
-                  className="absolute text-[10px] text-[var(--text-tertiary)]"
-                  style={{ left: mark.weekIndex * (CELL + GAP), top: 0 }}
-                >
-                  {mark.label}
-                </span>
-              ))}
-            </div>
-            {/* Legend */}
-            <div className="mt-2 flex items-center justify-end gap-1 text-[10px] text-[var(--text-tertiary)]">
-              <span>{t("usage.heatmapLess")}</span>
-              {[0, 1, 2, 3, 4].map((level) => (
-                <span key={level} className="rounded-[3px] inline-block" style={{ ...cellStyle(level === 0 ? 0 : maxTokens * (level / 4)), width: CELL, height: CELL }} />
-              ))}
-              <span>{t("usage.heatmapMore")}</span>
-            </div>
+            {/* Month labels + legend share one row for a tighter footer.
+                Weekly cells are double-width, so labels must use the same
+                per-column stride as the cells — otherwise they bunch up on
+                the left half and overlap each other. */}
+            {(() => {
+              const stride = mode === "daily" ? CELL + GAP : CELL * 2 + GAP;
+              const marks = mode === "daily" ? monthMarks : weeklyMonthMarks(weekly, monthLabel);
+              return (
+                <div className="mt-2 flex items-center" style={{ height: 14, marginLeft: mode === "daily" ? WEEK_GUTTER : 0 }}>
+                  <div className="relative h-full flex-1 min-w-0">
+                    {marks.map((mark) => (
+                      <span
+                        key={mark.weekIndex}
+                        className="absolute text-[10px] text-[var(--text-tertiary)] whitespace-nowrap"
+                        style={{ left: mark.weekIndex * stride, top: 0 }}
+                      >
+                        {mark.label}
+                      </span>
+                    ))}
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1 text-[10px] text-[var(--text-tertiary)]">
+                    <span>{t("usage.heatmapLess")}</span>
+                    {[0, 1, 2, 3, 4].map((level) => (
+                      <span
+                        key={level}
+                        className="inline-block rounded-[3px]"
+                        style={{ ...cellStyle(level === 0 ? 0 : maxTokens * (level / 4)), width: CELL, height: CELL }}
+                      />
+                    ))}
+                    <span>{t("usage.heatmapMore")}</span>
+                  </div>
+                </div>
+              );
+            })()}
+            {/* Shared hover tooltip, anchored above the hovered cell */}
+            {hover && (
+              <div
+                className="pointer-events-none fixed z-50 whitespace-nowrap rounded-lg border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-2.5 py-1.5 text-[11px] text-[var(--text-primary)] shadow-lg"
+                style={{
+                  left: Math.min(Math.max(hover.cx, 80), Math.max(window.innerWidth - 80, 80)),
+                  top: hover.top < 56 ? hover.bottom + 6 : hover.top - 6,
+                  transform: hover.top < 56 ? "translate(-50%, 0)" : "translate(-50%, -100%)",
+                }}
+              >
+                {hover.label}
+              </div>
+            )}
           </div>
         </div>
       )}

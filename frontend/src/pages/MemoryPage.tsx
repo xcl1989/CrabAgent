@@ -18,6 +18,8 @@ import {
   listMemories,
   listMemoryArchives,
   consolidateMemories,
+  getMemoryConsolidationStatus,
+  type MemoryConsolidationStatus,
   listArchivedMemories,
   restoreArchivedMemory,
   createMemory,
@@ -68,7 +70,10 @@ export default function MemoryPage() {
   const [archives, setArchives] = useState<{ name: string; count: number }[]>([]);
   const [archiveName, setArchiveName] = useState("");
   const [archiveEntries, setArchiveEntries] = useState<{ id: number; key: string; content: string }[]>([]);
-  const [consolidating, setConsolidating] = useState(false);
+  const [consolidation, setConsolidation] = useState<MemoryConsolidationStatus | null>(null);
+  const [starting, setStarting] = useState(false);
+  const [statusError, setStatusError] = useState(false);
+  const previousStatus = useRef<string | undefined>(undefined);
   const [showArchives, setShowArchives] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<MemoryEntry | null>(null);
   const requestId = useRef(0);
@@ -127,6 +132,24 @@ export default function MemoryPage() {
   useEffect(() => {
     const timer = setTimeout(fetchEntries, 250);
     return () => clearTimeout(timer);
+  }, [fetchEntries]);
+
+  useEffect(() => {
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      try {
+        const next = await getMemoryConsolidationStatus();
+        if (stopped) return;
+        if (previousStatus.current === "running" && next.status === "completed") fetchEntries();
+        previousStatus.current = next.status;
+        setConsolidation(next);
+        setStatusError(false);
+      } catch { if (!stopped) setStatusError(true); }
+      if (!stopped) timer = setTimeout(poll, 2000);
+    };
+    poll();
+    return () => { stopped = true; clearTimeout(timer); };
   }, [fetchEntries]);
 
   // Load workspaces, project memory, and agent names
@@ -225,14 +248,21 @@ export default function MemoryPage() {
           {t("memory.title").toUpperCase()}
         </span>
         <div className="flex-1" />
-        <Button variant="ghost" size="xs" disabled={consolidating} onClick={async () => {
-          setConsolidating(true);
-          try { const result = await consolidateMemories();
-            if (result.status !== "ok") toast.error(`语义整理未完成：${result.reason || result.status}`);
-            else { toast.success(`语义整理完成：合并 ${result.merged} 组`); fetchEntries(); }
-          } catch { toast.error("语义整理失败，未确认的记忆不会合并"); }
-          finally { setConsolidating(false); }
-        }}>{consolidating ? "正在语义整理…" : "语义整理"}</Button>
+        <span className="text-xs text-[var(--text-tertiary)]" role="status">
+          {statusError ? "无法获取整理状态，将自动重试" : consolidation?.status === "running" ?
+            `整理中：${({ starting: "准备", configuring: "配置", embedding: "分析记忆", matching: "匹配候选", deciding: "模型判断", merging: "保存结果" } as Record<string, string>)[consolidation.progress?.stage || ""] || "处理中"}${consolidation.progress?.total ? ` ${consolidation.progress.completed || 0}/${consolidation.progress.total}` : ""}（可切换页面）` :
+            consolidation?.status === "completed" ? `上次整理：${consolidation.result?.candidates || 0} 组候选，合并 ${consolidation.result?.merged || 0} 组；范围为全部记忆${consolidation.result?.recall_incomplete ? "（候选扫描未覆盖全部记录）" : ""}` :
+            consolidation?.status === "failed" ? `整理未完成：${consolidation.result?.reason || "未知错误"}` : "整理范围：全部记忆"}
+        </span>
+        <Button variant="ghost" size="xs" disabled={!consolidation || statusError || starting || consolidation.status === "running"} onClick={async () => {
+          setStarting(true);
+          try {
+            const job = await consolidateMemories();
+            previousStatus.current = job.status;
+            setConsolidation(job);
+          } catch { toast.error("启动语义整理失败，请重试"); }
+          finally { setStarting(false); }
+        }}>{consolidation?.status === "running" ? "正在语义整理…" : "语义整理"}</Button>
         <Button variant="ghost" size="xs" onClick={async () => {
           try { setArchives(await listMemoryArchives()); setArchiveName(""); setArchiveEntries([]); setShowArchives(true); }
           catch { toast.error("无法加载记忆归档"); }

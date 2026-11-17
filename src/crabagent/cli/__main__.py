@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import getpass
 import json
 import logging
+import secrets
+import shlex
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -50,13 +53,16 @@ def main():
     parser = argparse.ArgumentParser(
         prog="crabagent",
         description="CrabAgent - AI Agent Platform",
+        epilog="Commands: init, models, skill list, skill show NAME, provider. "
+               "Use --query TEXT for queries beginning with a command name.",
     )
-    parser.add_argument("query", nargs="?", help="Query to send to the agent")
+    parser.add_argument("query", nargs="*", help="Command or query words; use --query to bypass command dispatch")
+    parser.add_argument("--query", dest="explicit_query", help="Send text as a query without command dispatch")
     parser.add_argument("--workspace", "-w", type=Path, help="Workspace directory")
     parser.add_argument("--provider", "-p", help="Provider name to use")
     parser.add_argument("--model", "-m", help="Model to use")
     parser.add_argument("--session", "-s", help="Resume a session by session_id")
-    parser.add_argument("--max-iterations", type=int, default=50, help="Max iterations")
+    parser.add_argument("--max-iterations", type=int, default=None, help="Max iterations (default: configured value)")
     parser.add_argument("--serve", action="store_true", help="Start in serve mode")
     parser.add_argument("--host", default=settings.serve_host, help="Serve host")
     parser.add_argument("--port", type=int, default=settings.serve_port, help="Serve port")
@@ -69,6 +75,25 @@ def main():
 
     args = parser.parse_args()
     subcmd_words = {"init", "provider", "skill", "models"}
+    if args.max_iterations is not None and args.max_iterations < 1:
+        parser.error("--max-iterations must be positive")
+    if args.max_iterations is None:
+        args.max_iterations = settings.max_iterations
+    if args.explicit_query is not None and args.query:
+        parser.error("--query cannot be combined with positional words")
+    words = args.query
+    if args.explicit_query is not None:
+        args.query = args.explicit_query
+    else:
+        if len(words) == 1 and words[0].split() and words[0].split()[0].lower() in subcmd_words:
+            try:
+                words = shlex.split(words[0])
+            except ValueError as exc:
+                parser.error(str(exc))
+        args.query = " ".join(words)
+    args.command_words = words
+    if args.explicit_query is not None and not args.query.strip():
+        parser.error("--query must not be empty")
 
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.WARNING,
@@ -90,11 +115,14 @@ def main():
         _run_serve(args)
         return
 
-    if args.query and args.query.split()[0].lower() in subcmd_words:
+    if args.explicit_query is None and args.query and args.query.split()[0].lower() in subcmd_words:
         _dispatch_subcommand(args)
         return
 
     if not args.query:
+        if not sys.stdin.isatty() or not sys.stdout.isatty():
+            print("Interactive mode requires a TTY; use --query for one-off requests.", file=sys.stderr)
+            raise SystemExit(2)
         if getattr(args, "old", False):
             from crabagent.cli.tui import run_tui
 
@@ -108,22 +136,22 @@ def main():
 
 
 def _dispatch_subcommand(args):
-    remaining = args.query.split()
+    remaining = args.command_words
     subcmd = remaining[0].lower()
     if subcmd == "provider":
         _dispatch_provider(remaining[1:])
     elif subcmd == "skill":
         _dispatch_skill(remaining[1:])
-    elif subcmd == "models":
-        asyncio.run(_cmd_models())
-    elif subcmd == "init":
-        asyncio.run(_cmd_init())
+    elif subcmd in {"models", "init"}:
+        if len(remaining) != 1:
+            print(f"{subcmd} does not accept arguments", file=sys.stderr)
+            raise SystemExit(2)
+        asyncio.run(_cmd_models() if subcmd == "models" else _cmd_init())
 
 
 def _dispatch_provider(argv: list[str]):
-    from crabagent.cli.provider import main as provider_main
-
-    provider_main(argv)
+    print("Provider CLI is unavailable. Configure providers in the TUI or web settings.", file=sys.stderr)
+    raise SystemExit(2)
 
 
 def _dispatch_skill(argv: list[str]):
@@ -155,13 +183,14 @@ async def _cmd_skill(args):
         skill = skills.get(args.name)
         if not skill:
             names = ", ".join(sorted(skills.keys())) if skills else "(none)"
-            print(f"Skill '{args.name}' not found. Available: {names}")
-            return
+            print(f"Skill '{args.name}' not found. Available: {names}", file=sys.stderr)
+            raise SystemExit(1)
         from crabagent.core.agent.skill.loader import format_skill_content
 
         print(format_skill_content(skill))
     else:
-        print("Usage: crabagent skill {list|show}")
+        print("Usage: crabagent skill {list|show}", file=sys.stderr)
+        raise SystemExit(2)
 
 
 async def _cmd_models():
@@ -169,8 +198,8 @@ async def _cmd_models():
 
     provider = await get_default_provider()
     if not provider:
-        print("No default provider configured.")
-        return
+        print("No default provider configured.", file=sys.stderr)
+        raise SystemExit(1)
     from crabagent.core.provider_store import fetch_models
 
     try:
@@ -178,7 +207,8 @@ async def _cmd_models():
         for m in models:
             print(m)
     except Exception as e:
-        print(f"Error fetching models: {e}")
+        print(f"Error fetching models: {e}", file=sys.stderr)
+        raise SystemExit(1)
 
 
 async def _cmd_init():
@@ -188,23 +218,27 @@ async def _cmd_init():
     print("CrabAgent initialized.")
 
 
-async def _ensure_cli_user():
+async def _ensure_cli_user(username=CLI_USERNAME):
     from sqlalchemy import select
 
+    from crabagent.core.auth_utils import hash_password, verify_password
     from crabagent.core.database import User, async_session_factory
 
     async with async_session_factory() as db:
-        result = await db.execute(select(User).where(User.username == CLI_USERNAME))
+        result = await db.execute(select(User).where(User.username == username))
         user = result.scalar_one_or_none()
         if user:
+            if user.enabled and verify_password("cli", user.password_hash):
+                user.enabled = False
+                await db.commit()
+                await db.refresh(user)
             return user
-        from crabagent.core.auth_utils import hash_password
 
         user = User(
-            username=CLI_USERNAME,
-            password_hash=hash_password("cli"),
-            role="user",
-            enabled=True,
+            username=username,
+            password_hash=hash_password(secrets.token_urlsafe(32)),
+            role="admin" if username == "cli_user" else "user",
+            enabled=False,
         )
         db.add(user)
         await db.commit()
@@ -227,10 +261,10 @@ async def _load_conversation(session_id: str, user_id: int):
     async with async_session_factory() as db:
         conv = await get_conversation(db, session_id)
         if not conv:
-            print(f"Session '{session_id}' not found.")
+            print(f"Session '{session_id}' not found.", file=sys.stderr)
             return None, [], 0
         if conv.user_id != user_id:
-            print(f"Session '{session_id}' not found.")
+            print(f"Session '{session_id}' not found.", file=sys.stderr)
             return None, [], 0
         msgs = await get_messages(db, conv.id)
         max_seq = max((m.sequence for m in msgs), default=0)
@@ -730,7 +764,9 @@ async def _run_single(args):
 
     await init_db()
 
-    user = await _ensure_cli_user()
+    # Share the TUI's cli_user account so sessions can resume across modes
+    # and historical conversations stay attached to one identity.
+    user = await _ensure_cli_user("cli_user")
 
     ok = await _ensure_provider_configured()
     if not ok:
@@ -746,7 +782,7 @@ async def _run_single(args):
                 sys.exit(1)
             conversation_id = conv.id
             session_id_str = conv.session_id
-            if conv.workspace:
+            if conv.workspace and not args.workspace:
                 workspace = Path(conv.workspace).resolve()
             else:
                 workspace = (args.workspace or settings.workspace).resolve()
@@ -777,6 +813,11 @@ async def _run_single(args):
         user_id=user.id,
     )
 
+    errors = []
+    def track_error(event):
+        if event.type == EventType.AGENT_ERROR:
+            errors.append(event)
+    context.event_bus.subscribe(track_error)
     try:
         await run_agent(context, args.query)
     except KeyboardInterrupt:
@@ -794,6 +835,9 @@ async def _run_single(args):
                 await browser_mgr.close()
             except Exception:
                 pass
+
+    if errors:
+        raise SystemExit(1)
 
     if session_id_str:
         from crabagent.core.database import async_session_factory
@@ -850,6 +894,9 @@ async def _ensure_provider_configured():
     providers = await list_providers()
     if providers:
         return True
+    if not sys.stdin.isatty():
+        print("No LLM provider configured; interactive setup requires a TTY.", file=sys.stderr)
+        return False
 
     print("\nNo LLM provider configured. CrabAgent needs at least one provider to function.\n")
     print("Available provider types:")
@@ -875,7 +922,7 @@ async def _ensure_provider_configured():
             continue
 
         name = input(f"Name [{ptype}]: ").strip() or ptype
-        api_key = input("API key: ").strip()
+        api_key = getpass.getpass("API key: ").strip()
         if not api_key:
             print("API key is required. Please try again.")
             continue
@@ -900,7 +947,7 @@ async def _run_interactive(args):
 
     await init_db()
 
-    user = await _ensure_cli_user()
+    user = await _ensure_cli_user("cli_user")
 
     ok = await _ensure_provider_configured()
     if not ok:
@@ -1485,7 +1532,7 @@ async def _handle_provider_slash(arg: str, context):
         ptype = input("Provider type: ").strip()
         name = input("Name: ").strip()
         display = input("Display name (optional): ").strip()
-        api_key = input("API key: ").strip()
+        api_key = getpass.getpass("API key: ").strip()
         base_url = input("Base URL (optional): ").strip()
         if not ptype or not name or not api_key:
             print("provider type, name, and API key are required.")

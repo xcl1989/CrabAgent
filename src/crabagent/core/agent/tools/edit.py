@@ -1,5 +1,8 @@
+from pathlib import Path
+
 from crabagent.core.agent.tools.path_utils import resolve_tool_path
 from crabagent.core.agent.tools.registry import registry
+from crabagent.core.collaboration.write_coordinator import WriteConflict, replace_if_version, version_bytes
 
 
 @registry.register(
@@ -34,7 +37,8 @@ def edit_file(file_path: str, old_string: str, new_string: str, context=None) ->
         return f"Error: file does not exist: {file_path}"
 
     try:
-        content = path.read_text(encoding="utf-8")
+        original = path.read_bytes()
+        content = original.decode("utf-8")
     except Exception as e:
         return f"Error reading file: {e}"
 
@@ -50,5 +54,17 @@ def edit_file(file_path: str, old_string: str, new_string: str, context=None) ->
     line_num = content[:index].count("\n") + 1
 
     new_content = content.replace(old_string, new_string, 1)
-    path.write_text(new_content, encoding="utf-8")
+    try:
+        new_version = replace_if_version(
+            path,
+            new_content.encode("utf-8"),
+            version_bytes(original),
+            lock_root=Path.home() / ".crabagent" / "collaboration-locks",
+        )
+    except WriteConflict as exc:
+        return f"Error: {file_path} changed during editing; read it again and retry. Candidate: {exc.candidate_path}"
+    except OSError as exc:
+        return f"Error writing file: {exc}"
+    if context is not None:
+        context.metadata.setdefault("_file_versions", {})[str(path.resolve())] = new_version
     return f"Successfully replaced 1 occurrence in {file_path} @ L{line_num}"

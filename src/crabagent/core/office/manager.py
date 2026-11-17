@@ -7,6 +7,7 @@ import logging
 import os
 import shutil
 import sys
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -412,7 +413,45 @@ class OfficeManager:
                 success=False,
                 error=_INSTALL_HINT,
             )
+        if len(args) >= 2 and args[0] in {"create", "set", "add", "remove", "move", "swap", "batch"}:
+            return await self._exec_guarded(cmd, timeout)
         return await self._exec_with_stdin(cmd, timeout=timeout)
+
+    async def _exec_guarded(self, cmd: list[str], timeout: int) -> OfficeResult:
+        """Run a mutating command against a private copy before versioned commit."""
+        from crabagent.core.collaboration.write_coordinator import (
+            WriteConflict,
+            replace_if_version,
+            version_bytes,
+        )
+
+        target = Path(cmd[2]).resolve()
+        try:
+            original = target.read_bytes() if target.exists() else None
+            if cmd[1] == "create" and original is not None:
+                return OfficeResult(success=False, error="File already exists")
+            if cmd[1] != "create" and original is None:
+                return OfficeResult(success=False, error="File not found")
+            expected = version_bytes(original) if original is not None else "missing"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with tempfile.TemporaryDirectory(prefix="crabagent-office-") as tmp:
+                draft = Path(tmp) / target.name
+                if original is not None:
+                    draft.write_bytes(original)
+                draft_cmd = list(cmd)
+                draft_cmd[2] = str(draft)
+                result = await self._exec_with_stdin(draft_cmd, timeout=timeout)
+                if not result.success:
+                    return result
+                if not draft.is_file():
+                    return OfficeResult(success=False, error="OfficeCLI did not produce a document")
+                replace_if_version(target, draft.read_bytes(), expected,
+                                   lock_root=Path.home() / ".crabagent" / "collaboration-locks")
+                return result
+        except WriteConflict as exc:
+            return OfficeResult(success=False, error=f"Document changed during editing; candidate: {exc.candidate_path}")
+        except OSError as exc:
+            return OfficeResult(success=False, error=f"Document write failed: {exc}")
 
     # ── high-level helpers ──────────────────────────────────────────────
 

@@ -203,7 +203,11 @@ def save_agents_md(workspace: Path, content: str, locale: str = "en") -> str:
     """
     path = _agents_md_path(workspace, locale)
     try:
-        path.write_text(content.strip() + "\n", encoding="utf-8")
+        from crabagent.core.collaboration.write_coordinator import file_version, replace_if_version
+
+        version = file_version(path)
+        replace_if_version(path, (content.strip() + "\n").encode("utf-8"), version,
+                           lock_root=Path.home() / ".crabagent" / "collaboration-locks")
         return f"AGENTS.md saved ({len(content)} chars) to {path}"
     except Exception as e:
         return f"Error saving AGENTS.md: {e}"

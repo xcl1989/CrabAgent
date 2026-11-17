@@ -219,12 +219,41 @@ async def read_file(
     if target.stat().st_size > MAX_SIZE:
         return {"path": path, "content": "", "truncated": True, "message": "File too large (>1MB)"}
 
-    try:
-        content = target.read_text(encoding="utf-8")
-    except (UnicodeDecodeError, Exception):
-        content = ""
+    from crabagent.core.collaboration.write_coordinator import version_bytes
 
-    return {"path": path, "content": content, "truncated": False}
+    try:
+        raw = target.read_bytes()
+        content = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=400, detail="File is not UTF-8 text")
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to read file: {exc}")
+
+    return {"path": path, "content": content, "truncated": False, "version": version_bytes(raw)}
+
+
+@router.get("/version")
+async def get_file_version(
+    path: str, absolute: bool = False, user: User = Depends(get_current_user),
+):
+    """Observe the current file version without reading file contents into the response."""
+    from crabagent.core.collaboration.write_coordinator import file_version
+    from crabagent.core.config import settings
+
+    if absolute:
+        target = Path(path).resolve()
+        if not target.is_relative_to(Path.home().resolve()):
+            raise HTTPException(status_code=400, detail="Absolute path must be under home directory")
+    else:
+        target = _resolve_path(settings.workspace.resolve(), path.lstrip("/"))
+        if target is None:
+            raise HTTPException(status_code=400, detail="Path outside workspace")
+    if target.exists() and not target.is_file():
+        raise HTTPException(status_code=400, detail="Not a file")
+    try:
+        return {"path": path, "version": await asyncio.to_thread(file_version, target)}
+    except OSError:
+        raise HTTPException(status_code=403, detail="Cannot read file")
 
 
 @router.post("/write")
@@ -237,7 +266,7 @@ async def write_file(
 
     if req.absolute:
         target = Path(req.path).resolve()
-        if not str(target).startswith(str(Path.home())):
+        if not target.is_relative_to(Path.home().resolve()):
             raise HTTPException(status_code=400, detail="Absolute path must be under home directory")
     else:
         workspace = settings.workspace.resolve()
@@ -246,18 +275,34 @@ async def write_file(
             raise HTTPException(status_code=400, detail="Path outside workspace")
         target = t
 
+    from crabagent.core.collaboration.write_coordinator import WriteConflict, replace_if_version
+
+    if not req.expected_version:
+        raise HTTPException(status_code=428, detail="File version is required; reload before saving")
     try:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(req.content, encoding="utf-8")
-        return {"status": "ok", "path": req.path, "size": target.stat().st_size}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to write file: {e}")
+        version = replace_if_version(target, req.content.encode("utf-8"), req.expected_version,
+                                     lock_root=Path.home() / ".crabagent" / "collaboration-locks")
+        if req.session_id:
+            try:
+                from crabagent.core.collaboration.events import record_ui_write
+
+                await record_ui_write(user.id, req.session_id, target, "file_panel", version)
+            except Exception:
+                import logging
+                logging.getLogger(__name__).exception("Failed to record file panel write")
+        return {"status": "ok", "path": req.path, "size": len(req.content.encode("utf-8")), "version": version}
+    except WriteConflict as exc:
+        raise HTTPException(status_code=409, detail=f"File changed; candidate: {exc.candidate_path}")
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to write file: {exc}")
 
 
 class WriteFileRequest(BaseModel):
     path: str
     content: str
     absolute: bool = False
+    expected_version: str = ""
+    session_id: str = ""
 
 
 @router.get("/image")
@@ -628,7 +673,11 @@ async def create_entry(
     if req.entry_type == "directory":
         target.mkdir(parents=True)
     else:
-        target.write_text("", encoding="utf-8")
+        try:
+            with target.open("x", encoding="utf-8"):
+                pass
+        except FileExistsError:
+            raise HTTPException(status_code=409, detail="Path already exists")
     return {"status": "ok", "path": req.path, "type": req.entry_type}
 
 
@@ -735,7 +784,11 @@ async def upload_file(
 
         dest = uploads_dir / f"{stem}_{int(_time.time())}{suffix}"
 
-    dest.write_bytes(content)
+    try:
+        with dest.open("xb") as stream:
+            stream.write(content)
+    except FileExistsError:
+        raise HTTPException(status_code=409, detail="Upload name already exists; retry")
 
     return {
         "status": "ok",

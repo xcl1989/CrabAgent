@@ -76,6 +76,7 @@ import crabagent.core.agent.tools.memory  # noqa: F401
 import crabagent.core.agent.tools.office  # noqa: F401
 import crabagent.core.agent.tools.read  # noqa: F401
 import crabagent.core.agent.tools.shared  # noqa: F401
+import crabagent.core.agent.tools.collaboration  # noqa: F401
 import crabagent.core.agent.tools.web  # noqa: F401
 import crabagent.core.agent.tools.write  # noqa: F401
 from crabagent.core.agent.context import AgentContext

@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.18.5] — Cross-Session Collaboration, CLI Overhaul and Memory Consolidation Tasks (2026-11-17)
+
+### Added
+- Cross-session collaboration: collaboration projects, session bindings, file claims with conflict warnings, an event feed, and a write coordinator shared by all sessions of a user. Write/edit/office-mutation tools surface competing-claim warnings before touching files; unmanaged shell usage during a bound collaboration raises an explicit coordination warning. New collaboration agent tool, `/api/collaboration` endpoints, and a frontend collaboration page.
+- Per-user background memory consolidation tasks with staged progress reporting and status tracking (`memory_consolidation_tasks`).
+- Documents API and Office tools gained read tracking and mutation guards, with expanded API test coverage.
+- Files API hardening and extended regression tests.
+
+### Changed
+- CLI overhaul: standard argv parsing for subcommands (`crabagent skill list/show`, `models`, `init`) while keeping the legacy quoted form; `--query TEXT` bypasses command dispatch. The broken `provider` CLI entry now fails fast with a clear message (exit code 2) instead of crashing on a missing import.
+- Unified `--max-iterations` precedence across one-off runs and TUIs (explicit flag > configured default) with input validation.
+- Session resume and workspace handling unified: one-off runs and TUIs share the `cli_user` identity so sessions resume across modes; the saved workspace applies unless `--workspace` is given explicitly.
+- Non-interactive safety: TUI and provider configuration prompts refuse to start without a TTY; API key input is no longer echoed.
+
+### Fixed
+- Login rejects the historical fixed CLI password (`cli`) for the two CLI usernames only; changed passwords and other users are unaffected, and all existing data is preserved.
+- Failure paths now write to stderr with non-zero exit codes (`skill show`, `models`, provider entry) so scripts can detect errors reliably.
+
+---
+
 ## [0.18.4] — Memory Management and Semantic Consolidation (2026-11-16)
 
 ### Added

@@ -142,7 +142,9 @@ async def test_quick_edit_text_simple_replace_uses_batch_command(
     assert resp.status == "ok"
     assert manager.stdin_calls
     cmd, stdin_data, timeout = manager.stdin_calls[0]
-    assert cmd[:3] == ["/fake/officecli", "batch", str(target)]
+    assert cmd[:2] == ["/fake/officecli", "batch"]
+    assert Path(cmd[2]).name == target.name
+    assert cmd[2] != str(target)
     assert b'"find": "hello"' in stdin_data
     assert b'"replace": "bye"' in stdin_data
     assert timeout == 60
@@ -436,8 +438,15 @@ def test_build_batch_cmd_covers_multiple_operations(operation: str, params: dict
 
 
 def test_build_batch_cmd_returns_none_for_invalid_params():
-    assert documents._build_batch_cmd(documents.TableOpRequest(path="x.xlsx", operation="merge_cells", params={})) is None
-    assert documents._build_batch_cmd(documents.TableOpRequest(path="x.xlsx", operation="set_cell_style", params={"cell": "A1", "props": {}})) is None
+    assert (
+        documents._build_batch_cmd(documents.TableOpRequest(path="x.xlsx", operation="merge_cells", params={})) is None
+    )
+    assert (
+        documents._build_batch_cmd(
+            documents.TableOpRequest(path="x.xlsx", operation="set_cell_style", params={"cell": "A1", "props": {}})
+        )
+        is None
+    )
     assert documents._build_batch_cmd(documents.TableOpRequest(path="x.xlsx", operation="unknown", params={})) is None
 
 
@@ -460,3 +469,232 @@ def test_fix_html_newlines_injects_css_without_head():
 
 async def _awaitable(value):
     return value
+
+
+@pytest.mark.asyncio
+async def test_save_document_rejects_stale_version(docs_dir, fake_user):
+    import base64
+
+    from crabagent.core.collaboration.write_coordinator import file_version
+
+    target = docs_dir / "test.docx"
+    target.write_bytes(b"original")
+    old_version = file_version(target)
+    target.write_bytes(b"changed")
+    with pytest.raises(HTTPException) as exc:
+        await documents.save_document(
+            {"path": "test.docx", "content": base64.b64encode(b"draft").decode(), "expected_version": old_version},
+            user=fake_user,
+        )
+    assert exc.value.status_code == 409
+    assert target.read_bytes() == b"changed"
+
+
+@pytest.mark.asyncio
+async def test_save_document_requires_version(docs_dir, fake_user):
+    with pytest.raises(HTTPException) as exc:
+        await documents.save_document({"path": "test.docx", "content": "ZHJhZnQ="}, user=fake_user)
+    assert exc.value.status_code == 428
+
+
+@pytest.mark.asyncio
+async def test_quick_edit_text_conflict_preserves_original(docs_dir, fake_user, monkeypatch):
+    target = docs_dir / "doc.docx"
+    target.write_bytes(b"old")
+    manager = FakeOfficeManager()
+
+    async def edit_draft(cmd, stdin_data=None, timeout=60):
+        Path(cmd[2]).write_bytes(b"candidate")
+        target.write_bytes(b"other edit")
+        return SimpleNamespace(success=True, data={}, error="")
+
+    manager._exec_with_stdin = edit_draft
+    monkeypatch.setattr(documents, "get_office_manager", lambda: manager)
+    monkeypatch.setattr(documents, "_ensure_officecli", lambda: _awaitable(True))
+    req = documents.QuickEditTextRequest(path="doc.docx", old_text="old", new_text="new")
+    with pytest.raises(HTTPException) as exc:
+        await documents.quick_edit_text(req, user=fake_user)
+    assert exc.value.status_code == 409
+    assert target.read_bytes() == b"other edit"
+
+
+def test_safe_path_rejects_sibling_prefix(tmp_path):
+    base = tmp_path / "docs"
+    base.mkdir()
+    with pytest.raises(HTTPException):
+        documents._safe_path(base, "../docs-elsewhere/secret.docx")
+
+
+@pytest.mark.asyncio
+async def test_quick_text_rejects_stale_preview_before_mutation(docs_dir, fake_user, monkeypatch):
+    from crabagent.core.collaboration.write_coordinator import file_version
+
+    target = docs_dir / "doc.docx"
+    target.write_bytes(b"old")
+    version = file_version(target)
+    target.write_bytes(b"new")
+    manager = FakeOfficeManager()
+    monkeypatch.setattr(documents, "get_office_manager", lambda: manager)
+    monkeypatch.setattr(documents, "_ensure_officecli", lambda: _awaitable(True))
+    request = documents.QuickEditTextRequest(
+        path="doc.docx", old_text="old", new_text="draft", expected_version=version
+    )
+    with pytest.raises(HTTPException) as exc:
+        await documents.quick_edit_text(request, user=fake_user)
+    assert exc.value.status_code == 409
+    assert not manager.stdin_calls
+    assert target.read_bytes() == b"new"
+
+
+@pytest.mark.asyncio
+async def test_versioned_style_edit_rejects_stale_preview(docs_dir, fake_user, monkeypatch):
+    from crabagent.core.collaboration.write_coordinator import file_version
+
+    target = docs_dir / "sheet.xlsx"
+    target.write_bytes(b"before")
+    version = file_version(target)
+    target.write_bytes(b"other")
+    manager = FakeOfficeManager()
+    monkeypatch.setattr(documents, "get_office_manager", lambda: manager)
+    monkeypatch.setattr(documents, "_ensure_officecli", lambda: _awaitable(True))
+    req = documents.QuickEditStyleRequest(
+        path="sheet.xlsx",
+        expected_version=version,
+        changes=[documents.StyleChange(element="/Sheet1", props={"width": 20})],
+    )
+    with pytest.raises(HTTPException) as exc:
+        await documents.quick_edit_style(req, user=fake_user)
+    assert exc.value.status_code == 409
+    assert not manager.set_calls
+    assert target.read_bytes() == b"other"
+
+
+@pytest.mark.asyncio
+async def test_versioned_style_edit_uses_draft_and_commits(docs_dir, fake_user, monkeypatch):
+    from crabagent.core.collaboration.write_coordinator import file_version
+
+    target = docs_dir / "sheet.xlsx"
+    target.write_bytes(b"before")
+    manager = FakeOfficeManager()
+
+    async def mutate(path, element_path, props):
+        assert Path(path) != target
+        Path(path).write_bytes(b"after")
+        return SimpleNamespace(success=True, error="")
+
+    manager.set_props = mutate
+    monkeypatch.setattr(documents, "get_office_manager", lambda: manager)
+    monkeypatch.setattr(documents, "_ensure_officecli", lambda: _awaitable(True))
+    monkeypatch.setattr(
+        documents, "_get_docs_dir", lambda user_id, workspace="": Path(workspace) if workspace else docs_dir
+    )
+    req = documents.QuickEditStyleRequest(
+        path="sheet.xlsx",
+        expected_version=file_version(target),
+        changes=[documents.StyleChange(element="/Sheet1", props={"width": 20})],
+    )
+    result = await documents.quick_edit_style(req, user=fake_user)
+    assert target.read_bytes() == b"after"
+    assert result.version == file_version(target)
+
+
+@pytest.mark.asyncio
+async def test_versioned_style_concurrent_change_preserves_candidate(docs_dir, fake_user, monkeypatch):
+    from crabagent.core.collaboration.write_coordinator import file_version
+
+    target = docs_dir / "sheet.xlsx"
+    target.write_bytes(b"before")
+    manager = FakeOfficeManager()
+
+    async def mutate(path, element_path, props):
+        Path(path).write_bytes(b"candidate")
+        target.write_bytes(b"competing")
+        return SimpleNamespace(success=True, error="")
+
+    manager.set_props = mutate
+    monkeypatch.setattr(documents, "get_office_manager", lambda: manager)
+    monkeypatch.setattr(documents, "_ensure_officecli", lambda: _awaitable(True))
+    monkeypatch.setattr(
+        documents, "_get_docs_dir", lambda user_id, workspace="": Path(workspace) if workspace else docs_dir
+    )
+    request = documents.QuickEditStyleRequest(
+        path="sheet.xlsx",
+        expected_version=file_version(target),
+        changes=[documents.StyleChange(element="/Sheet1", props={"width": 20})],
+    )
+    with pytest.raises(HTTPException) as exc:
+        await documents.quick_edit_style(request, user=fake_user)
+    assert exc.value.status_code == 409
+    assert target.read_bytes() == b"competing"
+    candidate = Path(exc.value.detail.split("candidate: ", 1)[1])
+    assert candidate.read_bytes() == b"candidate"
+    candidate.unlink()
+
+
+@pytest.mark.asyncio
+async def test_bound_quick_edit_requires_version(docs_dir, fake_user, monkeypatch):
+    target = docs_dir / "doc.docx"
+    target.write_bytes(b"old")
+    manager = FakeOfficeManager()
+    monkeypatch.setattr(documents, "get_office_manager", lambda: manager)
+    monkeypatch.setattr(documents, "_ensure_officecli", lambda: _awaitable(True))
+
+    async def require(user_id, session_id, expected):
+        assert user_id == fake_user.id and session_id == "bound" and not expected
+        raise HTTPException(status_code=428, detail="version required")
+
+    monkeypatch.setattr(documents, "_require_bound_session_version", require)
+    req = documents.QuickEditTextRequest(path="doc.docx", old_text="old", new_text="new", session_id="bound")
+    with pytest.raises(HTTPException) as exc:
+        await documents.quick_edit_text(req, user=fake_user)
+    assert exc.value.status_code == 428
+    assert target.read_bytes() == b"old"
+
+
+@pytest.mark.asyncio
+async def test_bound_style_requires_version(docs_dir, fake_user, monkeypatch):
+    target = docs_dir / "sheet.xlsx"
+    target.write_bytes(b"old")
+
+    async def require(user_id, session_id, expected):
+        raise HTTPException(status_code=428, detail="version required")
+
+    monkeypatch.setattr(documents, "_require_bound_session_version", require)
+    req = documents.QuickEditStyleRequest(path="sheet.xlsx", session_id="bound", changes=[])
+    with pytest.raises(HTTPException) as exc:
+        await documents.quick_edit_style(req, user=fake_user)
+    assert exc.value.status_code == 428
+    assert target.read_bytes() == b"old"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("endpoint", ["style", "text", "table-op", "theme", "structure"])
+async def test_http_quick_edit_requires_version_even_without_session(endpoint):
+    from fastapi import FastAPI
+    from httpx import ASGITransport, AsyncClient
+
+    from crabagent.serve.deps import get_current_user
+
+    app = FastAPI()
+    app.include_router(documents.router)
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id=7)
+    payload = {"path": "doc.docx", "old_text": "old", "new_text": "new", "changes": [],
+               "operation": "merge_cells", "props": {}, "operations": []}
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(f"/documents/quick-edit/{endpoint}", json=payload)
+    assert response.status_code == 428
+
+
+@pytest.mark.asyncio
+async def test_upload_existing_document_requires_expected_version(docs_dir, fake_user):
+    from io import BytesIO
+
+    from starlette.datastructures import UploadFile
+
+    target = docs_dir / "doc.docx"
+    target.write_bytes(b"existing")
+    file = UploadFile(filename="doc.docx", file=BytesIO(b"new"))
+    with pytest.raises(HTTPException) as exc:
+        await documents.upload_document(file=file, workspace="", expected_version="", user=fake_user)
+    assert exc.value.status_code == 428
+    assert target.read_bytes() == b"existing"

@@ -115,6 +115,7 @@ HIDDEN_IMPORTS = [
     "crabagent.core.agent.tools.scheduled_task",
     "crabagent.core.agent.tools.agent",
     "crabagent.core.agent.tools.shared",
+    "crabagent.core.agent.tools.collaboration",
     "crabagent.core.agent.tools.browser",
     "crabagent.core.agent.tools.browser_dom",
     # Agent modules

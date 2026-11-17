@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from pathlib import Path
 
 from crabagent.core.agent.tools.registry import registry
 
@@ -152,8 +153,12 @@ async def create_tool(
 
     file_content = _generate_tool_file(name, description, parameters, code)
 
-    td.mkdir(parents=True, exist_ok=True)
-    tool_file.write_text(file_content, encoding="utf-8")
+    from crabagent.core.collaboration.write_coordinator import WriteConflict, replace_if_version
+    try:
+        replace_if_version(tool_file, file_content.encode("utf-8"), "missing",
+                           lock_root=Path.home() / ".crabagent" / "collaboration-locks")
+    except WriteConflict as exc:
+        return f"Error: tool changed while creating; candidate: {exc.candidate_path}"
 
     from crabagent.core.tool_loader import _load_tool_file
 
@@ -247,7 +252,8 @@ async def update_tool(
     if not tool_file.exists():
         return f"Error: tool '{name}' does not exist. Use create_tool to create it first."
 
-    existing = tool_file.read_text(encoding="utf-8")
+    existing_bytes = tool_file.read_bytes()
+    existing = existing_bytes.decode("utf-8")
     existing_ns: dict = {}
     try:
         exec(existing, existing_ns)
@@ -262,7 +268,12 @@ async def update_tool(
         return f"Error: {err}"
 
     file_content = _generate_tool_file(name, new_desc, new_params, code)
-    tool_file.write_text(file_content, encoding="utf-8")
+    from crabagent.core.collaboration.write_coordinator import WriteConflict, replace_if_version, version_bytes
+    try:
+        replace_if_version(tool_file, file_content.encode("utf-8"), version_bytes(existing_bytes),
+                           lock_root=Path.home() / ".crabagent" / "collaboration-locks")
+    except WriteConflict as exc:
+        return f"Error: tool changed while updating; candidate: {exc.candidate_path}"
 
     if name in context.tool_registry._tools:
         del context.tool_registry._tools[name]

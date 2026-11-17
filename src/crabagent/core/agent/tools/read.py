@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import codecs
 from typing import Any
 
 from crabagent.core.agent.multimodal import image_file_to_block, is_image_path
@@ -7,7 +8,7 @@ from crabagent.core.agent.token_limits import is_vision_model
 from crabagent.core.agent.tools.path_utils import resolve_tool_path
 from crabagent.core.agent.tools.registry import registry
 from crabagent.core.agent.tools.text_encoding import decode_file
-import codecs
+from crabagent.core.collaboration.write_coordinator import version_bytes
 
 # Shared exclude set — keep in sync with glob.py and grep.py
 _SKIP_DIRS = {
@@ -123,10 +124,13 @@ def read_file(
         )
 
     try:
-        lines = decode_file(path.read_bytes()).splitlines(keepends=True)
+        data = path.read_bytes()
+        lines = decode_file(data).splitlines(keepends=True)
     except Exception as e:
         return f"Error reading file: {e}"
 
+    if context is not None:
+        context.metadata.setdefault("_file_versions", {})[str(path.resolve())] = version_bytes(data)
     total = len(lines)
     start = max(0, offset - 1)
     end = min(total, start + limit)
@@ -136,5 +140,5 @@ def read_file(
     for i, line in enumerate(selected, start=start + 1):
         result.append(f"{i}: {line.rstrip()}")
 
-    header = f"[File: {file_path} ({total} lines total)]\n"
+    header = f"[File: {file_path} ({total} lines total); version: {version_bytes(data)}]\n"
     return header + "\n".join(result)

@@ -370,6 +370,7 @@ export default function ChatPage({ onActiveSessionChange, onActiveBranchChange, 
         busy: false,
         previewLoading: false,
         previewHtml: preview.html,
+        version: preview.version,
         previewError: null,
         events: [...prev.events, { message: `✅ Opened ${name}`, timestamp: Date.now(), status: "done" }],
       } : prev);
@@ -1474,6 +1475,7 @@ export default function ChatPage({ onActiveSessionChange, onActiveBranchChange, 
                   />
                 ) : workspaceType === "code" && currentDocPath ? (
                   <CodePanel
+                    sessionId={activeSession?.session_id}
                     key={currentDocPath}
                     initialPath={currentDocPath}
                     initialContent=""
@@ -1481,18 +1483,21 @@ export default function ChatPage({ onActiveSessionChange, onActiveBranchChange, 
                   />
                 ) : workspaceType === "prototype" && currentDocPath ? (
                   <PrototypePanel
+                    sessionId={activeSession?.session_id}
                     key={currentDocPath}
                     filePath={currentDocPath}
                     onClose={() => { setDocState(null); setCurrentDocPath(null); }}
                   />
                 ) : workspaceType === "markdown" && currentDocPath ? (
                   <MarkdownPanel
+                    sessionId={activeSession?.session_id}
                     key={currentDocPath}
                     filePath={currentDocPath}
                     onClose={() => { setDocState(null); setCurrentDocPath(null); }}
                   />
                 ) : docState ? (
                   <DocumentPanel
+                    sessionId={activeSession?.session_id}
                     doc={docState}
                     onClose={() => { setDocState(null); setCurrentDocPath(null); }}
                     maximized={false}
@@ -1517,6 +1522,7 @@ export default function ChatPage({ onActiveSessionChange, onActiveBranchChange, 
                           ...prev,
                           previewLoading: false,
                           previewHtml: preview.html,
+        version: preview.version,
                           previewError: null,
                         } : prev);
                       } catch (e: any) {
@@ -1987,6 +1993,7 @@ export default function ChatPage({ onActiveSessionChange, onActiveBranchChange, 
             </div>
           )}
           <DocumentPanel
+            sessionId={activeSession?.session_id}
             doc={docState}
             onClose={() => { setDocState(null); setCurrentDocPath(null); }}
             maximized={docPanelMaximized}
@@ -2012,6 +2019,7 @@ export default function ChatPage({ onActiveSessionChange, onActiveBranchChange, 
                   ...prev,
                   previewLoading: false,
                   previewHtml: preview.html,
+        version: preview.version,
                   previewError: null,
                 } : prev);
               } catch (e: any) {

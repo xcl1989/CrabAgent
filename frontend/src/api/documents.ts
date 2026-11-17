@@ -20,6 +20,7 @@ export interface DocPreviewResponse {
   html: string;
   file: string;
   name: string;
+  version: string;
 }
 
 export function listDocuments(workspace = ""): Promise<DocListResponse> {
@@ -30,10 +31,12 @@ export function listDocuments(workspace = ""): Promise<DocListResponse> {
 export async function uploadDocument(
   file: File,
   workspace = "",
+  expectedVersion = "",
 ): Promise<{ status: string; file: string; size: number; path: string }> {
   const formData = new FormData();
   formData.append("file", file);
   if (workspace) formData.append("workspace", workspace);
+  if (expectedVersion) formData.append("expected_version", expectedVersion);
   const res = await fetch("/api/documents/upload", {
     method: "POST",
     body: formData,
@@ -53,6 +56,13 @@ export function getDownloadUrl(path: string): string {
   const token = api.getToken();
   if (token) params.set("token", token);
   return `/api/documents/download?${params.toString()}`;
+}
+
+export async function getDocumentVersion(path: string, workspace = ""): Promise<string> {
+  const params: Record<string, string> = { path };
+  if (workspace) params.workspace = workspace;
+  const result = await api.get<{ version: string }>("/documents/version", params);
+  return result.version;
 }
 
 export async function getPreview(
@@ -105,18 +115,24 @@ export function saveDocument(
   path: string,
   contentBase64: string,
   workspace = "",
-): Promise<{ status: string; file: string; size: number }> {
-  return api.post("/documents/save", { path, content: contentBase64, workspace });
+  expectedVersion = "",
+  sessionId = "",
+): Promise<{ status: string; file: string; size: number; version: string }> {
+  const params = workspace ? `?workspace=${encodeURIComponent(workspace)}` : "";
+  return api.post(`/documents/save${params}`, { path, content: contentBase64, expected_version: expectedVersion, session_id: sessionId });
 }
 
 export interface QuickEditTextRequest {
   path: string;
   old_text: string;
   new_text: string;
+  expected_version?: string;
   workspace?: string;
+  session_id?: string;
 }
 
 export interface QuickEditTextResponse {
+  version: string;
   status: string;
   preview_html: string | null;
   message: string;
@@ -138,11 +154,14 @@ export interface StyleChange {
 export interface QuickEditStyleRequest {
   path: string;
   workspace?: string;
+  session_id?: string;
+  expected_version?: string;
   changes: StyleChange[];
 }
 
 export interface QuickEditStyleResponse {
   status: string;
+  version: string;
   preview_html: string | null;
   results: Array<{ element: string; success: boolean; error?: string }>;
   message: string;
@@ -159,6 +178,8 @@ export function quickEditStyle(
 export interface TableOpRequest {
   path: string;
   workspace?: string;
+  session_id?: string;
+  expected_version?: string;
   operation: string;
   sheet?: string;
   params: Record<string, unknown>;
@@ -166,6 +187,7 @@ export interface TableOpRequest {
 
 export interface TableOpResponse {
   status: string;
+  version: string;
   preview_html: string | null;
   message: string;
   error?: string;
@@ -183,8 +205,10 @@ export function quickEditTheme(
   path: string,
   props: Record<string, string>,
   workspace = "",
+  expectedVersion = "",
+  sessionId = "",
 ): Promise<QuickEditStyleResponse> {
-  return api.post("/documents/quick-edit/theme", { path, props, workspace });
+  return api.post("/documents/quick-edit/theme", { path, props, workspace, expected_version: expectedVersion, session_id: sessionId });
 }
 
 // ── Quick Edit: Structure ──────────────────────────────────────────
@@ -200,11 +224,14 @@ export interface StructureOperation {
 export interface StructureEditRequest {
   path: string;
   workspace?: string;
+  session_id?: string;
+  expected_version?: string;
   operations: StructureOperation[];
 }
 
 export interface StructureEditResponse {
   status: string;
+  version: string;
   preview_html: string | null;
   results: Array<{ index: number; command?: string; target?: string; success: boolean; error?: string }>;
   message: string;

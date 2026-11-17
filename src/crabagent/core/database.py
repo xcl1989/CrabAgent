@@ -5,7 +5,7 @@ import logging
 import time as _time
 from collections.abc import AsyncGenerator
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, Integer, String, Text, text
+from sqlalchemy import JSON, Boolean, DateTime, Float, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -20,6 +20,41 @@ class Base(DeclarativeBase):
 
 def utcnow() -> datetime.datetime:
     return datetime.datetime.now()
+
+
+class CollaborationProject(Base):
+    __tablename__ = "collaboration_projects"
+    __table_args__ = (UniqueConstraint("user_id", "workspace", name="uq_collaboration_project_workspace"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    workspace: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class CollaborationBinding(Base):
+    __tablename__ = "collaboration_bindings"
+
+    session_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    project_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class CollaborationEntry(Base):
+    __tablename__ = "collaboration_entries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    project_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    session_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    branch_id: Mapped[str] = mapped_column(String(32), nullable=False, default="main")
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    scope: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    state: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
 
 
 class ProviderConfig(Base):

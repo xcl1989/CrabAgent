@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { X, Download, RefreshCw, Eye, Clock, FileText, Maximize2, Minimize2, FileSpreadsheet, Presentation, Gauge } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "../lib/cn";
+import { toast } from "./ui/Toast";
 import { DocumentTimeline, DocOpEvent } from "./DocumentTimeline";
 import { DocumentPreview } from "./DocumentPreview";
 import { DocOutline, OutlineItem } from "./DocOutline";
@@ -20,6 +21,7 @@ export interface DocState {
   busy: boolean;
   /** Latest HTML preview content */
   previewHtml: string | null;
+  version?: string;
   /** Preview loading state */
   previewLoading: boolean;
   /** Preview error message */
@@ -32,6 +34,7 @@ export interface DocState {
 
 interface Props {
   doc: DocState | null;
+  sessionId?: string;
   onClose: () => void;
   onDownload?: () => void;
   onRefreshPreview?: () => void;
@@ -50,6 +53,7 @@ interface Props {
 
 export function DocumentPanel({
   doc,
+  sessionId,
   onClose,
   onDownload,
   onRefreshPreview,
@@ -71,6 +75,27 @@ export function DocumentPanel({
   // Toolbar state
   const [editElementActive, setEditElementActive] = useState(false);
   const [editElementStyle, setEditElementStyle] = useState<EditElementStyle | undefined>();
+  const documentVersion = useRef<string | undefined>(doc?.version);
+  useEffect(() => { documentVersion.current = doc?.version; }, [doc?.filePath, doc?.version]);
+  useEffect(() => {
+    if (!doc?.filePath) return;
+    let active = true;
+    let warnedVersion = "";
+    const check = async () => {
+      if (!documentVersion.current || document.visibilityState === "hidden") return;
+      const checkedVersion = documentVersion.current;
+      try {
+        const current = await documentsApi.getDocumentVersion(doc.filePath, doc.workspace || "");
+        if (active && checkedVersion === documentVersion.current && current !== checkedVersion && warnedVersion !== current) {
+          warnedVersion = current;
+          toast.warning("文档已被其他程序修改", { description: "请刷新预览后再编辑；此提醒不能阻止外部写入。" });
+        }
+      } catch { /* Retry on the next poll. */ }
+    };
+    const timer = window.setInterval(check, 5000);
+    window.addEventListener("focus", check);
+    return () => { active = false; window.clearInterval(timer); window.removeEventListener("focus", check); };
+  }, [doc?.filePath, doc?.workspace]);
   const iframeRef = useRef<HTMLDivElement>(null);
   const highlightRef = useRef<typeof pendingHighlight>(null);
   const [cellRange, setCellRange] = useState<string | null>(null);
@@ -79,36 +104,53 @@ export function DocumentPanel({
 
   const handleQuickEdit = useCallback(async (oldText: string, newText: string) => {
     if (!doc?.filePath) return;
+    if (!documentVersion.current) {
+      toast.error("请先刷新文档预览，再进行文字编辑");
+      return;
+    }
     setEditing(true);
     try {
       const result = await documentsApi.quickEditText({
         path: doc.filePath,
         old_text: oldText,
         new_text: newText,
+        expected_version: documentVersion.current,
         workspace: doc.workspace || "",
+        session_id: sessionId,
       });
+      documentVersion.current = result.version;
       if (result.preview_html) {
         setLocalPreviewHtml(result.preview_html);
+      } else {
+        onRefreshPreview?.();
       }
       if (result.status === "no_match") {
         console.warn("Quick edit: text not found:", oldText);
       }
     } catch (e: any) {
       console.error("Quick edit failed:", e);
+      toast.error("文档编辑未完成", { description: e?.message || "请刷新文档后重试" });
       onRefreshPreview?.();
     } finally {
       setEditing(false);
     }
-  }, [doc?.filePath, doc?.workspace, onRefreshPreview]);
+  }, [doc?.filePath, doc?.workspace, onRefreshPreview, sessionId]);
 
   const handleStyleEdit = useCallback(async (element: string, props: Record<string, string | number | boolean>) => {
     if (!doc?.filePath) return;
+    if (!documentVersion.current) { toast.error("请先刷新文档预览"); return; }
     try {
       const result = await documentsApi.quickEditStyle({
         path: doc.filePath,
         workspace: doc.workspace || "",
+        session_id: sessionId,
+        expected_version: documentVersion.current,
         changes: [{ element, props }],
       });
+      if (result.status !== "ok") {
+        toast.error("部分样式修改未完成", { description: result.results.filter((item) => !item.success).map((item) => item.error).join("; ") });
+      }
+      if (result.version) documentVersion.current = result.version;
       if (result.preview_html) {
         setLocalPreviewHtml(result.preview_html);
       }
@@ -116,11 +158,13 @@ export function DocumentPanel({
       // 再调服务器刷新会让 useEffect 清掉 localPreviewHtml 导致闪回
     } catch (e: any) {
       console.error("Style edit failed:", e);
+      toast.error("文档编辑未完成", { description: e?.message || "请刷新文档后重试" });
     }
-  }, [doc?.filePath, doc?.workspace]);
+  }, [doc?.filePath, doc?.workspace, sessionId]);
 
   const handleTableOp = useCallback(async (op: TableOp) => {
     if (!doc?.filePath) return;
+    if (!documentVersion.current) { toast.error("请先刷新文档预览"); return; }
     try {
       const params = { ...op.params };
       if ((op.operation === "merge_cells" || op.operation === "unmerge_cells") && cellRange) {
@@ -132,10 +176,14 @@ export function DocumentPanel({
       const result = await documentsApi.quickEditTableOp({
         path: doc.filePath,
         workspace: doc.workspace || "",
+        session_id: sessionId,
+        expected_version: documentVersion.current,
         operation: op.operation,
         sheet: activeSheet,
         params,
       });
+      if (result.status !== "ok") toast.error("表格编辑未完成", { description: result.error || result.message });
+      if (result.version) documentVersion.current = result.version;
       if (result.preview_html) {
         setLocalPreviewHtml(result.preview_html);
       } else {
@@ -143,11 +191,13 @@ export function DocumentPanel({
       }
     } catch (e: any) {
       console.error("Table op failed:", e);
+      toast.error("文档编辑未完成", { description: e?.message || "请刷新文档后重试" });
     }
-  }, [doc?.filePath, doc?.workspace, cellRange, onRefreshPreview, activeSheet]);
+  }, [doc?.filePath, doc?.workspace, cellRange, onRefreshPreview, activeSheet, sessionId]);
 
   const handleCellEdit = useCallback(async (path: string, newText: string) => {
     if (!doc?.filePath) return;
+    if (!documentVersion.current) { toast.error("请先刷新文档预览"); return; }
     try {
       const m = path.match(/\/([^/]+)\/([A-Z]+\d+)$/);
       if (!m) return;
@@ -156,10 +206,14 @@ export function DocumentPanel({
       const result = await documentsApi.quickEditTableOp({
         path: doc.filePath,
         workspace: doc.workspace || "",
+        session_id: sessionId,
+        expected_version: documentVersion.current,
         operation: "set_cell_style",
         sheet,
         params: { cell, props: { value: newText } },
       });
+      if (result.status !== "ok") toast.error("单元格编辑未完成", { description: result.error || result.message });
+      if (result.version) documentVersion.current = result.version;
       if (result.preview_html) {
         setLocalPreviewHtml(result.preview_html);
       } else {
@@ -167,17 +221,23 @@ export function DocumentPanel({
       }
     } catch (e: any) {
       console.error("Cell edit failed:", e);
+      toast.error("文档编辑未完成", { description: e?.message || "请刷新文档后重试" });
     }
-  }, [doc?.filePath, doc?.workspace, onRefreshPreview]);
+  }, [doc?.filePath, doc?.workspace, onRefreshPreview, sessionId]);
 
   const handleStructureOp = useCallback(async (op: StructureOp) => {
     if (!doc?.filePath) return;
+    if (!documentVersion.current) { toast.error("请先刷新文档预览"); return; }
     try {
       const result = await documentsApi.quickEditStructure({
         path: doc.filePath,
         workspace: doc.workspace || "",
+        session_id: sessionId,
+        expected_version: documentVersion.current,
         operations: op.operations,
       });
+      if (result.status !== "ok") toast.error("部分结构编辑未完成", { description: result.results.filter((item) => !item.success).map((item) => item.error).join("; ") });
+      if (result.version) documentVersion.current = result.version;
       if (result.preview_html) {
         setLocalPreviewHtml(result.preview_html);
       } else {
@@ -185,8 +245,9 @@ export function DocumentPanel({
       }
     } catch (e: any) {
       console.error("Structure edit failed:", e);
+      toast.error("文档编辑未完成", { description: e?.message || "请刷新文档后重试" });
     }
-  }, [doc?.filePath, doc?.workspace, onRefreshPreview]);
+  }, [doc?.filePath, doc?.workspace, onRefreshPreview, sessionId]);
 
   // Clear local preview when doc changes
   useEffect(() => {
@@ -218,6 +279,7 @@ export function DocumentPanel({
 
   const handleStyleChange = useCallback(async (props: Record<string, string | number | boolean>) => {
     if (!doc?.filePath) return;
+    if (!documentVersion.current) { toast.error("请先刷新文档预览"); return; }
     const elementPath = highlightRef.current?.path || "";
 
     // 1. Instant visual update in iframe
@@ -242,15 +304,19 @@ export function DocumentPanel({
       const result = await documentsApi.quickEditStyle({
         path: doc.filePath,
         workspace: doc.workspace || "",
+        session_id: sessionId,
+        expected_version: documentVersion.current,
         changes: [{ element: elementPath, props }],
       });
+      if (result.version) documentVersion.current = result.version;
       if (result.preview_html) {
         setLocalPreviewHtml(result.preview_html);
       }
     } catch (e: any) {
       console.error("Style edit failed:", e);
+      toast.error("文档编辑未完成", { description: e?.message || "请刷新文档后重试" });
     }
-  }, [doc?.filePath, doc?.workspace]);
+  }, [doc?.filePath, doc?.workspace, sessionId]);
 
   const handleDownload = useCallback(() => {
     onDownload?.();
@@ -355,12 +421,16 @@ export function DocumentPanel({
               onTableOp={handleTableOp}
               onThemeEdit={async (props) => {
                 if (!doc?.filePath) return;
+                if (!documentVersion.current) { toast.error("请先刷新文档预览"); return; }
                 try {
                   const result = await documentsApi.quickEditTheme(
                     doc.filePath,
                     props,
                     doc.workspace || "",
+                    documentVersion.current,
+                    sessionId,
                   );
+                  if (result.version) documentVersion.current = result.version;
                   if (result.preview_html) {
                     setLocalPreviewHtml(result.preview_html);
                   } else {
@@ -368,6 +438,7 @@ export function DocumentPanel({
                   }
                 } catch (e: any) {
                   console.error("Theme edit failed:", e);
+                  toast.error("文档编辑未完成", { description: e?.message || "请刷新文档后重试" });
                 }
               }}
               onStructureOp={handleStructureOp}

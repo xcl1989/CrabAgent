@@ -327,6 +327,32 @@ class ToolRegistry:
                             return f"Tool '{tool.name}' execution denied by user."
                     context.approved_tools.add(tool.name)
 
+        if context is not None and name == "bash" and context.metadata.get("_collaboration_bound"):
+            if getattr(context, "event_bus", None):
+                from crabagent.core.event import AgentEvent, EventType
+
+                await context.event_bus.emit(AgentEvent(type=EventType.BUDGET_WARNING, data={
+                    "type": "collaboration_unmanaged_shell",
+                    "message": "Shell commands bypass project file conflict protection; coordinate concurrent writes.",
+                }))
+        claim_warning = ""
+        if context is not None and name in {"write", "edit", "office_create", "office_edit", "office_batch_edit"}:
+            try:
+                from crabagent.core.collaboration.claims import competing_claims
+
+                raw_path = arguments.get("file_path") or context.metadata.get("current_doc") or ""
+                overlaps = await competing_claims(context, str(raw_path))
+                if overlaps:
+                    claim_warning = f"Collaboration warning: overlapping active claims {overlaps}. Coordinate with the other session."
+                    if getattr(context, "event_bus", None):
+                        from crabagent.core.event import AgentEvent, EventType
+
+                        await context.event_bus.emit(AgentEvent(type=EventType.BUDGET_WARNING, data={
+                            "type": "collaboration_overlap", "message": claim_warning,
+                        }))
+            except Exception:
+                logger.exception("Failed to check collaboration claims")
+
         try:
             sig = inspect.signature(tool.handler)
             kwargs = dict(arguments)
@@ -369,12 +395,25 @@ class ToolRegistry:
                 result = await tool.handler(**kwargs)
             else:
                 result = await asyncio.to_thread(tool.handler, **kwargs)
+            if context is not None and isinstance(result, str):
+                file_success = name in {"write", "edit"} and result.startswith("Successfully ")
+                office_success = name in {"office_create", "office_edit", "office_batch_edit"} and result.startswith("✅")
+                if file_success or office_success:
+                    try:
+                        from crabagent.core.collaboration.events import record_tool_write
+
+                        path = arguments.get("file_path") or context.metadata.get("current_doc") or ""
+                        await record_tool_write(context, name, str(path))
+                    except Exception:
+                        logger.exception("Failed to record collaboration file change")
             _elapsed = _t.monotonic() - _t0
             if _elapsed > 0.5:
                 logging.getLogger(__name__).warning("tool %s SLOW %.1fs", name, _elapsed)
             # Flush pending molts immediately for direct tool calls (outside run_agent)
             if context is not None and not context.metadata.get("_batch_molt"):
                 await self._flush_molt_snapshot(context)
+            if claim_warning and isinstance(result, str):
+                result = claim_warning + "\n" + result
             # Preserve structured and multimodal outputs. The agent loop handles
             # protocol-safe serialization and moves image blocks to user messages.
             return result if isinstance(result, (str, list, dict)) else str(result)

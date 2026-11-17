@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from crabagent.core.database import Conversation
@@ -60,11 +60,18 @@ async def update_conversation(db: AsyncSession, session_id: str, **kwargs) -> Co
 
 
 async def delete_conversation(db: AsyncSession, session_id: str) -> bool:
-    from crabagent.core.database import Message
+    from crabagent.core.database import CollaborationBinding, CollaborationEntry, Message
 
     conv = await get_conversation(db, session_id)
     if not conv:
         return False
+    await db.execute(delete(CollaborationBinding).where(CollaborationBinding.session_id == session_id))
+    await db.execute(
+        update(CollaborationEntry).where(
+            CollaborationEntry.session_id == session_id, CollaborationEntry.kind == "claim",
+            CollaborationEntry.state == "active",
+        ).values(state="closed")
+    )
     await db.execute(delete(Message).where(Message.conversation_id == conv.id))
     await db.execute(delete(Conversation).where(Conversation.session_id == session_id))
     await db.commit()

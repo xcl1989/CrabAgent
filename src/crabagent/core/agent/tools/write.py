@@ -1,5 +1,8 @@
+from pathlib import Path
+
 from crabagent.core.agent.tools.path_utils import resolve_tool_path
 from crabagent.core.agent.tools.registry import registry
+from crabagent.core.collaboration.write_coordinator import WriteConflict, file_version, replace_if_version
 
 
 @registry.register(
@@ -14,7 +17,11 @@ from crabagent.core.agent.tools.registry import registry
         "properties": {
             "file_path": {
                 "type": "string",
-                "description": "Absolute file system path or workspace-relative path to the file to create or overwrite.",
+                "description": "Absolute or workspace-relative path to create or overwrite.",
+            },
+            "expected_version": {
+                "type": "string",
+                "description": "Version returned by read, or missing for a new file; protects against stale writes.",
             },
             "content": {
                 "type": "string",
@@ -25,7 +32,7 @@ from crabagent.core.agent.tools.registry import registry
     },
     requires_permission=True,
 )
-def write_file(file_path: str, content: str, context=None) -> str:
+def write_file(file_path: str, content: str, context=None, expected_version: str | None = None) -> str:
     if not file_path or not file_path.strip():
         return "Error: file_path is required and must be a non-empty path"
     if not content:
@@ -36,9 +43,20 @@ def write_file(file_path: str, content: str, context=None) -> str:
         return error
     assert path is not None
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
+        versions = context.metadata.setdefault("_file_versions", {}) if context is not None else {}
+        version = expected_version or versions.get(str(path.resolve()))
+        if version is None:
+            if file_version(path) != "missing":
+                return f"Error: read {file_path} before overwriting, or provide expected_version."
+            version = "missing"
+        new_version = replace_if_version(
+            path, content.encode("utf-8"), version, lock_root=Path.home() / ".crabagent" / "collaboration-locks"
+        )
+        if context is not None:
+            versions[str(path.resolve())] = new_version
         return f"Successfully wrote {len(content)} bytes to {file_path}"
+    except WriteConflict as exc:
+        return f"Error: {file_path} changed since the expected version; read it again and retry. Candidate: {exc.candidate_path}"
     except Exception as e:
         return f"Error writing file: {e}"
 

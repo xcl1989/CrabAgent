@@ -6,6 +6,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import { readFile, saveFile } from "../api/files";
+import { useExternalFileVersion } from "../hooks/useExternalFileVersion";
 
 type ViewMode = "split" | "source" | "preview";
 
@@ -13,11 +14,13 @@ interface Props {
   filePath: string;
   className?: string;
   onClose?: () => void;
+  sessionId?: string;
 }
 
-export function MarkdownPanel({ filePath, className, onClose }: Props) {
+export function MarkdownPanel({ filePath, className, onClose, sessionId }: Props) {
   const { t } = useTranslation();
   const [source, setSource] = useState("");
+  const [version, setVersion] = useState("");
   const [originalSource, setOriginalSource] = useState("");
   const [viewMode, setViewMode] = useState<ViewMode>("split");
   const [loading, setLoading] = useState(true);
@@ -25,6 +28,11 @@ export function MarkdownPanel({ filePath, className, onClose }: Props) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const externalChange = useExternalFileVersion(filePath, version);
+  useEffect(() => {
+    if (externalChange) setError("文件已被其他程序修改；保存时会检查冲突，请先比较或重新读取。");
+  }, [externalChange]);
 
   const fileName = filePath.split("/").pop() || filePath;
 
@@ -37,6 +45,7 @@ export function MarkdownPanel({ filePath, className, onClose }: Props) {
       .then((res) => {
         if (cancelled) return;
         setSource(res.content);
+        setVersion(res.version);
         setOriginalSource(res.content);
         setDirty(false);
       })
@@ -56,7 +65,8 @@ export function MarkdownPanel({ filePath, className, onClose }: Props) {
     if (!dirty) return;
     setSaving(true);
     try {
-      await saveFile(filePath, source);
+      const result = await saveFile(filePath, source, false, version, sessionId);
+      setVersion(result.version);
       setOriginalSource(source);
       setDirty(false);
       setError(null);
@@ -65,7 +75,7 @@ export function MarkdownPanel({ filePath, className, onClose }: Props) {
     } finally {
       setSaving(false);
     }
-  }, [dirty, filePath, source]);
+  }, [dirty, filePath, source, version, sessionId]);
 
   // ── Keyboard shortcuts (Cmd/Ctrl+S) ────────────────────────
   useEffect(() => {

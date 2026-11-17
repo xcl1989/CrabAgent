@@ -3,17 +3,20 @@ from __future__ import annotations
 import asyncio
 import base64
 import datetime
+import functools
 import json
 import logging
 import mimetypes
 import shutil
+import tempfile
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
 from crabagent.core.config import settings
+from crabagent.core.collaboration.write_coordinator import WriteConflict, file_version, replace_if_version, version_bytes
 from crabagent.core.database import User
 from crabagent.core.office.manager import get_office_manager
 from crabagent.serve.deps import get_current_user
@@ -79,7 +82,7 @@ def _safe_path(base_dir: Path, file_name: str) -> Path:
     """Resolve a file name safely within base_dir, preventing path traversal."""
     full = base_dir.resolve() / file_name
     full = full.resolve()
-    if not str(full).startswith(str(base_dir.resolve())):
+    if not full.is_relative_to(base_dir.resolve()):
         raise HTTPException(status_code=400, detail="Invalid file path")
     return full
 
@@ -97,6 +100,16 @@ def _file_info(file_path: Path, base_dir: Path) -> dict:
         "type": ext.lstrip("."),
         "previewable": ext in _PREVIEWABLE_EXTENSIONS,
     }
+
+
+async def _require_quick_edit_version(request: Request) -> None:
+    """Reject legacy HTTP mutations that cannot identify the version being edited."""
+    try:
+        payload = await request.json()
+    except (ValueError, UnicodeDecodeError):
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+    if not isinstance(payload, dict) or not isinstance(payload.get("expected_version"), str) or not payload["expected_version"]:
+        raise HTTPException(status_code=428, detail="Document version is required; reload the preview before editing")
 
 
 # ── routes ─────────────────────────────────────────────────────────
@@ -120,6 +133,7 @@ async def list_documents(
 async def upload_document(
     file: UploadFile = File(...),
     workspace: str = Form(default=""),
+    expected_version: str = Form(default=""),
     user: User = Depends(get_current_user),
 ):
     """上传 Office 文档到工作区。"""
@@ -136,8 +150,15 @@ async def upload_document(
     docs_dir = _get_docs_dir(user.id, workspace)
     dest = _safe_path(docs_dir, file.filename)
 
+    current = file_version(dest)
+    if current != "missing" and not expected_version:
+        raise HTTPException(status_code=428, detail="Version required to overwrite an existing document")
+    expected = expected_version or "missing"
     content = await file.read()
-    dest.write_bytes(content)
+    try:
+        replace_if_version(dest, content, expected, lock_root=Path.home() / ".crabagent" / "collaboration-locks")
+    except WriteConflict as exc:
+        raise HTTPException(status_code=409, detail=f"Document changed during upload; candidate: {exc.candidate_path}")
 
     logger.info("Document uploaded: %s (%d bytes)", dest, len(content))
     return {"status": "ok", "file": file.filename, "size": len(content), "path": str(dest)}
@@ -160,6 +181,19 @@ async def download_document(
 
     media_type, _ = mimetypes.guess_type(str(file_path))
     return FileResponse(str(file_path), filename=file_path.name, media_type=media_type)
+
+
+@router.get("/version")
+async def document_version(
+    path: str, workspace: str = "", user: User = Depends(get_current_user),
+):
+    target = _safe_path(_get_docs_dir(user.id, workspace), path)
+    if target.exists() and not target.is_file():
+        raise HTTPException(status_code=400, detail="Not a file")
+    try:
+        return {"version": await asyncio.to_thread(file_version, target)}
+    except OSError:
+        raise HTTPException(status_code=403, detail="Cannot read document")
 
 
 @router.get("/preview")
@@ -185,11 +219,15 @@ async def preview_document(
     if ext not in _PREVIEWABLE_EXTENSIONS:
         raise HTTPException(status_code=400, detail=f"File type '{ext}' is not previewable")
 
+    before_version = file_version(file_path)
     result = await mgr.view_html(str(file_path))
+    if file_version(file_path) != before_version:
+        raise HTTPException(status_code=409, detail="Document changed during preview; retry")
     if not result.success:
         raise HTTPException(status_code=500, detail=result.error)
 
-    return {"html": _fix_html_newlines(result.data), "file": path, "name": file_path.name}
+    return {"html": _fix_html_newlines(result.data), "file": path, "name": file_path.name,
+            "version": before_version}
 
 
 @router.post("/save")
@@ -208,16 +246,23 @@ async def save_document(
     file_path = _safe_path(docs_dir, path)
 
     try:
-        content = base64.b64decode(content_b64)
+        content = base64.b64decode(content_b64, validate=True)
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid base64 content")
 
-    # 确保父目录存在
-    file_path.parent.mkdir(parents=True, exist_ok=True)
-    file_path.write_bytes(content)
+    expected = data.get("expected_version")
+    if not isinstance(expected, str) or not expected:
+        raise HTTPException(status_code=428, detail="Document version is required; reload before saving")
+    try:
+        version = replace_if_version(
+            file_path, content, expected, lock_root=Path.home() / ".crabagent" / "collaboration-locks"
+        )
+    except WriteConflict as exc:
+        raise HTTPException(status_code=409, detail=f"Document changed since loading; candidate: {exc.candidate_path}")
 
+    await _record_document_write(user.id, str(data.get("session_id") or ""), file_path, "document_save")
     logger.info("Document saved: %s (%d bytes)", file_path, len(content))
-    return {"status": "ok", "file": path, "size": len(content)}
+    return {"status": "ok", "file": path, "size": len(content), "version": version}
 
 
 @router.delete("")
@@ -253,11 +298,14 @@ class QuickEditStyleRequest(BaseModel):
     """请求：批量修改文档中元素的样式/布局属性（行高、列宽等）。"""
     path: str
     workspace: str = ""
+    session_id: str = ""
+    expected_version: str = ""
     changes: list[StyleChange]
 
 
 class QuickEditStyleResponse(BaseModel):
     status: str
+    version: str = ""
     preview_html: str | None = None
     results: list[dict] = []
     message: str = ""
@@ -270,12 +318,15 @@ class QuickEditTextRequest(BaseModel):
     old_text: str
     new_text: str
     workspace: str = ""
+    session_id: str = ""
+    expected_version: str = ""
 
 
 class QuickEditTextResponse(BaseModel):
     status: str
     preview_html: str | None = None
     message: str = ""
+    version: str = ""
 
 
 def _backup_doc(file_path: Path) -> str | None:
@@ -306,6 +357,65 @@ def _fix_html_newlines(html: str | None) -> str | None:
     return html
 
 
+async def _record_document_write(user_id: int, session_id: str, file_path: Path, operation: str) -> None:
+    if not session_id:
+        return
+    try:
+        from crabagent.core.collaboration.events import record_ui_write
+
+        await record_ui_write(user_id, session_id, file_path, operation, file_version(file_path))
+    except Exception:
+        logger.exception("Failed to record document write")
+
+
+async def _require_bound_session_version(user_id: int, session_id: str, expected: str) -> None:
+    """Legacy callers may omit a version only when their session is not project-bound."""
+    if not session_id or expected:
+        return
+    from crabagent.core.database import CollaborationBinding, async_session_factory
+
+    async with async_session_factory() as db:
+        binding = await db.get(CollaborationBinding, session_id)
+        if binding and binding.user_id == user_id:
+            raise HTTPException(status_code=428, detail="Document version is required for a project-bound session")
+
+
+def _versioned_quick_edit(handler):
+    """Apply one UI operation to a draft and commit against the preview version."""
+    @functools.wraps(handler)
+    async def wrapped(req, user=Depends(get_current_user)):
+        expected = getattr(req, "expected_version", "")
+        await _require_bound_session_version(user.id, req.session_id, expected)
+        if not expected:
+            return await handler(req, user=user)
+        target = _safe_path(_get_docs_dir(user.id, req.workspace), req.path)
+        try:
+            original = target.read_bytes()
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail="File not found")
+        if version_bytes(original) != expected:
+            raise HTTPException(status_code=409, detail="Document changed since preview; reload and retry")
+        with tempfile.TemporaryDirectory(prefix="crabagent-ui-office-") as directory:
+            draft = Path(directory) / target.name
+            draft.write_bytes(original)
+            draft_req = req.model_copy(update={"path": draft.name, "workspace": directory,
+                                                "session_id": "", "expected_version": ""})
+            response = await handler(draft_req, user=user)
+            if isinstance(response, JSONResponse):
+                return response
+            if getattr(response, "status", "error") != "ok":
+                raise HTTPException(status_code=409, detail="Document edit did not fully succeed; original unchanged")
+            try:
+                committed = replace_if_version(target, draft.read_bytes(), expected,
+                    lock_root=Path.home() / ".crabagent" / "collaboration-locks")
+            except WriteConflict as exc:
+                raise HTTPException(status_code=409, detail=f"Document changed during editing; candidate: {exc.candidate_path}")
+            await _record_document_write(user.id, req.session_id, target, "office_quick_edit")
+            response.version = committed
+            return response
+    return wrapped
+
+
 async def _render_preview_html(file_path: Path) -> str | None:
     """Render document preview HTML after a quick-edit mutation."""
     mgr = get_office_manager()
@@ -313,7 +423,8 @@ async def _render_preview_html(file_path: Path) -> str | None:
     return _fix_html_newlines(preview_result.data) if preview_result.success else None
 
 
-@router.post("/quick-edit/style", response_model=QuickEditStyleResponse)
+@router.post("/quick-edit/style", dependencies=[Depends(_require_quick_edit_version)], response_model=QuickEditStyleResponse)
+@_versioned_quick_edit
 async def quick_edit_style(
     req: QuickEditStyleRequest,
     user: User = Depends(get_current_user),
@@ -375,6 +486,8 @@ async def quick_edit_style(
             all_ok = False
             logger.exception("[QE-style] Error on %s", change.element)
 
+    if any(item["success"] for item in results):
+        await _record_document_write(user.id, req.session_id, file_path, "office_style")
     # 渲染新预览（即使部分失败也返回，让前端看到当前状态）
     preview_html = await _render_preview_html(file_path)
 
@@ -386,7 +499,7 @@ async def quick_edit_style(
     )
 
 
-@router.post("/quick-edit/text", response_model=QuickEditTextResponse)
+@router.post("/quick-edit/text", dependencies=[Depends(_require_quick_edit_version)], response_model=QuickEditTextResponse)
 async def quick_edit_text(
     req: QuickEditTextRequest,
     user: User = Depends(get_current_user),
@@ -412,7 +525,16 @@ async def quick_edit_text(
     if ext not in _PREVIEWABLE_EXTENSIONS:
         raise HTTPException(status_code=400, detail=f"Unsupported file type '{ext}'")
 
+    await _require_bound_session_version(user.id, req.session_id, req.expected_version)
+    original_path = file_path
     try:
+        original_content = original_path.read_bytes()
+        expected_version = version_bytes(original_content)
+        if req.expected_version and req.expected_version != expected_version:
+            raise HTTPException(status_code=409, detail="Document changed since preview; reload and retry")
+        draft_dir = tempfile.TemporaryDirectory(prefix="crabagent-quick-edit-")
+        file_path = Path(draft_dir.name) / original_path.name
+        file_path.write_bytes(original_content)
         old = req.old_text.strip()
         new = req.new_text.strip()
         if not old:
@@ -499,20 +621,34 @@ async def quick_edit_text(
                     "--json",
                 )
                 if not add_result.success:
-                    logger.error("[QE] Add paragraph failed at index %d: %s", para_index + idx, add_result.error)
+                    raise HTTPException(status_code=500, detail=f"Add paragraph failed: {add_result.error}")
 
-        preview_html = await _render_preview_html(file_path)
+        try:
+            committed_version = replace_if_version(
+                original_path, file_path.read_bytes(), expected_version,
+                lock_root=Path.home() / ".crabagent" / "collaboration-locks",
+            )
+        except WriteConflict as exc:
+            raise HTTPException(status_code=409, detail=f"Document changed during editing; candidate: {exc.candidate_path}")
+        await _record_document_write(user.id, req.session_id, original_path, "office_text")
+        preview_html = await _render_preview_html(original_path)
+        if file_version(original_path) != committed_version:
+            preview_html = None
 
         return QuickEditTextResponse(
             status="ok",
             preview_html=preview_html,
             message="done",
+            version=committed_version,
         )
     except HTTPException:
         raise
     except Exception as e:
         logger.exception("[QE] Unexpected error")
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if "draft_dir" in locals():
+            draft_dir.cleanup()
 
 
 # ── Quick Edit: structured table operations ───────────────────────────
@@ -523,6 +659,8 @@ class TableOpRequest(BaseModel):
 
     path: str
     workspace: str = ""
+    session_id: str = ""
+    expected_version: str = ""
     operation: str
     """操作类型：insert_row | delete_row | insert_col | delete_col |
     merge_cells | unmerge_cells | set_formula | set_cell_style"""
@@ -543,6 +681,7 @@ class TableOpRequest(BaseModel):
 
 class TableOpResponse(BaseModel):
     status: str
+    version: str = ""
     preview_html: str | None = None
     message: str = ""
     error: str = ""
@@ -605,7 +744,8 @@ def _build_batch_cmd(req: TableOpRequest) -> dict | None:
     return None
 
 
-@router.post("/quick-edit/table-op", response_model=TableOpResponse)
+@router.post("/quick-edit/table-op", dependencies=[Depends(_require_quick_edit_version)], response_model=TableOpResponse)
+@_versioned_quick_edit
 async def quick_edit_table_op(
     req: TableOpRequest,
     user: User = Depends(get_current_user),
@@ -647,6 +787,7 @@ async def quick_edit_table_op(
                 message=f"操作失败: {req.operation}",
             )
 
+        await _record_document_write(user.id, req.session_id, file_path, "office_table")
         preview_html = await _render_preview_html(file_path)
 
         return TableOpResponse(
@@ -667,6 +808,8 @@ class ThemeEditRequest(BaseModel):
 
     path: str
     workspace: str = ""
+    session_id: str = ""
+    expected_version: str = ""
     props: dict[str, str]
     """主题属性：
     - accent1~accent6: 主题配色（十六进制如 4472C4）
@@ -682,6 +825,8 @@ class StructureEditRequest(BaseModel):
 
     path: str
     workspace: str = ""
+    session_id: str = ""
+    expected_version: str = ""
     operations: list[dict]
     """操作列表示例：
     - PPT slide: {"command":"add","parent":"/","type":"slide","props":{"layout":"Title Slide","title":"Q3 Review"}}
@@ -695,12 +840,14 @@ class StructureEditRequest(BaseModel):
 
 class StructureEditResponse(BaseModel):
     status: str
+    version: str = ""
     preview_html: str | None = None
     results: list[dict] = []
     message: str = ""
 
 
-@router.post("/quick-edit/theme", response_model=QuickEditStyleResponse)
+@router.post("/quick-edit/theme", dependencies=[Depends(_require_quick_edit_version)], response_model=QuickEditStyleResponse)
+@_versioned_quick_edit
 async def quick_edit_theme(
     req: ThemeEditRequest,
     user: User = Depends(get_current_user),
@@ -734,6 +881,8 @@ async def quick_edit_theme(
         "error": result.error if not result.success else "",
     }]
 
+    if result.success:
+        await _record_document_write(user.id, req.session_id, file_path, "office_theme")
     preview_html = await _render_preview_html(file_path)
 
     return QuickEditStyleResponse(
@@ -744,7 +893,8 @@ async def quick_edit_theme(
     )
 
 
-@router.post("/quick-edit/structure", response_model=StructureEditResponse)
+@router.post("/quick-edit/structure", dependencies=[Depends(_require_quick_edit_version)], response_model=StructureEditResponse)
+@_versioned_quick_edit
 async def quick_edit_structure(
     req: StructureEditRequest,
     user: User = Depends(get_current_user),
@@ -825,6 +975,8 @@ async def quick_edit_structure(
 
     preview_html = await _render_preview_html(file_path)
     success_count = sum(1 for item in results if item.get("success"))
+    if success_count:
+        await _record_document_write(user.id, req.session_id, file_path, "office_structure")
     status = "ok" if all_ok else "partial"
     return StructureEditResponse(
         status=status,

@@ -4,6 +4,7 @@ import { Smartphone, Monitor, Tablet, Code, Eye, Columns2, Save, RefreshCw, X } 
 import { cn } from "../lib/cn";
 import * as filesApi from "../api/files";
 import { getTree, readFile, saveFile, FileEntry } from "../api/files";
+import { useExternalFileVersion } from "../hooks/useExternalFileVersion";
 
 type DeviceSize = { name: string; width: number; height: number };
 type ViewMode = "preview" | "source" | "split";
@@ -12,6 +13,7 @@ interface Props {
   filePath: string;
   className?: string;
   onClose?: () => void;
+  sessionId?: string;
 }
 
 const DEVICES: DeviceSize[] = [
@@ -26,11 +28,12 @@ const DEVICE_LABELS: Record<string, string> = {
   "📐 Tablet": "Tablet",
 };
 
-export function PrototypePanel({ filePath, className, onClose }: Props) {
+export function PrototypePanel({ filePath, className, onClose, sessionId }: Props) {
   const { t } = useTranslation();
   const [viewMode, setViewMode] = useState<ViewMode>("preview");
   const [deviceIdx, setDeviceIdx] = useState(1);
   const [source, setSource] = useState<string>("");
+  const [version, setVersion] = useState("");
   const [loading, setLoading] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string>("");
   const [serverLoading, setServerLoading] = useState(true);
@@ -50,6 +53,10 @@ export function PrototypePanel({ filePath, className, onClose }: Props) {
   const [fileEntries, setFileEntries] = useState<FileEntry[]>([]);
   const [treeLoading, setTreeLoading] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const externalChange = useExternalFileVersion(activeFile, version, true);
+  useEffect(() => {
+    if (externalChange) setError("文件已被其他程序修改；保存时会检查冲突，请先比较或重新读取。");
+  }, [externalChange]);
 
   // Start/stop HTTP preview server on filePath change
   useEffect(() => {
@@ -94,6 +101,7 @@ export function PrototypePanel({ filePath, className, onClose }: Props) {
     try {
       const result = await readFile(fullPath, true);
       setSource(result.content);
+      setVersion(result.version);
       setActiveFile(fullPath);
       setActiveFileName(displayName);
       setDirty(false);
@@ -120,7 +128,8 @@ export function PrototypePanel({ filePath, className, onClose }: Props) {
   const handleSave = useCallback(async () => {
     if (!source) return;
     try {
-      await saveFile(activeFile, source, true);
+      const result = await saveFile(activeFile, source, true, version, sessionId);
+      setVersion(result.version);
       setSaved(true);
       setDirty(false);
       setTimeout(() => setSaved(false), 2000);
@@ -129,7 +138,7 @@ export function PrototypePanel({ filePath, className, onClose }: Props) {
     } catch (e: any) {
       setError(e?.message || "Save failed");
     }
-  }, [activeFile, source]);
+  }, [activeFile, source, version, sessionId]);
 
   // Manual refresh iframe
   const handleRefresh = useCallback(() => {

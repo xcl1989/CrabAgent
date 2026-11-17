@@ -7,6 +7,7 @@ import MemoryPage from "./pages/MemoryPage";
 import SettingsPage from "./pages/SettingsPage";
 import UsagePage from "./pages/UsagePage";
 import CalendarPage from "./pages/CalendarPage";
+import CollaborationPage from "./pages/CollaborationPage";
 import { NavBar } from "./components/NavBar";
 import { cn } from "./lib/cn";
 import { connectGlobalSSE } from "./api/monitor";
@@ -16,9 +17,9 @@ import { DesktopPet } from "./components/DesktopPet";
 import { BackgroundTasks } from "./components/BackgroundTasks";
 import { MobileConsole } from "./pages/mobile/MobileConsole";
 
-export type PageId = "chat" | "browser" | "agents" | "memory" | "usage" | "calendar" | "settings";
+export type PageId = "chat" | "browser" | "agents" | "memory" | "usage" | "calendar" | "collaboration" | "settings";
 
-const pageIds: readonly PageId[] = ["chat", "browser", "agents", "memory", "usage", "calendar", "settings"];
+const pageIds: readonly PageId[] = ["chat", "browser", "agents", "memory", "usage", "calendar", "collaboration", "settings"];
 
 function pageFromHash(): PageId | null {
   const page = window.location.hash.replace(/^#\/?/, "");
@@ -87,6 +88,29 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
     }
   }, [ftsStatus?.in_progress]);
 
+  // Poll only the active session's authorized project; event records remain the source of truth.
+  useEffect(() => {
+    if (!activeSessionId) return;
+    let active = true;
+    let cursor: number | null = null;
+    let projectId: number | null = null;
+    const poll = async () => {
+      try {
+        const response = await api.get<{ project_id: number | null; cursor: number; entries: { id: number }[] }>(
+          `/collaboration/sessions/${encodeURIComponent(activeSessionId)}/updates`,
+          cursor === null ? undefined : { after: String(cursor) },
+        );
+        if (!active) return;
+        if (response.project_id !== projectId) { cursor = null; projectId = response.project_id; }
+        if (cursor !== null && response.entries.length) toast.info("项目有其他对话的最新协作动态");
+        cursor = Math.max(cursor ?? 0, response.cursor);
+      } catch { /* Retry on the next poll. */ }
+    };
+    poll();
+    const timer = setInterval(poll, 10000);
+    return () => { active = false; clearInterval(timer); };
+  }, [activeSessionId, activeBranch]);
+
   // Connect to global SSE for system notifications
   useEffect(() => {
     const es = connectGlobalSSE((event) => {
@@ -116,6 +140,7 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
         {page === "memory" && <div className="absolute inset-0"><MemoryPage /></div>}
         {page === "usage" && <div className="absolute inset-0"><UsagePage /></div>}
         {page === "calendar" && <div className="absolute inset-0"><CalendarPage /></div>}
+        {page === "collaboration" && <div className="absolute inset-0"><CollaborationPage sessionId={activeSessionId} /></div>}
         {page === "settings" && <div className="absolute inset-0"><SettingsPage /></div>}
       </div>
 

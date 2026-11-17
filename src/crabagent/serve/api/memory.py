@@ -87,9 +87,16 @@ async def list_memories(
 
 @router.post("/semantic-consolidate")
 async def semantic_consolidate_memories(user: User = Depends(get_current_user)):
-    from crabagent.core.memory_batch_merge import semantic_consolidate
+    from crabagent.core.memory_consolidation_tasks import start
 
-    return await semantic_consolidate(user.id)
+    return start(user.id)
+
+
+@router.get("/semantic-consolidate/status")
+async def semantic_consolidation_status(user: User = Depends(get_current_user)):
+    from crabagent.core.memory_consolidation_tasks import status
+
+    return status(user.id)
 
 
 @router.get("/archives/list")

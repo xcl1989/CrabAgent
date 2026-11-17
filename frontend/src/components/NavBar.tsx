@@ -1,4 +1,4 @@
-import { MessageSquare, Users, Brain, Settings, Sun, Moon, LogOut, Globe, Coins, Calendar, PanelTop } from "lucide-react";
+import { MessageSquare, Users, Brain, Settings, Sun, Moon, LogOut, Globe, Coins, Calendar, PanelTop, FolderGit2 } from "lucide-react";
 import { useTheme } from "../lib/theme";
 import { cn } from "../lib/cn";
 import { useState } from "react";
@@ -19,6 +19,7 @@ const items: NavItem[] = [
   { id: "browser", labelKey: "nav.browser", icon: <PanelTop size={15} /> },
   { id: "agents", labelKey: "nav.agents", icon: <Users size={15} /> },
   { id: "calendar", labelKey: "nav.calendar", icon: <Calendar size={15} /> },
+  { id: "collaboration", labelKey: "nav.collaboration", icon: <FolderGit2 size={15} /> },
   { id: "memory", labelKey: "nav.memory", icon: <Brain size={15} /> },
   { id: "usage", labelKey: "nav.usage", icon: <Coins size={15} /> },
   { id: "settings", labelKey: "nav.settings", icon: <Settings size={15} /> },

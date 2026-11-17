@@ -59,9 +59,19 @@ async def register_user(db: AsyncSession, username: str, password: str):
     return user
 
 
+# Historical CLI accounts were provisioned with this fixed password. Login with
+# this exact credential is rejected for those usernames only; users who changed
+# their password (or any other user whose password happens to be "cli") can
+# still authenticate normally.
+_LEGACY_CLI_USERNAMES = {"cli_user", "__cli__"}
+_LEGACY_CLI_PASSWORD = "cli"
+
+
 async def authenticate_user(db: AsyncSession, username: str, password: str):
     user = await get_user_by_username(db, username)
     if not user or not user.enabled:
+        return None
+    if username in _LEGACY_CLI_USERNAMES and password == _LEGACY_CLI_PASSWORD:
         return None
     if not verify_password(password, user.password_hash):
         return None

@@ -276,6 +276,14 @@ export function restoreArchivedMemory(name: string, id: number): Promise<{ statu
   return api.post(`/memory/archives/${encodeURIComponent(name)}/restore/${id}`, {});
 }
 
-export function consolidateMemories(): Promise<{ status: string; merged: number; candidates?: number; reason?: string }> {
+export interface MemoryConsolidationStatus {
+  status: "idle" | "running" | "completed" | "failed";
+  progress?: { stage: string; completed?: number; total?: number };
+  result?: { merged: number; candidates?: number; reason?: string; recall_incomplete?: boolean } | null;
+}
+export function getMemoryConsolidationStatus(): Promise<MemoryConsolidationStatus> {
+  return api.get("/memory/semantic-consolidate/status");
+}
+export function consolidateMemories(): Promise<MemoryConsolidationStatus> {
   return api.post("/memory/semantic-consolidate", {});
 }

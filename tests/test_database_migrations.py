@@ -40,3 +40,19 @@ async def test_ensure_column_ignores_special_column_names(conn):
     # accidental SQL injection through the helper's f-strings.
     with pytest.raises(Exception):
         await ensure_column(conn, "demo; DROP TABLE demo", "x", "TEXT")
+
+
+@pytest.mark.asyncio
+async def test_collaboration_tables_add_to_existing_database(tmp_path):
+    from crabagent.core.database import Base
+
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'legacy.db'}")
+    async with engine.begin() as connection:
+        await connection.execute(text("CREATE TABLE existing_data (value TEXT)"))
+        await connection.execute(text("INSERT INTO existing_data VALUES ('keep')"))
+        await connection.run_sync(Base.metadata.create_all)
+        await connection.run_sync(Base.metadata.create_all)
+        assert (await connection.execute(text("SELECT value FROM existing_data"))).scalar_one() == "keep"
+        result = await connection.execute(text("SELECT name FROM sqlite_master WHERE name='collaboration_projects'"))
+        assert result.scalar_one() == "collaboration_projects"
+    await engine.dispose()
