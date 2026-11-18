@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime
 import re
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -172,6 +172,21 @@ async def update_goal(
         goal.status = status
         if status in CLOSED_STATUSES:
             goal.closed_at = datetime.now()
+            from sqlalchemy import update
+
+            from crabagent.core.database import CollaborationEntry
+
+            await db.execute(
+                update(CollaborationEntry)
+                .where(
+                    CollaborationEntry.user_id == goal.user_id,
+                    CollaborationEntry.session_id == goal.session_id,
+                    CollaborationEntry.kind == "claim",
+                    CollaborationEntry.state == "active",
+                    CollaborationEntry.content.startswith(f"Goal batch claim: {goal.id}\n"),
+                )
+                .values(state="closed")
+            )
     if objective is not None:
         objective = objective.strip()
         if not objective:

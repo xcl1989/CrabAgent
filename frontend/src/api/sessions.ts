@@ -10,6 +10,7 @@ export interface Session {
   active_branch: string;
   prompt_locale: string;
   history_searchable: boolean;
+  collaboration_disabled?: boolean;
   created_at: string | null;
   updated_at: string | null;
 }

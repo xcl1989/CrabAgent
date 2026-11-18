@@ -321,40 +321,44 @@ export default function UsageHeatmap({ workspace }: { workspace: string }) {
                 ))}
               </div>
             )}
-            {/* Month labels + legend share one row for a tighter footer.
-                Weekly cells are double-width, so labels must use the same
-                per-column stride as the cells — otherwise they bunch up on
-                the left half and overlap each other. */}
+            {/* Month labels row — constrained to the grid width so labels can
+                never overflow into the legend. */}
             {(() => {
               const stride = mode === "daily" ? CELL + GAP : CELL * 2 + GAP;
               const marks = mode === "daily" ? monthMarks : weeklyMonthMarks(weekly, monthLabel);
               return (
-                <div className="mt-2 flex items-center" style={{ height: 14, marginLeft: mode === "daily" ? WEEK_GUTTER : 0 }}>
-                  <div className="relative h-full flex-1 min-w-0">
-                    {marks.map((mark) => (
-                      <span
-                        key={mark.weekIndex}
-                        className="absolute text-[10px] text-[var(--text-tertiary)] whitespace-nowrap"
-                        style={{ left: mark.weekIndex * stride, top: 0 }}
-                      >
-                        {mark.label}
-                      </span>
-                    ))}
-                  </div>
-                  <div className="flex shrink-0 items-center gap-1 text-[10px] text-[var(--text-tertiary)]">
-                    <span>{t("usage.heatmapLess")}</span>
-                    {[0, 1, 2, 3, 4].map((level) => (
-                      <span
-                        key={level}
-                        className="inline-block rounded-[3px]"
-                        style={{ ...cellStyle(level === 0 ? 0 : maxTokens * (level / 4)), width: CELL, height: CELL }}
-                      />
-                    ))}
-                    <span>{t("usage.heatmapMore")}</span>
-                  </div>
+                <div
+                  className="mt-2 relative overflow-hidden"
+                  style={{
+                    height: 14,
+                    marginLeft: mode === "daily" ? WEEK_GUTTER : 0,
+                    width: mode === "daily" ? grid.length * (CELL + GAP) : weekly.length * (CELL * 2 + GAP),
+                  }}
+                >
+                  {marks.map((mark) => (
+                    <span
+                      key={mark.weekIndex}
+                      className="absolute text-[10px] leading-none text-[var(--text-tertiary)] whitespace-nowrap"
+                      style={{ left: mark.weekIndex * stride, top: 2 }}
+                    >
+                      {mark.label}
+                    </span>
+                  ))}
                 </div>
               );
             })()}
+            {/* Legend on its own row, right-aligned under the grid */}
+            <div className="mt-1.5 flex items-center justify-end gap-1 text-[10px] text-[var(--text-tertiary)]">
+              <span>{t("usage.heatmapLess")}</span>
+              {[0, 1, 2, 3, 4].map((level) => (
+                <span
+                  key={level}
+                  className="inline-block rounded-[3px]"
+                  style={{ ...cellStyle(level === 0 ? 0 : maxTokens * (level / 4)), width: CELL, height: CELL }}
+                />
+              ))}
+              <span>{t("usage.heatmapMore")}</span>
+            </div>
             {/* Shared hover tooltip, anchored above the hovered cell */}
             {hover && (
               <div

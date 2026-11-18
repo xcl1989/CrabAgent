@@ -165,3 +165,64 @@ def test_coordinator_serializes_processes(tmp_path, monkeypatch):
         assert process.exitcode == 0
     assert outcomes == ["conflict", "ok"]
     assert target.read_bytes() in (b"\x01", b"\x02")
+
+
+def test_edit_refuses_external_change_since_read_even_if_old_text_remains(tmp_path):
+    from crabagent.core.agent.context import AgentContext
+    from crabagent.core.agent.tools.edit import edit_file
+    from crabagent.core.agent.tools.read import read_file
+
+    target = tmp_path / "test.txt"
+    target.write_text("same text\noriginal\n")
+    context = AgentContext(workspace=tmp_path)
+    read_file("test.txt", context=context)
+    target.write_text("same text\nexternal edit\n")
+    result = edit_file("test.txt", "same text", "replacement", context=context)
+    assert "changed since it was read" in result
+    assert target.read_text() == "same text\nexternal edit\n"
+    read_file("test.txt", context=context)
+    assert edit_file("test.txt", "same text", "replacement", context=context).startswith("Successfully")
+
+
+def test_observed_changes_detects_external_modification_and_deletion(tmp_path):
+    from crabagent.core.agent.context import AgentContext
+    from crabagent.core.agent.tools.read import read_file
+    from crabagent.core.collaboration.observed_changes import changed_observed_files
+
+    first = tmp_path / "first.txt"
+    second = tmp_path / "second.txt"
+    first.write_text("old")
+    second.write_text("present")
+    context = AgentContext(workspace=tmp_path)
+    read_file("first.txt", context=context)
+    read_file("second.txt", context=context)
+    assert changed_observed_files(context) == []
+    first.write_text("new")
+    second.unlink()
+    assert changed_observed_files(context) == sorted([str(first), str(second)])
+    read_file("first.txt", context=context)
+    assert changed_observed_files(context) == [str(second)]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("enabled", [True, False])
+async def test_bash_tool_reports_change_to_previously_read_file(tmp_path, enabled):
+    from crabagent.core.agent.context import AgentContext
+    from crabagent.core.agent.tools.read import read_file
+    from crabagent.core.agent.tools.registry import ToolRegistry
+
+    target = tmp_path / "test.txt"
+    target.write_text("before")
+    context = AgentContext(workspace=tmp_path)
+    context.metadata.update(_batch_molt=True, _collaboration_bound=enabled)
+    read_file("test.txt", context=context)
+    tools = ToolRegistry()
+
+    @tools.register(name="bash", description="test", parameters={"type": "object", "properties": {}})
+    async def shell(context=None):
+        target.write_text("after")
+        return "[no output]"
+
+    result = await tools.execute("bash", {}, context=context)
+    assert ("Previously read files changed" in result) == enabled
+    assert (str(target) in result) == enabled

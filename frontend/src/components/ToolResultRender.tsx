@@ -7,7 +7,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
   Terminal, FileText, Pencil, Search, FolderOpen, Save, Globe,
-  GitBranch, Zap, Check, X, AlertTriangle, ChevronDown,
+  GitBranch, Zap, Check, X, AlertTriangle, ChevronDown, History,
 } from "lucide-react";
 import { terminalOutput } from "../lib/terminalOutput";
 import { cn } from "../lib/cn";
@@ -15,6 +15,76 @@ import i18n from "../i18n";
 
 // Shorthand for i18n in non-component functions
 const _t = (key: string, opts?: Record<string, unknown>) => i18n.t(key, opts);
+
+// ---------------------------------------------------------------------------
+// Collaboration change notes appended to failed edit/write results.
+// The backend appends "\n[Collaboration] Recent recorded changes ..." followed
+// by "event <id>, session <sid>, <time>:\n<content>" blocks.
+// ---------------------------------------------------------------------------
+
+interface CollabChange {
+  eventId: string;
+  session: string;
+  time: string;
+  content: string;
+}
+
+function extractCollabChanges(result: string): { base: string; changes: CollabChange[] } {
+  const marker = "[Collaboration] Recent recorded changes";
+  const markerIdx = result.indexOf(marker);
+  if (markerIdx < 0) return { base: result, changes: [] };
+  const base = result.slice(0, markerIdx).trimEnd();
+  const body = result.slice(markerIdx);
+  const changes: CollabChange[] = [];
+  const entryRe = /event (\d+), session ([^,]+), ([^\n]+):\n/g;
+  const starts: { m: RegExpExecArray }[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = entryRe.exec(body)) !== null) starts.push({ m });
+  for (let i = 0; i < starts.length; i++) {
+    const end = i + 1 < starts.length ? starts[i + 1].m.index : body.indexOf("Read the current file before retrying");
+    const seg = body.slice(starts[i].m.index, end > 0 ? end : undefined);
+    changes.push({
+      eventId: starts[i].m[1],
+      session: starts[i].m[2],
+      time: starts[i].m[3],
+      content: seg.slice(starts[i].m[0].length).trim(),
+    });
+  }
+  return { base, changes };
+}
+
+function CollaborationChangeList({ changes }: { changes: CollabChange[] }) {
+  const [expanded, setExpanded] = useState(false);
+  if (changes.length === 0) return null;
+  const visible = expanded ? changes : changes.slice(0, 1);
+  return (
+    <div className="border-t border-[var(--border-subtle)] bg-[var(--bg-tertiary)]">
+      <div className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold text-[var(--text-secondary)]">
+        <History size={12} />
+        {_t("toolResult.collabChanges", { count: changes.length })}
+      </div>
+      {visible.map((change) => (
+        <div key={change.eventId} className="mx-2 mb-2 rounded border border-[var(--border)] bg-[var(--code-bg)] overflow-hidden">
+          <div className="px-2 py-1 text-[10px] font-mono text-[var(--text-tertiary)] border-b border-[var(--border-subtle)]">
+            #{change.eventId} · {change.session.slice(0, 8)} · {change.time.slice(0, 19).replace("T", " ")}
+          </div>
+          <div className="px-2 py-1 text-[11px] font-mono leading-[1.5] whitespace-pre-wrap break-all text-[var(--text-secondary)] max-h-40 overflow-y-auto">
+            {change.content}
+          </div>
+        </div>
+      ))}
+      {changes.length > 1 && (
+        <button
+          onClick={() => setExpanded((v) => !v)}
+          className="w-full flex items-center justify-center gap-1 pb-2 text-[11px] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors"
+        >
+          <ChevronDown size={12} className={cn(expanded && "rotate-180 transition-transform")} />
+          {expanded ? _t("toolResult.collapse") : _t("toolResult.showMoreChanges", { count: changes.length - 1 })}
+        </button>
+      )}
+    </div>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -29,6 +99,7 @@ interface ToolResultRenderProps {
   accentVar?: string;   // "var(--accent)" or "var(--accent-2)"
 }
 
+export { extractCollabChanges };
 export default function ToolResultRender({
   name,
   argsJson,
@@ -152,6 +223,8 @@ function EditRender({ args, result, accentVar }: { args: Record<string, unknown>
   const { oldLines, newLines } = computeDiff(oldStr, newStr);
   const hasOld = oldLines.length > 0;
   const err = isError(result);
+  const { base, changes } = err ? extractCollabChanges(result) : { base: result, changes: [] as CollabChange[] };
+  const displayResult = base;
 
   // Parse starting line number from result: "… @ L139"
   const lineMatch = result.match(/@ L(\d+)/);
@@ -207,10 +280,11 @@ function EditRender({ args, result, accentVar }: { args: Record<string, unknown>
         </span>}
       </div>
       {err && (
-        <div className="px-3 py-1.5 text-[11px] text-[var(--danger)] border-t border-[var(--border-subtle)]">
-          {result}
+        <div className="px-3 py-1.5 text-[11px] text-[var(--danger)] border-t border-[var(--border-subtle)] whitespace-pre-wrap">
+          {displayResult}
         </div>
       )}
+      {err && <CollaborationChangeList changes={changes} />}
     </Container>
   );
 }
@@ -224,12 +298,16 @@ function WriteRender({ args, result, accentVar }: { args: Record<string, unknown
   const content = str(args.content) || "";
   const lines = content.split("\n");
   const err = isError(result);
+  const { base, changes } = err ? extractCollabChanges(result) : { base: result, changes: [] as CollabChange[] };
 
   return (
     <Container accentVar={accentVar}>
       <Header icon={<Pencil size={13} />} title={_t("toolResult.write")} subtitle={`${filePath} · ${_t("toolResult.bytes", { size: formatBytes(content.length) })}`} />
       {err ? (
-        <div className="px-3 py-2 text-[12px] text-[var(--danger)]">{result}</div>
+        <>
+          <div className="px-3 py-2 text-[12px] text-[var(--danger)] whitespace-pre-wrap">{base}</div>
+          <CollaborationChangeList changes={changes} />
+        </>
       ) : (
         <FileContentLines lines={lines} maxLines={20} />
       )}

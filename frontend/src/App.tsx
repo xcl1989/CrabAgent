@@ -35,6 +35,7 @@ interface FtsRebuild {
 function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
   const [page, setPage] = useState<PageId>(() => pageFromHash() ?? "chat");
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [collaborationEnabled, setCollaborationEnabled] = useState(false);
   const [activeBranch, setActiveBranch] = useState<string | undefined>();
   const [enterBrowser, setEnterBrowser] = useState(0);
   const [ftsStatus, setFtsStatus] = useState<FtsRebuild | null>(null);
@@ -90,26 +91,35 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
 
   // Poll only the active session's authorized project; event records remain the source of truth.
   useEffect(() => {
-    if (!activeSessionId) return;
+    if (!activeSessionId || !collaborationEnabled) return;
     let active = true;
+    let pending = false;
     let cursor: number | null = null;
     let projectId: number | null = null;
     const poll = async () => {
+      if (pending || document.visibilityState === "hidden") return;
+      pending = true;
       try {
         const response = await api.get<{ project_id: number | null; cursor: number; entries: { id: number }[] }>(
           `/collaboration/sessions/${encodeURIComponent(activeSessionId)}/updates`,
           cursor === null ? undefined : { after: String(cursor) },
         );
         if (!active) return;
-        if (response.project_id !== projectId) { cursor = null; projectId = response.project_id; }
-        if (cursor !== null && response.entries.length) toast.info("项目有其他对话的最新协作动态");
+        if (response.project_id !== projectId) {
+          cursor = null;
+          projectId = response.project_id;
+        }
+        if (cursor !== null && response.entries.length) {
+          toast.info("项目有其他对话的最新协作动态");
+        }
         cursor = Math.max(cursor ?? 0, response.cursor);
-      } catch { /* Retry on the next poll. */ }
+        if (response.project_id !== null) window.dispatchEvent(new Event("project-collaboration-update"));
+      } catch { /* Retry on the next poll. */ } finally { pending = false; }
     };
     poll();
     const timer = setInterval(poll, 10000);
     return () => { active = false; clearInterval(timer); };
-  }, [activeSessionId, activeBranch]);
+  }, [activeSessionId, activeBranch, collaborationEnabled]);
 
   // Connect to global SSE for system notifications
   useEffect(() => {
@@ -131,6 +141,7 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
         <div className={cn("absolute inset-0", page !== "chat" && "hidden")}>
           <ChatPage
             onActiveSessionChange={setActiveSessionId}
+            onCollaborationChange={setCollaborationEnabled}
             onActiveBranchChange={setActiveBranch}
             enterBrowserSignal={enterBrowser}
           />
@@ -140,7 +151,10 @@ function AuthenticatedApp({ onLogout }: { onLogout: () => void }) {
         {page === "memory" && <div className="absolute inset-0"><MemoryPage /></div>}
         {page === "usage" && <div className="absolute inset-0"><UsagePage /></div>}
         {page === "calendar" && <div className="absolute inset-0"><CalendarPage /></div>}
-        {page === "collaboration" && <div className="absolute inset-0"><CollaborationPage sessionId={activeSessionId} /></div>}
+        {page === "collaboration" && <div className="absolute inset-0"><CollaborationPage sessionId={activeSessionId} onBindingChange={(enabled) => {
+          setCollaborationEnabled(enabled);
+          window.dispatchEvent(new CustomEvent("project-collaboration-binding", { detail: { sessionId: activeSessionId, enabled } }));
+        }} /></div>}
         {page === "settings" && <div className="absolute inset-0"><SettingsPage /></div>}
       </div>
 

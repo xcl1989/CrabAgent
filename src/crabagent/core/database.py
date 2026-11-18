@@ -225,6 +225,7 @@ class Conversation(Base):
     source: Mapped[str] = mapped_column(String(20), default="chat")  # chat | wechat | email | scheduled
     current_file: Mapped[str] = mapped_column(Text, default="")
     workspace_type: Mapped[str] = mapped_column(Text, default="")
+    collaboration_disabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     history_searchable: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
@@ -965,6 +966,10 @@ async def init_db() -> None:
         await conn.execute(text("PRAGMA journal_mode=WAL"))
         await conn.run_sync(Base.metadata.create_all)
         await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_collaboration_file_activity "
+            "ON collaboration_entries (project_id, user_id, kind, scope, id)"
+        ))
+        await conn.execute(text(
             "CREATE UNIQUE INDEX IF NOT EXISTS ux_workspace_preferences_user_workspace "
             "ON workspace_preferences(user_id, workspace)"
         ))
@@ -986,6 +991,7 @@ async def init_db() -> None:
         await ensure_column(conn, "conversations", "current_file", "TEXT DEFAULT ''")
         await ensure_column(conn, "conversations", "workspace_type", "TEXT DEFAULT ''")
         await ensure_column(conn, "conversations", "history_searchable", "BOOLEAN DEFAULT 1")
+        await ensure_column(conn, "conversations", "collaboration_disabled", "BOOLEAN NOT NULL DEFAULT 0")
 
         # Goals are created by metadata for new databases. The tables below are
         # intentionally independent so existing user databases only gain data.

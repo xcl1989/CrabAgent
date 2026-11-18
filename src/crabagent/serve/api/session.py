@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -51,6 +52,7 @@ class SessionResponse(BaseModel):
     active_branch: str = "main"
     prompt_locale: str = ""
     history_searchable: bool = True
+    collaboration_disabled: bool = False
     created_at: str | None = None
     updated_at: str | None = None
 
@@ -66,6 +68,7 @@ def _conv_to_response(conv) -> SessionResponse:
         active_branch=conv.active_branch or "main",
         prompt_locale=getattr(conv, "prompt_locale", "") or "",
         history_searchable=getattr(conv, "history_searchable", True),
+        collaboration_disabled=getattr(conv, "collaboration_disabled", False),
         created_at=conv.created_at.isoformat() if conv.created_at else None,
         updated_at=conv.updated_at.isoformat() if conv.updated_at else None,
     )
@@ -467,7 +470,15 @@ async def create_session(
         model=req.model,
         title=req.title,
     )
-    return _conv_to_response(conv)
+    response = _conv_to_response(conv)
+    if conv.workspace:
+        from crabagent.core.collaboration.auto_binding import ensure_session_binding
+
+        try:
+            await ensure_session_binding(db, user.id, response.session_id)
+        except Exception:
+            logging.getLogger(__name__).exception("Could not bind new project session; retry on first prompt")
+    return response
 
 
 @router.get("/{session_id}", response_model=SessionResponse)

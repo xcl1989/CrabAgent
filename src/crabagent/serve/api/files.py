@@ -280,13 +280,32 @@ async def write_file(
     if not req.expected_version:
         raise HTTPException(status_code=428, detail="File version is required; reload before saving")
     try:
-        version = replace_if_version(target, req.content.encode("utf-8"), req.expected_version,
-                                     lock_root=Path.home() / ".crabagent" / "collaboration-locks")
+        raw = req.content.encode("utf-8")
+        change = None
         if req.session_id:
+            from crabagent.core.database import CollaborationBinding
+
+            binding = await db.get(CollaborationBinding, req.session_id)
+            if binding and binding.user_id == user.id:
+                if req.expected_version == "missing":
+                    change = (b"", raw)
+                else:
+                    try:
+                        before = await asyncio.to_thread(target.read_bytes)
+                        change = (before, raw)
+                    except OSError:
+                        pass  # The versioned commit remains authoritative.
+        version = await asyncio.to_thread(
+            replace_if_version, target, raw, req.expected_version,
+            lock_root=Path.home() / ".crabagent" / "collaboration-locks",
+        )
+        if change is not None:
             try:
                 from crabagent.core.collaboration.events import record_ui_write
+                from crabagent.core.collaboration.write_coordinator import version_bytes
 
-                await record_ui_write(user.id, req.session_id, target, "file_panel", version)
+                await record_ui_write(user.id, req.session_id, target, "file_panel", version,
+                                      change=change if req.expected_version in ("missing", version_bytes(change[0])) else None)
             except Exception:
                 import logging
                 logging.getLogger(__name__).exception("Failed to record file panel write")

@@ -82,7 +82,7 @@ const STARTER_PROMPTS = [
   { icon: <MessageSquare size={14} />, labelKey: "chat.writeDocLabel", promptKey: "chat.writeDocPrompt" },
 ];
 
-export default function ChatPage({ onActiveSessionChange, onActiveBranchChange, enterBrowserSignal }: { onActiveSessionChange?: (sessionId: string | null) => void; onActiveBranchChange?: (branch: string) => void; enterBrowserSignal?: number }) {
+export default function ChatPage({ onActiveSessionChange, onCollaborationChange, onActiveBranchChange, enterBrowserSignal }: { onActiveSessionChange?: (sessionId: string | null) => void; onCollaborationChange?: (enabled: boolean) => void; onActiveBranchChange?: (branch: string) => void; enterBrowserSignal?: number }) {
   const { t, i18n } = useTranslation();
   const [workspace, setWorkspace] = useState<string>("");
   const [goal, setGoal] = useState<GoalData | null>(null);
@@ -292,6 +292,9 @@ export default function ChatPage({ onActiveSessionChange, onActiveBranchChange, 
       // Completed or archived goals should not continue occupying the chat header.
       if (snapshot) setGoal(["complete", "cleared"].includes(snapshot.status) ? null : snapshot);
     }
+    if (event.type === "collaboration_activity" && typeof event.data.message === "string") {
+      toast.info("当前文件有协作动态", { description: event.data.message });
+    }
     if (event.type.startsWith("doc_op_")) {
       handleDocEvent(event);
     } else {
@@ -394,6 +397,22 @@ export default function ChatPage({ onActiveSessionChange, onActiveBranchChange, 
   useEffect(() => {
     onActiveBranchChange?.(activeBranch);
   }, [activeBranch, onActiveBranchChange]);
+
+  useEffect(() => {
+    const onBindingChange = (event: Event) => {
+      const { sessionId, enabled } = (event as CustomEvent<{ sessionId: string; enabled: boolean }>).detail;
+      setActiveSession(session => session?.session_id === sessionId ? { ...session, collaboration_disabled: !enabled } : session);
+      setSessions(sessions => sessions.map(session => session.session_id === sessionId
+        ? { ...session, collaboration_disabled: !enabled } : session));
+    };
+    window.addEventListener("project-collaboration-binding", onBindingChange);
+    return () => window.removeEventListener("project-collaboration-binding", onBindingChange);
+  }, [setActiveSession, setSessions]);
+
+  const collaborationEnabled = !!activeSession?.workspace && !activeSession?.collaboration_disabled;
+  useEffect(() => {
+    onCollaborationChange?.(collaborationEnabled);
+  }, [collaborationEnabled, onCollaborationChange]);
 
   useEffect(() => {
     onActiveSessionChange?.(activeSession?.session_id || null);
@@ -1475,6 +1494,8 @@ export default function ChatPage({ onActiveSessionChange, onActiveBranchChange, 
                   />
                 ) : workspaceType === "code" && currentDocPath ? (
                   <CodePanel
+                    collaborationEnabled={collaborationEnabled}
+                    collaborationBranch={activeBranch}
                     sessionId={activeSession?.session_id}
                     key={currentDocPath}
                     initialPath={currentDocPath}
@@ -1483,6 +1504,8 @@ export default function ChatPage({ onActiveSessionChange, onActiveBranchChange, 
                   />
                 ) : workspaceType === "prototype" && currentDocPath ? (
                   <PrototypePanel
+                    collaborationEnabled={collaborationEnabled}
+                    collaborationBranch={activeBranch}
                     sessionId={activeSession?.session_id}
                     key={currentDocPath}
                     filePath={currentDocPath}
@@ -1490,6 +1513,8 @@ export default function ChatPage({ onActiveSessionChange, onActiveBranchChange, 
                   />
                 ) : workspaceType === "markdown" && currentDocPath ? (
                   <MarkdownPanel
+                    collaborationEnabled={collaborationEnabled}
+                    collaborationBranch={activeBranch}
                     sessionId={activeSession?.session_id}
                     key={currentDocPath}
                     filePath={currentDocPath}
@@ -1497,6 +1522,8 @@ export default function ChatPage({ onActiveSessionChange, onActiveBranchChange, 
                   />
                 ) : docState ? (
                   <DocumentPanel
+                    collaborationEnabled={collaborationEnabled}
+                    collaborationBranch={activeBranch}
                     sessionId={activeSession?.session_id}
                     doc={docState}
                     onClose={() => { setDocState(null); setCurrentDocPath(null); }}
@@ -1993,6 +2020,8 @@ export default function ChatPage({ onActiveSessionChange, onActiveBranchChange, 
             </div>
           )}
           <DocumentPanel
+            collaborationEnabled={collaborationEnabled}
+            collaborationBranch={activeBranch}
             sessionId={activeSession?.session_id}
             doc={docState}
             onClose={() => { setDocState(null); setCurrentDocPath(null); }}

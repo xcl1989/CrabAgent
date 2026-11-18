@@ -1,3 +1,4 @@
+import { FileCollaboration } from "./FileCollaboration";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Save, FileText, Code2, Eye, Columns2, AlertTriangle } from "lucide-react";
@@ -15,9 +16,11 @@ interface Props {
   className?: string;
   onClose?: () => void;
   sessionId?: string;
+  collaborationEnabled?: boolean;
+  collaborationBranch?: string;
 }
 
-export function MarkdownPanel({ filePath, className, onClose, sessionId }: Props) {
+export function MarkdownPanel({ filePath, className, onClose, sessionId, collaborationEnabled, collaborationBranch }: Props) {
   const { t } = useTranslation();
   const [source, setSource] = useState("");
   const [version, setVersion] = useState("");
@@ -142,6 +145,7 @@ export function MarkdownPanel({ filePath, className, onClose, sessionId }: Props
 
   return (
     <div className={cn("flex flex-col h-full bg-[var(--bg-primary)]", className)}>
+      <FileCollaboration sessionId={sessionId} path={filePath} enabled={collaborationEnabled} branch={collaborationBranch} />
       {/* ── Toolbar ─────────────────────────────────────────── */}
       <div className="flex items-center gap-1 px-3 h-11 border-b border-[var(--border)] bg-[var(--bg-secondary)] shrink-0">
         {/* View mode switcher */}

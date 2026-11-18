@@ -41,10 +41,15 @@ async def test_update_goal_completes_with_evidence_and_records_event(monkeypatch
     async def fake_event(_db, _goal, event_type, detail, data=None):
         events.append((event_type, detail, data))
 
+    from unittest.mock import AsyncMock
+
     goal = _goal()
+    goal.user_id = 1
+    db = SimpleNamespace(execute=AsyncMock())
     monkeypatch.setattr(service, "record_event", fake_event)
 
-    updated = await service.update_goal(SimpleNamespace(), goal, status="complete", evidence="pytest: 20 passed")
+    updated = await service.update_goal(db, goal, status="complete", evidence="pytest: 20 passed")
+    db.execute.assert_awaited_once()
 
     assert updated is goal
     assert goal.status == "complete"

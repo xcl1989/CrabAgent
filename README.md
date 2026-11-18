@@ -1,430 +1,116 @@
 # 🦀 CrabAgent
 
-> **AI Knowledge Work Platform** — Chat when you need answers, Work when you need results, Computer Use when the task is on your desktop. One agent across terminal, browser, and native macOS apps.
+**A local-first AI work assistant for conversations, files, browsers, and the desktop.**
 
-CrabAgent is a local-first AI platform with **two working modes** that adapt to what you're doing:
+English | [中文](README.zh-CN.md) · [Python 3.12+](https://www.python.org/downloads/) · [License](LICENSE)
 
-| | Chat Mode 💬 | Work Mode 🛠️ |
+CrabAgent brings AI chat, task execution, and a live workspace together. Ask an agent to research a question, edit code or Office documents, navigate a browser, or operate an authorized native macOS app. Use Chat Mode for discussion and Work Mode to inspect documents, code, and prototypes as you work.
+
+## Highlights
+
+- **Chat and workspace**: multiple conversations and workspaces, with Markdown, code editing, document preview, and prototypes. Responses can include Mermaid diagrams, charts, and KPI cards.
+- **Agent team and project memory**: delegate research, analysis, coding, or writing when useful; run parallel tasks or pipelines, hand off work, and retain project knowledge and preferences across sessions.
+- **Goals and tasks**: track objectives, acceptance criteria, and progress alongside tasks, calendars, scheduled jobs, and meeting action items.
+- **Files and documents**: work with local files and create, edit, or preview Word, Excel, and PowerPoint documents. Snapshots support rollback.
+- **Browser and macOS control**: the collaboration browser shares login state; opt-in macOS control operates allowlisted native apps. You handle CAPTCHA, MFA, and other human-only steps.
+- **Integrations**: MCP, custom tools, email, WeChat, remote access through Tailscale, and task notifications via Bark or ntfy are available with their respective configuration.
+- **Project collaboration**: editing intentions are advisory; shared files show current intentions and saved changes, while version checks prevent stale saves.
+
+## Two Work Modes
+
+| | Chat Mode | Work Mode |
 |---|---|---|
-| **Layout** | Session list + conversation | AI sidebar + live workspace |
-| **Focus** | Talk, ask, brainstorm | Create, edit, build |
-| **Right panel** | — | Document preview / code editor / prototype / meeting notes |
-| **Switch** | Click 🛠️ icon in toolbar | Click 💬 icon or AI auto-switches when opening files |
+| Best for | Questions, discussion, search, and planning | Creating or changing files while inspecting results |
+| Layout | Session list and conversation | AI sidebar with a document, code, or prototype workspace |
+| Typical actions | Switch models, use tools, delegate to agents | Preview Office files, edit Markdown, inspect code and meeting notes |
 
-You don't pick a mode upfront. Start chatting, and when the AI starts working on a document or code file, the workspace slides open automatically. Switch back to Chat Mode anytime for a clean conversation view.
+Switch modes in the interface; opening or creating a file can also bring up the workspace. The conversation remains available throughout.
 
-```
-Chat Mode                          Work Mode
-┌──────┬──────────────┐           ┌──┬──────────┬────────────────┐
-│      │              │           │  │ AI Chat  │   Workspace    │
-│ Sess │  Conversation│           │ 💬│ Sidebar  │  ┌──────────┐  │
-│ List │              │           │  │ (350px)  │  │ Document │  │
-│      │              │           │  │          │  │ Preview  │  │
-│      │              │           │  │ Input    │  │ Code     │  │
-│      │              │           │  │          │  │ Prototype│  │
-│      │              │           │  │          │  │ Meeting  │  │
-└──────┴──────────────┘           │  │          │  └──────────┘  │
-                                  └──┴──────────┴────────────────┘
-```
-
-[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-[![License](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
-
-**[English](README.md)** | **[中文](README.zh-CN.md)**
-
----
-
-## 💬 Chat Mode — Pure Conversation
-
-The default mode. Session list on the left, full-width conversation on the right. No distractions.
-
-**Best for:**
-- Asking questions and getting AI-powered answers
-- Brainstorming and exploring ideas
-- Quick research via web search and browser automation
-- Delegating tasks to specialized AI agents (researcher, analyst, coder, writer)
-- Multi-turn conversations with full project memory
-
-```
-You: "帮我分析一下这个项目的架构"
-AI: [reads files, analyzes patterns, generates structured report]
-You: "把分析结果整理成一份 Word 文档"
-AI: [creates document] → auto-switches to Work Mode with preview
-```
-
----
-
-## 🛠️ Work Mode — AI + Live Workspace
-
-When the AI creates or opens a file, the interface splits: AI chat shrinks to a 350px sidebar on the left, and the **workspace** takes over the right side. Everything the AI does is visible in real time.
-
-### Workspace types
-
-| Type | What shows | Trigger |
-|------|-----------|---------|
-| 📄 **Document** | Office document preview (`.docx` / `.xlsx` / `.pptx`) with outline, timeline, and inline edit | AI creates/opens an Office file |
-| 💻 **Code** | Monaco-based code editor with syntax highlighting | AI works on a code file |
-| 🔬 **Prototype** | Split-pane: source code on left, live preview on right | AI builds an HTML/JS prototype |
-| 📝 **Meeting** | Structured meeting notes panel with action item extraction | You click "Start Meeting" |
-| 🌐 **Browser** | Real embedded browser with shared login state; AI navigates and interacts while you handle CAPTCHA and MFA | You click "Collaboration Browser" |
-| 🖥️ **macOS Computer Use** | AI observes and operates native macOS apps — accessibility tree, window capture, keyboard/mouse input. Opt-in, allowlisted apps only | Settings → macOS 控制 |
-
-### Work Mode features
-
-- **Real-time preview**: watch the AI edit a document and see changes reflected instantly
-- **Inline editing**: double-click text in document preview to edit directly
-- **AI Edit toolbar**: Bold, italic, font size, color — one click to style selected text
-- **Natural language edit**: type instructions like "make the heading red" and the AI applies it
-- **Document timeline**: see the full history of AI operations on the document
-- **File workspace**: create folders, multi-select items, drag files or folders between directories, use a floating context menu, and copy text previews without leaving Work Mode
-- **Collaboration browser**: AI navigates websites, fills forms, and extracts data in an embedded browser with page-version safety, sensitive-field blocking, and high-risk click interception — all while you maintain login state and handle human-only steps
-- **One-click switch back to Chat Mode** when you're done
-
-```
-Work Mode in action:
-
-You: "读取 sales.xlsx 汇总 Q1 数据，做成一份报告"
-                          │
-  ┌───────────────────────┼───────────────────────────────┐
-  │  AI Chat Sidebar      │  Workspace (Document Preview) │
-  │                       │                               │
-  │  AI: Reading file...  │  ┌─────────────────────────┐  │
-  │  AI: Q1 total: $1.2M  │  │  Q1 Sales Report        │  │
-  │  AI: Creating doc...  │  │  ───────────────        │  │
-  │  AI: Done! ✓          │  │  Total: $1.2M           │  │
-  │                       │  │  Growth: +23%           │  │
-  │  [Input: continue...] │  │  ...                    │  │
-  │                       │  └─────────────────────────┘  │
-  └───────────────────────┴───────────────────────────────┘
-```
-
----
-
-## 🤖 AI Team
-
-Both modes have access to a team of specialized agents:
-
-| Agent | Role | Best for |
-|-------|------|----------|
-| **Researcher** | Web researcher | Search, browse, collect data |
-| **Analyst** | Data analyst | Compare, identify patterns, generate reports |
-| **Coder** | Code expert | Write, review, debug, refactor |
-| **Writer** | Content writer | Write, edit, translate, format |
-| **Plan Creator** | Task planner | Decompose complex tasks into workflows |
-
-### Orchestration modes
-
-```
-Delegate      → @researcher "find competitor pricing"
-Parallel      → Run 3 agents simultaneously on different tasks
-Pipeline      → research → analyze → write (with data flow)
-Handoff       → Pass context from one agent to another
-```
-
-**Cost control:** In Settings → General, map the parent agent's `provider|model` to a (usually cheaper) `provider|model` for sub-agents — applied automatically on every delegation, across providers.
-
----
-
-## 📬 Email Intelligence — Tasks from Inbox
-
-CrabAgent watches your inbox and turns emails into action items — automatically.
-
-```
-Incoming email: "明天下午3点开会讨论新功能"
-      │
-      ├─ 🧠 LLM analyzes: meeting + deadline detected
-      ├─ 📝 Drafts a reply for your review
-      ├─ ✅ Creates task: "参加关于crabagent的会议" (due tomorrow 3PM)
-      └─ 🔗 Links task to email conversation — click to view full context
-```
-
-No rules, no regex. Just LLM-powered understanding.
-
----
-
-## 💬 WeChat Channel — AI in Your Pocket
-
-Bind your WeChat account via QR code, and CrabAgent becomes reachable from your phone.
-
-```
-You (WeChat): "看一下26年1月有啥工作"
-       │
-       ├─ 🤖 Agent processes with full project context
-       ├─ 💬 Replies directly in WeChat chat
-       └─ 🔔 Pushes notifications: task overdue, scheduled task done, email summary
-```
-
-**Three modes:**
-- **Command execution** — send instructions from WeChat, Agent executes and replies
-- **Proactive notifications** — task deadlines, scheduled task results, email summaries auto-pushed
-- **Conversational** — multi-turn chat with full project memory
-
----
-
-## 📱 Remote Access & Push — Full Agent, Anywhere
-
-Beyond the WeChat chat channel, CrabAgent supports a full-fidelity remote setup:
-
-- **Remote Web UI via Tailscale** — the local server listens on all interfaces, so after a zero-config Tailscale tunnel between your Mac and phone, opening `http://<mac-ip>:5210` on cellular gives you the complete desktop experience: sessions, task drawers, documents, and the collaboration browser. No port forwarding, nothing exposed to the public internet.
-- **Bark / ntfy push notifications** — when a task finishes, fails, or waits for your authorization, a push notification arrives on your phone instantly (waiting-for-you alerts are time-sensitive and break through iOS Focus). Tap the notification to deep-link straight back into the Agent UI. Configure it in Settings → "手机推送", with per-event toggles and a one-click test send.
-- **WeChat stays as a fallback** — both channels run in parallel and independently.
-
----
-
-## 🔑 ChatGPT Subscription — Use Your Plus/Pro Membership
-
-Already paying for ChatGPT Plus or Pro? Use it directly in CrabAgent — **no API key, no extra cost**.
-
-```
-Settings → Providers → Add → "ChatGPT Subscription (Plus/Pro)"
-       │
-       ├─ 🔐 Click "Login ChatGPT" → get a device code
-       ├─ 🌐 Open auth.openai.com/codex/device in browser
-       ├─ ✍️ Sign in with ChatGPT, enter the code
-       ├─ ✅ CrabAgent auto-detects login
-       └─ 📊 Click "View Usage" → see real-time quota:
-            ┌──────────────────────────────────┐
-            │ Plan: PLUS     Limit: premium     │
-            │                                   │
-            │ 5h window   ██░░░░░░░  12.3%      │
-            │ 7d window   █░░░░░░░░   3.1%      │
-            │ Reset in: 4.2h / 6.2d             │
-            └──────────────────────────────────┘
-```
-
-**Available models:** `gpt-5.4`, `gpt-5.3-codex`, `gpt-5.3-instant`, `gpt-5.2-codex`, and more — all powered by your ChatGPT subscription.
-
-**How it works:** CrabAgent uses the same OAuth Device Code flow as the official OpenAI Codex CLI. Your ChatGPT login is stored locally and auto-refreshed. All API calls go through `chatgpt.com/backend-api/codex`, using your subscription quota — not paid API credits.
-
----
-
-## 🧠 Project Memory & Self-Evolving Agents
-
-Every time you work in a project, CrabAgent automatically extracts lessons and preferences. Next time you open it, it already knows:
-
-```
-=== 项目上下文 ===
-上次活跃：06-05 15:30
-技术栈：Python / FastAPI / SQLAlchemy
-项目经验：N+1 查询用 selectinload 优化；API 文档用 OpenAPI 规范
-====================
-```
-
-After each task, agents reflect on what worked (and what didn't) and store the insight permanently:
-
-| Layer | Scope | What's stored |
-|-------|-------|---------------|
-| **Project Memory** | Per workspace | Recent lessons, tech stack, activity timeline |
-| **User Preferences** | Per user | Communication style, tool preferences, rejected patterns |
-| **Agent Lessons** | Per agent | Technical strategies, pitfalls, effective approaches |
-
----
+**For example**, ask an agent to summarize a spreadsheet and create a report, or inspect a codebase, explain changes, and run tests. Check sources and results when working with real business data.
 
 ## Quick Start
+
+Requires Python 3.12 or later.
 
 ```bash
 pip install crabagent
 crabagent init
 
-# TUI — interactive REPL with slash commands
-crabagent
-
-# Web UI — Chat Mode & Work Mode
-crabagent --serve          # → http://localhost:5210
-                           #   Default login: admin / xcl1989
-
-# Single-shot CLI
-crabagent "organize this directory"
+crabagent                         # interactive TUI
+crabagent --serve                 # Web UI: http://localhost:5210
+crabagent "organize this directory"  # single CLI request
 ```
 
-### Desktop App (macOS & Windows)
+Configure a model provider when prompted, or use Settings for ChatGPT subscription login, MCP, and other integrations. Optional browser automation dependencies:
 
-Build the Electron wrapper (requires Python + `crabagent` installed on your system):
-
-```bash
-# One-command build (from git clone):
-make desktop                       # macOS → CrabAgent-x.x.x-arm64.dmg
-
-# Or from pip install (auto-detects platform):
-crabagent --build-desktop          # macOS → .dmg | Windows → .exe installer
-
-# Windows (PowerShell):
-.\scripts\build-desktop.ps1        # → CrabAgent-x.x.x-setup.exe
-```
-
-The desktop app includes a floating **desktop pet** that reacts to agent state (idle, thinking, working, waiting, celebrating, error). Drag it anywhere on screen; use the tray or app menu to show/hide it.
-
----
-
-## Features
-
-### 🎯 Goal Mode
-Create a durable goal for the current conversation with the target button or `/goal <objective>`. A goal keeps its objective, success criteria, constraints, checkpoints, and evidence visible while all planning, tool calls, tests, and results remain in the normal chat stream.
-
-Pause, resume, edit, or inspect the goal timeline at any time. With **Auto Continue** enabled, CrabAgent starts the next focused session turn after the current response, stopping safely when the goal is completed, paused, blocked, or reaches its configured token or turn budget.
-
-### 🛠️ Work Mode
-Split-pane workspace with live document preview, code editor, prototype builder, meeting notes, and Markdown editor. AI chat sidebar stays interactive while you work.
-
-### 📈 Usage Insights
-Track token consumption by time range and workspace. The Usage page highlights period totals, calls, cache health, and active sessions, then lets you compare model and agent consumption, search and sort sessions, and expand a session to inspect its recent calls.
-
-### 🔍 Execution Trace
-Every agent run records a structured span tree — LLM calls, tool invocations, and sub-agent delegations — with per-step token usage, duration, and status. Click "Trace" on the stats bar to open a side panel with a color-coded tree, token share bars, expandable details, and automated insights (tool loop detection, token hotspots, context bloat, error concentration).
-
-### 📊 Rich Conversation Visualizations
-Assistant responses can turn Markdown into shareable visuals: Mermaid flowcharts, sequence/state/ER diagrams, architecture diagrams, and bar, line, area, pie, or scatter charts. KPI cards summarize a key metric. Open any visualization in a larger view, then copy it as a PNG or download a high-resolution PNG to share.
-
-Mermaid diagrams render after a streamed response is complete and are syntax-validated before display, so incomplete diagram text never replaces the conversation with raw parser-error graphics.
-
-### 📝 Markdown Editor
-Split-pane editor for `.md` files — source on the left, live rendered preview on the right. Bidirectional scroll sync, GFM tables, syntax-highlighted code blocks. Switch between Source / Split / Preview views.
-
-### 📄 Intelligent Document Processing
-AI agents can read, create, edit, and preview Office documents (`.docx`, `.xlsx`, `.pptx`) directly in conversations.
-
-### 🧠 Project Memory
-Remembers your project context across sessions. Zero extra cost.
-
-### 🖼️ Multi-modal
-Paste/drop images into conversations or ask the agent to `read` an image already in the workspace. Vision-capable models receive the image directly (large files are resized automatically), without routing ordinary inspection through a generic image-analysis MCP tool. Specialized OCR, UI, diagram, chart, comparison, and video tools remain available. On text-only models (e.g. kimi-k2, moonshot-v1), images degrade gracefully to text placeholders and the session keeps running. AI-generated images persist across sessions with inline rendering. **Lazy loading**: images are fetched on-demand after text renders, so opening image-heavy sessions is instant. AI image editing (`image_edit`) creates new images from an attached reference — modify style or background, or place the same subject in a new scene; the model slug is resolved dynamically from the provider, so provider-side model changes need no update.
-
-### 🗂️ Multi-Workspace
-Work across multiple projects simultaneously. The workspace switcher shows a **live badge** with the count of active sessions in each workspace — no need to switch back and forth to check if a background agent has finished. Running sessions in the current workspace are marked with a pulsing green indicator.
-
-### 🌐 Browser Automation
 ```bash
 pip install 'crabagent[browser]'
 playwright install chromium
 ```
 
-### 🖥️ macOS Computer Use
-Let the AI observe and operate **native macOS applications** — not just the browser. Built on a signed one-shot Swift helper; all enforcement lives in native code, not prompts.
+The Web server listens on `0.0.0.0:5210` by default and may be reachable from other devices. Review authentication, network access, and firewall settings before remote use.
 
-The helper ships **pre-built inside the `crabagent` wheel** — no manual build needed.
-After `pip install crabagent`, build the desktop app yourself:
+## Desktop App
 
-```bash
-crabagent --build-desktop        # builds the .app / .dmg (helper included)
-```
-
-The `npm run build-helper` step below is only for developers who modify the
-helper's Swift source:
-
-
-**Capabilities**
-- **AX-tree observation** — roles, labels, values and frames of every control (up to 300 nodes, values truncated)
-- **Per-window capture** — ScreenCaptureKit JPEG of a single window, never the whole screen
-- **Input** — CGEvent click, Unicode text (CJK + emoji), named keys, modifier combos (`cmd+s`), scroll
-
-**Safety model** — input is opt-in and gated by four independent layers: the macOS 控制 toggle in Settings, a per-app allowlist (unknown apps trigger a confirmation card; approval persists), frontmost-app verification before every action, and Secure Input / lock-screen refusal. `Cmd+Q` / `Cmd+Tab` are denied. Budgeted (60 actions / 20 observations / 15 min) and audited.
-
-**TCC stability** — the helper runs from `~/.crabagent/bin` (outside the app bundle) under a stable code-signing identity, so Accessibility and Screen Recording grants survive repacks.
-
-Requires macOS 13+; grant **Accessibility** and **Screen Recording** to CrabAgent in System Settings on first use.
-
-### 🔌 MCP Client
-Connect external MCP servers (stdio + HTTP). Tools auto-discover and get prefixed.
-
-### ⏱ Scheduled Tasks
-```
-> Open Hacker News at 9 AM every day and screenshot top 5
-> Check product page every 30 min, notify me if below $500
-```
-
-### 🦀 Snapshots (Molt)
-Auto-snapshot files before changes. Roll back anytime without Git.
-
-### 🔧 Custom Tools
-Drop a `.py` file in `.crabagent/tools/` — or let the AI create one for you in a conversation.
-
----
-
-## Installation
+The desktop app supports macOS and Windows. After installing CrabAgent, build it with:
 
 ```bash
-pip install crabagent                    # CLI + Web UI + API (all-in-one)
-pip install 'crabagent[browser]'        # Browser automation
-pip install 'crabagent[memory]'         # Semantic memory search (recommended)
-pip install 'crabagent[dev]'            # Testing + linting
+crabagent --build-desktop
 ```
 
-### Development
+From source, use `make desktop` on macOS or `scripts/build-desktop.ps1` on Windows. The desktop app also includes an optional status pet controlled from the tray or app menu.
+
+## Agent Team, Goals, and Memory
+
+Built-in agents include a researcher, data analyst, coding expert, writer, and planner. Choose a role in conversation or let the agent delegate, run independent work in parallel, or connect steps in a pipeline. For straightforward tasks, the current agent can work alone.
+
+Goal Mode tracks ongoing work: use the target button or `/goal <objective>` to create a goal with acceptance criteria, constraints, and checkpoints. Pause, resume, or inspect progress as needed. Auto Continue is bounded by the goal state and configured budgets.
+
+Project memory retains workspace context, shared knowledge, preferences, and lessons for later sessions. Use the task board, calendar, and scheduled tasks for ongoing work; meeting notes can be used to extract action items.
+
+## Browser and Desktop Control
+
+The **collaboration browser** shares its embedded browser login state with you. An agent can navigate, fill non-sensitive fields, and inspect pages; you handle logins, CAPTCHA, and MFA. Sensitive input and high-risk actions remain subject to safeguards.
+
+**macOS control** is opt-in and requires application authorization. Grant Accessibility and Screen Recording permissions when prompted; the agent can inspect windows and controls and use keyboard and mouse input in allowed apps. Availability depends on the operating system and target application.
+
+## Project Collaboration and Safety
+
+Conversations belonging to the same user can share collaboration records. A session with an explicit valid workspace can automatically join its project; unlinking opts the session out. An editing intention describes a file or directory and what you plan to change. Overlap is shown but never blocks editing. File reads and editor panels show relevant intentions and saved-change summaries, with text diffs available on demand. Managed saves check the version and reject stale writes; reread before reapplying a change. Sessions without a project do not send project collaboration tools to the model.
+
+This is **cooperative coordination, not an operating-system file lock**. Bash no longer automatically claims the entire working directory, but shell commands, background processes, and external editors are not forcibly excluded from writing; version checks detect only some external changes. Records are isolated by user, not shared across accounts.
+
+## Remote Access and Integrations
+
+- **Remote access**: use a controlled network such as Tailscale to reach the Web UI. Check the listening address, authentication, and firewall rules first; do not expose the service directly to the public internet.
+- **Notifications and channels**: configure Bark or ntfy in Settings for task events. WeChat and email integrations require separate configuration and authorization.
+- **Extensions**: connect MCP servers in Settings or add custom tools under `.crabagent/tools/`. Configure tool and external-service permissions for your use case.
+
+## Configuration and Commands
+
+Environment variables use the `CRAB_` prefix and can be supplied through the environment or `.env`. Model providers and integrations can also be managed in Settings.
+
+| Setting | Default | Purpose |
+|---|---|---|
+| `CRAB_SERVE_HOST` / `CRAB_SERVE_PORT` | `0.0.0.0` / `5210` | Web server listening address and port |
+| `CRAB_DB_URL` | SQLite URL for `~/.crabagent/crabagent.db` | Database connection |
+| `CRAB_MAX_ITERATIONS` / `CRAB_MAX_TOKENS` | `200` / `16384` | Agent iteration and response token limits |
+| `CRAB_WEB_PROXY` | empty | Proxy for web search and scraping |
+
+Use `/help` in the TUI to list commands. Common commands include `/model`, `/sessions`, `/new`, `/agents`, `/memory`, `/skills`, `/molt`, and `/todo`.
+
+## Development
 
 ```bash
-make install            # Build frontend + install (editable)
-ruff check src/ tests/  # Lint
-ruff format src/ tests/ # Format
-pytest                   # Run tests
+make install                  # build the frontend and install in editable mode
+ruff check src/ tests/
+pytest tests/
+
+cd frontend && npm run build  # build the frontend
 ```
 
----
-
-## CLI / TUI Commands
-
-| Command | Description |
-|---------|-------------|
-| `/exit`, `/quit` | Exit |
-| `/help` | Help |
-| `/clear` | Clear context |
-| `/model [name]` | Switch model |
-| `/models` | List models |
-| `/provider [cmd]` | Manage providers |
-| `/sessions` / `/session [id]` | List/load sessions |
-| `/new` | New session |
-| `/agents [cmd]` | Agent team management |
-| `/agent [name]` | Switch agent |
-| `/agent_stats <name>` | Agent growth stats |
-| `/delegate [@agent] [task]` | Delegate task |
-| `/memory [list|search|clear]` | Team memory |
-| `/skills` / `/skill <name>` | List/view skills |
-| `/molt [cmd]` | Snapshot management |
-| `/todo [cmd]` | Todo management |
-| `/export` | Export as Markdown |
-| `/image <path>` | Send image |
-| `/runs [agent]` | View run history |
-| `/abort` | Abort execution |
-
----
-
-## Configuration
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `CRAB_DB_URL` | `sqlite+aiosqlite:///./crabagent.db` | Database URL |
-| `CRAB_JWT_SECRET` | auto-generated | JWT signing key |
-| `CRAB_SERVE_HOST` | `0.0.0.0` | Server host |
-| `CRAB_SERVE_PORT` | `5210` | Server port |
-| `CRAB_MAX_ITERATIONS` | `50` | Max agent iterations |
-| `CRAB_MAX_TOKENS` | `4096` | Max response tokens |
-| `CRAB_BROWSER_HEADLESS` | `true` | Browser headless mode |
-| `CRAB_WEB_PROXY` | (empty) | HTTP proxy for web tools |
-| `CRAB_MEMORY_EMBEDDING` | `auto` | Memory vector search: `auto` / `on` / `off` |
-
----
-
-## Project Structure
-
-```
-CrabAgent/
-├── src/crabagent/
-│   ├── cli/           # CLI + TUI
-│   ├── core/agent/    # Agent loop, tools, compression, agents
-│   ├── core/mcp/      # MCP client manager
-│   ├── core/          # Database, config, project memory, embedding
-│   └── serve/         # FastAPI + API + scheduler
-├── frontend/          # React SPA
-├── electron/          # Electron desktop app
-├── scripts/           # Build scripts
-├── crabagent.spec     # PyInstaller config
-└── crabagent.db       # SQLite database
-```
-
----
+Key directories: `src/crabagent/core/` (agent and core services), `src/crabagent/serve/` (API), `frontend/` (web UI), and `src/crabagent/electron/` (desktop app).
 
 ## License
 
-GNU Affero General Public License v3 (AGPLv3) for non-commercial use.
-Commercial use requires a separate license. Contact the author.
-
-See [LICENSE](LICENSE).
+Non-commercial use is covered by AGPL-3.0; commercial use requires a separate license. See [LICENSE](LICENSE) for the full terms.

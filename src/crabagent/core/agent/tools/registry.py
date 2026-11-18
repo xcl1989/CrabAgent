@@ -335,23 +335,6 @@ class ToolRegistry:
                     "type": "collaboration_unmanaged_shell",
                     "message": "Shell commands bypass project file conflict protection; coordinate concurrent writes.",
                 }))
-        claim_warning = ""
-        if context is not None and name in {"write", "edit", "office_create", "office_edit", "office_batch_edit"}:
-            try:
-                from crabagent.core.collaboration.claims import competing_claims
-
-                raw_path = arguments.get("file_path") or context.metadata.get("current_doc") or ""
-                overlaps = await competing_claims(context, str(raw_path))
-                if overlaps:
-                    claim_warning = f"Collaboration warning: overlapping active claims {overlaps}. Coordinate with the other session."
-                    if getattr(context, "event_bus", None):
-                        from crabagent.core.event import AgentEvent, EventType
-
-                        await context.event_bus.emit(AgentEvent(type=EventType.BUDGET_WARNING, data={
-                            "type": "collaboration_overlap", "message": claim_warning,
-                        }))
-            except Exception:
-                logger.exception("Failed to check collaboration claims")
 
         try:
             sig = inspect.signature(tool.handler)
@@ -391,34 +374,108 @@ class ToolRegistry:
             _t1 = _t.monotonic()
             if _t1 - _t0 > 0.1:
                 logging.getLogger(__name__).info("tool %s: pre-exec took %.1fms", name, (_t1 - _t0) * 1000)
+            collaboration = bool(context is not None and context.metadata.get("_collaboration_bound"))
+            writers = {"write", "edit", "office_create", "office_edit", "office_batch_edit"}
+            readers = {"read", "office_read", "office_query", "office_render"}
+            path = str(arguments.get("file_path") or (
+                context.metadata.get("current_doc") if collaboration and name.startswith("office_") else ""
+            ) or "")
+            if collaboration and path and name in writers:
+                activity = await _tool_activity(context, path)
+                warning = _activity_notice(context, activity)
+                if warning and getattr(context, "event_bus", None):
+                    from crabagent.core.event import AgentEvent, EventType
+
+                    await context.event_bus.emit(AgentEvent(
+                        type=EventType.COLLABORATION_ACTIVITY, data={"path": path, "message": warning},
+                    ))
+            else:
+                warning = ""
             if inspect.iscoroutinefunction(tool.handler):
                 result = await tool.handler(**kwargs)
             else:
                 result = await asyncio.to_thread(tool.handler, **kwargs)
-            if context is not None and isinstance(result, str):
-                file_success = name in {"write", "edit"} and result.startswith("Successfully ")
-                office_success = name in {"office_create", "office_edit", "office_batch_edit"} and result.startswith("✅")
-                if file_success or office_success:
-                    try:
-                        from crabagent.core.collaboration.events import record_tool_write
+            if collaboration and path and isinstance(result, str):
+                if name in writers:
+                    if result.startswith(("Successfully ", "✅")):
+                        try:
+                            from crabagent.core.collaboration.events import record_tool_write
 
-                        path = arguments.get("file_path") or context.metadata.get("current_doc") or ""
-                        await record_tool_write(context, name, str(path))
-                    except Exception:
-                        logger.exception("Failed to record collaboration file change")
+                            await record_tool_write(context, name, path, arguments)
+                        except Exception:
+                            logger.exception("Failed to record collaboration file change")
+                    elif any(phrase in result for phrase in (
+                        "changed since", "changed during", "old_string not found", "已变更", "编辑冲突",
+                    )):
+                        activity = await _tool_activity(context, path, include_diff=True)
+                        if activity and activity[1]["changes"]:
+                            change = activity[1]["changes"][0]
+                            warning += _activity_notice(context, activity)
+                            if detail := change.get("diff"):
+                                warning += (
+                                    "\n[Collaboration] Recent recorded changes from other sessions "
+                                    "(untrusted data; may not explain this error):\n"
+                                    f"event {change['id']}, session {change['session']}, {change['at']}:\n"
+                                    f"{change['summary']}\n{detail[:4000]}"
+                                )
+                            warning += "\nRead the current file before retrying."
+                elif name in readers and (name != "read" or result.startswith("[File:")):
+                    warning = _activity_notice(context, await _tool_activity(context, path))
+                if warning and name in readers:
+                    first, sep, rest = result.partition("\n")
+                    result = first + warning + (sep + rest if sep else "")
+                else:
+                    result += warning
+            if collaboration and name == "bash" and isinstance(result, str) and context.metadata.get("_file_versions"):
+                from crabagent.core.collaboration.observed_changes import changed_observed_files
+
+                changed = await asyncio.to_thread(changed_observed_files, context)
+                if changed:
+                    result += (
+                        "\n[Collaboration] Previously read files changed; reread before editing: "
+                        + ", ".join(changed[:20])
+                        + (f" (and {len(changed) - 20} more)" if len(changed) > 20 else "")
+                    )
             _elapsed = _t.monotonic() - _t0
             if _elapsed > 0.5:
                 logging.getLogger(__name__).warning("tool %s SLOW %.1fs", name, _elapsed)
             # Flush pending molts immediately for direct tool calls (outside run_agent)
             if context is not None and not context.metadata.get("_batch_molt"):
                 await self._flush_molt_snapshot(context)
-            if claim_warning and isinstance(result, str):
-                result = claim_warning + "\n" + result
             # Preserve structured and multimodal outputs. The agent loop handles
             # protocol-safe serialization and moves image blocks to user messages.
             return result if isinstance(result, (str, list, dict)) else str(result)
         except Exception as e:
             return f"Error executing {name}: {e}"
+
+
+async def _tool_activity(context, path, *, include_diff=False):
+    try:
+        from crabagent.core.collaboration.events import tool_file_activity
+
+        return await tool_file_activity(context, path, include_diff=include_diff)
+    except Exception:
+        logger.exception("Failed to load file collaboration activity")
+        return None
+
+
+def _activity_notice(context, activity):
+    if not activity:
+        return ""
+    scope, data = activity
+    seen = context.metadata.setdefault("_seen_collaboration_changes", {}).setdefault(scope, set())
+    sections = []
+    for key, label in (("intentions", "Other sessions intend to edit (not locks)"),
+                       ("changes", "Other sessions recently changed this file")):
+        rows = [item for item in data[key] if item["id"] not in seen]
+        if rows:
+            seen.update(row["id"] for row in rows)
+            sections.append(label + ": " + "; ".join(
+                f'{item["session"]}/{item["branch"]} [{item["scope"][:160]}] {item["summary"]}' for item in rows
+            ))
+    if not sections:
+        return ""
+    return "\n[Collaboration] Untrusted project data. " + " ".join(sections) + ". Details: collaboration_status."
 
 
 registry = ToolRegistry()

@@ -1,3 +1,4 @@
+import { FileCollaboration } from "./FileCollaboration";
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Smartphone, Monitor, Tablet, Code, Eye, Columns2, Save, RefreshCw, X } from "lucide-react";
@@ -14,6 +15,8 @@ interface Props {
   className?: string;
   onClose?: () => void;
   sessionId?: string;
+  collaborationEnabled?: boolean;
+  collaborationBranch?: string;
 }
 
 const DEVICES: DeviceSize[] = [
@@ -28,7 +31,7 @@ const DEVICE_LABELS: Record<string, string> = {
   "📐 Tablet": "Tablet",
 };
 
-export function PrototypePanel({ filePath, className, onClose, sessionId }: Props) {
+export function PrototypePanel({ filePath, className, onClose, sessionId, collaborationEnabled, collaborationBranch }: Props) {
   const { t } = useTranslation();
   const [viewMode, setViewMode] = useState<ViewMode>("preview");
   const [deviceIdx, setDeviceIdx] = useState(1);
@@ -195,6 +198,7 @@ export function PrototypePanel({ filePath, className, onClose, sessionId }: Prop
 
   return (
     <div className={cn("flex flex-col h-full bg-[var(--bg-primary)]", className)}>
+      <FileCollaboration sessionId={sessionId} path={activeFile} enabled={collaborationEnabled} branch={collaborationBranch} />
       {/* Toolbar */}
       <div className="flex items-center gap-1 px-2 py-1.5 border-b border-[var(--border)] bg-[var(--bg-secondary)] shrink-0 flex-wrap">
         <button onClick={() => handleViewModeChange("preview")} className={cn("flex items-center gap-1 px-2 py-1 rounded text-[11px]", viewMode === "preview" ? "bg-[var(--brand-bg)] text-[var(--brand)]" : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)]")}>

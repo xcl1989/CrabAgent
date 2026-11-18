@@ -424,7 +424,9 @@
     "type": "类型",
     "category": "分类",
     "key": "键名",
-    "bytes": "{{size}} 字节"
+    "bytes": "{{size}} 字节",
+    "collabChanges": "其他会话修改过此文件（{{count}} 条）",
+    "showMoreChanges": "展开其余 {{count}} 条变更"
   },
   "resultCompare": {
     "completed": "已完成",

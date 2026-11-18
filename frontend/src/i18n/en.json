@@ -418,7 +418,9 @@
     "type": "Type",
     "category": "Category",
     "key": "Key",
-    "bytes": "{{size}} bytes"
+    "bytes": "{{size}} bytes",
+    "collabChanges": "Other sessions changed this file ({{count}})",
+    "showMoreChanges": "Show {{count}} more change(s)"
   },
   "resultCompare": {
     "completed": "Completed",

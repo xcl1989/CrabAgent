@@ -250,9 +250,30 @@ async def run_agent(
     context: AgentContext,
     query: str | list[dict],
 ) -> list[dict]:
+    context.metadata["_run_batch_claim_ids"] = []
     try:
         return await _run_agent(context, query)
     finally:
+        claim_ids = context.metadata.pop("_run_batch_claim_ids", [])
+        if claim_ids:
+            try:
+                from crabagent.core.agent.tools.collaboration import release_run_claims
+
+                await release_run_claims(context, claim_ids)
+            except Exception:
+                logger.exception("Failed to release run-scoped collaboration claims")
+        lease = context.metadata.pop("_run_batch_lease", None)
+        if lease:
+            import os
+
+            try:
+                os.close(lease[1])
+            except OSError:
+                logger.exception("Failed to close run-scoped collaboration lease")
+            try:
+                lease[2].unlink(missing_ok=True)
+            except OSError:
+                logger.exception("Failed to remove run-scoped collaboration lease file")
         if context.metadata.pop("_collab_browser_used", False):
             try:
                 from crabagent.core.agent.tools.collaboration_browser import _bridge_request

@@ -260,7 +260,7 @@ async def save_document(
     except WriteConflict as exc:
         raise HTTPException(status_code=409, detail=f"Document changed since loading; candidate: {exc.candidate_path}")
 
-    await _record_document_write(user.id, str(data.get("session_id") or ""), file_path, "document_save")
+    await _record_document_write(user.id, str(data.get("session_id") or ""), file_path, "document_save", version=version)
     logger.info("Document saved: %s (%d bytes)", file_path, len(content))
     return {"status": "ok", "file": path, "size": len(content), "version": version}
 
@@ -357,13 +357,15 @@ def _fix_html_newlines(html: str | None) -> str | None:
     return html
 
 
-async def _record_document_write(user_id: int, session_id: str, file_path: Path, operation: str) -> None:
+async def _record_document_write(
+    user_id: int, session_id: str, file_path: Path, operation: str, *, version: str = "", summary: str = "",
+) -> None:
     if not session_id:
         return
     try:
         from crabagent.core.collaboration.events import record_ui_write
 
-        await record_ui_write(user_id, session_id, file_path, operation, file_version(file_path))
+        await record_ui_write(user_id, session_id, file_path, operation, version or file_version(file_path), summary=summary)
     except Exception:
         logger.exception("Failed to record document write")
 
@@ -378,6 +380,22 @@ async def _require_bound_session_version(user_id: int, session_id: str, expected
         binding = await db.get(CollaborationBinding, session_id)
         if binding and binding.user_id == user_id:
             raise HTTPException(status_code=428, detail="Document version is required for a project-bound session")
+
+
+def _quick_edit_summary(req) -> str:
+    if hasattr(req, "changes"):
+        return "Updated style: " + ", ".join(change.element for change in req.changes[:5])
+    if hasattr(req, "operation"):
+        coordinate = next((f"{key} {req.params[key]}" for key in
+                           ("cell", "range", "row", "col_letter", "before_row", "after_row", "after_col")
+                           if key in req.params), "")
+        return f"{req.operation}: {req.sheet} {coordinate}".strip()
+    if hasattr(req, "operations"):
+        return "; ".join(f"{op.get('command', '')} {op.get('path') or op.get('parent') or ''}"
+                         for op in req.operations[:5] if isinstance(op, dict))
+    if hasattr(req, "props"):
+        return "Updated theme: " + ", ".join(req.props)
+    return "Updated document"
 
 
 def _versioned_quick_edit(handler):
@@ -410,7 +428,8 @@ def _versioned_quick_edit(handler):
                     lock_root=Path.home() / ".crabagent" / "collaboration-locks")
             except WriteConflict as exc:
                 raise HTTPException(status_code=409, detail=f"Document changed during editing; candidate: {exc.candidate_path}")
-            await _record_document_write(user.id, req.session_id, target, "office_quick_edit")
+            await _record_document_write(user.id, req.session_id, target, "office_quick_edit",
+                                         version=committed, summary=_quick_edit_summary(req))
             response.version = committed
             return response
     return wrapped
@@ -630,7 +649,8 @@ async def quick_edit_text(
             )
         except WriteConflict as exc:
             raise HTTPException(status_code=409, detail=f"Document changed during editing; candidate: {exc.candidate_path}")
-        await _record_document_write(user.id, req.session_id, original_path, "office_text")
+        await _record_document_write(user.id, req.session_id, original_path, "office_text",
+                                     version=committed_version, summary="Replaced matching document text")
         preview_html = await _render_preview_html(original_path)
         if file_version(original_path) != committed_version:
             preview_html = None

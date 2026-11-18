@@ -42,6 +42,13 @@ def edit_file(file_path: str, old_string: str, new_string: str, context=None) ->
     except Exception as e:
         return f"Error reading file: {e}"
 
+    if context is not None:
+        observed = context.metadata.get("_file_versions", {}).get(str(path.resolve()))
+        if observed is None and context.metadata.get("_collaboration_bound"):
+            return f"Error: read {file_path} before editing."
+        if observed is not None and observed != version_bytes(original):
+            return f"Error: {file_path} changed since it was read; read it again before editing."
+
     # Count occurrences first (safe — returns 0 instead of raising)
     count = content.count(old_string)
     if count == 0:
@@ -67,4 +74,8 @@ def edit_file(file_path: str, old_string: str, new_string: str, context=None) ->
         return f"Error writing file: {exc}"
     if context is not None:
         context.metadata.setdefault("_file_versions", {})[str(path.resolve())] = new_version
+        if context.metadata.get("_collaboration_bound"):
+            context.metadata.setdefault("_pending_change_diffs", {})[str(path.resolve())] = (
+                original, new_content.encode("utf-8"),
+            )
     return f"Successfully replaced 1 occurrence in {file_path} @ L{line_num}"

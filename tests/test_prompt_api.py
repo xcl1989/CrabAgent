@@ -109,3 +109,24 @@ async def test_finishing_prompt_does_not_accept_followup(monkeypatch):
     with pytest.raises(HTTPException) as exc:
         await prompt_api.prompt_async("session", prompt_api.PromptRequest(message="hi"), None, None, None)
     assert exc.value.status_code == 409
+
+
+@pytest.mark.parametrize("workspace,disabled", [("", False), ("/project", True)])
+async def test_normal_prompt_does_not_open_collaboration_db_or_send_tools(workspace, disabled, monkeypatch):
+    from types import SimpleNamespace
+
+    from crabagent.core.agent.context import AgentContext
+    from crabagent.core.agent.tools.registry import registry
+    from crabagent.core.collaboration.claims import PROJECT_TOOLS
+
+    def unexpected_db():
+        pytest.fail("ordinary prompt must not open a collaboration transaction")
+
+    monkeypatch.setattr(prompt_api, "async_session_factory", unexpected_db)
+    context = AgentContext(workspace=Path.cwd(), tool_registry=registry.clone())
+    await prompt_api._configure_project_collaboration(
+        context, 1, "ordinary", SimpleNamespace(workspace=workspace, collaboration_disabled=disabled),
+    )
+    assert not PROJECT_TOOLS.intersection(tool["function"]["name"] for tool in context.tool_registry.tool_defs())
+    assert not context.metadata.get("_collaboration_bound")
+    assert registry.get("collaboration_status")

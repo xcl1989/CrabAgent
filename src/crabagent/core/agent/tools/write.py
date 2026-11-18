@@ -49,14 +49,23 @@ def write_file(file_path: str, content: str, context=None, expected_version: str
             if file_version(path) != "missing":
                 return f"Error: read {file_path} before overwriting, or provide expected_version."
             version = "missing"
+        track = context is not None and context.metadata.get("_collaboration_bound")
+        original = path.read_bytes() if track and version != "missing" else b""
         new_version = replace_if_version(
             path, content.encode("utf-8"), version, lock_root=Path.home() / ".crabagent" / "collaboration-locks"
         )
         if context is not None:
             versions[str(path.resolve())] = new_version
+            if track:
+                context.metadata.setdefault("_pending_change_diffs", {})[str(path.resolve())] = (
+                    original, content.encode("utf-8"),
+                )
         return f"Successfully wrote {len(content)} bytes to {file_path}"
     except WriteConflict as exc:
-        return f"Error: {file_path} changed since the expected version; read it again and retry. Candidate: {exc.candidate_path}"
+        return (
+            f"Error: {file_path} changed since the expected version; "
+            f"read it again and retry. Candidate: {exc.candidate_path}"
+        )
     except Exception as e:
         return f"Error writing file: {e}"
 

@@ -1,3 +1,4 @@
+import { FileCollaboration } from "./FileCollaboration";
 import { useState, useCallback, useEffect, useRef } from "react";
 import { X, Download, RefreshCw, Eye, Clock, FileText, Maximize2, Minimize2, FileSpreadsheet, Presentation, Gauge } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -35,6 +36,8 @@ export interface DocState {
 interface Props {
   doc: DocState | null;
   sessionId?: string;
+  collaborationEnabled?: boolean;
+  collaborationBranch?: string;
   onClose: () => void;
   onDownload?: () => void;
   onRefreshPreview?: () => void;
@@ -54,6 +57,8 @@ interface Props {
 export function DocumentPanel({
   doc,
   sessionId,
+  collaborationEnabled,
+  collaborationBranch,
   onClose,
   onDownload,
   onRefreshPreview,
@@ -357,6 +362,8 @@ export function DocumentPanel({
     <div className={cn("flex flex-col h-full", className)}>
       {/* Header */}
       <Header fileName={doc.fileName} onClose={onClose} maximized={maximized} onToggleMaximize={onToggleMaximize} />
+
+      <FileCollaboration sessionId={sessionId} path={doc.filePath} enabled={collaborationEnabled} branch={collaborationBranch} />
 
       {/* Status bar */}
       {doc.busy && (

@@ -8,7 +8,8 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from crabagent.core.collaboration.claims import find_overlapping_claims
+from crabagent.core.collaboration.auto_binding import normalize_workspace
+from crabagent.core.collaboration.claims import intention_text, normalize_scope, overlapping_intentions
 from crabagent.core.database import CollaborationBinding, CollaborationEntry, CollaborationProject, User, get_db
 from crabagent.serve.deps import get_current_user, get_owned_conversation
 
@@ -142,6 +143,7 @@ async def bind_session(
         binding.project_id = project_id
     else:
         db.add(CollaborationBinding(session_id=req.session_id, user_id=user.id, project_id=project_id))
+    conv.collaboration_disabled = False
     await db.commit()
     return {"status": "ok"}
 
@@ -152,9 +154,11 @@ async def session_updates(
 ):
     conversation = await get_owned_conversation(db, session_id, user)
     binding = await db.get(CollaborationBinding, session_id)
-    if not binding or binding.user_id != user.id:
+    if conversation.collaboration_disabled or not conversation.workspace or not binding or binding.user_id != user.id:
         return {"project_id": None, "cursor": 0, "entries": []}
-    await owned_project(db, binding.project_id, user.id)
+    project = await owned_project(db, binding.project_id, user.id)
+    if normalize_workspace(conversation.workspace) != project.workspace:
+        return {"project_id": None, "cursor": 0, "entries": []}
     rows = await db.execute(
         select(CollaborationEntry)
         .where(
@@ -176,12 +180,43 @@ async def session_updates(
                 "branch_id": entry.branch_id,
                 "kind": entry.kind,
                 "scope": entry.scope,
-                "content": entry.content,
+                "content": (
+                    (intention_text(entry.content) or "") if entry.kind == "claim" else entry.content.partition("\n")[0]
+                )[:400],
             }
             for entry in scanned
             if entry.session_id != session_id or entry.branch_id != (conversation.active_branch or "main")
         ],
     }
+
+
+@router.get("/sessions/{session_id}/file-activity")
+async def file_activity(
+    session_id: str,
+    path: str,
+    include_diff: bool = False,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from crabagent.core.collaboration.events import query_file_activity
+
+    empty = {"intentions": [], "changes": []}
+    conversation = await get_owned_conversation(db, session_id, user)
+    if conversation.collaboration_disabled or not conversation.workspace:
+        return empty
+    binding = await db.get(CollaborationBinding, session_id)
+    if not binding or binding.user_id != user.id:
+        return empty
+    project = await owned_project(db, binding.project_id, user.id)
+    if normalize_workspace(conversation.workspace) != project.workspace:
+        return empty
+    try:
+        scope = normalize_scope(Path(project.workspace), path, absolute=True)
+    except (OSError, RuntimeError, ValueError):
+        return empty
+    return await query_file_activity(
+        db, user.id, project.id, session_id, conversation.active_branch or "main", scope, include_diff=include_diff
+    )
 
 
 @router.get("/projects/{project_id}/entries")
@@ -203,9 +238,9 @@ async def entries(
             "session_id": e.session_id,
             "branch_id": e.branch_id,
             "kind": e.kind,
-            "content": e.content,
+            "content": (intention_text(e.content) or "[expired or legacy write]") if e.kind == "claim" else e.content,
             "scope": e.scope,
-            "state": e.state,
+            "state": "closed" if e.kind == "claim" and intention_text(e.content) is None else e.state,
             "created_at": e.created_at.isoformat(),
         }
         for e in rows.scalars()
@@ -216,14 +251,30 @@ async def entries(
 async def add_entry(
     project_id: int, req: EntryRequest, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
 ):
-    await owned_project(db, project_id, user.id)
+    project = await owned_project(db, project_id, user.id)
     conv = await get_owned_conversation(db, req.session_id, user)
     binding = await db.get(CollaborationBinding, req.session_id)
     if not binding or binding.project_id != project_id or binding.user_id != user.id:
         raise HTTPException(status_code=400, detail="Session is not bound to this project")
     if req.kind not in {"claim", "handoff"}:
         raise HTTPException(status_code=400, detail="Unsupported entry kind")
-    overlaps = await find_overlapping_claims(db, user.id, project_id, req.scope) if req.kind == "claim" else []
+    branch = conv.active_branch or "main"
+    scope = req.scope
+    overlaps = []
+    if req.kind == "claim":
+        try:
+            scope = normalize_scope(Path(project.workspace), scope)
+        except (ValueError, OSError, RuntimeError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        overlaps = await overlapping_intentions(
+            db,
+            user.id,
+            project_id,
+            [scope],
+            req.session_id,
+            branch,
+            descendants=True,
+        )
     entry = CollaborationEntry(
         user_id=user.id,
         project_id=project_id,
@@ -231,12 +282,12 @@ async def add_entry(
         branch_id=conv.active_branch or "main",
         kind=req.kind,
         content=req.content,
-        scope=req.scope,
+        scope=scope,
     )
     db.add(entry)
     await db.commit()
     await db.refresh(entry)
-    return {"id": entry.id, "overlapping_claims": overlaps}
+    return {"id": entry.id, "overlapping_claims": [item["id"] for item in overlaps], "overlapping_intentions": overlaps}
 
 
 @router.post("/projects/{project_id}/entries/{entry_id}/close")
@@ -256,10 +307,12 @@ async def close_entry(
 async def unbind_session(
     project_id: int, req: BindingRequest, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
 ):
-    await owned_project(db, project_id, user.id)
-    await get_owned_conversation(db, req.session_id, user)
+    project = await owned_project(db, project_id, user.id)
+    conversation = await get_owned_conversation(db, req.session_id, user)
     binding = await db.get(CollaborationBinding, req.session_id)
-    if not binding or binding.user_id != user.id or binding.project_id != project_id:
+    if (binding and (binding.user_id != user.id or binding.project_id != project_id)) or (
+        not binding and normalize_workspace(conversation.workspace) != project.workspace
+    ):
         raise HTTPException(status_code=404, detail="Binding not found")
     await db.execute(
         update(CollaborationEntry)
@@ -272,6 +325,8 @@ async def unbind_session(
         )
         .values(state="closed")
     )
-    await db.delete(binding)
+    if binding:
+        await db.delete(binding)
+    conversation.collaboration_disabled = True
     await db.commit()
     return {"status": "ok"}

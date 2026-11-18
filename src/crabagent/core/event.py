@@ -20,6 +20,7 @@ class EventType(StrEnum):
     TEXT_DONE = "text_done"
     THINKING_DELTA = "thinking_delta"
     THINKING_DONE = "thinking_done"
+    COLLABORATION_ACTIVITY = "collaboration_activity"
     BUDGET_WARNING = "budget_warning"
     BUDGET_EXHAUSTED = "budget_exhausted"
     MESSAGE_CREATED = "message_created"

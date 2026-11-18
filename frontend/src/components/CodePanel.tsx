@@ -1,3 +1,4 @@
+import { FileCollaboration } from "./FileCollaboration";
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Save, Code, AlertTriangle } from "lucide-react";
@@ -22,6 +23,8 @@ interface Props {
   className?: string;
   workMode?: boolean;
   sessionId?: string;
+  collaborationEnabled?: boolean;
+  collaborationBranch?: string;
 }
 
 function detectLanguage(name: string): string {
@@ -38,7 +41,7 @@ function detectLanguage(name: string): string {
   return langMap[ext] || "text";
 }
 
-export function CodePanel({ initialPath, initialContent, className, workMode, sessionId }: Props) {
+export function CodePanel({ initialPath, initialContent, className, workMode, sessionId, collaborationEnabled, collaborationBranch }: Props) {
   const { t } = useTranslation();
   const [tabs, setTabs] = useState<CodeTabState[]>(() => initialPath && initialContent !== undefined
     ? [{ path: initialPath, name: initialPath.split("/").pop() || initialPath, content: initialContent, originalContent: initialContent, version: "", modified: false, language: detectLanguage(initialPath) }]
@@ -139,6 +142,7 @@ export function CodePanel({ initialPath, initialContent, className, workMode, se
 
   return (
     <div className={cn("flex flex-col h-full bg-[var(--bg-primary)]", className)}>
+      <FileCollaboration sessionId={sessionId} path={activeTab?.path} enabled={collaborationEnabled} branch={collaborationBranch} />
       {/* Tab bar */}
       <CodeTabs
         tabs={tabs.map((t) => ({ path: t.path, name: t.name, modified: t.modified }))}
