@@ -320,6 +320,7 @@ export default function ChatPage({ onActiveSessionChange, onCollaborationChange,
     selectSession,
     newSession,
     selectSessionById,
+    prepareOpenSession,
     startReplay,
     handleSSEEvent,
     handleSwitchBranch,
@@ -330,11 +331,28 @@ export default function ChatPage({ onActiveSessionChange, onCollaborationChange,
     requestMessageImages,
   } = useChatState(wrappedOnEvent, workspace, onAutoLoadSession);
 
+  // External open request (desktop pet click, notification deep link): jump to
+  // the session's own workspace first, then select it. The workspace-load
+  // effect in useChatState picks up the pending target recorded by
+  // prepareOpenSession, so the switch lands on the requested conversation
+  // instead of that workspace's latest session.
+  const handleExternalOpenSession = useCallback(
+    async (sessionId: string) => {
+      const s = await prepareOpenSession(sessionId);
+      if (s?.workspace && s.workspace !== workspace) {
+        setWorkspace(s.workspace);
+        return;
+      }
+      void selectSessionById(sessionId, selectedModel, models).then(setSelectedModel);
+    },
+    [prepareOpenSession, workspace, selectSessionById, selectedModel, models, setSelectedModel],
+  );
+
   useEffect(() => {
     return window.electronAPI?.onOpenSession?.((sessionId) => {
-      void selectSessionById(sessionId, selectedModel, models).then(setSelectedModel);
+      void handleExternalOpenSession(sessionId);
     });
-  }, [selectSessionById, selectedModel, models, setSelectedModel]);
+  }, [handleExternalOpenSession]);
 
   // ── Open Office document from file tree ───────────────────────
   const handleOpenDoc = useCallback(async (path: string, name: string) => {

@@ -105,6 +105,34 @@ async def test_partial_tasks_stop_after_result_viewed(db):
 
 
 @pytest.mark.asyncio
+async def test_failed_tasks_stop_after_result_viewed(db):
+    task = await task_store.add_task(db, user_id=1, title="失败任务")
+    await task_store.update_task(db, task["id"], 1, status="failed")
+
+    summary = await attention.get_attention_summary(db, 1)
+    assert len(summary["groups"]["failed_tasks"]) == 1
+
+    # Viewing the failure acknowledges it — otherwise the desktop pet would
+    # keep the error pose forever.
+    await task_service.mark_result_viewed(db, task["id"], 1)
+    summary = await attention.get_attention_summary(db, 1)
+    assert not summary["groups"]["failed_tasks"]
+
+
+@pytest.mark.asyncio
+async def test_task_items_carry_source_session_in_target(db):
+    task = await task_store.add_task(
+        db, user_id=1, title="失败任务", source_session="sess-abc"
+    )
+    await task_store.update_task(db, task["id"], 1, status="failed")
+
+    summary = await attention.get_attention_summary(db, 1)
+
+    item = summary["groups"]["failed_tasks"][0]
+    assert item["target"]["session_id"] == "sess-abc"
+
+
+@pytest.mark.asyncio
 async def test_due_human_tasks_within_24h(db):
     soon = await task_store.add_task(
         db,

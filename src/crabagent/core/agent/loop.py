@@ -499,6 +499,15 @@ async def _run_agent(
                     if levels is not None and effort not in levels:
                         effort = "medium" if "medium" in levels else (levels[0] if levels else None)
                 if effort:
+                    # 智谱 Coding Plan 端点（open.bigmodel.cn/api/coding/paas/v4）在
+                    # reasoning_effort=low/medium 时不返回明文 reasoning_content，
+                    # 只在 usage 里报 reasoning_tokens，UI 会显示"内容已加密"占位符。
+                    # 实测（2026-11-19, glm-5.3, N=5）：不传/high → 5/5 明文；
+                    # low/medium → 0/5。因此对 zhipu 仅在 high 时透传，
+                    # 其余档位不传参数（智谱按默认思考强度输出明文）。
+                    if provider.provider_type == "zhipu" and effort != "high":
+                        effort = None
+                if effort:
                     completion_params["reasoning_effort"] = effort
                     completion_params["allowed_openai_params"] = ["reasoning_effort"]
             response = await _complete(context, admission, text_only=_force_text_only, **completion_params)

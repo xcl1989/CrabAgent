@@ -74,7 +74,13 @@ def _now() -> datetime.datetime:
 
 
 def _task_target(task: dict, view: str = "progress") -> dict:
-    return {"type": "task", "task_id": task["id"], "view": view, "title": task["title"]}
+    target = {"type": "task", "task_id": task["id"], "view": view, "title": task["title"]}
+    # Carry the source session so consumers (desktop pet click-to-jump,
+    # /api/work resolve) can navigate to the conversation, not just the task.
+    session_id = task.get("session_id") or task.get("source_session") or ""
+    if session_id:
+        target["session_id"] = session_id
+    return target
 
 
 async def get_attention_summary(db: AsyncSession, user_id: int) -> dict:
@@ -111,11 +117,19 @@ async def get_attention_summary(db: AsyncSession, user_id: int) -> dict:
     ]
 
     # ── failed tasks ──
+    # Only remind about failures the user has not opened yet; once
+    # result_viewed_at is set the item stops nagging (same rule as
+    # partial/unread below), otherwise the desktop pet would show the
+    # failure pose forever even after the user has reviewed the error.
     failed = (
         (
             await db.execute(
                 select(Task)
-                .where(Task.user_id == user_id, Task.status == TaskStatus.FAILED.value)
+                .where(
+                    Task.user_id == user_id,
+                    Task.status == TaskStatus.FAILED.value,
+                    Task.result_viewed_at.is_(None),
+                )
                 .order_by(Task.updated_at.desc())
             )
         )
@@ -215,7 +229,7 @@ async def get_attention_summary(db: AsyncSession, user_id: int) -> dict:
             "message": message,
             "detail": task.result_summary or task.warning_summary or "",
             "target": _task_target(
-                {"id": task.id, "title": task.title},
+                {"id": task.id, "title": task.title, "source_session": task.source_session},
                 view=view,
             ),
             "updated_at": (task.updated_at or task.created_at).isoformat()

@@ -176,6 +176,22 @@ function mergeMonitorWithAttention(
   const persistentPriority = PERSISTENT_KIND_PRIORITY[persistent.kind] ?? 99;
   if (monitorPriority <= persistentPriority) return summary;
 
+  // Keep the session target from persistent attention so "click the pet"
+  // can jump to the source conversation even when the transient monitor
+  // summary is idle (target null). Dropping it here used to leave
+  // targetSessionRef empty and the click only opened the main window.
+  const mergedTarget = (): AgentMonitorSummary["target"] => {
+    const base = summary.target;
+    if (base) {
+      return base.session_id
+        ? base
+        : { ...base, session_id: persistent.sessionId || "" };
+    }
+    return persistent.sessionId
+      ? { session_id: persistent.sessionId, title: persistent.message, request_type: null }
+      : null;
+  };
+
   switch (persistent.kind) {
     case "pending_requests": {
       const base = summary.target;
@@ -192,14 +208,14 @@ function mergeMonitorWithAttention(
       return { ...summary, status: "waiting", message: persistent.message, target };
     }
     case "failed_tasks":
-      return { ...summary, status: "error", message: persistent.message, target: summary.target };
+      return { ...summary, status: "error", message: persistent.message, target: mergedTarget() };
     case "partial_tasks":
       // A partial result still has deliverables — celebrate instead of
       // showing the failure animation, otherwise the pet looks broken
       // for as long as the partial record persists.
-      return { ...summary, status: "completed", message: persistent.message, target: summary.target };
+      return { ...summary, status: "completed", message: persistent.message, target: mergedTarget() };
     case "unread_results":
-      return { ...summary, status: "completed", message: persistent.message, target: summary.target };
+      return { ...summary, status: "completed", message: persistent.message, target: mergedTarget() };
     default:
       return summary;
   }

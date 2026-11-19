@@ -30,6 +30,11 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
   // True once the user manually picks a session, so the workspace auto-loader
   // cannot override that choice when its slower response arrives.
   const manualSelectRef = useRef(false);
+  // Session requested from outside the workspace context (desktop pet click,
+  // notification deep link). When it lives in another workspace, the pending
+  // id is set before `workspace` changes so the workspace-load effect selects
+  // it instead of auto-loading that workspace's latest session.
+  const pendingOpenSessionRef = useRef<string | null>(null);
   const pendingSubEventsRef = useRef<SSEEvent[]>([]);
   const subFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const subAgentContents = useRef<Map<string, string>>(new Map());
@@ -185,6 +190,25 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
       if (signal.aborted || seq !== loadSeqRef.current) return;
       setSessions(result);
       setSending(false);
+      // A session requested from another surface (desktop pet / deep link)
+      // wins over the auto-load of the workspace's latest session — without
+      // this the user lands on the wrong conversation after the switch.
+      const pendingId = pendingOpenSessionRef.current;
+      if (pendingId) {
+        pendingOpenSessionRef.current = null;
+        const target = result.find((x) => x.session_id === pendingId);
+        if (target) {
+          const targetSeq = ++loadSeqRef.current;
+          manualSelectRef.current = true;
+          activeSessionRef.current = target;
+          setActiveSession(target);
+          setActiveBranch(target.active_branch || "main");
+          if (target.model || target.workspace) onAutoLoadSession?.(target);
+          void loadSessionMessages(target.session_id, targetSeq);
+          return;
+        }
+        // Pending session missing from the list — fall through to auto-load.
+      }
       // If the user already picked a session while the list was loading, keep
       // their choice: overriding it here left the picked session blank until it
       // was clicked a second time.
@@ -470,6 +494,30 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
     [selectSession]
   );
 
+  /**
+   * Prepare an external open request (desktop pet click, notification deep
+   * link). Fetches the session and, when it lives in another workspace,
+   * records it as the pending target so the workspace-load effect selects it
+   * right after ChatPage switches `workspace` — otherwise that effect would
+   * auto-load the new workspace's latest session instead.
+   * Returns the fetched session, or null if unavailable.
+   */
+  const prepareOpenSession = useCallback(
+    async (sessionId: string): Promise<Session | null> => {
+      try {
+        const s = await sessionsApi.getSession(sessionId);
+        if (!s) return null;
+        if (s.workspace && workspace && s.workspace !== workspace) {
+          pendingOpenSessionRef.current = sessionId;
+        }
+        return s;
+      } catch {
+        return null;
+      }
+    },
+    [workspace]
+  );
+
   const startReplay = useCallback(
     (branchId: string) => {
       if (!activeSession || replaying) return;
@@ -567,6 +615,7 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
     selectSession,
     newSession,
     selectSessionById,
+    prepareOpenSession,
     startReplay,
     handleSSEEvent,
     handleSwitchBranch,
