@@ -7,7 +7,6 @@ import mimetypes
 import os
 import re
 import time
-from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -17,12 +16,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import crabagent.core.agent.tools.collaboration  # noqa: F401
 from crabagent.core.agent.context import AgentContext
 from crabagent.core.agent.loop import run_agent
+from crabagent.core.agent.session_memory import ANCHOR_ID, SessionMemory
 from crabagent.core.agent.tools.registry import registry
 from crabagent.core.config import settings
 from crabagent.core.database import User, async_session_factory, get_db
 from crabagent.core.event import AgentEvent, EventType
 from crabagent.serve.deps import get_current_user, get_owned_conversation
 from crabagent.serve.services import conversation as conv_svc
+from crabagent.serve.services.chat_prompt import get_chat_base_prompt
 from crabagent.serve.services.message import get_messages, message_to_dict, save_message
 from crabagent.serve.services.persistence import PersistenceListener
 
@@ -228,6 +229,10 @@ async def prompt_async(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    return await _start_prompt(session_id, req, request, user, db)
+
+
+async def _start_prompt(session_id, req, request, user, db, *, automatic=False):
     conv = await get_owned_conversation(db, session_id, user)
 
     if session_id in _tasks and not _tasks[session_id].done():
@@ -414,150 +419,7 @@ async def prompt_async(
     workspace = Path(conv.workspace).expanduser() if conv.workspace else Path.cwd()
     workspace = workspace.resolve()
 
-    # Reuse cached system prompt if available — preserves LLM prefix cache
-    # Also check if prompt contains locale instruction (for migration from old cache)
-    _use_cache = False
-    if conv.system_prompt:
-        _use_cache = True
-        # Detect raw/unresolved translation keys — indicates a broken cache
-        # (e.g., server process had stale i18n data when the prompt was generated)
-        if any(
-            marker in conv.system_prompt
-            for marker in (
-                "team_prompt.",
-                "agent_system.",
-                "memory_prompt.",
-                "shared_context.",
-            )
-        ):
-            _use_cache = False
-            logger.info(
-                "[CACHE] Session %s: MISS (raw translation keys detected in cached prompt)",
-                session_id,
-            )
-        if _use_cache and locale != "en":
-            from crabagent.core.i18n import get_locale_instruction
-
-            lang_inst = get_locale_instruction(locale)
-            if lang_inst and lang_inst not in conv.system_prompt:
-                _use_cache = False
-                logger.info(
-                    "[CACHE] Session %s: MISS (old cache without locale instruction, current locale='%s')",
-                    session_id,
-                    locale,
-                )
-        if _use_cache and "task_add" not in conv.system_prompt:
-            # Old cache without the proactive task-creation policy — refresh it.
-            _use_cache = False
-            logger.info(
-                "[CACHE] Session %s: MISS (old cache without task creation policy)",
-                session_id,
-            )
-        if _use_cache:
-            base_prompt = conv.system_prompt
-            logger.info(
-                "[CACHE] Session %s: HIT (prompt_len=%d, prompt_locale='%s', current locale='%s')",
-                session_id,
-                len(conv.system_prompt),
-                getattr(conv, "prompt_locale", ""),
-                locale,
-            )
-
-    if not _use_cache:
-        logger.info(
-            "[CACHE] Session %s: MISS (prompt_locale='%s', current locale='%s')",
-            session_id,
-            getattr(conv, "prompt_locale", ""),
-            locale,
-        )
-        from crabagent.core.i18n import get_system_prompt_template
-
-        template = get_system_prompt_template(locale)
-        if template:
-            now = datetime.now(UTC)
-            from crabagent.core.i18n import _WEEKDAY_NAMES
-
-            weekday = _WEEKDAY_NAMES.get(locale, {}).get(now.weekday(), now.strftime("%A"))
-            base_prompt = template.format(
-                date=now.strftime("%Y-%m-%d"),
-                weekday=weekday,
-                workspace=workspace,
-            )
-        else:
-            now = datetime.now(UTC)
-            base_prompt = (
-                f"You are CrabAgent, an AI assistant. "
-                f"Today is {now.strftime('%Y-%m-%d %A')}. "
-                f"Working directory: {workspace}"
-            )
-        try:
-            from crabagent.core.agent.agents import build_team_prompt
-
-            team_prompt = await build_team_prompt(locale=locale)
-            if team_prompt:
-                base_prompt += "\n\n" + team_prompt
-        except Exception:
-            pass
-
-        try:
-            from crabagent.core.agent.agents import build_memory_prompt
-
-            mem_prompt = await build_memory_prompt(
-                user.id,
-                query=(req.message or "")[:500],
-                locale=locale,
-                workspace_path=str(workspace),
-            )
-            if mem_prompt:
-                base_prompt += "\n\n" + mem_prompt
-        except Exception:
-            logger.exception("Failed to build memory prompt for user %s", user.id)
-
-        # Inject project memory
-        try:
-            from crabagent.core.project_memory import load_project_memory
-
-            pm = await load_project_memory(user.id, workspace)
-            if pm:
-                pm_prompt = pm.to_prompt()
-                if pm_prompt:
-                    base_prompt += "\n\n" + pm_prompt
-        except Exception:
-            pass
-
-        # Inject AGENTS.md (workspace-level project rules)
-        try:
-            from crabagent.core.i18n import t
-            from crabagent.core.project_memory import load_agents_md
-
-            agents_md = load_agents_md(workspace, locale=locale)
-            if agents_md:
-                section_title = t("agents_md.section_title", locale)
-                base_prompt += f"\n\n{section_title}\n\n" + agents_md
-        except Exception:
-            pass
-
-        # Append locale instruction to the cached prompt (single system message)
-        try:
-            from crabagent.core.i18n import get_locale_instruction
-
-            lang_inst = get_locale_instruction(locale)
-            if lang_inst:
-                base_prompt += "\n\n" + lang_inst
-        except Exception:
-            pass
-
-        # Persist for subsequent messages in the same session
-        try:
-            from crabagent.serve.services.conversation import update_conversation
-
-            async with async_session_factory() as save_db:
-                await update_conversation(save_db, session_id, system_prompt=base_prompt, prompt_locale=locale)
-            logger.info(
-                "[CACHE] Session %s: SAVED (prompt_len=%d, prompt_locale='%s')", session_id, len(base_prompt), locale
-            )
-        except Exception as e:
-            logger.warning("[CACHE] Session %s: SAVE FAILED: %s", session_id, e)
+    base_prompt = await get_chat_base_prompt(conv, workspace, locale)
 
     context = AgentContext(
         workspace=workspace,
@@ -725,10 +587,18 @@ Use ordinary Markdown when a visualization is not helpful.
 
     # Add history messages first (any persisted agent_switch messages are included
     # in their correct positions via message_to_dict which converts them to user role)
+    if settings.session_memory_models and settings.memory_auto_recall:
+        context.metadata["_session_memory"] = SessionMemory(user.id, conv.id, active_branch, str(workspace))
+        if not automatic:
+            context.metadata["_initial_memory_anchor"] = saved_msg.id
+
     for msg_record in history_msgs:
         if msg_record.role == "stats":
             continue
-        context.messages.append(message_to_dict(msg_record))
+        message = message_to_dict(msg_record)
+        if "_session_memory" in context.metadata and msg_record.role == "user":
+            message[ANCHOR_ID] = msg_record.id
+        context.messages.append(message)
 
     # Restore accumulated token count for compression threshold check
     if conv.tokens:
@@ -754,21 +624,22 @@ Use ordinary Markdown when a visualization is not helpful.
                     build_agent_switch_msg(agent_def, locale=locale, extra_lines=_cap_lines)
                 )
 
-        # Inject per-agent lessons (not cached in system prompt)
-        try:
-            lessons_block = await _inject_lessons(
-                "",
-                user_id=user.id,
-                agent_name=effective_agent,
-                task_hint=(req.message or "")[:120],
-                workspace_path=str(workspace),
-            )
-            if lessons_block.strip():
-                context.messages.append(
-                    {"role": "experience", "content": lessons_block.strip(), "agent": effective_agent}
+        # The experimental path uses only guarded snapshots.
+        if "_session_memory" not in context.metadata:
+            try:
+                lessons_block = await _inject_lessons(
+                    "",
+                    user_id=user.id,
+                    agent_name=effective_agent,
+                    task_hint=(req.message or "")[:120],
+                    workspace_path=str(workspace),
                 )
-        except Exception:
-            pass
+                if lessons_block.strip():
+                    context.messages.append(
+                        {"role": "experience", "content": lessons_block.strip(), "agent": effective_agent}
+                    )
+            except Exception:
+                pass
 
     persistence = PersistenceListener(conversation_id=conv.id, branch_id=active_branch)
     persistence.sequence = user_msg_seq
@@ -1361,7 +1232,7 @@ Use ordinary Markdown when a visualization is not helpful.
                                 AgentEvent(type=EventType.GOAL_CONTINUATION_STARTED, data={"goal": latest_snapshot})
                             )
                             async with async_session_factory() as continue_db:
-                                await prompt_async(session_id, follow_up, request, user, continue_db)
+                                await _start_prompt(session_id, follow_up, request, user, continue_db, automatic=True)
                         except Exception:
                             logger.exception("Failed to start goal continuation for session %s", session_id)
 

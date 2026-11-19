@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.18.7] — Parallel Tool Calls, Session Memory and macOS Controls (2026-11-19)
+
+### Added
+- Opt-in session memory for explicitly allowed provider/model pairs. Relevant memory is captured per user turn and branch, with revision checks before injection; it is not enabled by default.
+- macOS accessibility element activation with short-lived, single-use references tied to the observed window and process.
+
+### Fixed
+- Assemble parallel streamed tool arguments by call identity. For ChatGPT Responses streams, preserve complete arguments from the final event before the adapter can discard them. Ambiguous calls are not executed; valid batches still execute in parallel.
+- Do not display a fabricated shell exit code when a command was never executed.
+- Revalidate macOS observations and input targets and prevent bridge payloads from overriding the selected command.
+- Share chat prompt construction across entry points and keep session-memory anchors aligned with message persistence and branch operations.
+
+---
+
+## [0.18.6] — Non-exclusive Collaboration and Session Isolation (2026-11-18)
+
+- Make editing claims advisory, show overlapping editing intentions and file changes, and retain stale-version checks for managed saves.
+- Skip collaboration tools and activity polling for ordinary sessions outside collaboration; persist explicit unbinding.
+
+---
+
 ## [0.18.5] — Cross-Session Collaboration, CLI Overhaul and Memory Consolidation Tasks (2026-11-17)
 
 ### Added

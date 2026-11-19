@@ -955,7 +955,7 @@ async function startCollaborationBridge() {
         const commands = new Set(['status', 'stop', 'resume', 'release', 'authorize_local_preview', 'navigate', 'observe', 'computer_observe', 'screenshot',
           'click', 'commit_click', 'point', 'commit_point', 'type', 'scroll', 'select', 'press_key', 'hold_game_keys', 'game_plan', 'cancel_game_plan', 'wait_for',
           'macos_permissions', 'macos_windows', 'macos_allow_app',
-          'macos_observe', 'macos_capture', 'macos_click', 'macos_double_click', 'macos_right_click',
+          'macos_observe', 'macos_capture', 'macos_press_element', 'macos_click', 'macos_double_click', 'macos_right_click',
           'macos_move', 'macos_drag', 'macos_type', 'macos_key', 'macos_scroll', 'macos_hold_game_keys', 'macos_game_plan', 'macos_cancel_game_keys',
           'macos_activate']);
         if (!commands.has(command) || !body.payload || typeof body.payload !== 'object' || Array.isArray(body.payload)) {
@@ -1027,7 +1027,7 @@ async function startCollaborationBridge() {
             return;
           }
           const macosCommand = command.replace(/^macos_/, '');
-          const result = await runMacosHelper({ command: macosCommand, ...body.payload });
+          const result = await runMacosHelper({ ...body.payload, command: macosCommand });
           collaborationBridgeJson(res, 200, { result });
           return;
         }

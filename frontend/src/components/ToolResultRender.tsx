@@ -378,6 +378,7 @@ function FileContentLines({ lines, maxLines = 20 }: { lines: string[]; maxLines?
 function BashRender({ args, result, accentVar }: { args: Record<string, unknown>; result: string; accentVar: string }) {
   const command = str(args.command) || "";
   const lines = terminalOutput(result).split("\n");
+  const notExecuted = /^Error: tool 'bash' was not executed:/.test(result);
   const err = isError(result);
   const exitCode = err ? 1 : 0;
 
@@ -418,12 +419,12 @@ function BashRender({ args, result, accentVar }: { args: Record<string, unknown>
         </button>
       )}
       {/* Exit status */}
-      <div className={cn("flex items-center gap-1.5 px-3 py-1.5 text-[11px] border-t border-[var(--border-subtle)]",
+      {!notExecuted && <div className={cn("flex items-center gap-1.5 px-3 py-1.5 text-[11px] border-t border-[var(--border-subtle)]",
         detectedExit === 0 ? "text-[var(--success)]" : "text-[var(--danger)]"
       )}>
         {detectedExit === 0 ? <Check size={12} /> : <AlertTriangle size={12} />}
         Exit code: {detectedExit}
-      </div>
+      </div>}
     </Container>
   );
 }

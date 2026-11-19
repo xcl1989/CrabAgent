@@ -700,3 +700,57 @@ def test_visual_message_keeps_each_image_path_associated():
     blocks = loop._build_messages(context)[0]["content"]
     assert blocks[1]["text"].endswith("/tmp/one.png]")
     assert blocks[3]["text"].endswith("/tmp/two.png]")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ambiguous", [False, True])
+async def test_run_agent_routes_parallel_tool_arguments_by_index(monkeypatch, ambiguous):
+    registry = ToolRegistry()
+    executed = []
+
+    @registry.register(name="first_tool", description="first", parameters={})
+    async def first_tool(text: str):
+        executed.append(("first", text))
+        return "first result"
+
+    @registry.register(name="second_tool", description="second", parameters={})
+    async def second_tool(text: str):
+        executed.append(("second", text))
+        return "second result"
+
+    context = AgentContext(workspace=Path.cwd(), tool_registry=registry, model="gpt-4o", max_iterations=2)
+    events = []
+    context.event_bus.subscribe(events.append)
+    chunks = [
+        _chunk(_delta(tool_calls=[_tool_call("call_second", "second_tool", "", 5)])),
+        _chunk(_delta(tool_calls=[_tool_call("call_first", "first_tool", "", 2)])),
+        _chunk(_delta(tool_calls=[_tool_call(None, None, '{"text":"A"}', None if ambiguous else 2)])),
+        _chunk(_delta(tool_calls=[_tool_call(None, None, '{"text":"B"}', 5)])),
+        _chunk(_delta(), finish_reason="tool_calls"),
+    ]
+    requests = []
+
+    async def fake_acompletion(**kwargs):
+        requests.append(kwargs["messages"])
+        return _stream(chunks if len(requests) == 1 else [_chunk(_delta(content="done"), finish_reason="stop")])
+
+    provider = SimpleNamespace(name="mock", provider_type="openai", api_key="k", base_url="", enabled=True)
+    monkeypatch.setattr(loop, "_resolve_provider", _async_return(provider))
+    monkeypatch.setattr(loop.litellm, "acompletion", fake_acompletion)
+    monkeypatch.setattr("crabagent.core.proxy.resolve_llm_proxy", _async_return(""))
+
+    await loop.run_agent(context, "execute both")
+
+    results = [event.data for event in events if event.type == EventType.TOOL_RESULT]
+    assert {result["id"] for result in results} == {"call_first", "call_second"}
+    if ambiguous:
+        assert not executed
+        assert all("was not executed" in result["result"] for result in results)
+    else:
+        assert sorted(executed) == [("first", "A"), ("second", "B")]
+        assert {result["id"]: result["result"] for result in results} == {
+            "call_first": "first result", "call_second": "second result",
+        }
+    assert {msg["tool_call_id"] for msg in requests[1] if msg["role"] == "tool"} == {
+        "call_first", "call_second",
+    }

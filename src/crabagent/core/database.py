@@ -4,6 +4,7 @@ import datetime
 import logging
 import time as _time
 from collections.abc import AsyncGenerator
+from uuid import uuid4
 
 from sqlalchemy import JSON, Boolean, DateTime, Float, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -222,6 +223,7 @@ class Conversation(Base):
     auto_titled: Mapped[bool] = mapped_column(Boolean, default=False)
     system_prompt: Mapped[str] = mapped_column(Text, default="")
     prompt_locale: Mapped[str] = mapped_column(String(10), default="")
+    prompt_schema_version: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
     source: Mapped[str] = mapped_column(String(20), default="chat")  # chat | wechat | email | scheduled
     current_file: Mapped[str] = mapped_column(Text, default="")
     workspace_type: Mapped[str] = mapped_column(Text, default="")
@@ -536,6 +538,9 @@ class AgentMemory(Base):
     __tablename__ = "agent_memory"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    memory_uid: Mapped[str | None] = mapped_column(String(32), default=lambda: uuid4().hex)
+    content_revision: Mapped[int] = mapped_column(Integer, default=1, server_default=text("1"))
+    visibility_epoch: Mapped[int] = mapped_column(Integer, default=1, server_default=text("1"))
     user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     memory_type: Mapped[str] = mapped_column(String(20), nullable=False)
     agent_name: Mapped[str] = mapped_column(String(100), default="")
@@ -553,6 +558,35 @@ class AgentMemory(Base):
     recall_policy: Mapped[str] = mapped_column(String(20), default="")
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class ConversationMemoryAnchor(Base):
+    """A committed row marks a prepared batch even when no memories were selected."""
+
+    __tablename__ = "conversation_memory_anchors"
+
+    conversation_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    branch_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    anchor_message_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    first_admission_recorded: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+
+
+class ConversationMemoryInjection(Base):
+    __tablename__ = "conversation_memory_injections"
+
+    conversation_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    branch_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    anchor_message_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    memory_uid: Mapped[str] = mapped_column(String(32), primary_key=True, index=True)
+    content_revision: Mapped[int] = mapped_column(Integer)
+    visibility_epoch: Mapped[int] = mapped_column(Integer)
+    ordinal: Mapped[int] = mapped_column(Integer)
+    render_version: Mapped[int] = mapped_column(Integer, default=1)
+    snapshot_payload: Mapped[str] = mapped_column(Text)
+    supersedes_revision: Mapped[int | None] = mapped_column(Integer)
+    token_count_estimate: Mapped[int] = mapped_column(Integer, default=0)
+    admitted: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
 
 
 class MemoryEmbedding(Base):
@@ -958,6 +992,67 @@ async def ensure_column(conn, table: str, column: str, definition: str) -> bool:
     return True
 
 
+async def _migrate_session_memory(conn) -> None:
+    await ensure_column(conn, "agent_memory", "memory_uid", "VARCHAR(32)")
+    await ensure_column(conn, "agent_memory", "content_revision", "INTEGER NOT NULL DEFAULT 1")
+    await ensure_column(conn, "agent_memory", "visibility_epoch", "INTEGER NOT NULL DEFAULT 1")
+    await conn.execute(text("UPDATE agent_memory SET memory_uid = lower(hex(randomblob(16))) WHERE memory_uid IS NULL"))
+    await conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ux_agent_memory_uid ON agent_memory(memory_uid)"))
+
+    # SQLite triggers cover ORM updates, bulk cleanup, and legacy SQL writers alike.
+    content_fields = ("key", "content", "category", "memory_type")
+    visibility_fields = ("user_id", "scope", "workspace_path", "agent_name", "recall_policy",
+                         "source_session", "memory_type")
+    version_fields = (*content_fields, *(f for f in visibility_fields if f not in content_fields))
+
+    def changed(fields):
+        return " OR ".join(f"OLD.{field} IS NOT NEW.{field}" for field in fields)
+
+    await conn.execute(text("""
+        CREATE TRIGGER IF NOT EXISTS agent_memory_assign_uid
+        AFTER INSERT ON agent_memory WHEN NEW.memory_uid IS NULL
+        BEGIN
+            UPDATE agent_memory SET memory_uid = lower(hex(randomblob(16))) WHERE id = NEW.id;
+        END
+    """))
+    await conn.execute(text("""
+        CREATE TRIGGER IF NOT EXISTS agent_memory_keep_uid
+        BEFORE UPDATE OF memory_uid ON agent_memory
+        WHEN OLD.memory_uid IS NOT NULL AND OLD.memory_uid IS NOT NEW.memory_uid
+        BEGIN
+            SELECT RAISE(ABORT, 'agent_memory UID is immutable');
+        END
+    """))
+    await conn.execute(text(f"""
+        CREATE TRIGGER IF NOT EXISTS agent_memory_track_revisions
+        AFTER UPDATE OF {", ".join(version_fields)} ON agent_memory
+        WHEN {changed(version_fields)}
+        BEGIN
+            UPDATE agent_memory SET
+                content_revision = OLD.content_revision + CASE WHEN {changed(content_fields)} THEN 1 ELSE 0 END,
+                visibility_epoch = OLD.visibility_epoch + CASE WHEN {changed(visibility_fields)} THEN 1 ELSE 0 END
+            WHERE id = NEW.id;
+        END
+    """))
+    await conn.execute(text("""
+        CREATE TRIGGER IF NOT EXISTS agent_memory_delete_snapshots
+        AFTER DELETE ON agent_memory
+        BEGIN
+            DELETE FROM conversation_memory_injections WHERE memory_uid = OLD.memory_uid;
+        END
+    """))
+    await conn.execute(text("""
+        CREATE TRIGGER IF NOT EXISTS message_delete_memory_batch
+        AFTER DELETE ON messages
+        BEGIN
+            DELETE FROM conversation_memory_injections
+            WHERE conversation_id = OLD.conversation_id AND branch_id = OLD.branch_id AND anchor_message_id = OLD.id;
+            DELETE FROM conversation_memory_anchors
+            WHERE conversation_id = OLD.conversation_id AND branch_id = OLD.branch_id AND anchor_message_id = OLD.id;
+        END
+    """))
+
+
 async def init_db() -> None:
     _ensure_workspace_dirs()
     _migrate_db_to_home()
@@ -987,6 +1082,7 @@ async def init_db() -> None:
         await ensure_column(conn, "conversations", "provider", "VARCHAR(100) DEFAULT ''")
         await ensure_column(conn, "conversations", "system_prompt", "TEXT DEFAULT ''")
         await ensure_column(conn, "conversations", "prompt_locale", "VARCHAR(10) DEFAULT ''")
+        await ensure_column(conn, "conversations", "prompt_schema_version", "INTEGER NOT NULL DEFAULT 0")
         await ensure_column(conn, "conversations", "source", "VARCHAR(20) DEFAULT 'chat'")
         await ensure_column(conn, "conversations", "current_file", "TEXT DEFAULT ''")
         await ensure_column(conn, "conversations", "workspace_type", "TEXT DEFAULT ''")
@@ -1156,6 +1252,7 @@ async def init_db() -> None:
         await ensure_column(conn, "agent_memory", "scope", "VARCHAR(20) DEFAULT ''")
         await ensure_column(conn, "agent_memory", "workspace_path", "TEXT DEFAULT ''")
         await ensure_column(conn, "agent_memory", "recall_policy", "VARCHAR(20) DEFAULT ''")
+        await _migrate_session_memory(conn)
 
         # --- MemoryEmbedding table (vector search) ---
         await conn.execute(text("""

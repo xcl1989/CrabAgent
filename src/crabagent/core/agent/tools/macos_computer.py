@@ -19,6 +19,13 @@ from crabagent.core.computer.audit import record_browser_event
 from crabagent.core.computer.game_plan import validate_game_plan
 from crabagent.core.computer.session import get_session
 
+_OBSERVATION_TTL = 30
+
+
+def _clear_observation(context: Any) -> None:
+    context.metadata.pop("_macos_batch_observation", None)
+    context.metadata.pop("_macos_press_targets", None)
+
 
 async def _call_bridge(command: str, payload: dict[str, Any], context: Any) -> dict[str, Any]:
     session = get_session(context)
@@ -43,6 +50,7 @@ async def macos_activate(bundle_id: str, context=None) -> str:
     session = get_session(context)
     session.check()
     started = time.monotonic()
+    _clear_observation(context)
     try:
         value = await _input_with_allow_flow(
             "macos_activate", {"bundleId": bundle_id}, context, "macos_activate", started
@@ -80,7 +88,8 @@ async def macos_windows(context=None) -> str:
 @registry.register(
     name="macos_observe",
     description="Inspect a local macOS app window's accessibility tree (roles, labels, values, "
-    "frames) to plan clicks or typing on the user's behalf. Returns structured elements; macOS "
+    "frames) to plan clicks or typing on the user's behalf. Prefer macos_press_element when "
+    "a node has an element_ref. macOS "
     "accessibility permission must be granted on this machine.",
     parameters={
         "type": "object",
@@ -96,16 +105,26 @@ async def macos_observe(window_id: int, pid: int, context=None) -> str:
     session = get_session(context)
     session.check(observe=True)
     started = time.monotonic()
+    _clear_observation(context)
     try:
         value = await _call_bridge("macos_observe", {"windowId": window_id, "pid": pid}, context)
     except Exception as exc:
         session.failures += 1
         await record_browser_event(context, "action_result", action="macos_observe", decision="failed", started=started)
         raise RuntimeError(str(exc)) from exc
+    if value.get("ok") is not True or not isinstance(value.get("nodes"), list):
+        session.failures += 1
+        return _result(value)
+    targets = {}
+    for node in value["nodes"]:
+        signature = node.pop("_pressSignature", None)
+        if isinstance(signature, dict):
+            ref = uuid.uuid4().hex
+            targets[ref] = signature
+            node["element_ref"] = ref
     session.record(value, observe=True)
-    # Mark the input precondition: a fresh macOS observation happened in this context.
-    context.metadata["_macos_input_confirmed"] = True
-    context.metadata["_macos_batch_observation"] = (window_id, pid, time.monotonic())
+    context.metadata["_macos_batch_observation"] = (window_id, pid, started)
+    context.metadata["_macos_press_targets"] = targets
     await record_browser_event(context, "observed", action="macos_observe", decision="executed", url="")
     return _result(value)
 
@@ -125,17 +144,28 @@ async def macos_capture(window_id: int, context=None) -> list[dict[str, Any]]:
     session = get_session(context)
     session.check(observe=True)
     started = time.monotonic()
+    _clear_observation(context)
     try:
         value = await _call_bridge("macos_capture", {"windowId": window_id}, context)
     except Exception as exc:
         session.failures += 1
         await record_browser_event(context, "action_result", action="macos_capture", decision="failed", started=started)
         raise RuntimeError(str(exc)) from exc
-    session.record(value, observe=True)
-    context.metadata["_macos_input_confirmed"] = True
-    context.metadata["_macos_batch_observation"] = (window_id, None, time.monotonic())
-    await record_browser_event(context, "observed", action="macos_capture", decision="executed", url="")
     data_url = value.pop("dataUrl", "")
+    pid = value.get("pid")
+    if (
+        value.get("ok") is True
+        and isinstance(data_url, str)
+        and data_url.partition(",")[2]
+        and type(pid) is int
+        and pid > 0
+    ):
+        session.record(value, observe=True)
+        context.metadata["_macos_batch_observation"] = (window_id, pid, started)
+    else:
+        session.failures += 1
+        raise RuntimeError(str(value.get("error") or "CAPTURE_FAILED: missing window PID or screenshot"))
+    await record_browser_event(context, "observed", action="macos_capture", decision="executed", url="")
     text = _result(value)
     if isinstance(value, dict) and "windowFrame" in value:
         frame = value["windowFrame"] or {}
@@ -144,24 +174,24 @@ async def macos_capture(window_id: int, context=None) -> list[dict[str, Any]]:
             "\n\n[坐标换算] 截图 1 像素 == 窗口 1 逻辑点。macos_click 需要全局屏幕坐标："
             f"global_x = {ox} + 像素x，global_y = {oy} + 像素y。"
         )
-    if not data_url:
-        return [{"type": "text", "text": text}]
     return [
         {"type": "text", "text": text},
         {"type": "image_url", "image_url": {"url": data_url}, "mime": "image/jpeg"},
     ]
 
 
-def _input_preconditions(context: Any, window_id: int) -> dict[str, Any]:
-    session = get_session(context)
-    session.check()
-    context.metadata.pop("_macos_batch_observation", None)
-    if context.metadata.get("_collab_browser_observation_id") is None and not context.metadata.get(
-        "_macos_input_confirmed"
+def _input_preconditions(context: Any, window_id: int, pid: int | None = None) -> dict[str, Any]:
+    get_session(context).check()
+    observed = context.metadata.get("_macos_batch_observation")
+    if (
+        not observed
+        or observed[0] != window_id
+        or (pid is not None and observed[1] != pid)
+        or time.monotonic() - observed[2] > _OBSERVATION_TTL
     ):
-        # Require a fresh observation before any input, mirroring the browser flow.
-        raise RuntimeError("STALE_OBSERVATION: call macos_observe or macos_capture before input")
-    return {"windowId": window_id}
+        raise RuntimeError("STALE_OBSERVATION: observe or capture the target window again")
+    _clear_observation(context)
+    return {"windowId": window_id, "pid": observed[1]}
 
 
 async def _input_with_allow_flow(
@@ -169,11 +199,9 @@ async def _input_with_allow_flow(
 ) -> dict[str, Any]:
     """Run one input action with automatic soft-failure recovery.
 
-    - APP_NOT_ALLOWLISTED: ask the user to allow the app once, then retry.
+    - APP_NOT_ALLOWLISTED: ask the user to allow the app once.
     - WINDOW_NOT_FRONTMOST: the target app lost focus between observation and
-      action (common — the host app or a browser steals it back). Auto-activate
-      the target app and retry once instead of failing the agent's turn and
-      forcing a manual activate → capture → click cycle.
+      action. Auto-activate the target app, but require a new observation.
     """
     value = await _call_bridge(command, payload, context)
     error = str(value.get("error", "")) if isinstance(value, dict) else ""
@@ -201,7 +229,9 @@ async def _input_with_allow_flow(
             )
             return {"ok": False, "error": f"用户未允许控制 {bundle_id}", "status": "blocked"}
         await _call_bridge("macos_allow_app", {"bundleId": bundle_id}, context)
-        return await _call_bridge(command, payload, context)
+        if command == "macos_activate":
+            return await _call_bridge(command, payload, context)
+        return {"ok": False, "status": "not_executed", "needs_observation": True}
 
     if "WINDOW_NOT_FRONTMOST:" in error and command != "macos_activate":
         bundle_id = (
@@ -217,8 +247,7 @@ async def _input_with_allow_flow(
                 "macos_activate", {"bundleId": bundle_id}, context, "macos_activate", started
             )
             if isinstance(activated, dict) and activated.get("ok"):
-                await asyncio.sleep(0.3)  # let focus settle before retrying
-                value = await _call_bridge(command, payload, context)
+                return {"ok": False, "status": "not_executed", "needs_observation": True}
 
     return value
 
@@ -246,8 +275,8 @@ async def _input_with_allow_flow(
 async def macos_click(window_id: int, pid: int, x: int, y: int, context=None) -> str:
     session = get_session(context)
     started = time.monotonic()
-    payload = _input_preconditions(context, window_id)
-    payload.update(pid=pid, x=x, y=y)
+    payload = _input_preconditions(context, window_id, pid)
+    payload.update(x=x, y=y)
     try:
         value = await _input_with_allow_flow("macos_click", payload, context, "macos_click", started)
     except Exception as exc:
@@ -282,8 +311,9 @@ def _register_input_tool(
             session.failures += 1
             await record_browser_event(context, "action_result", action=name, decision="failed", started=started)
             raise RuntimeError(str(exc)) from exc
-        session.record(value)
-        await record_browser_event(context, "action_result", action=name, decision="executed", url="")
+        decision = value.get("status", "executed" if value.get("ok") is True else "failed")
+        session.record({**value, "status": decision})
+        await record_browser_event(context, "action_result", action=name, decision=decision, started=started)
         return _result(value)
 
     _tool.__name__ = name
@@ -293,6 +323,26 @@ def _register_input_tool(
         parameters={"type": "object", "properties": properties, "required": required},
         metadata={"source": "builtin", "category": "computer"},
     )(_tool)
+
+
+def _press_payload(params: dict[str, Any], context: Any) -> dict[str, Any]:
+    targets = context.metadata.get("_macos_press_targets", {})
+    signature = targets.get(params["element_ref"])
+    payload = _input_preconditions(context, params["window_id"], params["pid"])
+    if not signature:
+        raise RuntimeError("STALE_OBSERVATION: use an element_ref from a fresh macos_observe")
+    return {**payload, "signature": signature}
+
+
+_register_input_tool(
+    "macos_press_element",
+    "Press an enabled native control using an element_ref from macos_observe. "
+    "The reference is single-use and valid for 30 seconds in the same window and PID. "
+    "If not executed or the outcome is unknown, observe again before taking further action.",
+    {"window_id": {"type": "integer"}, "pid": {"type": "integer"}, "element_ref": {"type": "string"}},
+    ["window_id", "pid", "element_ref"],
+    _press_payload,
+)
 
 
 _COORD_POINT = {
@@ -313,7 +363,7 @@ _GLOBAL_POINTS_NOTE = (
 
 def _point_payload_builder():
     def build(params: dict[str, Any], context: Any) -> dict[str, Any]:
-        payload = _input_preconditions(context, params["window_id"])
+        payload = _input_preconditions(context, params["window_id"], params["pid"])
         payload.update(pid=params["pid"], x=params["x"], y=params["y"])
         return payload
 
@@ -322,7 +372,7 @@ def _point_payload_builder():
 
 def _drag_payload_builder():
     def build(params: dict[str, Any], context: Any) -> dict[str, Any]:
-        payload = _input_preconditions(context, params["window_id"])
+        payload = _input_preconditions(context, params["window_id"], params["pid"])
         payload.update(
             pid=params["pid"],
             x=params["x"],
@@ -398,9 +448,12 @@ _register_input_tool(
     metadata={"source": "builtin", "category": "computer"},
 )
 async def macos_type(window_id: int, text: str, context=None) -> str:
+    return _result(await _type_input(_input_preconditions(context, window_id), text, context))
+
+
+async def _type_input(payload: dict[str, Any], text: str, context: Any) -> dict[str, Any]:
     session = get_session(context)
     started = time.monotonic()
-    payload = _input_preconditions(context, window_id)
     payload["text"] = text[:10_000]
     try:
         value = await _input_with_allow_flow("macos_type", payload, context, "macos_type", started)
@@ -410,7 +463,7 @@ async def macos_type(window_id: int, text: str, context=None) -> str:
         raise RuntimeError(str(exc)) from exc
     session.record(value)
     await record_browser_event(context, "action_result", action="macos_type", decision="executed", url="")
-    return _result(value)
+    return value
 
 
 @registry.register(
@@ -468,7 +521,7 @@ async def macos_hold_game_keys(window_id: int, pid: int, keys: list[str], durati
         raise ValueError("window_id and pid must be positive integers")
     session = get_session(context)
     observation = context.metadata.get("_macos_batch_observation")
-    if not observation or observation[:2] != (window_id, pid) or time.monotonic() - observation[2] > 30:
+    if not observation or observation[:2] != (window_id, pid) or time.monotonic() - observation[2] > _OBSERVATION_TTL:
         raise RuntimeError("STALE_OBSERVATION: observe the target window and pid first")
     started = time.monotonic()
     payload = _input_preconditions(context, window_id)
@@ -527,7 +580,7 @@ async def macos_game_plan(window_id: int, pid: int, steps: list[dict[str, Any]],
         raise ValueError("window_id and pid must be positive integers")
     session = get_session(context)
     observation = context.metadata.get("_macos_batch_observation")
-    if not observation or observation[:2] != (window_id, pid) or time.monotonic() - observation[2] > 30:
+    if not observation or observation[:2] != (window_id, pid) or time.monotonic() - observation[2] > _OBSERVATION_TTL:
         raise RuntimeError("STALE_OBSERVATION: observe the target window and pid first")
     started = time.monotonic()
     payload = _input_preconditions(context, window_id)
@@ -627,16 +680,10 @@ async def macos_click_and_type(window_id: int, pid: int, x: int, y: int, text: s
 
     if not text or any(char in text for char in "\r\n\t") or len(text.encode("utf-8")) > 10_000:
         raise ValueError("Text must be nonempty, single-line and at most 10000 bytes")
-    observation = context.metadata.pop("_macos_batch_observation", None) if context else None
-    if (
-        not observation
-        or observation[0] != window_id
-        or observation[1] not in (None, pid)
-        or time.monotonic() - observation[2] > 30
-    ):
-        raise RuntimeError("STALE_OBSERVATION: observe this window again before click and type")
+    observation = context.metadata.get("_macos_batch_observation")
     click = json.loads(await macos_click(window_id, pid, x, y, context=context))
     if click.get("ok") is not True or click.get("status") in {"failed", "blocked"} or click.get("error"):
         return _result({"click": click, "type": {"status": "not_executed"}, "needs_observation": True})
-    typed = json.loads(await macos_type(window_id, text, context=context))
+    # The click consumed the observation. Only this compound action may continue.
+    typed = await _type_input({"windowId": window_id, "pid": observation[1]}, text, context)
     return _result({"click": click, "type": typed, "needs_observation": True})

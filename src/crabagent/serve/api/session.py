@@ -14,6 +14,7 @@ from crabagent.core.database import BrowserTask, Conversation, Message, User, Wo
 from crabagent.serve.api.prompt import _tasks
 from crabagent.serve.deps import get_current_user, get_owned_conversation
 from crabagent.serve.services import conversation as conv_svc
+from crabagent.serve.services.chat_prompt import get_chat_base_prompt
 from crabagent.serve.services.message import get_messages, message_to_dict
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
@@ -132,13 +133,17 @@ async def compress_session(
     if "/" not in model:
         model = f"chatgpt/{model}" if provider.provider_type == "chatgpt" else f"openai/{model}"
 
+    workspace = (Path(conv.workspace).expanduser() if conv.workspace else Path.cwd()).resolve()
+    locale = getattr(user, "locale", None) or settings.language or "en"
+    base_prompt = await get_chat_base_prompt(conv, workspace, locale)
+
     # Manual compression must use the same context slicing, summarization,
     # persistence, and failure handling as automatic compression.
     context = AgentContext(
-        workspace=Path(conv.workspace) if conv.workspace else Path.cwd(),
+        workspace=workspace,
         messages=[message_to_dict(msg) for msg in records],
-        system_prompt=conv.system_prompt or "",
-        locale=getattr(user, "locale", None) or settings.language or "en",
+        system_prompt=base_prompt,
+        locale=locale,
     )
     persistence = PersistenceListener(conversation_id=conv.id, branch_id=branch_id)
     context.metadata["_persistence"] = persistence
@@ -603,5 +608,6 @@ async def reset_system_prompt(
     if conv.system_prompt:
         conv.system_prompt = ""
         conv.prompt_locale = ""
+        conv.prompt_schema_version = 0
         await db.commit()
     return {"status": "ok", "session_id": session_id}

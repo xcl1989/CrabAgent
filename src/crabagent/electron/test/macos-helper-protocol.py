@@ -80,6 +80,7 @@ def main() -> int:
     r8 = run_request({"command": "click", "x": 10, "y": 10})
     check("click without opt-in refused", r8.get("ok") is False and "opt-in" in r8.get("error", ""), r8)
     for cmd, payload in [
+        ("press_element", {"windowId": 1, "pid": 1, "signature": {"role": "AXButton"}}),
         ("double_click", {"x": 10, "y": 10}),
         ("right_click", {"x": 10, "y": 10}),
         ("move", {"x": 10, "y": 10}),

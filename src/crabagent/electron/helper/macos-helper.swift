@@ -37,6 +37,9 @@ enum HelperError: Error, CustomStringConvertible {
 
 let maxRequestBytes = 256 * 1024
 let maxAxNodes = 300
+// Chrome-sized apps exceed the display budget, but press-signature uniqueness only
+// needs cheap attribute reads, so the press scan may walk deeper than the snapshot.
+let maxPressScanNodes = 1600
 let maxAxDepth = 8
 let maxValueChars = 120
 
@@ -124,11 +127,44 @@ func axChildren(_ element: AXUIElement) -> [AXUIElement] {
     return children
 }
 
-var axNodeBudget = maxAxNodes
+// Bounded AX tree traversal; the press scan uses a larger budget than the snapshot.
+func walkAX(_ root: AXUIElement, budget: Int = maxAxNodes, visit: (AXUIElement) -> Void) -> Bool {
+    var budget = budget
+    var truncated = false
+    func walk(_ element: AXUIElement, _ depth: Int) {
+        guard budget > 0, depth <= maxAxDepth else { truncated = true; return }
+        budget -= 1
+        visit(element)
+        for child in axChildren(element) {
+            if budget == 0 { truncated = true; break }
+            walk(child, depth + 1)
+        }
+    }
+    walk(root, 0)
+    return truncated
+}
 
-func axWalk(_ element: AXUIElement, depth: Int, into nodes: inout [[String: Any]]) {
-    guard axNodeBudget > 0, depth <= maxAxDepth else { return }
-    axNodeBudget -= 1
+func pressSignature(_ element: AXUIElement) -> [String: String]? {
+    guard let role = axString(element, kAXRoleAttribute) else { return nil }
+    let identifier = axString(element, kAXIdentifierAttribute) ?? ""
+    let title = axString(element, kAXTitleAttribute) ?? ""
+    let label = axString(element, kAXDescriptionAttribute) ?? ""
+    guard !identifier.isEmpty || !title.isEmpty || !label.isEmpty,
+          [role, identifier, title, label].allSatisfy({ $0.utf8.count <= 512 }) else { return nil }
+    return ["role": role, "identifier": identifier, "title": title, "label": label,
+            "subrole": axString(element, kAXSubroleAttribute) ?? ""]
+}
+
+func canPress(_ element: AXUIElement) -> Bool {
+    var enabled: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(element, kAXEnabledAttribute as CFString, &enabled) == .success,
+          enabled as? Bool == true else { return false }
+    var actions: CFArray?
+    return AXUIElementCopyActionNames(element, &actions) == .success
+        && (actions as? [String])?.contains(kAXPressAction) == true
+}
+
+func axNode(_ element: AXUIElement) -> [String: Any] {
     var node: [String: Any] = [:]
     if let role = axString(element, kAXRoleAttribute) { node["role"] = role }
     if let subrole = axString(element, kAXSubroleAttribute) { node["subrole"] = subrole }
@@ -146,10 +182,7 @@ func axWalk(_ element: AXUIElement, depth: Int, into nodes: inout [[String: Any]
         node["focused"] = (focusedValue as? Bool) ?? false
     }
     if let frame = axFrame(element) { node["frame"] = frame }
-    nodes.append(node)
-    for child in axChildren(element) {
-        axWalk(child, depth: depth + 1, into: &nodes)
-    }
+    return node
 }
 
 // Match an AX window element to the CGWindowID by comparing position+size with the
@@ -159,14 +192,13 @@ func axWindowElement(pid: Int, windowId: Int) -> (element: AXUIElement, frame: [
           entry["pid"] as? Int == pid, let bounds = entry["bounds"] as? [String: Any],
           let width = bounds["width"] as? Int, width > 0 else { return nil }
     let appElement = AXUIElementCreateApplication(pid_t(pid))
-    for window in axChildren(appElement) where axString(window, kAXRoleAttribute) == "AXWindow" {
-        if let frame = axFrame(window),
-           frame["width"] == width,
-           frame["x"] == bounds["x"] as? Int, frame["y"] == bounds["y"] as? Int {
-            return (window, frame)
-        }
+    let matches = axChildren(appElement).compactMap { window -> (AXUIElement, [String: Int])? in
+        guard axString(window, kAXRoleAttribute) == "AXWindow", let frame = axFrame(window),
+              frame["width"] == width, frame["height"] == bounds["height"] as? Int,
+              frame["x"] == bounds["x"] as? Int, frame["y"] == bounds["y"] as? Int else { return nil }
+        return (window, frame)
     }
-    return nil
+    return matches.count == 1 ? matches[0] : nil
 }
 
 func observePayload(_ request: [String: Any]) -> Result<[String: Any], HelperError> {
@@ -179,13 +211,60 @@ func observePayload(_ request: [String: Any]) -> Result<[String: Any], HelperErr
     guard let matched = axWindowElement(pid: pid, windowId: windowId) else {
         return .failure(.preconditionFailed("window not found or AX frame mismatch"))
     }
-    axNodeBudget = maxAxNodes
     var nodes: [[String: Any]] = []
-    axWalk(matched.element, depth: 0, into: &nodes)
+    var signatures: [[String: String]?] = []
+    var counts: [[String: String]: Int] = [:]
+    // Uniqueness counts only pressable candidates: a title shared with a static
+    // text or container must not invalidate a pressable button. Refs are issued
+    // even when the scan truncates: observe and press walk the same deterministic
+    // prefix, and the press side re-resolves uniqueness before acting.
+    let truncated = walkAX(matched.element, budget: maxPressScanNodes, visit: { element in
+        nodes.append(axNode(element))
+        let pressable = canPress(element)
+        let signature = pressable ? pressSignature(element) : nil
+        if pressable, let signature { counts[signature, default: 0] += 1 }
+        signatures.append(signature)
+    })
+    for (index, signature) in signatures.enumerated() {
+        if let signature, counts[signature] == 1 {
+            nodes[index]["_pressSignature"] = signature
+        }
+    }
     return .success([
         "backend": "macos-ax", "windowId": windowId, "pid": pid,
-        "windowFrame": matched.frame, "nodes": nodes, "truncated": axNodeBudget <= 0,
+        "windowFrame": matched.frame, "nodes": nodes, "truncated": truncated,
     ])
+}
+
+func performPressElement(_ request: [String: Any]) -> Result<[String: Any], HelperError> {
+    guard preflightAccessibility() else { return .failure(.permissionDenied("accessibility not granted")) }
+    guard let windowId = request["windowId"] as? Int, let pid = request["pid"] as? Int,
+          let signature = request["signature"] as? [String: String] else {
+        return .failure(.badRequest("windowId, pid and signature are required"))
+    }
+    if case .failure(let error) = inputPreconditions(request) { return .failure(error) }
+    guard let matched = axWindowElement(pid: pid, windowId: windowId) else {
+        return .failure(.preconditionFailed("STALE_OBSERVATION: target window not uniquely resolved"))
+    }
+    var matches: [AXUIElement] = []
+    _ = walkAX(matched.element, budget: maxPressScanNodes, visit: { element in
+        if pressSignature(element) == signature { matches.append(element) }
+    })
+    guard matches.count == 1, let target = matches.first, canPress(target) else {
+        return .failure(.preconditionFailed("STALE_OBSERVATION: element unavailable or ambiguous"))
+    }
+    if case .failure(let error) = inputPreconditions(request) { return .failure(error) }
+    let app = AXUIElementCreateApplication(pid_t(pid))
+    var focusedWindow: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(app, kAXFocusedWindowAttribute as CFString, &focusedWindow) == .success,
+          let focusedWindow, CFEqual(focusedWindow, matched.element) else {
+        return .failure(.preconditionFailed("STALE_OBSERVATION: target window does not have focus"))
+    }
+    let result = AXUIElementPerformAction(target, kAXPressAction as CFString)
+    guard result == .success else {
+        return .failure(.preconditionFailed("OUTCOME_UNKNOWN: AXPress returned \(result.rawValue); observe before retrying"))
+    }
+    return .success(["pressed": true])
 }
 
 // MARK: - window capture (M1, ScreenCaptureKit)
@@ -199,7 +278,9 @@ func capturePayload(_ request: [String: Any]) async -> Result<[String: Any], Hel
     }
     do {
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-        guard let scWindow = content.windows.first(where: { $0.windowID == CGWindowID(windowId) }) else {
+        guard let cgWindowId = CGWindowID(exactly: windowId),
+              let scWindow = content.windows.first(where: { $0.windowID == cgWindowId }),
+              let pid = scWindow.owningApplication?.processID else {
             return .failure(.preconditionFailed("window not found in shareable content"))
         }
         let filter = SCContentFilter(desktopIndependentWindow: scWindow)
@@ -226,6 +307,7 @@ func capturePayload(_ request: [String: Any]) async -> Result<[String: Any], Hel
         }
         return .success([
             "windowId": windowId,
+            "pid": Int(pid),
             "width": cgImage.width, "height": cgImage.height,
             "windowFrame": [
                 "x": Int(frame.origin.x), "y": Int(frame.origin.y),
@@ -260,14 +342,12 @@ func inputPreconditions(_ request: [String: Any]) -> Result<Void, HelperError> {
     guard let front = NSWorkspace.shared.frontmostApplication, let bundleId = front.bundleIdentifier else {
         return .failure(.preconditionFailed("no frontmost application"))
     }
-    if !allowlist.contains(bundleId) {
-        // Soft refusal: Python surfaces an allow-confirmation to the user; on approval the
-        // bundle is added to the allowlist and the action is retried once.
-        return .failure(.preconditionFailed("APP_NOT_ALLOWLISTED: \(bundleId)"))
-    }
     if let windowId = request["windowId"] as? Int {
         let entry = windowEntries().first(where: { $0["windowId"] as? Int == windowId })
-        if entry?["bundleId"] as? String != bundleId {
+        if let pid = request["pid"] as? Int, let entry, entry["pid"] as? Int != pid {
+            return .failure(.preconditionFailed("STALE_OBSERVATION: target window PID changed"))
+        }
+        if entry?["pid"] as? Int != Int(front.processIdentifier) || entry?["bundleId"] as? String != bundleId {
             // Soft failure with the target bundle so the caller can auto-activate and
             // retry once instead of bouncing the agent through a manual
             // activate → capture → click cycle. Resolve the bundle from the window
@@ -279,6 +359,11 @@ func inputPreconditions(_ request: [String: Any]) -> Result<Void, HelperError> {
             }
             return .failure(.preconditionFailed("WINDOW_NOT_FRONTMOST: \(target)"))
         }
+    }
+    if !allowlist.contains(bundleId) {
+        // Soft refusal: Python surfaces an allow-confirmation to the user; on approval the
+        // bundle is added to the allowlist and the action is retried once.
+        return .failure(.preconditionFailed("APP_NOT_ALLOWLISTED: \(bundleId)"))
     }
     return .success(())
 }
@@ -812,6 +897,8 @@ func handleRequest(_ request: [String: Any]) async -> Result<[String: Any], Help
         return .success(windowsPayload())
     case "observe":
         return observePayload(request)
+    case "press_element":
+        return performPressElement(request)
     case "capture":
         return await capturePayload(request)
     case "activate":
@@ -880,7 +967,7 @@ guard let request = try? JSONSerialization.jsonObject(with: requestData) as? [St
 
 // Input commands require explicit opt-in per Electron config; the helper double-checks a
 // marker so an allowlist can never authorize input while macOS input is disabled.
-let inputCommands: Set<String> = ["activate", "click", "double_click", "right_click", "move", "drag", "type", "key", "hold_game_keys", "game_plan", "scroll"]
+let inputCommands: Set<String> = ["activate", "press_element", "click", "double_click", "right_click", "move", "drag", "type", "key", "hold_game_keys", "game_plan", "scroll"]
 if inputCommands.contains(request["command"] as? String ?? "")
     && ProcessInfo.processInfo.environment["CRAB_MACOS_INPUT"] != "1" {
     respond(["ok": false, "error": "macos input is disabled (opt-in required)"]); exit(1)

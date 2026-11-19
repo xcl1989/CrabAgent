@@ -51,8 +51,28 @@ class PersistenceListener:
             except Exception:
                 logger.debug("[FTS] Index batch failed (non-fatal)")
 
+    async def save_user_anchor(self, content: str | list[dict], agent: str) -> int:
+        # Flush older events first so compression and other readers see the turns in order.
+        await self.finalize()
+        payload = json.dumps(content, ensure_ascii=False) if isinstance(content, list) else content
+        sequence = self.sequence + 1
+        async with async_session_factory() as db:
+            msg = await save_message(
+                db, conversation_id=self.conversation_id, branch_id=self.branch_id,
+                sequence=sequence, role="user", content=payload, agent=agent,
+            )
+        self.sequence = sequence
+        if payload:
+            try:
+                from crabagent.core.fts import index_message
+
+                await index_message(msg.id, payload)
+            except Exception:
+                logger.debug("[FTS] Queued user message indexing failed (non-fatal)")
+        return msg.id
+
     async def on_event(self, event: AgentEvent):
-        if event.type != EventType.MESSAGE_CREATED:
+        if event.type != EventType.MESSAGE_CREATED or event.data.get("already_persisted"):
             return
 
         msg = event.data.get("message")

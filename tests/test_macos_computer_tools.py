@@ -11,13 +11,13 @@ from crabagent.core.agent.tools import macos_computer
 
 
 def context():
-    metadata: dict = {"_macos_input_confirmed": True}
+    metadata: dict = {"_macos_batch_observation": (7, 42, macos_computer.time.monotonic())}
     return SimpleNamespace(metadata=metadata, confirm_callback=None)
 
 
 def fresh_context():
     ctx = context()
-    ctx.metadata.pop("_macos_input_confirmed")
+    ctx.metadata.pop("_macos_batch_observation")
     return ctx
 
 
@@ -53,7 +53,7 @@ async def test_observe_relays_window(monkeypatch):
 async def test_capture_returns_image_result(monkeypatch):
     async def bridge(command, payload, context=None):
         assert command == "macos_capture" and payload == {"windowId": 7}
-        return {"ok": True, "windowId": 7, "dataUrl": "data:image/jpeg;base64,QQ", "mime": "image/jpeg"}
+        return {"ok": True, "windowId": 7, "pid": 42, "dataUrl": "data:image/jpeg;base64,QQ", "mime": "image/jpeg"}
 
     monkeypatch.setattr(macos_computer, "_call_bridge", bridge)
     result = await macos_computer.macos_capture(7, context=context())
@@ -109,7 +109,7 @@ async def test_scroll_passes_optional_spot(monkeypatch):
 
     monkeypatch.setattr(macos_computer, "_call_bridge", bridge)
     await macos_computer.macos_scroll(7, -300, context=context(), x=500, y=600)
-    assert captured["payload"] == {"windowId": 7, "amount": -300, "x": 500, "y": 600}
+    assert captured["payload"] == {"windowId": 7, "pid": 42, "amount": -300, "x": 500, "y": 600}
 
 
 @pytest.mark.asyncio
@@ -125,7 +125,7 @@ async def test_failure_counts_budget_and_reraises(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_allow_flow_adds_app_and_retries(monkeypatch):
+async def test_allow_flow_adds_app_and_requires_fresh_observation(monkeypatch):
     calls = []
 
     async def bridge(command, payload, context=None):
@@ -146,9 +146,8 @@ async def test_allow_flow_adds_app_and_retries(monkeypatch):
     ctx = context()
     ctx.confirm_callback = approve
     result = json.loads(await macos_computer.macos_click(7, 42, 10, 10, context=ctx))
-    assert result["clicked"] == {"x": 10, "y": 10}
-    assert result["clicked"] == {"x": 10, "y": 10}
-    assert [c for c, _ in calls] == ["macos_click", "macos_allow_app", "macos_click"]
+    assert result["needs_observation"] is True
+    assert [c for c, _ in calls] == ["macos_click", "macos_allow_app"]
     assert calls[1][1] == {"bundleId": "com.apple.TextEdit"}
 
 
@@ -194,12 +193,12 @@ async def test_observe_sets_input_precondition(monkeypatch):
     monkeypatch.setattr(macos_computer, "_call_bridge", bridge)
     ctx = fresh_context()
     await macos_computer.macos_observe(7, 42, context=ctx)
-    assert ctx.metadata["_macos_input_confirmed"] is True
+    assert ctx.metadata["_macos_batch_observation"][:2] == (7, 42)
 
 
 @pytest.mark.asyncio
-async def test_frontmost_flow_activates_and_retries(monkeypatch):
-    """Lost-focus between observe and click: auto-activate the target, retry once."""
+async def test_frontmost_flow_activates_without_replaying(monkeypatch):
+    """Lost focus: restore the target app but do not dispatch the old action."""
     calls = []
 
     async def bridge(command, payload, context=None):
@@ -217,8 +216,8 @@ async def test_frontmost_flow_activates_and_retries(monkeypatch):
     monkeypatch.setattr(macos_computer, "_call_bridge", bridge)
     ctx = context()
     result = json.loads(await macos_computer.macos_click(7, 42, 10, 10, context=ctx))
-    assert result["clicked"] == {"x": 10, "y": 10}
-    assert [c for c, _ in calls] == ["macos_click", "macos_activate", "macos_click"]
+    assert result["needs_observation"] is True
+    assert [c for c, _ in calls] == ["macos_click", "macos_activate"]
     assert calls[1][1] == {"bundleId": "com.tencent.xinWeChat"}
 
 
@@ -250,12 +249,12 @@ async def test_frontmost_flow_surfaces_persistent_failure(monkeypatch):
 async def test_capture_sets_input_precondition(monkeypatch):
     async def bridge(command, payload, context=None):
         assert command == "macos_capture"
-        return {"ok": True, "windowId": 7, "dataUrl": "data:image/jpeg;base64,QQ"}
+        return {"ok": True, "windowId": 7, "pid": 42, "dataUrl": "data:image/jpeg;base64,QQ"}
 
     monkeypatch.setattr(macos_computer, "_call_bridge", bridge)
     ctx = fresh_context()
     await macos_computer.macos_capture(7, context=ctx)
-    assert ctx.metadata["_macos_input_confirmed"] is True
+    assert ctx.metadata["_macos_batch_observation"][:2] == (7, 42)
 
 
 @pytest.mark.asyncio
@@ -335,3 +334,48 @@ async def test_game_hold_dispatches_once_without_auto_activation(monkeypatch):
     assert len(calls) == 1 and calls[0][0] == "macos_hold_game_keys"
     assert calls[0][1]["keys"] == ["KeyW", "Space"]
     assert calls[0][1]["action_id"]
+
+
+@pytest.mark.asyncio
+async def test_press_element_references_are_opaque_and_single_use(monkeypatch):
+    calls = []
+    signature = {"role": "AXButton", "title": "Example"}
+
+    async def bridge(command, payload, context=None):
+        calls.append((command, payload))
+        if command == "macos_observe":
+            return {"ok": True, "nodes": [{"role": "AXButton", "_pressSignature": signature}]}
+        return {"ok": True, "pressed": True}
+
+    monkeypatch.setattr(macos_computer, "_call_bridge", bridge)
+    ctx = fresh_context()
+    node = json.loads(await macos_computer.macos_observe(7, 42, context=ctx))["nodes"][0]
+    assert "_pressSignature" not in node
+    press = macos_computer.registry.get("macos_press_element")
+    assert press is not None
+    for window_id, pid in [(8, 42), (7, 43)]:
+        with pytest.raises(RuntimeError, match="STALE_OBSERVATION"):
+            await press.handler(window_id=window_id, pid=pid, element_ref=node["element_ref"], context=ctx)
+    result = await press.handler(window_id=7, pid=42, element_ref=node["element_ref"], context=ctx)
+    assert json.loads(result)["pressed"] is True
+    with pytest.raises(RuntimeError, match="STALE_OBSERVATION"):
+        await press.handler(window_id=7, pid=42, element_ref=node["element_ref"], context=ctx)
+    assert calls == [
+        ("macos_observe", {"windowId": 7, "pid": 42}),
+        ("macos_press_element", {"windowId": 7, "pid": 42, "signature": signature}),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_failed_capture_and_browser_observation_do_not_authorize_input(monkeypatch):
+    async def bridge(command, payload, context=None):
+        assert command == "macos_capture"
+        return {"ok": True, "pid": 42, "dataUrl": "data:image/jpeg;base64,"}
+
+    monkeypatch.setattr(macos_computer, "_call_bridge", bridge)
+    ctx = context()
+    ctx.metadata["_collab_browser_observation_id"] = "browser-observation"
+    with pytest.raises(RuntimeError, match="CAPTURE_FAILED"):
+        await macos_computer.macos_capture(7, context=ctx)
+    with pytest.raises(RuntimeError, match="STALE_OBSERVATION"):
+        await macos_computer.macos_key(7, "tab", context=ctx)

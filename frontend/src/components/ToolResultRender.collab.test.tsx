@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("../i18n", () => ({ default: { t: (key: string, opts?: Record<string, unknown>) => key } }));
 
-const { extractCollabChanges } = await import("./ToolResultRender");
+const { default: ToolResultRender, extractCollabChanges } = await import("./ToolResultRender");
 
 const sample = [
   "Error: old_string not found in /tmp/sample.md",
@@ -33,5 +34,20 @@ describe("extractCollabChanges", () => {
     const { base, changes } = extractCollabChanges("Error: file missing");
     expect(base).toBe("Error: file missing");
     expect(changes).toHaveLength(0);
+  });
+});
+
+
+describe("bash execution status", () => {
+  it("does not show an exit code when the command was never executed", () => {
+    const error = "Error: tool 'bash' was not executed: no arguments were received.";
+    const html = renderToStaticMarkup(<ToolResultRender name="bash" argsJson="{}" result={error} />);
+    expect(html).toContain("was not executed");
+    expect(html).not.toContain("Exit code:");
+  });
+
+  it("still shows a real shell exit code", () => {
+    const html = renderToStaticMarkup(<ToolResultRender name="bash" argsJson='{"command":"exit 7"}' result="Exit code: 7" />);
+    expect(html).toContain("Exit code: 7");
   });
 });

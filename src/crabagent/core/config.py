@@ -69,6 +69,7 @@ class Settings(BaseSettings):
     memory_auto_extract: bool = True
     memory_auto_recall: bool = True
     memory_max_inject: int = 5
+    session_memory_models: list[str] = []  # Explicit provider-name:wire-model allowlist.
 
     # ── LLM retry / resilience ──
     llm_retry_max: int = 3
