@@ -426,6 +426,7 @@ async def _run_agent(
             )
     context.metadata["resolved_model"] = model.split("/", 1)[-1] if "/" in model else model
     context.metadata["resolved_provider"] = provider.name
+    context.metadata["resolved_provider_type"] = provider.provider_type
 
     mcp_summary = [
         {"name": s["name"], "status": s["status"], "tool_count": s["tool_count"]}
@@ -1229,6 +1230,13 @@ def _build_messages(context: AgentContext, text_only: bool = False, *, memory_bl
         "assistant": {"role", "content", "tool_calls", "reasoning_content"},
         "tool": {"role", "content", "tool_call_id"},
     }
+    # 智谱端点看到输入消息里带历史 reasoning_content（尤其是明文思考）后，
+    # 会概率性地隐藏本轮 reasoning_content（实测 2026-11-20：带明文历史 2/5 隐藏，
+    # 不带 0/5 隐藏），导致 UI 显示"内容已加密"占位符。GLM 并不需要上一轮
+    # 的思考文本，因此对 zhipu 直接剥离，历史只保留 content/tool_calls。
+    drop_reasoning = context.metadata.get("resolved_provider_type") == "zhipu"
+    if drop_reasoning:
+        _VALID_KEYS["assistant"] = _VALID_KEYS["assistant"] - {"reasoning_content"}
     # Repair persisted tool-call blocks before filtering their protocol fields.
     messages = _validate_tool_calls(messages)
     cleaned = []
