@@ -19,6 +19,7 @@ from crabagent.core.agent.multimodal import (
 from crabagent.core.agent.session_memory import ANCHOR_ID, Admission
 from crabagent.core.agent.token_limits import get_model_token_limit
 from crabagent.core.agent.tool_call_stream import ResponsesToolCallSnapshot, ToolCallStream
+from crabagent.core.agent.tools.registry import WRITER_TOOL_NAMES
 from crabagent.core.config import settings
 from crabagent.core.event import AgentEvent, EventType
 from crabagent.core.observability.spans import end_span, start_span
@@ -791,7 +792,23 @@ async def _run_agent(
                     )
                     raise
 
-            gathered = await asyncio.gather(*[_run_and_emit(m) for m in tool_metas], return_exceptions=True)
+            # Tools that mutate files must not run concurrently: each edit/write
+            # snapshots the file and commits under a version check, so two
+            # parallel writers to the same file would race and the loser would
+            # fail with "changed during editing" even though nothing external
+            # touched the file. The model decides per message how many tool
+            # calls to issue, so the executor enforces ordering: batches that
+            # include any mutating tool run sequentially (order preserved);
+            # read-only batches keep running in parallel.
+            if any(meta["name"] in WRITER_TOOL_NAMES for meta in tool_metas):
+                gathered = []
+                for _m in tool_metas:
+                    try:
+                        gathered.append(await _run_and_emit(_m))
+                    except Exception as _exc:
+                        gathered.append(_exc)
+            else:
+                gathered = await asyncio.gather(*[_run_and_emit(m) for m in tool_metas], return_exceptions=True)
 
             pending_tool_images: list[tuple[str, list[dict]]] = []
             for i in range(len(tool_metas)):

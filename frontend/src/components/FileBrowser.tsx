@@ -54,6 +54,8 @@ function useFileTree(workspace?: string) {
     setSelectedPath(path);
     setFileContent(null);
     setFileError(null);
+    // 图片走 /files/image 预览，不需要读文本内容；否则二进制文件 read 必然 400
+    if (isImageFile(path)) return;
     try {
       const result: FileContent = await readFile(path, isAbsolute);
       if (result.truncated) {
@@ -62,9 +64,9 @@ function useFileTree(workspace?: string) {
         setFileContent(result.content);
       }
     } catch (e: unknown) {
-      setFileError(
-        i18n.t("fileBrowser.readFailed"),
-      );
+      // ApiError 的 message 即后端 detail，透传便于排查
+      const detail = e instanceof Error && e.message && e.message !== "Unauthorized" ? e.message : null;
+      setFileError(detail ? `${i18n.t("fileBrowser.readFailed")}: ${detail}` : i18n.t("fileBrowser.readFailed"));
     }
   };
 

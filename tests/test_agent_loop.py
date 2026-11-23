@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -754,3 +755,101 @@ async def test_run_agent_routes_parallel_tool_arguments_by_index(monkeypatch, am
     assert {msg["tool_call_id"] for msg in requests[1] if msg["role"] == "tool"} == {
         "call_first", "call_second",
     }
+
+
+@pytest.mark.asyncio
+async def test_run_agent_serializes_writer_tool_batch(monkeypatch):
+    """Two edit calls in one assistant message must not overlap: each edit
+    snapshots the file and commits under a version check, so concurrent runs
+    make the loser fail with a false "changed during editing" conflict."""
+    registry = ToolRegistry()
+    active = 0
+    max_active = 0
+    order = []
+
+    @registry.register(
+        name="edit",
+        description="edit",
+        parameters={"type": "object", "properties": {"file_path": {"type": "string"}}},
+    )
+    async def edit_tool(file_path: str):
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        try:
+            await asyncio.sleep(0.02)
+            order.append(file_path)
+            return f"edited {file_path}"
+        finally:
+            active -= 1
+
+    context = AgentContext(workspace=Path.cwd(), tool_registry=registry, model="gpt-4o", max_iterations=3)
+    chunks = [
+        _chunk(delta=_delta(tool_calls=[_tool_call("call_a", "edit", "", 0)])),
+        _chunk(delta=_delta(tool_calls=[_tool_call("call_b", "edit", "", 1)])),
+        _chunk(delta=_delta(tool_calls=[_tool_call(None, None, '{"file_path": "a.txt"}', 0)])),
+        _chunk(delta=_delta(tool_calls=[_tool_call(None, None, '{"file_path": "b.txt"}', 1)])),
+        _chunk(delta=_delta(), finish_reason="tool_calls"),
+    ]
+    requests = []
+
+    async def fake_acompletion(**kwargs):
+        requests.append(kwargs["messages"])
+        if len(requests) == 1:
+            return _stream(chunks)
+        return _stream([_chunk(delta=_delta(content="done"), finish_reason="stop", usage=_usage())])
+
+    provider = SimpleNamespace(name="mock", provider_type="openai", api_key="k", base_url="", enabled=True)
+    monkeypatch.setattr(loop, "_resolve_provider", _async_return(provider))
+    monkeypatch.setattr(loop.litellm, "acompletion", fake_acompletion)
+    monkeypatch.setattr("crabagent.core.proxy.resolve_llm_proxy", _async_return(""))
+
+    await loop.run_agent(context, "edit two files")
+
+    assert max_active == 1
+    assert order == ["a.txt", "b.txt"]
+
+
+@pytest.mark.asyncio
+async def test_run_agent_keeps_read_only_batch_parallel(monkeypatch):
+    """Pure read batches must keep running concurrently (no artificial
+    serialization for readers)."""
+    registry = ToolRegistry()
+    active = 0
+    max_active = 0
+
+    @registry.register(
+        name="read",
+        description="read",
+        parameters={"type": "object", "properties": {"file_path": {"type": "string"}}},
+    )
+    async def read_tool(file_path: str):
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        try:
+            await asyncio.sleep(0.02)
+            return f"read {file_path}"
+        finally:
+            active -= 1
+
+    context = AgentContext(workspace=Path.cwd(), tool_registry=registry, model="gpt-4o", max_iterations=3)
+    chunks = [
+        _chunk(delta=_delta(tool_calls=[_tool_call("call_a", "read", "", 0)])),
+        _chunk(delta=_delta(tool_calls=[_tool_call("call_b", "read", "", 1)])),
+        _chunk(delta=_delta(tool_calls=[_tool_call(None, None, '{"file_path": "a.txt"}', 0)])),
+        _chunk(delta=_delta(tool_calls=[_tool_call(None, None, '{"file_path": "b.txt"}', 1)])),
+        _chunk(delta=_delta(), finish_reason="tool_calls"),
+    ]
+
+    async def fake_acompletion(**kwargs):
+        return _stream(chunks)
+
+    provider = SimpleNamespace(name="mock", provider_type="openai", api_key="k", base_url="", enabled=True)
+    monkeypatch.setattr(loop, "_resolve_provider", _async_return(provider))
+    monkeypatch.setattr(loop.litellm, "acompletion", fake_acompletion)
+    monkeypatch.setattr("crabagent.core.proxy.resolve_llm_proxy", _async_return(""))
+
+    await loop.run_agent(context, "read two files")
+
+    assert max_active == 2

@@ -25,6 +25,14 @@ class ToolInfo:
 
 logger = logging.getLogger(__name__)
 
+# Tools that mutate files. When a single assistant message carries several tool
+# calls and any of them is a writer, the agent loop runs the batch sequentially
+# (WRITER_TOOL_NAMES in crabagent.core.agent.loop) so version checks in the
+# write coordinator see each writer's result before the next one starts.
+# Keep this set in sync with that constant.
+WRITER_TOOL_NAMES = frozenset({"write", "edit", "office_create", "office_edit", "office_batch_edit"})
+READER_TOOL_NAMES = frozenset({"read", "office_read", "office_query", "office_render"})
+
 
 class ToolRegistry:
     def __init__(self):
@@ -375,8 +383,8 @@ class ToolRegistry:
             if _t1 - _t0 > 0.1:
                 logging.getLogger(__name__).info("tool %s: pre-exec took %.1fms", name, (_t1 - _t0) * 1000)
             collaboration = bool(context is not None and context.metadata.get("_collaboration_bound"))
-            writers = {"write", "edit", "office_create", "office_edit", "office_batch_edit"}
-            readers = {"read", "office_read", "office_query", "office_render"}
+            writers = WRITER_TOOL_NAMES
+            readers = READER_TOOL_NAMES
             path = str(arguments.get("file_path") or (
                 context.metadata.get("current_doc") if collaboration and name.startswith("office_") else ""
             ) or "")

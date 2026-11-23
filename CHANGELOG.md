@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.18.9] — Sequential Writer Tools Within One Message (2026-11-23)
+
+### Fixed
+- When a single assistant message carries multiple tool calls and any of them is a mutating tool (write/edit/office_*), the whole batch now runs sequentially in order. Previously parallel execution let two edits of the same file each verify against the version they read, so the later committer falsely failed with "changed during editing" and its content only survived in a `~/.crabagent/collaboration-conflicts/` copy. The executor no longer depends on how the model distributes its calls; read-only batches still run in parallel.
+- Writer and reader tool sets promoted to module-level constants `registry.WRITER_TOOL_NAMES` / `READER_TOOL_NAMES`, shared as a single source of truth by the agent loop and the tool executor.
+- The file browser no longer reads image files as text on click (avoiding the guaranteed 400 for binary files) and previews them via `/files/image` instead.
+- Rebuilt frontend static assets and tidied `.gitignore`.
+
+### Tests
+- Added regression tests: two edits in one batch run serially (concurrency count 1, call order preserved); two reads in one batch stay parallel (concurrency count 2).
+
+---
+
 ## [0.18.7] — Parallel Tool Calls, Session Memory and macOS Controls (2026-11-19)
 
 ### Added
