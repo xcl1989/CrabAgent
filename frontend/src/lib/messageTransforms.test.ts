@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { SSEEvent } from "../api/events";
 import { ChatMessage } from "../types/ChatMessage";
-import { sseEventToMessages } from "./messageTransforms";
+import { dbMessagesToChat, sseEventToMessages } from "./messageTransforms";
 
 function resultCard(runId: number): ChatMessage {
   return {
@@ -64,4 +64,50 @@ describe("bash stream correlation", () => {
     const updated = sseEventToMessages({ type: "bash_output", timestamp: 0, data: { text: "lost", tool_call_id: "missing" } }, calls);
     expect(updated.every((call) => !call.bashStream)).toBe(true);
   });
+});
+
+describe("memory reference cards", () => {
+  it("shows only nonempty receipts and deduplicates by user anchor", () => {
+    const event = (keys: string[]): SSEEvent => ({
+      type: "memory_references", timestamp: 0, data: { anchor_id: 42, keys },
+    });
+    expect(sseEventToMessages(event([]), [])).toEqual([]);
+    const turn: ChatMessage[] = [{ id: "db-42", role: "user", content: "fix backend" }];
+    const cards = sseEventToMessages(event(["python-backend"]), turn);
+    expect(cards.slice(1)).toMatchObject([{
+      id: "memory-references-42", role: "memory_references", memory_references: ["python-backend"],
+    }]);
+    expect(sseEventToMessages(event(["python-backend"]), cards)).toBe(cards);
+  });
+
+  it("inserts a late receipt after its user turn, not inside streaming thinking", () => {
+    const event: SSEEvent = {
+      type: "memory_references", timestamp: 0, data: { anchor_id: 42, keys: ["python-backend"] },
+    };
+    const streaming: ChatMessage[] = [
+      { id: "db-42", role: "user", content: "fix backend" },
+      { id: "t-1", role: "thinking", content: "The" },
+    ];
+    const result = sseEventToMessages(event, streaming);
+    expect(result.map((m) => m.role)).toEqual(["user", "memory_references", "thinking"]);
+    expect(result[2]).toBe(streaming[1]);
+  });
+
+  it("drops a receipt whose user turn is no longer in view", () => {
+    const event: SSEEvent = {
+      type: "memory_references", timestamp: 0, data: { anchor_id: 99, keys: ["python-backend"] },
+    };
+    const messages: ChatMessage[] = [{ id: "db-42", role: "user", content: "fix backend" }];
+    expect(sseEventToMessages(event, messages)).toBe(messages);
+  });
+});
+
+
+it("restores a memory card immediately after its user turn", () => {
+  const messages = dbMessagesToChat([
+    { id: 42, sequence: 1, role: "user", content: "fix backend", created_at: null, memory_references: ["backend"] },
+    { id: 43, sequence: 2, role: "assistant", content: "ok", created_at: null },
+  ]);
+  expect(messages.map((m) => m.role)).toEqual(["user", "memory_references", "assistant"]);
+  expect(messages[1]).toMatchObject({ id: "memory-references-42", memory_references: ["backend"] });
 });

@@ -53,6 +53,23 @@ async def lifespan(app: FastAPI):
     await init_db()
     logger.info("Database initialized")
 
+    # Memory vector index: backfill embeddings for memories saved before the
+    # embedding model was available.  Runs in the background so startup is not
+    # blocked by model loading; failures only mean recall stays keyword-only.
+    import asyncio as _asyncio
+
+    async def _backfill_memory_embeddings() -> None:
+        try:
+            from crabagent.core.database import agent_memory_backfill_embeddings
+
+            count = await agent_memory_backfill_embeddings()
+            if count:
+                logger.info("Memory embeddings backfilled: %s", count)
+        except Exception:
+            logger.warning("Memory embedding backfill failed (non-fatal)", exc_info=True)
+
+    _asyncio.create_task(_backfill_memory_embeddings())
+
     # Trusted work system: repair zombie runs and lingering tasks left by
     # a previous process. Failures must not block startup.
     try:

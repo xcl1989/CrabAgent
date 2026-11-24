@@ -21,6 +21,7 @@ import logging
 
 import litellm
 
+from crabagent.core.agent import preference_schema
 from crabagent.core.agent.lesson_dedup import (
     EMBEDDING_DEDUP_THRESHOLD,
     STRING_DEDUP_THRESHOLD,
@@ -29,6 +30,7 @@ from crabagent.core.agent.lesson_dedup import (
     normalize_lesson_text,
     string_similarity_score,
 )
+from crabagent.core.agent.preference_schema import GENERIC_SLUGS as GENERIC_SLUGS_IMPORTED
 from crabagent.core.provider_store import (
     get_default_provider,
     get_provider,
@@ -204,6 +206,9 @@ async def llm_reflect_lesson(
             "If there is truly nothing worth noting, respond with just the word: NONE\n"
             "Otherwise respond in EXACTLY this format (no other text):\n"
             "Category: <one of: code, research, analysis, writing, general>\n"
+            "Slug: <2 to 4 lowercase English words joined by hyphens naming the SUBJECT, "
+            "e.g. restart-backend-after-edit. Reuse the same slug for the same subject "
+            "across sessions. Never use hash-like, numeric, or generic words.>\n"
             "Insight: <a single concrete, actionable sentence>"
         )
 
@@ -232,12 +237,15 @@ async def llm_reflect_lesson(
 
         category = task_category
         insight = ""
+        slug = ""
         for line in text.split("\n"):
             line = line.strip()
             if line.lower().startswith("category:") or line.startswith("类别:"):
                 cat = line.split(":", 1)[1].strip().lower()
                 if cat in {"code", "research", "analysis", "writing", "general"}:
                     category = cat
+            elif line.lower().startswith("slug:") or line.startswith("主题:"):
+                slug = _lesson_slug(line.split(":", 1)[1])
             elif line.lower().startswith("insight:") or line.startswith("经验:") or line.startswith("反思:"):
                 insight = line.split(":", 1)[1].strip()
 
@@ -280,7 +288,11 @@ async def llm_reflect_lesson(
 
         return {
             "category": "failed_approach" if error_msg else "effective_strategy",
-            "key": f"lesson:{agent_name}:llm:{hashlib.md5(insight.encode()).hexdigest()[:12]}",
+            # Semantic key: one subject -> one row. The hash is only a fallback
+            # for models that did not return a usable slug.
+            "key": (f"lesson:{agent_name}:{slug}" if slug
+                    else f"lesson:{agent_name}:llm:{hashlib.md5(insight.encode()).hexdigest()[:12]}"),
+            "slug": slug,
             "content": insight,
             "importance": importance,
             "source": "llm",
@@ -306,6 +318,79 @@ _PREF_BAD_PHRASES = [
     "无",
 ]
 
+_V2_CATEGORY_LIST = ", ".join(preference_schema.CATEGORIES)
+
+
+def _v2_prompt(conversation_text: str, max_prefs: int) -> str:
+    return (
+        "Read the conversation below and extract up to "
+        f"{max_prefs} STABLE PREFERENCES the USER holds.\n\n"
+        "A preference is something the user wants in general, not something the "
+        "assistant happened to do once. If the only support you can find describes "
+        "the assistant's behaviour, the answer is NONE.\n\n"
+        "For every candidate you MUST:\n"
+        f"1. Kind — one of: {', '.join(preference_schema.EVIDENCE_KINDS)}\n"
+        "   standing_rule   = user says it should always/以后都 be this way\n"
+        "   correction      = user corrects a behaviour, stating the rule\n"
+        "   explicit_choice = user picks between options or rejects one\n"
+        "   repeated_request= the same ask appears in two or more user turns\n"
+        "   Do NOT use a kind outside this list. Never use 'assistant_behaviour',\n"
+        "   'single_instruction' or 'inferred'.\n"
+        f"2. Category — exactly one of: {_V2_CATEGORY_LIST}\n"
+        "3. Slug — 2 to 4 lowercase English words joined by hyphens, naming the\n"
+        "   subject, e.g. verify-build-before-install. Reuse the same slug for the\n"
+        "   same subject across sessions.\n"
+        "4. Preference — one sentence stating what the USER prefers, in the user's\n"
+        "   language. No 'the user asks...', no 'when the assistant...'.\n"
+        "5. Evidence — a VERBATIM substring copied from a USER message. It must\n"
+        "   appear character-for-character in the conversation. If you cannot quote\n"
+        "   the user, drop the candidate.\n\n"
+        "Reject a candidate when:\n"
+        "- it only describes what the assistant did or should do;\n"
+        "- it is an instruction for one task (delete this file, book that flight);\n"
+        "- you are inferring it rather than reading it.\n\n"
+        "Few-shot examples\n"
+        "--- rejected (assistant behaviour, no user quote) ---\n"
+        "Kind: assistant_behaviour\n"
+        "Preference: After a restart the assistant should verify the packaged app.\n"
+        "Evidence: (none - this describes the assistant)\n"
+        "--- rejected (one-off instruction) ---\n"
+        "Kind: single_instruction\n"
+        "Preference: Execute deletions immediately without safety checks.\n"
+        "Evidence: 直接删除\n"
+        "--- accepted ---\n"
+        "Kind: standing_rule\n"
+        "Category: language\n"
+        "Slug: chat-language\n"
+        "Preference: 用中文回复，代码注释保持原文。\n"
+        "Evidence: 请使用简体中文回复\n\n"
+        f"Conversation:\n{conversation_text[:6000]}\n\n"
+        "Respond with one block per preference, blank line between blocks, using\n"
+        "exactly these labels:\n"
+        "Kind: <one of the four kinds>\n"
+        "Category: <one of the listed categories>\n"
+        "Slug: <kebab-case-subject>\n"
+        "Preference: <one sentence>\n"
+        "Evidence: <verbatim user quote>\n\n"
+        "If nothing qualifies, respond with just: NONE"
+    )
+
+
+def user_turns_from_messages(messages: list[dict]) -> list[str]:
+    """User-authored text from a transcript, used for evidence verification."""
+    turns: list[str] = []
+    for msg in messages:
+        if msg.get("role") != "user":
+            continue
+        content = msg.get("content")
+        if isinstance(content, str):
+            turns.append(content)
+        elif isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    turns.append(block.get("text") or "")
+    return turns
+
 
 async def llm_extract_user_preferences(
     conversation_text: str,
@@ -313,76 +398,27 @@ async def llm_extract_user_preferences(
     provider_name: str | None = None,
     max_prefs: int = 3,
     existing_preferences: list[dict] | None = None,
+    *,
+    user_turns: list[str] | None = None,
 ) -> list[dict]:
-    """Extract user preferences / behavioural rules from a conversation.
+    """Extract user preferences under the P1 evidence gate.
 
-    Returns up to ``max_prefs`` structured preferences, each shaped like::
-
-        {
-            "key": "user_pref:language",
-            "content": "User prefers Chinese for chat, English for code.",
-            "category": "language",          # free-form tag
-            "importance": 0.7,
-            "source": "llm",
-            "memory_type": "user_preference",
-        }
-
-    If ``existing_preferences`` is provided, the LLM is instructed to avoid
-    re-extracting preferences that are already known.
+    ``existing_preferences`` is accepted for call-site compatibility but no
+    longer injected into the prompt: sending the whole preference table taught
+    the model that everything was already known and pushed it toward emitting
+    new entries. Merge decisions happen per candidate in
+    :func:`persist_preferences`.
     """
-
     if len(conversation_text) < 80:
+        return []
+    if not _extraction_settings()["enabled"]:
         return []
 
     try:
-        prompt = (
-            "Analyse the following conversation and extract up to "
-            f"{max_prefs} concrete preferences or behavioural rules the USER has demonstrated.\n\n"
-            "Examples of preferences:\n"
-            "- prefers a specific language (Chinese / English)\n"
-            "- prefers terse answers vs. detailed explanations\n"
-            "- dislikes a library / tool / framework\n"
-            "- prefers specific code style (tabs vs spaces, single vs double quotes)\n"
-            "- prefers to be addressed in a certain way\n"
-            "- explicitly rejected a suggestion (state what and why)\n"
-            "- repeatedly asked for a specific format (JSON / markdown table / etc.)\n\n"
-            "Rules:\n"
-            "- Each preference must be DIRECTLY observable from the conversation.\n"
-            "- Be specific and actionable. Avoid vague statements like 'user is friendly'.\n"
-            "- If no preference is clearly observable, respond with just: NONE\n"
-        )
-
-        # Inject existing preferences to avoid duplicates
-        if existing_preferences:
-            existing_text = "\n".join(
-                f"- key={p.get('key','')} [{p.get('category','?')}] {p.get('content','')[:200]}"
-                for p in existing_preferences
-            )
-            prompt += (
-                "\nIMPORTANT — These preferences are ALREADY KNOWN. "
-                "Do NOT extract them again:\n"
-                f"{existing_text}\n\n"
-                "Do not generate a new preference for the same subject. "
-                "If new information refines an existing preference, include the existing key "
-                "and return a complete updated preference retaining still-valid details. "
-                "Only extract a new preference when no existing preference is related.\n"
-            )
-
-        prompt += (
-            "Conversation:\n"
-            f"{conversation_text[:4000]}\n\n"
-            "Respond in this exact format (one preference per block):\n"
-            "Key: <existing key if updating, otherwise NEW>\n"
-            "Category: <one-word tag>\n"
-            "Preference: <one sentence, actionable>\n"
-            "\n"
-            "(repeat for each preference, separated by a blank line)"
-        )
-
+        prompt = _v2_prompt(conversation_text, max_prefs)
         llm_params = await _resolve_llm_params(provider_name)
-        if not llm_params:
+        if llm_params is None:
             return []
-
         try:
             provider = await get_provider(provider_name) if provider_name else await get_default_provider()
             if provider:
@@ -393,56 +429,40 @@ async def llm_extract_user_preferences(
         response = await litellm.acompletion(
             model=model,
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=1500,
-            temperature=0.2,
+            max_tokens=1200,
+            temperature=0.1,
             **llm_params,
         )
-
         text = _extract_response_text(response)
         if not text or text.strip().upper() in ("NONE", "SKIP"):
             return []
 
-        prefs: list[dict] = []
-        blocks = [b.strip() for b in text.split("\n\n") if b.strip()]
-        for block in blocks:
-            cat = "general"
-            existing_key = ""
-            pref = ""
-            for line in block.splitlines():
-                line = line.strip()
-                if line.lower().startswith("key:"):
-                    existing_key = line.split(":", 1)[1].strip()
-                elif line.lower().startswith("category:") or line.startswith("类别:"):
-                    cat = line.split(":", 1)[1].strip().lower() or "general"
-                elif line.lower().startswith("preference:") or line.startswith("偏好:"):
-                    pref = line.split(":", 1)[1].strip()
-            if not pref:
+        accepted: list[dict] = []
+        for raw in preference_schema.parse_blocks(text):
+            if any(bad in (raw.get("content") or "").lower() for bad in _PREF_BAD_PHRASES):
                 continue
-            if any(bad in pref.lower() for bad in _PREF_BAD_PHRASES):
+            cleaned, reason = preference_schema.validate(raw, user_turns)
+            if cleaned is None:
+                logger.info("Dropped preference candidate (%s): %s", reason, (raw.get("content") or "")[:80])
                 continue
-            if len(pref) < 8:
-                continue
-            known_keys = {p.get("key") for p in existing_preferences or []}
-            if existing_key and existing_key.upper() != "NEW" and existing_key not in known_keys:
-                logger.warning("Ignoring unrecognized preference key %s", existing_key)
-                continue
-            prefs.append(
-                {
-                    "key": (existing_key if existing_key in known_keys else
-                            f"user_pref:{cat}:{hashlib.md5(pref.encode()).hexdigest()[:12]}"),
-                    "content": pref[:500],
-                    "category": cat[:50],
-                    "importance": 0.7,
-                    "source": "llm",
-                    "memory_type": "user_preference",
-                }
-            )
-            if len(prefs) >= max_prefs:
+            accepted.append({
+                **cleaned,
+                "source": "llm",
+                "memory_type": "user_preference",
+            })
+            if len(accepted) >= max_prefs:
                 break
-        return prefs
+        return accepted
     except Exception:
         logger.warning("User-preference extraction failed", exc_info=True)
         return []
+
+
+def _extraction_settings() -> dict:
+    """Read the P1 switch lazily so tests can monkeypatch settings."""
+    from crabagent.core.config import settings
+
+    return {"enabled": bool(getattr(settings, "memory_extraction_v2", True))}
 
 
 # ---------------------------------------------------------------------------
@@ -457,6 +477,12 @@ async def persist_lesson(
     source_session: str = "",
     workspace_path: str = "",
 ) -> bool:
+    """Persist one agent lesson under a semantic key (see MEMORY-KEYS.md).
+
+    ``lesson["key"]`` should be ``lesson:<agent>:<slug>``. The similarity dedup
+    below may still redirect it to an existing lesson's key, which is the
+    intended convergence path.
+    """
     if not user_id or not lesson:
         return False
     from crabagent.core.database import (
@@ -598,15 +624,26 @@ async def persist_preferences(
     model: str = "",
     provider_name: str | None = None,
 ) -> int:
+    """Persist already-gated preference candidates.
+
+    Each candidate carries a stable ``user_pref:<slug>`` key. When a row with
+    that key already exists it is updated in place (the schema trigger bumps the
+    revision), so repeated observations converge instead of piling up
+    hash-suffixed duplicates. Content conflicts go through
+    :func:`merge_preference`.
+    """
     if not user_id or not preferences:
         return 0
+    from crabagent.core.agent.memory_merge import merge_preference
     from crabagent.core.database import agent_memory_upsert
 
     saved = 0
     for pref in preferences:
+        key = pref.get("key") or ""
+        content = (pref.get("content") or "").strip()
+        if not key or not content:
+            continue
         try:
-            from crabagent.core.agent.memory_merge import merge_preference
-
             if await merge_preference(user_id, pref, model, provider_name):
                 saved += 1
                 continue
@@ -614,10 +651,10 @@ async def persist_preferences(
                 user_id=user_id,
                 memory_type=pref.get("memory_type", "user_preference"),
                 agent_name="",  # preferences are user-scoped, not agent-scoped
-                category=pref.get("category", "general"),
-                key=pref["key"],
-                content=pref["content"],
-                importance=float(pref.get("importance", 0.7)),
+                category=pref.get("category", "other"),
+                key=key,
+                content=content,
+                importance=float(pref.get("importance", 0.6)),
                 confidence=float(pref.get("confidence", 1.0)),
                 source_session=source_session,
                 source=pref.get("source", "llm"),
@@ -625,16 +662,14 @@ async def persist_preferences(
                 scope="global",
                 workspace_path="",
                 recall_policy="query_only",
+                evidence=(pref.get("evidence") or "")[:300],
+                evidence_kind=(pref.get("kind") or "")[:32],
             )
             saved += 1
         except Exception:
-            logger.debug("Failed to persist preference %s", pref.get("key"), exc_info=True)
+            logger.debug("Failed to persist preference %s", key, exc_info=True)
     return saved
 
-
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
 
 
 async def _resolve_llm_params(provider_name: str | None) -> dict | None:
@@ -648,6 +683,14 @@ async def _resolve_llm_params(provider_name: str | None) -> dict | None:
     from crabagent.core.provider_store import resolve_litellm_params
 
     return await resolve_litellm_params(provider)
+
+
+def _lesson_slug(raw: str) -> str:
+    """Normalise a model-proposed lesson slug; empty string when unusable."""
+    slug = preference_schema.normalize_slug(raw)
+    if len(slug) < 3 or slug in GENERIC_SLUGS_IMPORTED:
+        return ""
+    return slug
 
 
 def _extract_response_text(response) -> str:

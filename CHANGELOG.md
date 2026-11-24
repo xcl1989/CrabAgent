@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.19.0] — Memory Recall Quality (2026-11-24)
+
+### Changed
+- **Auto-recall matching rewritten.** Chinese queries are now segmented with jieba into whole words instead of a sliding-window bigram, which removed the cross-word fragments ("个文", "建一", "能用") that matched almost anything. A single distinctive word ("大屏") is now enough to recall, where the old "two overlapping bigrams" rule dropped it.
+- **Corpus-level generic-word filter.** A word appearing in four or more visible memories ("可能", "文件", "文档") is treated as generic and can no longer trigger a recall on its own. Derived from the corpus at rank time, so no hand-maintained stop list can fall behind the data. Tiny corpora fall back to the static stop list.
+- **Semantic recall wired into auto-injection.** Keyword hits and vector hits are fused by Reciprocal Rank Fusion, so a memory surfaces when *either* signal is strong. Paraphrases with zero lexical overlap ("文档预览里直接改文字" → `feature:quick_edit`) now recall. Hits below `memory_vector_threshold` (0.45) are ignored.
+- **Resident ("always") entries bounded.** Only concise entries stay resident, capped at four per turn; a long convention with a one-line `summary` stays resident via its digest while the full text remains available through `memory_recall`. When the user actually asks about a resident entry, the full text is injected instead of the digest.
+- `memory_save` accepts an optional `summary` for long `convention` / `decision` entries.
+- Embeddings are backfilled in the background at startup; `agent_memory_backfill_embeddings` is idempotent and safe to re-run.
+
+### Added
+- Memory reference cards in the chat now show a type badge (convention / decision / preference / lesson), the one-line digest, and a resident marker instead of a bare key. Legacy rows and live SSE events that carry plain key strings are normalised on the client.
+- `agent_memory_vector_candidates` for visibility-scoped cosine search, and a `summary` column on `agent_memory`.
+
+### Fixed
+- `scripts/sync_version.py` no longer aborts when one Electron `package.json` is unreadable (for example a leftover merge conflict); the remaining files are still synced.
+- Memory reference receipts never expose the injected body — only the stored digest.
+
+### Tests
+- Added `tests/test_memory_recall_quality.py` covering resident demotion and promotion, generic-word filtering, single distinctive-word recall, vector fusion and threshold, backfill idempotence, and summary injection.
+- Updated session-memory receipt tests for the richer reference format.
+- Aligned `test_reflect.py` preference-extraction tests with the P1 evidence gate (`Kind` / `Slug` / verbatim `Evidence`), and added coverage for rejecting invented quotes and `assistant_behaviour` candidates.
+- Updated the Responses-stream adapter test for litellm's signature change (`output_index` is now mapped internally; the external index map argument is gone).
+
+---
+
 ## [0.18.9] — Sequential Writer Tools Within One Message (2026-11-23)
 
 ### Fixed

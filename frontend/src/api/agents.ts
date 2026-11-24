@@ -287,3 +287,37 @@ export function getMemoryConsolidationStatus(): Promise<MemoryConsolidationStatu
 export function consolidateMemories(): Promise<MemoryConsolidationStatus> {
   return api.post("/memory/semantic-consolidate", {});
 }
+
+// ─── Memory quality report (read-only triage, P1 step 1) ───
+
+export interface QualityFinding {
+  id: number;
+  key: string;
+  category: string;
+  content: string;
+  importance: number;
+  source_session?: string;
+  agent_name?: string;
+  access_count?: number;
+  created_at: string;
+  issues: string[];
+  nearest?: { key: string; similarity: number; duplicate: boolean };
+}
+
+export interface MemoryQualityReport {
+  generated_at: string;
+  summary: {
+    preferences_flagged: number;
+    assistant_behaviour: number;
+    conditional_rule: number;
+    random_key: number;
+    likely_duplicates: number;
+    lesson_overflow: number;
+  };
+  preferences: QualityFinding[];
+  lessons: QualityFinding[];
+}
+
+export function getMemoryQualityReport(): Promise<MemoryQualityReport> {
+  return api.get("/memory/quality");
+}

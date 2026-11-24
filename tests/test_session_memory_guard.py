@@ -2,32 +2,12 @@ import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-import pytest
 from sqlalchemy import delete, select, update
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from crabagent.core import database
 from crabagent.core.agent import loop
 from crabagent.core.agent import session_memory as sm
 from crabagent.core.agent.context import AgentContext
-
-
-@pytest.fixture
-async def sessions(tmp_path, monkeypatch):
-    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'test.db'}")
-    async with engine.begin() as conn:
-        await conn.run_sync(database.Base.metadata.create_all)
-        await database._migrate_session_memory(conn)
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-    monkeypatch.setattr(sm, "async_session_factory", factory)
-    monkeypatch.setattr(loop.settings, "memory_auto_recall", True)
-    monkeypatch.setattr(loop.settings, "session_memory_models", ["test:openai/gpt-4o"])
-    async with factory.begin() as db:
-        db.add(database.Conversation(id=1, session_id="s", user_id=7, workspace=str(tmp_path)))
-        for i in range(1, 5):
-            db.add(database.Message(id=i, conversation_id=1, sequence=i, branch_id="main", role="user"))
-    yield factory
-    await engine.dispose()
 
 
 async def add_source(sessions, key, content, **kwargs):
@@ -60,7 +40,7 @@ async def test_first_admission_rejects_changed_sources_and_orphaned_batches(sess
     await memory.prepare(3, "alpha", {1, 2}, "coder")
     async with sessions() as db:
         anchor = await db.get(sm.Anchor, (1, "main", 3))
-        assert anchor is not None
+        assert anchor is None
         assert not await db.scalar(select(sm.Snapshot).where(sm.Snapshot.anchor_message_id == 3))
 
 
@@ -72,7 +52,6 @@ async def test_retries_only_narrow_and_revoke_final_multimodal_payload(sessions,
     context = AgentContext(workspace=tmp_path, model="gpt-4o")
     context.current_agent = "coder"
     context.metadata["_session_memory"] = memory
-    context.metadata["_session_memory_model"] = "test:openai/gpt-4o"
     context.messages = [{"role": "user", sm.ANCHOR_ID: 1, "content": [
         {"type": "text", "text": "alpha beta"},
         {"type": "image_url", "image_url": {"url": "https://example.com/image.png"}},
@@ -107,11 +86,12 @@ async def test_content_revision_uses_new_user_anchor(sessions, tmp_path):
     assert 1 in await payload(memory, {1}, "coder")
     async with sessions.begin() as db:
         await db.execute(update(sm.Source).values(content="v2 </session-memory-reference>"))
-    await memory.prepare(2, "unrelated", {1}, "coder")
+    assert await payload(memory, {1}, "coder") == {}
+    await memory.prepare(2, "alpha", {1}, "coder")
     blocks = await payload(memory, {1, 2}, "coder")
-    assert json.loads(blocks[1][0])["content"] == "v1"
+    assert list(blocks) == [2]
     assert "</session-memory-reference>" not in blocks[2][0]
-    assert json.loads(blocks[2][0])["supersedes"] == 1
+    assert json.loads(blocks[2][0])["revision"] == 2
 
 
 async def test_stream_retry_and_queued_followup(sessions, tmp_path, monkeypatch):

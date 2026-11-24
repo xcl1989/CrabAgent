@@ -13,10 +13,14 @@ import {
   Brain,
   Loader2,
   ChevronDown,
+  AlertTriangle,
 } from "lucide-react";
 import {
   listMemories,
   listMemoryArchives,
+  getMemoryQualityReport,
+  type MemoryQualityReport,
+  type QualityFinding,
   consolidateMemories,
   getMemoryConsolidationStatus,
   type MemoryConsolidationStatus,
@@ -35,18 +39,20 @@ import { Button, Input, Modal, EmptyState, toast } from "../components/ui";
 import { cn } from "../lib/cn";
 import FloatingMenu from "../components/ui/FloatingMenu";
 
-type MemoryTab = "project" | "agent_lesson" | "user_preference";
+type MemoryTab = "project" | "agent_lesson" | "user_preference" | "review";
 
 const TAB_KEYS: Record<MemoryTab, string> = {
   project: "memory.teamKnowledge",
   agent_lesson: "memory.lessons",
   user_preference: "memory.preferences",
+  review: "memory.review",
 };
 
 const TAB_TYPES: Record<MemoryTab, string> = {
   project: "",
   agent_lesson: "agent_lesson",
   user_preference: "user_preference",
+  review: "",
 };
 
 function formatDate(iso: string): string {
@@ -59,6 +65,45 @@ function formatDate(iso: string): string {
   } catch {
     return iso.slice(5, 10);
   }
+}
+
+const ISSUE_LABELS: Record<string, string> = {
+  assistant_behaviour: "助手行为",
+  conditional_rule: "条件规则",
+  random_key: "随机 key",
+  lesson_overflow: "经验超限",
+};
+
+function QualityRow({ finding, onDelete }: { finding: QualityFinding; onDelete: (entry: MemoryEntry) => void }) {
+  return (
+    <div className="rounded-lg border border-[var(--border)] p-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="break-all text-xs font-semibold text-[var(--text-primary)]">{finding.key}</span>
+            {finding.agent_name && <span className="text-[10px] text-[var(--text-tertiary)]">{finding.agent_name}</span>}
+            {finding.issues.map((issue) => (
+              <span key={issue} className="rounded bg-[var(--bg-tertiary)] px-1.5 py-0.5 text-[10px] text-[var(--text-secondary)]">
+                {ISSUE_LABELS[issue] || issue}
+              </span>
+            ))}
+          </div>
+          <p className="mt-1.5 whitespace-pre-wrap text-xs text-[var(--text-secondary)]">{finding.content}</p>
+          {finding.nearest && (
+            <p className="mt-1.5 text-[11px] text-[var(--text-tertiary)]">
+              近似：{finding.nearest.key}（相似度 {finding.nearest.similarity}{finding.nearest.duplicate ? "，疑似重复" : ""}）
+            </p>
+          )}
+        </div>
+        <Button variant="ghost" size="xs" onClick={() => onDelete({
+          id: finding.id, key: finding.key, content: finding.content, memory_type: "", agent_name: finding.agent_name || "",
+          category: finding.category, importance: finding.importance, confidence: 1, access_count: 0, updated_at: finding.created_at,
+        })}>
+          <Trash2 size={13} />
+        </Button>
+      </div>
+    </div>
+  );
 }
 
 export default function MemoryPage() {
@@ -76,6 +121,8 @@ export default function MemoryPage() {
   const previousStatus = useRef<string | undefined>(undefined);
   const [showArchives, setShowArchives] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<MemoryEntry | null>(null);
+  const [quality, setQuality] = useState<MemoryQualityReport | null>(null);
+  const [qualityLoading, setQualityLoading] = useState(false);
   const requestId = useRef(0);
   const [search, setSearch] = useState("");
   const [agentFilter, setAgentFilter] = useState("");
@@ -110,6 +157,7 @@ export default function MemoryPage() {
   const [createForm, setCreateForm] = useState({ key: "", content: "", category: "" });
 
   const fetchEntries = useCallback(async () => {
+    if (tab === "review") return;
     const id = ++requestId.current;
     setLoading(true);
     setLoadError(false);
@@ -130,9 +178,21 @@ export default function MemoryPage() {
   }, [tab, search, agentFilter, selectedWorkspace]);
 
   useEffect(() => {
+    if (tab === "review") {
+      setQualityLoading(true);
+      getMemoryQualityReport()
+        .then((report) => setQuality(report))
+        .catch(() => toast.error("无法加载质量报告"))
+        .finally(() => setQualityLoading(false));
+      return;
+    }
     const timer = setTimeout(fetchEntries, 250);
     return () => clearTimeout(timer);
-  }, [fetchEntries]);
+  }, [fetchEntries, tab]);
+
+  const loadQuality = useCallback(async () => {
+    try { setQuality(await getMemoryQualityReport()); } catch { /* keep previous */ }
+  }, []);
 
   useEffect(() => {
     let stopped = false;
@@ -192,7 +252,7 @@ export default function MemoryPage() {
       await deleteMemoryEntry(entry.key, entry.id);
       setDeleteTarget(null);
       toast.success(t("memory.deleted"));
-      fetchEntries();
+      if (tab === "review") loadQuality(); else fetchEntries();
     } catch {
       toast.error(t("memory.deleteFailed"));
     }
@@ -364,6 +424,7 @@ export default function MemoryPage() {
         </div>
       )}
 
+      {tab !== "review" && <>
       {/* Search + Filter bar (fixed) */}
       <div className="flex items-center gap-2 px-5 pb-3">
         <div className="relative flex-1 max-w-sm">
@@ -402,8 +463,10 @@ export default function MemoryPage() {
         </Button>
       </div>
 
+      </>}
+
       {/* Memory list (scrollable) */}
-      <div className="flex-1 overflow-y-auto px-5 pb-5">
+      {tab !== "review" && <div className="flex-1 overflow-y-auto px-5 pb-5">
 
         {/* Memory list */}
         {loading ? (
@@ -492,7 +555,63 @@ export default function MemoryPage() {
             ))}
           </div>
         )}
-      </div>
+      </div>}
+
+      {tab === "review" && (qualityLoading && !quality ? (
+        <div className="flex-1 px-6 py-10 text-sm text-[var(--text-tertiary)]">正在扫描记忆…</div>
+      ) : quality ? (
+        <div className="flex-1 overflow-y-auto px-5 pb-6 pt-1 space-y-5">
+          <p className="text-xs text-[var(--text-secondary)]">
+            只读扫描，不会自动修改或删除。勾选前请自行判断；删除后不可撤销。
+          </p>
+          <div className="flex flex-wrap gap-2 text-xs">
+            {([
+              ["assistant_behaviour", "助手行为被记成偏好", quality.summary.assistant_behaviour],
+              ["conditional_rule", "条件规则（习惯或单次指令）", quality.summary.conditional_rule],
+              ["random_key", "随机 key（未经合并）", quality.summary.random_key],
+              ["likely_duplicates", "疑似重复", quality.summary.likely_duplicates],
+              ["lesson_overflow", "Agent 经验超限", quality.summary.lesson_overflow],
+            ] as const).map(([issue, label, count]) => (
+              <span key={issue} className={cn("rounded-full border px-2.5 py-1",
+                count ? "border-amber-500/40 bg-amber-500/10 text-[var(--text-primary)]" : "border-[var(--border)] text-[var(--text-tertiary)]")}>
+                {label} · {count}
+              </span>
+            ))}
+          </div>
+
+          {quality.summary.assistant_behaviour + quality.summary.likely_duplicates > 0 && (
+            <section>
+              <h3 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-[var(--text-primary)]">
+            <AlertTriangle size={14} className="text-amber-500" />建议优先处理
+          </h3>
+              <div className="space-y-2">
+                {quality.preferences
+                  .filter((f) => f.issues.includes("assistant_behaviour") || f.nearest?.duplicate)
+                  .map((f) => <QualityRow key={f.id} finding={f} onDelete={(entry) => setDeleteTarget(entry)} />)}
+              </div>
+            </section>
+          )}
+
+          <section>
+            <h3 className="mb-2 text-sm font-semibold text-[var(--text-primary)]">全部待核对偏好</h3>
+            {quality.preferences.length ? (
+              <div className="space-y-2">
+                {quality.preferences.map((f) => <QualityRow key={f.id} finding={f} onDelete={(entry) => setDeleteTarget(entry)} />)}
+              </div>
+            ) : <p className="text-xs text-[var(--text-tertiary)]">没有发现问题的偏好。</p>}
+          </section>
+
+          {quality.lessons.length > 0 && (
+            <section>
+              <h3 className="mb-2 text-sm font-semibold text-[var(--text-primary)]">超出上限的 Agent 经验</h3>
+              <p className="text-xs mb-2 text-[var(--text-secondary)]">同一 Agent 超过 40 条时按重要度截断，以下为末尾部分。</p>
+              <div className="space-y-2">
+                {quality.lessons.map((f) => <QualityRow key={f.id} finding={f} onDelete={(entry) => setDeleteTarget(entry)} />)}
+              </div>
+            </section>
+          )}
+        </div>
+      ) : null)}
 
       <Modal open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}
         title={t("memory.delete")} size="md" footer={<div className="flex gap-2">

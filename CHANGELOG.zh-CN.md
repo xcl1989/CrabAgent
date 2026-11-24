@@ -8,6 +8,32 @@ English version: [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
+## [0.19.0] — 记忆召回质量（2026-11-24）
+
+### 变更
+- **重写自动召回匹配。** 中文查询改用 jieba 分词为完整词，不再用滑动窗口切 bigram，消除了"个文 / 建一 / 能用"这类几乎能命中任何内容的跨词碎片。单个有区分度的词（"大屏"）即可触发召回，而旧的"两个 bigram 重叠"规则会直接漏掉。
+- **语料级泛词过滤。** 出现在 4 条及以上可见记忆中的词（"可能"、"文件"、"文档"）视为泛词，不能再单独触发召回。阈值在排序时从语料实时统计，无需手工维护停用词表；语料过小时回退到静态停用词表。
+- **语义召回接入自动注入。** 关键词命中与向量命中用 Reciprocal Rank Fusion 融合，任一信号足够强即可召回。零字面重叠的改写（"文档预览里直接改文字" → `feature:quick_edit`）现在能召回；低于 `memory_vector_threshold`（0.45）的命中被忽略。
+- **常驻（always）条目收紧。** 只有简短条目保持常驻，每轮最多 4 条；带一句话 `summary` 的长约定通过摘要常驻，全文仍可经 `memory_recall` 获取。当用户恰好问到某条常驻项时，注入全文而非摘要。
+- `memory_save` 为长 `convention` / `decision` 条目新增可选 `summary` 参数。
+- 启动时后台回填 embedding；`agent_memory_backfill_embeddings` 幂等，可重复运行。
+
+### 新增
+- 聊天中的记忆引用卡片改为显示类型标签（约定 / 决策 / 偏好 / 经验）、一句话摘要和常驻标记，不再只是裸 key。携带纯字符串 key 的历史数据和实时 SSE 事件在客户端统一归一化。
+- 新增 `agent_memory_vector_candidates`（按可见性过滤的余弦检索）和 `agent_memory.summary` 列。
+
+### 修复
+- `scripts/sync_version.py` 在某个 Electron `package.json` 不可读时（例如遗留的合并冲突）不再中断，其余文件仍正常同步。
+- 记忆引用回执只暴露已存储的摘要，绝不暴露注入正文。
+
+### 测试
+- 新增 `tests/test_memory_recall_quality.py`，覆盖常驻降级与升格、泛词过滤、单词召回、向量融合与阈值、回填幂等、摘要注入。
+- 会话记忆回执测试同步更新为新的引用格式。
+- `test_reflect.py` 偏好提取测试对齐 P1 证据门控格式（`Kind` / `Slug` / 逐字 `Evidence`），并新增"拒绝编造引用"与"拒绝 assistant_behaviour 候选"的覆盖。
+- Responses 流适配器测试适配 litellm 签名变更（`output_index` 改为内部映射，外部 index map 参数已移除）。
+
+---
+
 ## [0.18.9] — 同消息写工具串行执行（2026-11-23）
 
 ### 修复

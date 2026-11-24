@@ -561,7 +561,6 @@ Use ordinary Markdown when a visualization is not helpful.
     from crabagent.core.agent.agent_switch import filter_tool_registry
     from crabagent.core.agent.agents import build_agent_switch_msg, get_agent
     from crabagent.core.agent.agents import get_agent as _get_agent
-    from crabagent.core.agent.agents import inject_agent_lessons as _inject_lessons
 
     if effective_agent == "default":
         _default_profile = await _get_agent("__default__")
@@ -587,7 +586,7 @@ Use ordinary Markdown when a visualization is not helpful.
 
     # Add history messages first (any persisted agent_switch messages are included
     # in their correct positions via message_to_dict which converts them to user role)
-    if settings.session_memory_models and settings.memory_auto_recall:
+    if settings.memory_auto_recall:
         context.metadata["_session_memory"] = SessionMemory(user.id, conv.id, active_branch, str(workspace))
         if not automatic:
             context.metadata["_initial_memory_anchor"] = saved_msg.id
@@ -623,23 +622,6 @@ Use ordinary Markdown when a visualization is not helpful.
                 context.messages.append(
                     build_agent_switch_msg(agent_def, locale=locale, extra_lines=_cap_lines)
                 )
-
-        # The experimental path uses only guarded snapshots.
-        if "_session_memory" not in context.metadata:
-            try:
-                lessons_block = await _inject_lessons(
-                    "",
-                    user_id=user.id,
-                    agent_name=effective_agent,
-                    task_hint=(req.message or "")[:120],
-                    workspace_path=str(workspace),
-                )
-                if lessons_block.strip():
-                    context.messages.append(
-                        {"role": "experience", "content": lessons_block.strip(), "agent": effective_agent}
-                    )
-            except Exception:
-                pass
 
     persistence = PersistenceListener(conversation_id=conv.id, branch_id=active_branch)
     persistence.sequence = user_msg_seq
@@ -719,10 +701,10 @@ Use ordinary Markdown when a visualization is not helpful.
     _throttle_until: dict[str, float] = {}
     _THROTTLE_INTERVAL = 0.1
     _THROTTLED_EVENTS: set[str] = set()
-    _SKIP_GLOBAL_EVENTS: set[str] = {EventType.COLLABORATION_ACTIVITY}
+    _SKIP_GLOBAL_EVENTS: set[str] = {EventType.COLLABORATION_ACTIVITY, EventType.MEMORY_REFERENCES}
     _last_stale_cleanup = time.time()
 
-    _CRITICAL_EVENT_TYPES = {EventType.TOOL_CONFIRM_REQUEST, EventType.USER_INPUT_REQUEST}
+    _CRITICAL_EVENT_TYPES = {EventType.TOOL_CONFIRM_REQUEST, EventType.USER_INPUT_REQUEST, EventType.MEMORY_REFERENCES}
     # Keep short tool calls visible long enough for the desktop pet to receive
     # and render their specialized animation after SSE debounce.
     _PET_TOOL_MINIMUM_SECONDS = 1.25
@@ -1284,7 +1266,7 @@ Use ordinary Markdown when a visualization is not helpful.
         "started_at": time.time(),
     }
 
-    return {"status": "processing", "session_id": session_id}
+    return {"status": "processing", "session_id": session_id, "user_message_id": saved_msg.id}
 
 
 @router.post("/sessions/{session_id}/abort")

@@ -10,6 +10,10 @@ _CATEGORY_DESC = (
 )
 
 
+def _active_agent(context) -> str:
+    return context.metadata.get("_sub_agent_name") or getattr(context, "current_agent", "") or "default"
+
+
 @registry.register(
     name="memory_save",
     description=(
@@ -18,11 +22,13 @@ _CATEGORY_DESC = (
         "details and project/agent scope; do not merge merely similar but unrelated facts. "
         "Create a new memory only when no related entry exists. "
         "Use 'team' type for project knowledge all agents should know "
-        "(tech stack, architecture, conventions, decisions). "
+        "(tech stack, architecture, conventions, decisions). Only 'convention' and "
+        "'decision' entries are loaded every turn; everything else is recalled when "
+        "relevant, so keep topic-specific knowledge under architecture/api/feature. "
         "Use 'lesson' type for behavioral patterns "
         "(what works, what doesn't, user preferences). "
         "If the user makes a choice or rejects something, record it. "
-        "Memories persist across sessions and are automatically loaded on startup."
+        "Memories persist across sessions; relevant entries may be recalled automatically."
     ),
     parameters={
         "type": "object",
@@ -39,14 +45,25 @@ _CATEGORY_DESC = (
             "key": {
                 "type": "string",
                 "description": (
-                    "Unique identifier, e.g. "
-                    "'tech_stack:framework', 'user_preference:language', "
-                    "'lesson:coder:efficiency'"
+                    "Unique identifier naming the SUBJECT, not the episode: "
+                    "'tech_stack:framework', 'convention:release-pipeline-pypi', "
+                    "'decision:nonexclusive-collaboration', "
+                    "'user_pref:verify-build-before-install', "
+                    "'lesson:coder:restart-backend-after-edit'. "
+                    "Use lowercase kebab-case and never a hash, timestamp or counter."
                 ),
             },
             "content": {
                 "type": "string",
                 "description": "The memory content. Be specific and actionable.",
+            },
+            "summary": {
+                "type": "string",
+                "description": (
+                    "Optional one-line digest (<=120 chars) used when this memory is "
+                    "injected on every turn. Required for long 'convention'/'decision' "
+                    "entries so the full text stays available on demand."
+                ),
             },
             "importance": {
                 "type": "number",
@@ -68,6 +85,7 @@ async def memory_save(
     content: str,
     importance: float = 0.5,
     confidence: float = 1.0,
+    summary: str = "",
     context=None,
 ) -> str:
     if context is None:
@@ -80,12 +98,20 @@ async def memory_save(
     importance = max(0.0, min(1.0, importance))
     confidence = max(0.0, min(1.0, confidence))
     agent_name = context.metadata.get("_sub_agent_name", "")
+    if memory_type == "lesson" and not agent_name:
+        agent_name = _active_agent(context)
     session_id = context.metadata.get("session_id", "")
     from crabagent.core.database import agent_memory_upsert
 
     workspace_path = context.metadata.get("workspace_path") or str(getattr(context, "workspace", "") or "")
     default_scope = ("workspace" if workspace_path else "global") if memory_type == "team" else "agent"
-    default_recall = "always" if memory_type == "team" else "query_only"
+    # Only cross-cutting conventions/decisions should be resident; topic
+    # knowledge (architecture/feature/api/project) is recalled on demand.
+    default_recall = (
+        "always"
+        if (memory_type == "team" and (category or "").strip().lower() in ("convention", "decision"))
+        else "query_only"
+    )
 
     await agent_memory_upsert(
         user_id=user_id,
@@ -102,6 +128,7 @@ async def memory_save(
         scope=default_scope,
         workspace_path="" if default_scope == "global" else workspace_path,
         recall_policy=default_recall,
+        summary=(summary or "").strip()[:200],
     )
     return f"Memory saved: [{memory_type}] {key}"
 
@@ -147,10 +174,14 @@ async def memory_recall(
     from crabagent.core.database import agent_memory_search_vector
 
     results = await agent_memory_search_vector(
-        user_id, query, memory_type=memory_type, limit=limit, fallback=True,
+        user_id,
+        query,
+        memory_type=memory_type,
+        limit=limit,
+        fallback=True,
         visible_only=True,
         workspace_path=context.metadata.get("workspace_path") or str(getattr(context, "workspace", "") or ""),
-        agent_name=context.metadata.get("_sub_agent_name", ""),
+        agent_name=_active_agent(context),
     )
     if not results:
         return f"No memories found for '{query}'."
@@ -158,9 +189,7 @@ async def memory_recall(
     for r in results:
         type_tag = r["memory_type"]
         agent_tag = f" [{r['agent_name']}]" if r["agent_name"] else ""
-        sim_tag = (
-            f", similarity={r['_similarity']:.2f}" if "_similarity" in r else ""
-        )
+        sim_tag = f", similarity={r['_similarity']:.2f}" if "_similarity" in r else ""
         lines.append(
             f"- **{r['key']}** (id={r.get('id', '?')}, {type_tag}{agent_tag}, "
             f"importance={r['importance']:.1f}{sim_tag}): {r['content']}"
@@ -203,10 +232,16 @@ async def memory_replace(key: str, old_text: str, new_text: str, context=None, m
         return "Error: no user_id in context"
     from crabagent.core.database import agent_memory_replace as _replace
 
-    ok = await _replace(user_id, key, old_text, new_text, memory_id=memory_id,
+    ok = await _replace(
+        user_id,
+        key,
+        old_text,
+        new_text,
+        memory_id=memory_id,
         visible_only=True,
         workspace_path=context.metadata.get("workspace_path") or str(getattr(context, "workspace", "") or ""),
-        agent_name=context.metadata.get("_sub_agent_name", ""))
+        agent_name=_active_agent(context),
+    )
     if ok:
         return f"Memory updated: {key}"
     return f"Error: memory '{key}' not found, ambiguous, or old_text not matched"
@@ -239,9 +274,12 @@ async def memory_list(memory_type: str = "", category: str = "", context=None) -
     from crabagent.core.database import agent_memory_list_all
 
     items = await agent_memory_list_all(
-        user_id, memory_type=memory_type, category=category, visible_only=True,
+        user_id,
+        memory_type=memory_type,
+        category=category,
+        visible_only=True,
         workspace_path=context.metadata.get("workspace_path") or str(getattr(context, "workspace", "") or ""),
-        agent_name=context.metadata.get("_sub_agent_name", ""),
+        agent_name=_active_agent(context),
     )
     if not items:
         return "No memories stored yet."
@@ -282,9 +320,14 @@ async def memory_forget(key: str, context=None, memory_id: int | None = None) ->
         return "Error: no user_id in context"
     from crabagent.core.database import agent_memory_delete
 
-    ok = await agent_memory_delete(user_id, key, memory_id=memory_id, visible_only=True,
+    ok = await agent_memory_delete(
+        user_id,
+        key,
+        memory_id=memory_id,
+        visible_only=True,
         workspace_path=context.metadata.get("workspace_path") or str(getattr(context, "workspace", "") or ""),
-        agent_name=context.metadata.get("_sub_agent_name", ""))
+        agent_name=_active_agent(context),
+    )
     if ok:
         return f"Memory deleted: {key}"
     return f"Error: memory '{key}' not found or ambiguous; specify memory_id"

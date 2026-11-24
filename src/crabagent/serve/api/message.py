@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from crabagent.core.agent.session_memory import SessionMemory
 from crabagent.core.database import Message, User, get_db
 from crabagent.serve.deps import get_current_user, get_owned_conversation
 from crabagent.serve.services.message import (
@@ -36,7 +39,15 @@ async def list_messages(
     msgs = [m for m in msgs if m.role not in ("agent_switch", "experience")]
     # Strip base64 image data for fast list loading; frontend fetches images
     # lazily via /messages/{message_id}/images
-    return [message_to_response(m, strip_images=True) for m in msgs]
+    memory = SessionMemory(user.id, conv.id, branch_id, str(Path(conv.workspace or Path.cwd()).expanduser().resolve()))
+    receipts = await memory.receipts(db, {m.id for m in msgs if m.role == "user"}, conv.agent or "default")
+    result = []
+    for message in msgs:
+        item = message_to_response(message, strip_images=True)
+        if keys := receipts.get(message.id):
+            item["memory_references"] = keys
+        result.append(item)
+    return result
 
 
 @router.get("/sessions/{session_id}/messages/{message_id}/images")

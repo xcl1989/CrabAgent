@@ -50,6 +50,16 @@
     "version": "v0.9.8 · Local-first AI agent platform"
   },
   "chat": {
+    "memoryReferences": "Memory sent with this turn ({{count}})",
+    "memoryReferences_one": "Memory sent with this turn ({{count}})",
+    "memoryReferences_other": "Memories sent with this turn ({{count}})",
+    "memoryResident": "resident",
+    "memoryKind": {
+      "convention": "Convention",
+      "decision": "Decision",
+      "preference": "Preference",
+      "lesson": "Lesson"
+    },
     "placeholder": "Type a message…",
     "attachImage": "Attach image",
     "delegate": "Delegate to agent team",
@@ -153,7 +163,8 @@
     "failedCreate": "Failed to create",
     "keyContentRequired": "Key and content are required",
     "edit": "Edit",
-    "delete": "Delete"
+    "delete": "Delete",
+    "review": "Review"
   },
   "scheduledTask": {
     "title": "Scheduled Tasks",

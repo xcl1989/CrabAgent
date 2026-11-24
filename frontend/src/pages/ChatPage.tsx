@@ -1007,13 +1007,20 @@ export default function ChatPage({ onActiveSessionChange, onCollaborationChange,
       if (!activeSession && !sid) return;
       const targetSid = activeSession?.session_id || sid;
       if (!targetSid) return;
+      const localId = `u-${Date.now()}`;
       setMessages((prev) => [
         ...prev,
-        { id: `u-${Date.now()}`, role: "user", content: promptText },
+        { id: localId, role: "user", content: promptText },
       ]);
       setSending(true);
       try {
-        await sessionsApi.sendPrompt(targetSid, promptText, selectedModel, undefined, undefined, undefined, selectedProvider ?? undefined);
+        const result = await sessionsApi.sendPrompt(targetSid, promptText, selectedModel, undefined, undefined, undefined, selectedProvider ?? undefined);
+        // Adopt the persisted id so memory receipts (keyed by anchor id) can
+        // locate this turn, and the end-of-run DB refresh keeps the same key.
+        if (result?.user_message_id) {
+          const dbId = `db-${result.user_message_id}`;
+          setMessages((prev) => prev.map((m) => (m.id === localId ? { ...m, id: dbId } : m)));
+        }
       } catch {
         setSending(false);
       }

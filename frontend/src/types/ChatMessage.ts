@@ -1,3 +1,18 @@
+/** A memory injected with a user turn. Older rows / SSE events may carry a
+ *  bare key string; normalise with `toMemoryReference` before rendering. */
+export interface MemoryReference {
+  key: string;
+  summary?: string;
+  memory_type?: string;
+  resident?: boolean;
+}
+
+export type MemoryReferenceInput = MemoryReference | string;
+
+export function toMemoryReference(ref: MemoryReferenceInput): MemoryReference {
+  return typeof ref === "string" ? { key: ref } : ref;
+}
+
 export interface ChatMessage {
   id: string;
   role: string;
@@ -44,6 +59,7 @@ export interface ChatMessage {
     deadline?: string;
     project?: string;
   };
+  memory_references?: MemoryReference[];
   task_result?: {
     task_id: number;
     title: string;

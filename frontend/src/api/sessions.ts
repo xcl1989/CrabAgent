@@ -38,6 +38,7 @@ export interface Message {
   compressed?: boolean;
   image_data?: string;
   has_images?: boolean;
+  memory_references?: Array<string | { key: string; summary?: string; memory_type?: string; resident?: boolean }>;
 }
 
 export interface BranchInfo {
@@ -176,7 +177,7 @@ export function sendPrompt(
   fileContext?: string,
   workspaceType?: string,
   workMode?: boolean,
-): Promise<{ status: string }> {
+): Promise<{ status: string; user_message_id?: number }> {
   return api.post(`/sessions/${sessionId}/prompt`, {
     message, model, provider, images, agent,
     reasoning_effort: reasoningEffort,

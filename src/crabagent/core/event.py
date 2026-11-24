@@ -24,6 +24,7 @@ class EventType(StrEnum):
     BUDGET_WARNING = "budget_warning"
     BUDGET_EXHAUSTED = "budget_exhausted"
     MESSAGE_CREATED = "message_created"
+    MEMORY_REFERENCES = "memory_references"
     TOOL_CONFIRM_REQUEST = "tool_confirm_request"
     USER_INPUT_REQUEST = "user_input_request"
     # A pending request was decided (approve/reject/answer) via any surface

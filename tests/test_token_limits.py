@@ -13,6 +13,8 @@ class TestTokenLimits:
         assert get_model_token_limit("qwen-turbo") == 1_000_000
         assert get_model_token_limit("glm-5.3") == 1_000_000
         assert get_model_token_limit("glm-5.3-flash") == 1_000_000
+        assert get_model_token_limit("glm-5.4") == 1_000_000
+        assert get_model_token_limit("zhipu/glm-5.4") == 1_000_000
 
     def test_prefix_match(self):
         assert get_model_token_limit("claude-sonnet-4-custom") == 200_000
@@ -62,3 +64,17 @@ class TestTokenLimits:
     def test_is_vision_model_accepts_glm_53_flash(self):
         assert is_vision_model("glm-5.3-flash") is True
         assert is_vision_model("openai/GLM-5.3-Flash") is True
+
+    def test_is_vision_model_accepts_glm_54(self):
+        assert is_vision_model("glm-5.4") is True
+        assert is_vision_model("zhipu/glm-5.4") is True
+        assert is_vision_model("Zhipu/GLM-5.4") is True
+
+    def test_glm_53_rejects_vision_but_flash_accepts(self):
+        # glm-5.3 本体不支持看图，仅 glm-5.3-flash 支持
+        assert is_vision_model("glm-5.3") is False
+        assert is_vision_model("zhipu/glm-5.3") is False
+        assert is_vision_model("glm-5.3-flash") is True
+
+    def test_glm_52_still_rejects_vision(self):
+        assert is_vision_model("glm-5.2") is False

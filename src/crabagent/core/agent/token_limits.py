@@ -53,6 +53,7 @@ DEFAULT_MODEL_TOKEN_LIMITS: dict[str, int] = {
     "glm-5.2": 1_000_000,
     "glm-5.3": 1_000_000,
     "glm-5.3-flash": 1_000_000,
+    "glm-5.4": 1_000_000,
     "qwen-turbo": 1_000_000,
     "qwen-plus": 128_000,
     "qwen-max": 32_000,
@@ -128,6 +129,7 @@ VISION_UNSUPPORTED_EXACT = {
     "glm-4.6",
     "glm-4.7",
     "glm-5.2",
+    "glm-5.3",
     "minimax-01",
 }
 
@@ -141,8 +143,10 @@ VISION_UNSUPPORTED_PREFIXES = [
 ]
 
 # Explicit capabilities take precedence over legacy family-level deny rules.
+# 仅 glm-5.3-flash / glm-5.4 支持图片输入；glm-5.3（非 flash）不支持。
 VISION_SUPPORTED_EXACT = {
     "glm-5.3-flash",
+    "glm-5.4",
 }
 
 # Model name fragments that unambiguously indicate vision capability.

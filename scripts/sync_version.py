@@ -18,11 +18,26 @@ def read_pyproject_version() -> str:
     return m.group(1)
 
 
+def _load_json(path: Path):
+    """Parse a JSON file, returning ``None`` when it is unreadable.
+
+    A leftover merge conflict or a half-written file must not abort the whole
+    sync: the other Electron directory still needs its version bumped.
+    """
+    try:
+        return json.loads(path.read_text())
+    except (OSError, ValueError) as exc:
+        print(f"SKIP: {path.relative_to(PROJECT_ROOT)} is not valid JSON ({exc.__class__.__name__})")
+        return None
+
+
 def update_package_json(path: Path, version: str) -> bool:
     if not path.exists():
         print(f"SKIP: {path} not found")
         return False
-    data = json.loads(path.read_text())
+    data = _load_json(path)
+    if data is None:
+        return False
     old = data.get("version", "")
     if old == version:
         return False
@@ -36,7 +51,9 @@ def update_package_lock(path: Path, version: str) -> bool:
     if not path.exists():
         print(f"SKIP: {path} not found")
         return False
-    data = json.loads(path.read_text())
+    data = _load_json(path)
+    if data is None:
+        return False
     old = data.get("version", "")
     root = data.get("packages", {}).get("")
     root_old = root.get("version", "") if isinstance(root, dict) else ""

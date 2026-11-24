@@ -1,4 +1,4 @@
-import { ChatMessage } from "../types/ChatMessage";
+import { ChatMessage, toMemoryReference } from "../types/ChatMessage";
 import { SSEEvent } from "../api/events";
 import { Message } from "../api/sessions";
 
@@ -34,6 +34,36 @@ function appendBashOutput(messages: ChatMessage[], text: string, callId?: string
 
 export function sseEventToMessages(event: SSEEvent, messages: ChatMessage[]): ChatMessage[] {
   const updated = [...messages];
+
+  if (event.type === "memory_references") {
+    const { anchor_id, keys } = event.data;
+    // Live SSE events carry bare keys (the loop only knows the key); the
+    // history endpoint returns rich objects. Accept both shapes.
+    if (typeof anchor_id !== "number" || !Array.isArray(keys) || !keys.length ||
+        !keys.every((key) => typeof key === "string" ||
+          (key && typeof key === "object" && typeof (key as { key?: unknown }).key === "string"))) {
+      return messages;
+    }
+    const id = `memory-references-${anchor_id}`;
+    if (messages.some((message) => message.id === id)) return messages;
+    const card: ChatMessage = {
+      id, role: "memory_references", content: "",
+      memory_references: keys.map((key) => toMemoryReference(key as Parameters<typeof toMemoryReference>[0])),
+    };
+    // The receipt arrives after the provider handoff, i.e. while thinking/text
+    // is already streaming. Anchor it right after its user turn (matched by
+    // numeric message id) so it never splits a streaming block.
+    let index = -1;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const message = messages[i];
+      if (message.role !== "user") continue;
+      const messageId = message.db_message_id ?? Number(String(message.id).replace(/^db-/, ""));
+      if (messageId === anchor_id) { index = i; break; }
+    }
+    if (index < 0) return messages;
+    updated.splice(index + 1, 0, card);
+    return updated;
+  }
 
   if (event.type === "text_delta") {
     const text = (event.data.text as string) || "";
@@ -708,6 +738,12 @@ export function dbMessagesToChat(msgs: Message[]): ChatMessage[] {
       }
     }
     result.push(base);
+    if (m.role === "user" && m.memory_references?.length) {
+      result.push({
+        id: `memory-references-${m.id}`, role: "memory_references", content: "",
+        memory_references: m.memory_references.map(toMemoryReference),
+      });
+    }
   }
 
   return result;

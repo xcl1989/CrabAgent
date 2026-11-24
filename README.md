@@ -66,7 +66,7 @@ Built-in agents include a researcher, data analyst, coding expert, writer, and p
 
 Goal Mode tracks ongoing work: use the target button or `/goal <objective>` to create a goal with acceptance criteria, constraints, and checkpoints. Pause, resume, or inspect progress as needed. Auto Continue is bounded by the goal state and configured budgets.
 
-Project memory retains workspace context, shared knowledge, preferences, and lessons for later sessions. Use the task board, calendar, and scheduled tasks for ongoing work; meeting notes can be used to extract action items.
+Project memory retains workspace context, shared knowledge, preferences, and lessons for later sessions. Relevant memories are injected automatically with each user turn: Chinese queries are segmented into whole words, generic terms are filtered by corpus frequency, and keyword hits are fused with semantic (embedding) hits so paraphrases recall as well as exact identifiers. Concise conventions stay resident every turn and long ones are injected as a one-line digest, with the full text available on demand. Use the task board, calendar, and scheduled tasks for ongoing work; meeting notes can be used to extract action items.
 
 ## Browser and Desktop Control
 

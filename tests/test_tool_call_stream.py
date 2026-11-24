@@ -68,12 +68,11 @@ def test_responses_adapter_preserves_arguments_across_interleaved_calls():
         {"type": "response.function_call_arguments.delta", "output_index": 2, "delta": '{"a":1}'},
         {"type": "response.function_call_arguments.delta", "output_index": 4, "delta": '2}'},
     ]
-    index_map = {}
     stream = ToolCallStream()
     for event in wire_events:
-        chunk = OpenAiResponsesToChatCompletionStreamIterator.translate_responses_chunk_to_openai_stream(
-            event, index_map
-        )
+        # litellm derives the tool-call index from ``output_index`` directly;
+        # the external index map this test used to thread through was removed.
+        chunk = OpenAiResponsesToChatCompletionStreamIterator.translate_responses_chunk_to_openai_stream(event)
         for delta in chunk.choices[0].delta.tool_calls or ():
             stream.add(delta)
     calls, ambiguous = stream.finish()

@@ -85,6 +85,14 @@ async def list_memories(
     return items
 
 
+@router.get("/quality")
+async def memory_quality_report(user: User = Depends(get_current_user)):
+    """Read-only triage list for auto-extracted memories. Never mutates rows."""
+    from crabagent.core.memory_quality import build_report
+
+    return await build_report(user.id)
+
+
 @router.post("/semantic-consolidate")
 async def semantic_consolidate_memories(user: User = Depends(get_current_user)):
     from crabagent.core.memory_consolidation_tasks import start

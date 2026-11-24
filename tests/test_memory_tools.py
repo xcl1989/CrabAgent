@@ -226,3 +226,21 @@ async def test_memory_forget_not_found(monkeypatch: pytest.MonkeyPatch):
 
     result = await memory_tools.memory_forget("key1", context=ctx)
     assert "not found" in result
+
+
+@pytest.mark.asyncio
+async def test_memory_save_defaults_team_topic_knowledge_to_query_only(monkeypatch):
+    ctx = AgentContext(workspace=Path.cwd())
+    ctx.metadata["user_id"] = 1
+    saved = {}
+
+    async def fake_upsert(**kwargs):
+        saved.update(kwargs)
+
+    monkeypatch.setattr("crabagent.core.database.agent_memory_upsert", fake_upsert)
+    await memory_tools.memory_save(memory_type="team", category="feature", key="feature:x", content="v", context=ctx)
+    assert saved["recall_policy"] == "query_only"
+    await memory_tools.memory_save(memory_type="team", category="decision", key="decision:x", content="v", context=ctx)
+    assert saved["recall_policy"] == "always"
+    await memory_tools.memory_save(memory_type="lesson", category="decision", key="lesson:x", content="v", context=ctx)
+    assert saved["recall_policy"] == "query_only"

@@ -50,6 +50,16 @@
     "version": "v0.9.8 · 本地优先的 AI Agent 平台"
   },
   "chat": {
+    "memoryReferences": "本轮已发送的记忆（{{count}} 条）",
+    "memoryReferences_one": "本轮已发送的记忆（{{count}} 条）",
+    "memoryReferences_other": "本轮已发送的记忆（{{count}} 条）",
+    "memoryResident": "常驻",
+    "memoryKind": {
+      "convention": "约定",
+      "decision": "决策",
+      "preference": "偏好",
+      "lesson": "经验"
+    },
     "placeholder": "输入消息…",
     "attachImage": "添加图片",
     "delegate": "委派给 Agent 团队",
@@ -153,7 +163,8 @@
     "failedCreate": "创建失败",
     "keyContentRequired": "键名和内容为必填项",
     "edit": "编辑",
-    "delete": "删除"
+    "delete": "删除",
+    "review": "待清理"
   },
   "scheduledTask": {
     "title": "定时任务",

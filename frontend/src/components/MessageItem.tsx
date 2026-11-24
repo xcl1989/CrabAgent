@@ -43,6 +43,19 @@ import { cn } from "../lib/cn";
 
 // ── Shared types ──────────────────────────────────────────────
 
+/** A memory injected with a user turn. Legacy rows / SSE events carry a bare
+ *  key string; normalise with `toMemoryReference` before rendering. */
+export interface MemoryReference {
+  key: string;
+  summary?: string;
+  memory_type?: string;
+  resident?: boolean;
+}
+
+export function toMemoryReference(ref: MemoryReference | string): MemoryReference {
+  return typeof ref === "string" ? { key: ref } : ref;
+}
+
 export interface ChatMessage {
   id: string;
   role: string;
@@ -86,6 +99,7 @@ export interface ChatMessage {
     deadline?: string;
     project?: string;
   };
+  memory_references?: MemoryReference[];
   task_result?: {
     task_id: number;
     title: string;
@@ -525,6 +539,62 @@ const TaskCardItem = memo(function TaskCardItem({ msg }: { msg: ChatMessage }) {
     </div>
   );
 });
+
+/** Short type badge for a memory: convention / decision / preference / lesson. */
+function memoryKind(ref: MemoryReference, t: (key: string) => string): { label: string; cls: string } {
+  const type = ref.memory_type || "";
+  const key = ref.key;
+  // Category is embedded in the key prefix for team memories.
+  const isConvention = key.startsWith("convention:") || key.startsWith("tech_stack:");
+  const isDecision = key.startsWith("decision:");
+  const isLesson = type === "lesson" || type === "agent_lesson" || key.startsWith("lesson:");
+  if (isConvention) return { label: t("chat.memoryKind.convention"), cls: "bg-sky-500/15 text-sky-600 dark:text-sky-400" };
+  if (isDecision) return { label: t("chat.memoryKind.decision"), cls: "bg-violet-500/15 text-violet-600 dark:text-violet-400" };
+  if (isLesson) return { label: t("chat.memoryKind.lesson"), cls: "bg-amber-500/15 text-amber-600 dark:text-amber-400" };
+  return { label: t("chat.memoryKind.preference"), cls: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400" };
+}
+
+function MemoryReferenceChip({ ref, t }: { ref: MemoryReference; t: (key: string) => string }) {
+  const kind = memoryKind(ref, t);
+  const title = ref.summary?.trim() || ref.key;
+  return (
+    <li className="flex items-start gap-2 rounded-md bg-[var(--bg-secondary)] px-2 py-1.5">
+      <span
+        className={cn(
+          "mt-px inline-flex shrink-0 items-center rounded px-1.5 py-px text-[10px] font-medium leading-4",
+          kind.cls,
+        )}
+      >
+        {kind.label}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block break-words text-[var(--text-secondary)]" title={ref.key}>
+          {title}
+        </span>
+        <span className="block truncate text-[10px] text-[var(--text-muted)]" title={ref.key}>
+          {ref.key}
+          {ref.resident ? ` · ${t("chat.memoryResident")}` : ""}
+        </span>
+      </span>
+    </li>
+  );
+}
+
+function MemoryReferencesItem({ msg }: { msg: ChatMessage }) {
+  const { t } = useTranslation();
+  const refs = msg.memory_references?.map(toMemoryReference);
+  if (!refs?.length) return null;
+  return (
+    <details className="my-1 w-fit max-w-full min-w-[16rem] rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs text-[var(--text-muted)]">
+      <summary className="cursor-pointer select-none">{t("chat.memoryReferences", { count: refs.length })}</summary>
+      <ul className="mt-2 space-y-1">
+        {refs.map((ref, i) => (
+          <MemoryReferenceChip key={`${i}-${ref.key}`} ref={ref} t={t} />
+        ))}
+      </ul>
+    </details>
+  );
+}
 
 /** Trusted work system: terminal result / failure card */
 const TaskResultItem = memo(function TaskResultItem({ msg }: { msg: ChatMessage }) {
@@ -1050,6 +1120,9 @@ function MessageItemBase({
 
     case "task_card":
       return <TaskCardItem msg={msg} />;
+
+    case "memory_references":
+      return <MemoryReferencesItem msg={msg} />;
 
     case "task_result":
       return <TaskResultItem msg={msg} />;

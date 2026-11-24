@@ -68,7 +68,9 @@ class ReflectMiddleware:
         agent_name = context.current_agent or "default"
         session_id = context.metadata.get("session_id", "")
         workspace_path = context.metadata.get("workspace_path") or str(getattr(context, "workspace", "") or "")
-        task = _first_user_message(context.messages)
+        # The task that just finished is the LAST user turn. Using the first
+        # one paired an early request with a late answer in long sessions.
+        task = _last_user_message(context.messages) or _first_user_message(context.messages)
         if not task:
             return
         task_category = classify_task(task)
@@ -120,6 +122,7 @@ class ReflectMiddleware:
                 provider_name=provider_name,
                 conversation_text=conversation_text,
                 workspace_path=workspace_path,
+                user_turns=_user_turn_texts(context.messages),
             )
         )
 
@@ -136,6 +139,7 @@ class ReflectMiddleware:
         provider_name: str | None,
         conversation_text: str,
         workspace_path: str,
+        user_turns: list[str] | None = None,
     ):
         """Background task: LLM lesson + preference extraction run concurrently."""
 
@@ -191,6 +195,7 @@ class ReflectMiddleware:
                     provider_name=provider_name,
                     max_prefs=3,
                     existing_preferences=existing,
+                    user_turns=user_turns,
                 )
                 if prefs:
                     saved = await persist_preferences(
@@ -230,6 +235,36 @@ def _first_user_message(messages: list[dict]) -> str:
                 if isinstance(block, dict) and block.get("type") == "text":
                     return block.get("text", "")
     return ""
+
+
+def _last_user_message(messages: list[dict]) -> str:
+    for msg in reversed(messages):
+        if msg.get("role") != "user":
+            continue
+        content = msg.get("content")
+        if isinstance(content, str) and content.strip():
+            return content
+        if isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text" and (block.get("text") or "").strip():
+                    return block["text"]
+    return ""
+
+
+def _user_turn_texts(messages: list[dict]) -> list[str]:
+    """Verbatim user-authored text, used to verify extracted evidence quotes."""
+    turns: list[str] = []
+    for msg in messages:
+        if msg.get("role") != "user":
+            continue
+        content = msg.get("content")
+        if isinstance(content, str) and content.strip():
+            turns.append(content)
+        elif isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text" and (block.get("text") or "").strip():
+                    turns.append(block["text"])
+    return turns
 
 
 def _last_assistant_text(messages: list[dict]) -> str:

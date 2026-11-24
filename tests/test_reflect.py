@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -24,7 +23,9 @@ class TestReflectHelpers:
 
     def test_extract_response_text_uses_reasoning_fallback(self):
         response = SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content="", reasoning_content="hidden response final answer"))]
+            choices=[
+                SimpleNamespace(message=SimpleNamespace(content="", reasoning_content="hidden response final answer"))
+            ]
         )
 
         assert "final answer" in reflect._extract_response_text(response)
@@ -89,7 +90,13 @@ class TestLLMReflectLesson:
 
         async def fake_acompletion(**kwargs):
             return SimpleNamespace(
-                choices=[SimpleNamespace(message=SimpleNamespace(content="Insight: Successfully completed the task", reasoning_content=""))]
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(
+                            content="Insight: Successfully completed the task", reasoning_content=""
+                        )
+                    )
+                ]
             )
 
         monkeypatch.setattr(reflect, "litellm", SimpleNamespace(acompletion=fake_acompletion))
@@ -115,6 +122,8 @@ class TestPreferenceExtraction:
 
     @pytest.mark.asyncio
     async def test_extracts_multiple_preferences(self, monkeypatch: pytest.MonkeyPatch):
+        """P1 format: every candidate carries Kind / Slug / Evidence and the
+        evidence must be a verbatim quote from a user turn."""
         monkeypatch.setattr(reflect, "_resolve_llm_params", _async_return({"api_key": "k"}))
 
         async def fake_acompletion(**kwargs):
@@ -123,8 +132,16 @@ class TestPreferenceExtraction:
                     SimpleNamespace(
                         message=SimpleNamespace(
                             content=(
-                                "Category: language\nPreference: User prefers Chinese for chat.\n\n"
-                                "Category: format\nPreference: User wants JSON output when possible."
+                                "Kind: standing_rule\n"
+                                "Category: language\n"
+                                "Slug: chat-language\n"
+                                "Preference: 用中文回复。\n"
+                                "Evidence: 请用中文回复\n\n"
+                                "Kind: explicit_choice\n"
+                                "Category: delivery_format\n"
+                                "Slug: json-output\n"
+                                "Preference: 尽量输出 JSON 格式。\n"
+                                "Evidence: 尽量输出 JSON 格式"
                             ),
                             reasoning_content="",
                         )
@@ -139,8 +156,73 @@ class TestPreferenceExtraction:
 
         assert len(prefs) == 2
         assert prefs[0]["category"] == "language"
-        assert "Chinese" in prefs[0]["content"]
-        assert prefs[1]["category"] == "format"
+        assert prefs[0]["key"] == "user_pref:chat-language"
+        assert prefs[0]["kind"] == "standing_rule"
+        assert prefs[0]["importance"] == 0.8
+        assert prefs[1]["category"] == "delivery_format"
+        assert prefs[1]["importance"] == 0.6
+
+    @pytest.mark.asyncio
+    async def test_rejects_evidence_the_user_never_said(self, monkeypatch: pytest.MonkeyPatch):
+        """The evidence gate is the point of P1: an invented quote is dropped
+        even when every other field looks valid."""
+        monkeypatch.setattr(reflect, "_resolve_llm_params", _async_return({"api_key": "k"}))
+
+        async def fake_acompletion(**kwargs):
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(
+                            content=(
+                                "Kind: standing_rule\n"
+                                "Category: language\n"
+                                "Slug: chat-language\n"
+                                "Preference: 用中文回复。\n"
+                                "Evidence: 以后一律用法语回复"
+                            ),
+                            reasoning_content="",
+                        )
+                    )
+                ]
+            )
+
+        monkeypatch.setattr(reflect, "litellm", SimpleNamespace(acompletion=fake_acompletion))
+
+        convo = "User: 请用中文回复。" * 20
+        prefs = await reflect.llm_extract_user_preferences(convo, model="gpt-4o", user_turns=["请用中文回复。"])
+
+        assert prefs == []
+
+    @pytest.mark.asyncio
+    async def test_rejects_assistant_behaviour_kind(self, monkeypatch: pytest.MonkeyPatch):
+        """'the assistant should X' is not a user preference, whatever else the
+        candidate says."""
+        monkeypatch.setattr(reflect, "_resolve_llm_params", _async_return({"api_key": "k"}))
+
+        async def fake_acompletion(**kwargs):
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(
+                            content=(
+                                "Kind: assistant_behaviour\n"
+                                "Category: workflow\n"
+                                "Slug: verify-packaged-app\n"
+                                "Preference: 重启后要验证打包版。\n"
+                                "Evidence: 重启后要验证打包版"
+                            ),
+                            reasoning_content="",
+                        )
+                    )
+                ]
+            )
+
+        monkeypatch.setattr(reflect, "litellm", SimpleNamespace(acompletion=fake_acompletion))
+
+        convo = "User: 重启后要验证打包版。" * 20
+        prefs = await reflect.llm_extract_user_preferences(convo, model="gpt-4o")
+
+        assert prefs == []
 
     @pytest.mark.asyncio
     async def test_filters_bad_or_too_short_preferences(self, monkeypatch: pytest.MonkeyPatch):
@@ -152,9 +234,21 @@ class TestPreferenceExtraction:
                     SimpleNamespace(
                         message=SimpleNamespace(
                             content=(
-                                "Category: general\nPreference: none\n\n"
-                                "Category: style\nPreference: short\n\n"
-                                "Category: style\nPreference: User prefers concise summaries."
+                                "Kind: standing_rule\n"
+                                "Category: other\n"
+                                "Slug: none\n"
+                                "Preference: none\n"
+                                "Evidence: none\n\n"
+                                "Kind: standing_rule\n"
+                                "Category: response_style\n"
+                                "Slug: terse\n"
+                                "Preference: short\n"
+                                "Evidence: short\n\n"
+                                "Kind: correction\n"
+                                "Category: response_style\n"
+                                "Slug: concise-summaries\n"
+                                "Preference: 回答要简洁，不要废话。\n"
+                                "Evidence: no fluff please"
                             ),
                             reasoning_content="",
                         )
@@ -168,7 +262,8 @@ class TestPreferenceExtraction:
         prefs = await reflect.llm_extract_user_preferences(convo, model="gpt-4o")
 
         assert len(prefs) == 1
-        assert prefs[0]["category"] == "style"
+        assert prefs[0]["category"] == "response_style"
+        assert prefs[0]["key"] == "user_pref:concise-summaries"
 
 
 class TestPersistenceHelpers:

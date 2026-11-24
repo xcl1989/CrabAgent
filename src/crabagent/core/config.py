@@ -69,6 +69,10 @@ class Settings(BaseSettings):
     memory_auto_extract: bool = True
     memory_auto_recall: bool = True
     memory_max_inject: int = 5
+    # Minimum cosine similarity for a vector hit to be fused into auto-recall.
+    memory_vector_threshold: float = 0.45
+    # P1: evidence-gated, closed-vocabulary preference extraction.
+    memory_extraction_v2: bool = True
     session_memory_models: list[str] = []  # Explicit provider-name:wire-model allowlist.
 
     # ── LLM retry / resilience ──

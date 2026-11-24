@@ -12,6 +12,10 @@ from crabagent.core.agent.lesson_dedup import embedding_similarity_score, string
 
 logger = logging.getLogger(__name__)
 
+# Similarity floor before the model is asked to judge. Lower than the old 0.85
+# because the wider candidate set makes near-misses the common case.
+MERGE_SIMILARITY = 0.72
+
 
 async def merge_preference(user_id: int, preference: dict, model: str, provider_name: str | None = None) -> bool:
     """Merge only after both similarity and an explicit model decision; fail closed."""
@@ -21,22 +25,45 @@ async def merge_preference(user_id: int, preference: dict, model: str, provider_
     from crabagent.core.database import AgentMemory, MemoryEmbedding, async_session_factory, utcnow
 
     content = preference["content"].strip()
-    category = preference.get("category", "general")
-    if not content or category == "general":
+    category = (preference.get("category") or "").strip().lower()
+    if not content or not category:
         return False
+
+    # A stable key means the same subject can be recognised without any
+    # similarity search: same key -> refine in place.
+    key = (preference.get("key") or "").strip()
     async with async_session_factory() as db:
-        rows = (await db.execute(select(AgentMemory).where(
-            AgentMemory.user_id == user_id, AgentMemory.memory_type == "user_preference",
-            AgentMemory.scope == "global", AgentMemory.workspace_path == "",
-            AgentMemory.agent_name == "", AgentMemory.category == category,
-        ).order_by(AgentMemory.updated_at.desc()).limit(50))).scalars().all()
-        candidates = [(row.id, row.content) for row in rows if row.content]
+        conditional = [
+            AgentMemory.user_id == user_id,
+            AgentMemory.memory_type == "user_preference",
+            AgentMemory.scope == "global",
+            AgentMemory.workspace_path == "",
+            AgentMemory.agent_name == "",
+        ]
+        exact = None
+        if key:
+            exact = (await db.execute(
+                select(AgentMemory).where(*conditional, AgentMemory.key == key)
+                .order_by(AgentMemory.updated_at.desc()).limit(1)
+            )).scalars().first()
+
+        # Widen beyond the category: legacy rows carry ~200 one-off tags, so a
+        # same-category filter alone would miss every real duplicate.
+        rows = (await db.execute(
+            select(AgentMemory).where(*conditional)
+            .order_by(AgentMemory.updated_at.desc()).limit(200)
+        )).scalars().all()
+        candidates = [(row.id, row.content, row.key) for row in rows if row.content]
+
     scored = []
-    for memory_id, previous in candidates:
+    for memory_id, previous, other_key in candidates:
+        if exact is not None and memory_id == exact.id:
+            scored.append((1.0, memory_id, previous))
+            continue
         similarity = string_similarity_score(content.lower(), previous.lower())
-        if similarity < 0.85:
+        if similarity < MERGE_SIMILARITY:
             similarity = await embedding_similarity_score(content, previous)
-        if similarity >= 0.85:
+        if similarity >= MERGE_SIMILARITY:
             scored.append((similarity, memory_id, previous))
     if not scored:
         return False

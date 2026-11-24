@@ -103,6 +103,7 @@ class BackgroundGroup(Base):
 
 class BackgroundDelivery(Base):
     """Opt-in UI-only outbox record and durable acknowledgement."""
+
     __tablename__ = "background_deliveries"
     group_id: Mapped[str] = mapped_column(String(32), primary_key=True)
     user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
@@ -116,6 +117,7 @@ class BackgroundDelivery(Base):
 
 class BackgroundGroupSummary(Base):
     """Opt-in summary stored separately from conversation messages."""
+
     __tablename__ = "background_group_summaries"
     group_id: Mapped[str] = mapped_column(String(32), primary_key=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False)
@@ -124,6 +126,7 @@ class BackgroundGroupSummary(Base):
 
 class BackgroundSemanticSummary(Base):
     """A frozen, explicitly authorized semantic summary request."""
+
     __tablename__ = "background_semantic_summaries"
     group_id: Mapped[str] = mapped_column(String(32), primary_key=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False)
@@ -139,6 +142,7 @@ class BackgroundStartCommand(Base):
     and provider names, locale, agent name, task text, allowed tools); API keys
     are re-resolved from the provider store by the executing process.
     """
+
     __tablename__ = "background_start_commands"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
@@ -556,6 +560,12 @@ class AgentMemory(Base):
     scope: Mapped[str] = mapped_column(String(20), default="")
     workspace_path: Mapped[str] = mapped_column(Text, default="")
     recall_policy: Mapped[str] = mapped_column(String(20), default="")
+    # P1: provenance for auto-extracted rows; blank for agent-written rows.
+    evidence: Mapped[str] = mapped_column(Text, default="")
+    evidence_kind: Mapped[str] = mapped_column(String(32), default="")
+    # P2: one-line digest used for resident injection. Blank means "use content".
+    summary: Mapped[str] = mapped_column(Text, default="")
+    supersedes_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
@@ -747,7 +757,6 @@ class TaskRequest(Base):
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=utcnow)
     decided_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
     consumed_at: Mapped[datetime.datetime | None] = mapped_column(DateTime, nullable=True)
-
 
 
 class BrowserTaskEvent(Base):
@@ -996,34 +1005,50 @@ async def _migrate_session_memory(conn) -> None:
     await ensure_column(conn, "agent_memory", "memory_uid", "VARCHAR(32)")
     await ensure_column(conn, "agent_memory", "content_revision", "INTEGER NOT NULL DEFAULT 1")
     await ensure_column(conn, "agent_memory", "visibility_epoch", "INTEGER NOT NULL DEFAULT 1")
+    await ensure_column(conn, "agent_memory", "evidence", "TEXT DEFAULT ''")
+    await ensure_column(conn, "agent_memory", "evidence_kind", "VARCHAR(32) DEFAULT ''")
+    await ensure_column(conn, "agent_memory", "summary", "TEXT DEFAULT ''")
+    await ensure_column(conn, "agent_memory", "supersedes_id", "INTEGER")
     await conn.execute(text("UPDATE agent_memory SET memory_uid = lower(hex(randomblob(16))) WHERE memory_uid IS NULL"))
     await conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ux_agent_memory_uid ON agent_memory(memory_uid)"))
 
     # SQLite triggers cover ORM updates, bulk cleanup, and legacy SQL writers alike.
-    content_fields = ("key", "content", "category", "memory_type")
-    visibility_fields = ("user_id", "scope", "workspace_path", "agent_name", "recall_policy",
-                         "source_session", "memory_type")
+    content_fields = ("key", "content", "category", "memory_type", "evidence")
+    visibility_fields = (
+        "user_id",
+        "scope",
+        "workspace_path",
+        "agent_name",
+        "recall_policy",
+        "source_session",
+        "memory_type",
+    )
     version_fields = (*content_fields, *(f for f in visibility_fields if f not in content_fields))
 
     def changed(fields):
         return " OR ".join(f"OLD.{field} IS NOT NEW.{field}" for field in fields)
 
-    await conn.execute(text("""
+    await conn.execute(
+        text("""
         CREATE TRIGGER IF NOT EXISTS agent_memory_assign_uid
         AFTER INSERT ON agent_memory WHEN NEW.memory_uid IS NULL
         BEGIN
             UPDATE agent_memory SET memory_uid = lower(hex(randomblob(16))) WHERE id = NEW.id;
         END
-    """))
-    await conn.execute(text("""
+    """)
+    )
+    await conn.execute(
+        text("""
         CREATE TRIGGER IF NOT EXISTS agent_memory_keep_uid
         BEFORE UPDATE OF memory_uid ON agent_memory
         WHEN OLD.memory_uid IS NOT NULL AND OLD.memory_uid IS NOT NEW.memory_uid
         BEGIN
             SELECT RAISE(ABORT, 'agent_memory UID is immutable');
         END
-    """))
-    await conn.execute(text(f"""
+    """)
+    )
+    await conn.execute(
+        text(f"""
         CREATE TRIGGER IF NOT EXISTS agent_memory_track_revisions
         AFTER UPDATE OF {", ".join(version_fields)} ON agent_memory
         WHEN {changed(version_fields)}
@@ -1033,15 +1058,19 @@ async def _migrate_session_memory(conn) -> None:
                 visibility_epoch = OLD.visibility_epoch + CASE WHEN {changed(visibility_fields)} THEN 1 ELSE 0 END
             WHERE id = NEW.id;
         END
-    """))
-    await conn.execute(text("""
+    """)
+    )
+    await conn.execute(
+        text("""
         CREATE TRIGGER IF NOT EXISTS agent_memory_delete_snapshots
         AFTER DELETE ON agent_memory
         BEGIN
             DELETE FROM conversation_memory_injections WHERE memory_uid = OLD.memory_uid;
         END
-    """))
-    await conn.execute(text("""
+    """)
+    )
+    await conn.execute(
+        text("""
         CREATE TRIGGER IF NOT EXISTS message_delete_memory_batch
         AFTER DELETE ON messages
         BEGIN
@@ -1050,7 +1079,8 @@ async def _migrate_session_memory(conn) -> None:
             DELETE FROM conversation_memory_anchors
             WHERE conversation_id = OLD.conversation_id AND branch_id = OLD.branch_id AND anchor_message_id = OLD.id;
         END
-    """))
+    """)
+    )
 
 
 async def init_db() -> None:
@@ -1060,18 +1090,21 @@ async def init_db() -> None:
     async with engine.begin() as conn:
         await conn.execute(text("PRAGMA journal_mode=WAL"))
         await conn.run_sync(Base.metadata.create_all)
-        await conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_collaboration_file_activity "
-            "ON collaboration_entries (project_id, user_id, kind, scope, id)"
-        ))
-        await conn.execute(text(
-            "CREATE UNIQUE INDEX IF NOT EXISTS ux_workspace_preferences_user_workspace "
-            "ON workspace_preferences(user_id, workspace)"
-        ))
-        await conn.execute(text(
-            "CREATE UNIQUE INDEX IF NOT EXISTS ux_user_preferences_user_key "
-            "ON user_preferences(user_id, key)"
-        ))
+        await conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_collaboration_file_activity "
+                "ON collaboration_entries (project_id, user_id, kind, scope, id)"
+            )
+        )
+        await conn.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ux_workspace_preferences_user_workspace "
+                "ON workspace_preferences(user_id, workspace)"
+            )
+        )
+        await conn.execute(
+            text("CREATE UNIQUE INDEX IF NOT EXISTS ux_user_preferences_user_key ON user_preferences(user_id, key)")
+        )
 
         await ensure_column(conn, "users", "locale", "VARCHAR(10) DEFAULT 'en'")
 
@@ -1091,18 +1124,20 @@ async def init_db() -> None:
 
         # Goals are created by metadata for new databases. The tables below are
         # intentionally independent so existing user databases only gain data.
-        await conn.execute(text(
-            "CREATE TABLE IF NOT EXISTS goals ("
-            "id INTEGER PRIMARY KEY AUTOINCREMENT, session_id VARCHAR(32) NOT NULL, "
-            "user_id INTEGER NOT NULL, objective TEXT NOT NULL, execution_model VARCHAR(200) DEFAULT '', "
-            "execution_provider VARCHAR(100) DEFAULT '', execution_agent VARCHAR(100) DEFAULT '', "
-            "reasoning_effort VARCHAR(50) DEFAULT '', success_criteria JSON, "
-            "constraints JSON, status VARCHAR(32) DEFAULT 'active', auto_continue BOOLEAN DEFAULT 0, "
-            "token_budget INTEGER, tokens_used INTEGER DEFAULT 0, max_auto_turns INTEGER, "
-            "auto_turns INTEGER DEFAULT 0, completion_evidence TEXT DEFAULT '', blocker TEXT DEFAULT '', "
-            "latest_checkpoint TEXT DEFAULT '', next_step TEXT DEFAULT '', stop_reason VARCHAR(200) DEFAULT '', "
-            "created_at DATETIME, updated_at DATETIME, closed_at DATETIME)"
-        ))
+        await conn.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS goals ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT, session_id VARCHAR(32) NOT NULL, "
+                "user_id INTEGER NOT NULL, objective TEXT NOT NULL, execution_model VARCHAR(200) DEFAULT '', "
+                "execution_provider VARCHAR(100) DEFAULT '', execution_agent VARCHAR(100) DEFAULT '', "
+                "reasoning_effort VARCHAR(50) DEFAULT '', success_criteria JSON, "
+                "constraints JSON, status VARCHAR(32) DEFAULT 'active', auto_continue BOOLEAN DEFAULT 0, "
+                "token_budget INTEGER, tokens_used INTEGER DEFAULT 0, max_auto_turns INTEGER, "
+                "auto_turns INTEGER DEFAULT 0, completion_evidence TEXT DEFAULT '', blocker TEXT DEFAULT '', "
+                "latest_checkpoint TEXT DEFAULT '', next_step TEXT DEFAULT '', stop_reason VARCHAR(200) DEFAULT '', "
+                "created_at DATETIME, updated_at DATETIME, closed_at DATETIME)"
+            )
+        )
         result = await conn.execute(text("PRAGMA table_info(goals)"))
         goal_columns = [row[1] for row in result.fetchall()]
         for column, definition in (
@@ -1115,17 +1150,21 @@ async def init_db() -> None:
                 await conn.execute(text(f"ALTER TABLE goals ADD COLUMN {column} {definition}"))
 
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_goals_session_id ON goals(session_id)"))
-        await conn.execute(text(
-            "CREATE TABLE IF NOT EXISTS goal_events ("
-            "id INTEGER PRIMARY KEY AUTOINCREMENT, goal_id INTEGER NOT NULL, event_type VARCHAR(32) NOT NULL, "
-            "detail TEXT DEFAULT '', data JSON, created_at DATETIME)"
-        ))
+        await conn.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS goal_events ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT, goal_id INTEGER NOT NULL, event_type VARCHAR(32) NOT NULL, "
+                "detail TEXT DEFAULT '', data JSON, created_at DATETIME)"
+            )
+        )
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_goal_events_goal_id ON goal_events(goal_id)"))
-        await conn.execute(text(
-            "CREATE TABLE IF NOT EXISTS goal_checkpoints ("
-            "id INTEGER PRIMARY KEY AUTOINCREMENT, goal_id INTEGER NOT NULL, summary TEXT NOT NULL, "
-            "next_step TEXT DEFAULT '', created_at DATETIME)"
-        ))
+        await conn.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS goal_checkpoints ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT, goal_id INTEGER NOT NULL, summary TEXT NOT NULL, "
+                "next_step TEXT DEFAULT '', created_at DATETIME)"
+            )
+        )
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_goal_checkpoints_goal_id ON goal_checkpoints(goal_id)"))
 
         await ensure_column(conn, "messages", "parent_id", "INTEGER DEFAULT NULL")
@@ -1145,10 +1184,9 @@ async def init_db() -> None:
         # blocking app startup (jieba dictionary load is ~1-2s, segmentation
         # of 30k+ messages can take minutes).
         try:
-            await conn.execute(text(
-                "CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts_cjk USING fts5("
-                "content, tokenize='unicode61')"
-            ))
+            await conn.execute(
+                text("CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts_cjk USING fts5(content, tokenize='unicode61')")
+            )
         except Exception as e:
             logger.warning("FTS5-CJK table creation failed (non-fatal): %s", e)
 
@@ -1179,12 +1217,8 @@ async def init_db() -> None:
         await ensure_column(conn, "tasks", "started_at", "DATETIME DEFAULT NULL")
         await ensure_column(conn, "tasks", "completed_at", "DATETIME DEFAULT NULL")
         await ensure_column(conn, "tasks", "result_viewed_at", "DATETIME DEFAULT NULL")
-        await conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_tasks_user_status ON tasks(user_id, status)"
-        ))
-        await conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_tasks_goal_id ON tasks(goal_id)"
-        ))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_tasks_user_status ON tasks(user_id, status)"))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_tasks_goal_id ON tasks(goal_id)"))
 
         # ── Trusted work system: agent_runs 扩展列 ──
         await ensure_column(conn, "agent_runs", "task_id", "INTEGER DEFAULT NULL")
@@ -1193,43 +1227,37 @@ async def init_db() -> None:
         await ensure_column(conn, "agent_runs", "progress_current", "INTEGER DEFAULT 0")
         await ensure_column(conn, "agent_runs", "progress_total", "INTEGER DEFAULT 0")
         await ensure_column(conn, "agent_runs", "interrupted_reason", "TEXT DEFAULT ''")
-        await conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_agent_runs_task_id ON agent_runs(task_id)"
-        ))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_agent_runs_task_id ON agent_runs(task_id)"))
 
         # ── Trusted work system: task_requests 表（create_all 建表 + 索引） ──
-        await conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ux_task_requests_key ON task_requests(request_key)"
-        ))
-        await conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_task_requests_user_status ON task_requests(user_id, status)"
-        ))
-        await conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_task_requests_task_status ON task_requests(task_id, status)"
-        ))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ux_task_requests_key ON task_requests(request_key)"))
+        await conn.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_task_requests_user_status ON task_requests(user_id, status)")
+        )
+        await conn.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_task_requests_task_status ON task_requests(task_id, status)")
+        )
 
         # ── Trusted work system: task_artifacts / task_checks 索引 ──
-        await conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_task_artifacts_task_run ON task_artifacts(task_id, run_id)"
-        ))
-        await conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_task_checks_task_position ON task_checks(task_id, position)"
-        ))
+        await conn.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_task_artifacts_task_run ON task_artifacts(task_id, run_id)")
+        )
+        await conn.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_task_checks_task_position ON task_checks(task_id, position)")
+        )
 
         # ── Trusted work system: run_molts 索引 + browser_tasks 关联列 ──
-        await conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_run_molts_run_id ON run_molts(run_id)"
-        ))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_run_molts_run_id ON run_molts(run_id)"))
         await ensure_column(conn, "browser_tasks", "trusted_task_id", "INTEGER DEFAULT NULL")
         await ensure_column(conn, "browser_tasks", "run_id", "INTEGER DEFAULT NULL")
-        await conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_browser_tasks_trusted_task_id ON browser_tasks(trusted_task_id)"
-        ))
+        await conn.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_browser_tasks_trusted_task_id ON browser_tasks(trusted_task_id)")
+        )
 
         # ── Trusted work system: task_events 时间线 ──
-        await conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_task_events_task_created ON task_events(task_id, created_at)"
-        ))
+        await conn.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_task_events_task_created ON task_events(task_id, created_at)")
+        )
 
         # ── Trusted work system: notifications 导航信封列 ──
         await ensure_column(conn, "notifications", "category", "VARCHAR(50) DEFAULT ''")
@@ -1240,12 +1268,10 @@ async def init_db() -> None:
         await ensure_column(conn, "notifications", "action", "VARCHAR(50) DEFAULT ''")
         await ensure_column(conn, "notifications", "metadata", "JSON")
         await ensure_column(conn, "notifications", "read_at", "DATETIME DEFAULT NULL")
-        await conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_notifications_user_read ON notifications(user_id, read)"
-        ))
-        await conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_notifications_task_id ON notifications(task_id)"
-        ))
+        await conn.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_notifications_user_read ON notifications(user_id, read)")
+        )
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_notifications_task_id ON notifications(task_id)"))
 
         await ensure_column(conn, "agent_memory", "source", "VARCHAR(10) DEFAULT ''")
         await ensure_column(conn, "agent_memory", "task_category", "VARCHAR(50) DEFAULT ''")
@@ -1255,7 +1281,8 @@ async def init_db() -> None:
         await _migrate_session_memory(conn)
 
         # --- MemoryEmbedding table (vector search) ---
-        await conn.execute(text("""
+        await conn.execute(
+            text("""
             CREATE TABLE IF NOT EXISTS memory_embedding (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 memory_id INTEGER NOT NULL UNIQUE,
@@ -1263,10 +1290,11 @@ async def init_db() -> None:
                 model_name VARCHAR(100) NOT NULL DEFAULT '',
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
-        """))
-        await conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_memory_embedding_memory_id ON memory_embedding(memory_id)"
-        ))
+        """)
+        )
+        await conn.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_memory_embedding_memory_id ON memory_embedding(memory_id)")
+        )
 
         # --- Calendar tables migrations ---
         # calendar_ical_sources: add CalDAV fields if missing (for upgrades)
@@ -1275,12 +1303,10 @@ async def init_db() -> None:
         await ensure_column(conn, "calendar_ical_sources", "caldav_password", "TEXT DEFAULT ''")
 
         # Execution spans — table is created by create_all(); add indexes here.
-        await conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_execution_spans_session_id ON execution_spans (session_id)"
-        ))
-        await conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_execution_spans_run_id ON execution_spans (run_id)"
-        ))
+        await conn.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_execution_spans_session_id ON execution_spans (session_id)")
+        )
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_execution_spans_run_id ON execution_spans (run_id)"))
         # Add provider column for existing databases
         await ensure_column(conn, "execution_spans", "provider", "VARCHAR(100) DEFAULT ''")
 
@@ -1306,6 +1332,7 @@ async def _rebuild_cjk_index_async() -> None:
     """Background task: rebuild jieba-based FTS5 index."""
     try:
         from crabagent.core.fts import rebuild_index
+
         await rebuild_index()
     except Exception as e:
         logging.getLogger(__name__).warning("FTS5-CJK rebuild failed: %s", e)
@@ -1578,6 +1605,9 @@ async def agent_memory_upsert(
     scope: str = "",
     workspace_path: str = "",
     recall_policy: str = "",
+    evidence: str = "",
+    evidence_kind: str = "",
+    summary: str = "",
 ) -> None:
     from sqlalchemy import delete, func, select
 
@@ -1589,18 +1619,25 @@ async def agent_memory_upsert(
 
             await db.execute(text("BEGIN IMMEDIATE"))
         legacy_scope = func.coalesce(AgentMemory.scope, "") == ""
-        inferred = ((func.coalesce(AgentMemory.workspace_path, "") != "") if effective_scope == "workspace"
-                    else (func.coalesce(AgentMemory.workspace_path, "") == ""))
+        inferred = (
+            (func.coalesce(AgentMemory.workspace_path, "") != "")
+            if effective_scope == "workspace"
+            else (func.coalesce(AgentMemory.workspace_path, "") == "")
+        )
         scope_match = AgentMemory.scope == effective_scope
         if effective_scope in ("global", "workspace"):
             scope_match = scope_match | (legacy_scope & inferred)
         result = await db.execute(
-            select(AgentMemory).where(
-                AgentMemory.user_id == user_id, AgentMemory.key == key,
-                AgentMemory.memory_type == memory_type, scope_match,
+            select(AgentMemory)
+            .where(
+                AgentMemory.user_id == user_id,
+                AgentMemory.key == key,
+                AgentMemory.memory_type == memory_type,
+                scope_match,
                 func.coalesce(AgentMemory.workspace_path, "") == workspace_path,
                 func.coalesce(AgentMemory.agent_name, "") == agent_name,
-            ).order_by(AgentMemory.id)
+            )
+            .order_by(AgentMemory.id)
         )
         existing = result.scalars().first()
         mem_id: int | None = None
@@ -1625,6 +1662,12 @@ async def agent_memory_upsert(
                 existing.workspace_path = workspace_path
             if recall_policy:
                 existing.recall_policy = recall_policy
+            if evidence:
+                existing.evidence = evidence
+            if evidence_kind:
+                existing.evidence_kind = evidence_kind
+            if summary:
+                existing.summary = summary
             existing.updated_at = utcnow()
             mem_id = existing.id
         else:
@@ -1643,6 +1686,9 @@ async def agent_memory_upsert(
                 scope=scope,
                 workspace_path=workspace_path,
                 recall_policy=recall_policy,
+                evidence=evidence,
+                evidence_kind=evidence_kind,
+                summary=summary,
             )
             db.add(new_mem)
         await db.flush()
@@ -1677,16 +1723,16 @@ async def agent_memory_get_by_type(
 ) -> list[dict]:
     from sqlalchemy import and_, or_, select
 
-    stmt = select(AgentMemory).where(
-        AgentMemory.user_id == user_id, AgentMemory.memory_type == memory_type
-    )
+    stmt = select(AgentMemory).where(AgentMemory.user_id == user_id, AgentMemory.memory_type == memory_type)
     # Infer the scope of legacy records from their workspace, if present.
     legacy_scope = or_(AgentMemory.scope == "", AgentMemory.scope.is_(None))
     if scope == "global":
-        stmt = stmt.where(or_(
-            AgentMemory.scope == scope,
-            and_(legacy_scope, or_(AgentMemory.workspace_path == "", AgentMemory.workspace_path.is_(None))),
-        ))
+        stmt = stmt.where(
+            or_(
+                AgentMemory.scope == scope,
+                and_(legacy_scope, or_(AgentMemory.workspace_path == "", AgentMemory.workspace_path.is_(None))),
+            )
+        )
     elif scope == "workspace":
         if not workspace_path:
             return []
@@ -1697,16 +1743,16 @@ async def agent_memory_get_by_type(
     elif scope:
         stmt = stmt.where(AgentMemory.scope == scope)
     if recall_policy:
-        stmt = stmt.where(or_(
-            AgentMemory.recall_policy == recall_policy,
-            AgentMemory.recall_policy == "",
-            AgentMemory.recall_policy.is_(None),
-        ))
+        stmt = stmt.where(
+            or_(
+                AgentMemory.recall_policy == recall_policy,
+                AgentMemory.recall_policy == "",
+                AgentMemory.recall_policy.is_(None),
+            )
+        )
 
     async with async_session_factory() as db:
-        result = await db.execute(
-            stmt.order_by(AgentMemory.importance.desc()).limit(limit)
-        )
+        result = await db.execute(stmt.order_by(AgentMemory.importance.desc()).limit(limit))
         return [
             {
                 "id": r.id,
@@ -1927,9 +1973,11 @@ async def agent_memory_search_vector(
 
     # Rebuild a bounded batch of missing embeddings on demand.
     async with async_session_factory() as db:
-        missing_stmt = (select(AgentMemory).outerjoin(
-            MemoryEmbedding, MemoryEmbedding.memory_id == AgentMemory.id
-        ).where(AgentMemory.user_id == user_id, MemoryEmbedding.memory_id.is_(None)))
+        missing_stmt = (
+            select(AgentMemory)
+            .outerjoin(MemoryEmbedding, MemoryEmbedding.memory_id == AgentMemory.id)
+            .where(AgentMemory.user_id == user_id, MemoryEmbedding.memory_id.is_(None))
+        )
         if memory_type:
             missing_stmt = missing_stmt.where(AgentMemory.memory_type == memory_type)
         if visible_only:
@@ -1938,8 +1986,9 @@ async def agent_memory_search_vector(
             missing_stmt = missing_stmt.where(AgentMemory.scope == scope)
         if workspace_path and not visible_only:
             missing_stmt = missing_stmt.where(AgentMemory.workspace_path == workspace_path)
-        missing_rows = (await db.execute(missing_stmt.order_by(
-            AgentMemory.updated_at.desc()).limit(10))).scalars().all()
+        missing_rows = (
+            (await db.execute(missing_stmt.order_by(AgentMemory.updated_at.desc()).limit(10))).scalars().all()
+        )
         missing_data = [(row.id, row.key, row.content) for row in missing_rows]
     for memory_id, key, content in missing_data:
         try:
@@ -2030,13 +2079,105 @@ async def agent_memory_search_vector(
     # Include keyword matches without an embedding, including newly edited records.
     if fallback:
         keyword = await agent_memory_search(
-            user_id, query, memory_type=memory_type, limit=limit, scope=scope,
-            workspace_path=workspace_path, visible_only=visible_only, agent_name=agent_name,
+            user_id,
+            query,
+            memory_type=memory_type,
+            limit=limit,
+            scope=scope,
+            workspace_path=workspace_path,
+            visible_only=visible_only,
+            agent_name=agent_name,
         )
         seen = {item["id"] for item in output}
         missing = [item for item in keyword if item["id"] not in seen]
         output = (missing + output)[:limit]
     return output
+
+
+async def agent_memory_vector_candidates(
+    query: str,
+    limit: int,
+    *,
+    visible=None,
+) -> list[dict]:
+    """Return ``[{memory_uid, key, similarity}]`` for the most similar memories.
+
+    *visible* is an optional SQLAlchemy visibility predicate (the tuple built
+    by ``SessionMemory._visible``); when omitted every memory of the user is
+    considered.  Encodes the query once and scores embeddings in memory —
+    a few hundred vectors of 384 dims is sub-millisecond, so no ANN index is
+    needed at this scale.  Returns ``[]`` when no embeddings exist or the
+    model is unavailable; callers must treat that as "keyword only".
+    """
+    import base64
+
+    from sqlalchemy import func, select
+
+    from crabagent.core.memory_embed import cosine_similarity, decode_embedding, encode_query
+
+    query_vec = await encode_query(query)
+    if query_vec is None:
+        return []
+    async with async_session_factory() as db:
+        stmt = (
+            select(MemoryEmbedding, AgentMemory)
+            .join(AgentMemory, MemoryEmbedding.memory_id == AgentMemory.id)
+            .where(
+                AgentMemory.memory_uid.is_not(None),
+                func.coalesce(AgentMemory.recall_policy, "").in_(("", "always", "query_only")),
+            )
+        )
+        if visible is not None:
+            stmt = stmt.where(*visible)
+        rows = (await db.execute(stmt)).all()
+    scored: list[tuple[float, AgentMemory]] = []
+    for emb_row, mem in rows:
+        try:
+            sim = cosine_similarity(query_vec, decode_embedding(base64.b64decode(emb_row.embedding)))
+        except Exception:
+            continue
+        scored.append((sim, mem))
+    scored.sort(key=lambda item: item[0], reverse=True)
+    return [
+        {"memory_uid": mem.memory_uid, "key": mem.key, "similarity": round(sim, 4)}
+        for sim, mem in scored[: max(0, limit)]
+    ]
+
+
+async def agent_memory_backfill_embeddings(
+    user_id: int | None = None,
+    *,
+    batch_size: int = 64,
+    max_rows: int = 2000,
+) -> int:
+    """Generate embeddings for memories that do not have one yet.
+
+    Returns the number of embeddings written.  Safe to call repeatedly; each
+    run only processes rows lacking an embedding, so it can be invoked at
+    startup or from a maintenance command without double work.
+    """
+    from sqlalchemy import select
+
+    total = 0
+    while total < max_rows:
+        async with async_session_factory() as db:
+            stmt = (
+                select(AgentMemory)
+                .outerjoin(MemoryEmbedding, MemoryEmbedding.memory_id == AgentMemory.id)
+                .where(MemoryEmbedding.memory_id.is_(None))
+            )
+            if user_id is not None:
+                stmt = stmt.where(AgentMemory.user_id == user_id)
+            rows = (await db.execute(stmt.order_by(AgentMemory.updated_at.desc()).limit(batch_size))).scalars().all()
+            pending = [(row.id, row.key, row.content) for row in rows]
+        if not pending:
+            break
+        for memory_id, key, content in pending:
+            await agent_memory_ensure_embedding(memory_id, key, content)
+            total += 1
+        if len(pending) < batch_size:
+            break
+    return total
 
 
 async def agent_memory_ensure_embedding(memory_id: int, key: str, content: str) -> None:
@@ -2061,9 +2202,7 @@ async def agent_memory_ensure_embedding(memory_id: int, key: str, content: str) 
         current = await db.get(AgentMemory, memory_id)
         if current is None or current.key != key or current.content != content:
             return
-        result = await db.execute(
-            select(MemoryEmbedding).where(MemoryEmbedding.memory_id == memory_id)
-        )
+        result = await db.execute(select(MemoryEmbedding).where(MemoryEmbedding.memory_id == memory_id))
         existing = result.scalar_one_or_none()
         if existing:
             existing.embedding = b64_str
@@ -2116,9 +2255,15 @@ async def agent_memory_list_all(
         ]
 
 
-async def agent_memory_delete(user_id: int, key: str, *, memory_id: int | None = None,
-                              visible_only: bool = False, workspace_path: str = "",
-                              agent_name: str = "") -> bool:
+async def agent_memory_delete(
+    user_id: int,
+    key: str,
+    *,
+    memory_id: int | None = None,
+    visible_only: bool = False,
+    workspace_path: str = "",
+    agent_name: str = "",
+) -> bool:
     from sqlalchemy import delete as sa_delete
     from sqlalchemy import select
 
@@ -2159,8 +2304,11 @@ async def agent_memory_replace(
     key: str,
     old_text: str,
     new_text: str,
-    *, memory_id: int | None = None, visible_only: bool = False,
-    workspace_path: str = "", agent_name: str = "",
+    *,
+    memory_id: int | None = None,
+    visible_only: bool = False,
+    workspace_path: str = "",
+    agent_name: str = "",
 ) -> bool:
     from sqlalchemy import select
 
@@ -2178,6 +2326,7 @@ async def agent_memory_replace(
         if old_text not in row.content:
             return False
         from sqlalchemy import delete
+
         await db.execute(delete(MemoryEmbedding).where(MemoryEmbedding.memory_id == row.id))
         row.content = row.content.replace(old_text, new_text, 1)
         row.updated_at = utcnow()
@@ -2538,16 +2687,12 @@ async def _resolve_session_ids_by_workspace(user_id: int, workspace: str) -> set
 
     async with async_session_factory() as db:
         result = await db.execute(
-            select(Conversation.session_id).where(
-                Conversation.user_id == user_id, Conversation.workspace == workspace
-            )
+            select(Conversation.session_id).where(Conversation.user_id == user_id, Conversation.workspace == workspace)
         )
         return {r[0] for r in result.fetchall()}
 
 
-async def token_usage_overview(
-    user_id: int, days: int = 30, workspace: str = ""
-) -> dict:
+async def token_usage_overview(user_id: int, days: int = 30, workspace: str = "") -> dict:
     """Aggregate overview: totals, by_agent, by_model, trend (daily or hourly)."""
     from sqlalchemy import func, select
 
@@ -2596,15 +2741,11 @@ async def token_usage_overview(
         today_conds = [TokenUsage.user_id == user_id, TokenUsage.created_at >= today_start]
         if ws_session_ids is not None:
             today_conds.append(TokenUsage.session_id.in_(ws_session_ids))
-        today_result = await db.execute(
-            select(func.sum(TokenUsage.total_tokens).label("total")).where(*today_conds)
-        )
+        today_result = await db.execute(select(func.sum(TokenUsage.total_tokens).label("total")).where(*today_conds))
         today_total = today_result.scalar() or 0
 
         # Sessions count
-        sessions_result = await db.execute(
-            select(func.count(func.distinct(TokenUsage.session_id))).where(*conds)
-        )
+        sessions_result = await db.execute(select(func.count(func.distinct(TokenUsage.session_id))).where(*conds))
         sessions_count = sessions_result.scalar() or 0
 
         # By agent
@@ -2660,9 +2801,7 @@ async def token_usage_overview(
         ]
 
         # Trend (daily or hourly)
-        trend_result = await db.execute(
-            select(TokenUsage).where(*conds).order_by(TokenUsage.created_at.asc())
-        )
+        trend_result = await db.execute(select(TokenUsage).where(*conds).order_by(TokenUsage.created_at.asc()))
         rows = trend_result.scalars().all()
         trend: dict[str, dict] = {}
         for r in rows:
@@ -2802,9 +2941,7 @@ async def token_usage_sessions(
         titles: dict[str, str] = {}
         if session_ids:
             conv_result = await db.execute(
-                select(Conversation.session_id, Conversation.title).where(
-                    Conversation.session_id.in_(session_ids)
-                )
+                select(Conversation.session_id, Conversation.title).where(Conversation.session_id.in_(session_ids))
             )
             for cid, title in conv_result.fetchall():
                 titles[cid] = title or ""
@@ -2828,9 +2965,7 @@ async def token_usage_sessions(
         ]
 
         # Total count
-        count_result = await db.execute(
-            select(func.count(func.distinct(TokenUsage.session_id))).where(*conds)
-        )
+        count_result = await db.execute(select(func.count(func.distinct(TokenUsage.session_id))).where(*conds))
         total = count_result.scalar() or 0
 
         return sessions, total
@@ -2852,10 +2987,7 @@ async def token_usage_workspaces(user_id: int) -> list[dict]:
             .group_by(Conversation.workspace)
             .order_by(func.sum(TokenUsage.total_tokens).desc())
         )
-        return [
-            {"workspace": r[0], "total_tokens": r[1] or 0, "calls": r[2] or 0}
-            for r in result.fetchall()
-        ]
+        return [{"workspace": r[0], "total_tokens": r[1] or 0, "calls": r[2] or 0} for r in result.fetchall()]
 
 
 async def token_usage_session_detail(user_id: int, session_id: str) -> dict | None:
@@ -3006,9 +3138,7 @@ async def token_usage_session_summary(user_id: int, session_id: str) -> dict:
 # ── Execution span persistence and queries ──
 
 
-async def execution_span_batch_create(
-    session_id: str, run_id: str, spans: list[dict]
-) -> None:
+async def execution_span_batch_create(session_id: str, run_id: str, spans: list[dict]) -> None:
     """Batch insert execution spans for a single run.
 
     In-memory spans use ``_id`` (a per-run counter starting from 1) as the
@@ -3058,11 +3188,7 @@ async def execution_span_batch_create(
             if db_parent_id is not None:
                 from sqlalchemy import update
 
-                await db.execute(
-                    update(ExecutionSpan)
-                    .where(ExecutionSpan.id == db_id)
-                    .values(parent_id=db_parent_id)
-                )
+                await db.execute(update(ExecutionSpan).where(ExecutionSpan.id == db_id).values(parent_id=db_parent_id))
 
         await db.commit()
 

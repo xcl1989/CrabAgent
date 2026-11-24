@@ -309,7 +309,9 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
                 dbMsgs.every(
                   (m, idx) =>
                     m.role === prev[idx]?.role &&
-                    (m.content?.length || 0) === (prev[idx]?.content?.length || 0),
+                    (m.content?.length || 0) === (prev[idx]?.content?.length || 0) &&
+                    (m.role !== "memory_references" ||
+                      (m.id === prev[idx].id && JSON.stringify(m.memory_references) === JSON.stringify(prev[idx].memory_references))),
                 );
               if (sameShape) return prev;
 
@@ -323,7 +325,7 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
               if (sameRoleSequence) {
                 return dbMsgs.map((m, idx) => ({
                   ...m,
-                  id: prev[idx].id,
+                  id: m.role === "memory_references" ? m.id : prev[idx].id,
                   isStreaming: false,
                 }));
               }
@@ -338,7 +340,7 @@ export function useChatState(onEvent?: (event: SSEEvent) => void, workspace?: st
                 ? [...dbMsgs, ...liveOnly]
                 : (() => {
                     const dbIds = new Set(dbMsgs.map((m) => m.id));
-                    const retained = prev.filter((m) => m.role === "screenshot" || !dbIds.has(m.id));
+                    const retained = prev.filter((m) => m.role !== "memory_references" && !dbIds.has(m.id));
                     return [...dbMsgs, ...retained.filter((m) => !dbMsgs.some((d) => d.id === m.id))];
                   })();
               return merged;
