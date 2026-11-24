@@ -9,11 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [0.19.0] — Memory Recall Quality (2026-11-24)
+## [0.19.1] — Memory Recall Hardening (2026-11-24)
 
 ### Changed
 - **Auto-recall matching rewritten.** Chinese queries are now segmented with jieba into whole words instead of a sliding-window bigram, which removed the cross-word fragments ("个文", "建一", "能用") that matched almost anything. A single distinctive word ("大屏") is now enough to recall, where the old "two overlapping bigrams" rule dropped it.
-- **Corpus-level generic-word filter.** A word appearing in four or more visible memories ("可能", "文件", "文档") is treated as generic and can no longer trigger a recall on its own. Derived from the corpus at rank time, so no hand-maintained stop list can fall behind the data. Tiny corpora fall back to the static stop list.
+- **Corpus-level generic-word filter.** A word appearing in a corpus-dependent share of visible memories ("可能", "文件") is treated as generic and can no longer trigger a recall on its own. The threshold scales with the corpus (`df/N`, floored and capped), so "发布" stays a real topic in a project that ships weekly instead of being generic at any corpus size. Tiny corpora fall back to the static stop list.
+- **Weak single-word matches rejected.** When a multi-word query matches a memory on exactly one word, that word must be rare enough to name the subject (not a tool name like "electron" or "python"), and must sit early in the query where Chinese puts the subject. This stopped a release note from being recalled into an offscreen-rendering question.
+- **Acknowledgement-only turns recall nothing.** "不用。", "好的" and friends carry no topic; keyword matching is skipped and such turns rely on the semantic channel only. A single shared word ("分支" in "怎么会分支的") no longer pulls an unrelated memory in.
+- **Workspace affinity.** Memories recorded in the current workspace rank above global ones; cross-project leakage ("大屏" pulling in a wolfkill speech note) is fixed by scope-correcting mis-stored memories rather than by the ranker.
+- **IDF-weighted coverage ranking.** Coverage (matched weight over the query's total weight, BM25-style IDF) leads the rank tuple, so a memory matching the subject beats one matching an incidental rare word; 1/df gave absent-from-corpus words the maximum weight.
 - **Semantic recall wired into auto-injection.** Keyword hits and vector hits are fused by Reciprocal Rank Fusion, so a memory surfaces when *either* signal is strong. Paraphrases with zero lexical overlap ("文档预览里直接改文字" → `feature:quick_edit`) now recall. Hits below `memory_vector_threshold` (0.45) are ignored.
 - **Resident ("always") entries bounded.** Only concise entries stay resident, capped at four per turn; a long convention with a one-line `summary` stays resident via its digest while the full text remains available through `memory_recall`. When the user actually asks about a resident entry, the full text is injected instead of the digest.
 - `memory_save` accepts an optional `summary` for long `convention` / `decision` entries.
@@ -21,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Memory reference cards in the chat now show a type badge (convention / decision / preference / lesson), the one-line digest, and a resident marker instead of a bare key. Legacy rows and live SSE events that carry plain key strings are normalised on the client.
+- **Live receipts during streaming.** The memory card used to appear only after the post-run reload: the user turn still carries its optimistic `u-<ts>` id while streaming, so matching the anchor by DB id failed and the card was silently dropped. When an optimistic turn exists the card attaches to the last user turn instead; a receipt whose turn has scrolled out of view is still dropped.
 - `agent_memory_vector_candidates` for visibility-scoped cosine search, and a `summary` column on `agent_memory`.
 
 ### Fixed
@@ -28,7 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Memory reference receipts never expose the injected body — only the stored digest.
 
 ### Tests
-- Added `tests/test_memory_recall_quality.py` covering resident demotion and promotion, generic-word filtering, single distinctive-word recall, vector fusion and threshold, backfill idempotence, and summary injection.
+- Added `tests/test_memory_recall_quality.py` covering resident demotion and promotion, generic-word filtering, single distinctive-word recall, vector fusion and threshold, backfill idempotence, and summary injection. Extended with acknowledgement-only turns, incidental single-word rejection, subject-word recall and workspace-scope isolation.
 - Updated session-memory receipt tests for the richer reference format.
 - Aligned `test_reflect.py` preference-extraction tests with the P1 evidence gate (`Kind` / `Slug` / verbatim `Evidence`), and added coverage for rejecting invented quotes and `assistant_behaviour` candidates.
 - Updated the Responses-stream adapter test for litellm's signature change (`output_index` is now mapped internally; the external index map argument is gone).

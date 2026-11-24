@@ -51,14 +51,27 @@ export function sseEventToMessages(event: SSEEvent, messages: ChatMessage[]): Ch
       memory_references: keys.map((key) => toMemoryReference(key as Parameters<typeof toMemoryReference>[0])),
     };
     // The receipt arrives after the provider handoff, i.e. while thinking/text
-    // is already streaming. Anchor it right after its user turn (matched by
-    // numeric message id) so it never splits a streaming block.
+    // is already streaming. Anchor it right after its user turn so it never
+    // splits a streaming block.
     let index = -1;
+    let sawOptimisticTurn = false;
     for (let i = messages.length - 1; i >= 0; i--) {
       const message = messages[i];
       if (message.role !== "user") continue;
+      if (String(message.id).startsWith("u-")) sawOptimisticTurn = true;
       const messageId = message.db_message_id ?? Number(String(message.id).replace(/^db-/, ""));
       if (messageId === anchor_id) { index = i; break; }
+    }
+    // During streaming the user turn still carries its optimistic local id
+    // (`u-<ts>`); the DB id only arrives with the post-run reload. Matching by
+    // id therefore fails and the card was silently dropped until the reload.
+    // Fall back to the last user turn — but only when such an optimistic turn
+    // exists, so a receipt for a turn that has scrolled out of view is still
+    // dropped rather than attached to the wrong message.
+    if (index < 0 && sawOptimisticTurn) {
+      for (let i = messages.length - 1; i >= 0; i--) {
+        if (messages[i].role === "user") { index = i; break; }
+      }
     }
     if (index < 0) return messages;
     updated.splice(index + 1, 0, card);

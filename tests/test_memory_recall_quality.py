@@ -217,3 +217,63 @@ async def test_long_resident_without_summary_is_demoted(sessions, tmp_path):
     await add_source(sessions, "decision:long-note", "很长的决策说明。" * 60, recall_policy="always", importance=0.95)
     memory = sm.SessionMemory(7, 1, "main", str(tmp_path))
     assert not await memory.prepare(1, "今天天气怎么样", set(), "coder")
+
+
+async def test_acknowledgement_only_turn_recalls_nothing(sessions, tmp_path):
+    """A turn that is only an acknowledgement carries no topic to match."""
+    await _seed_corpus(sessions)
+    await add_source(sessions, "convention:cn_report", "问数模型工具约定：不要用 query_data_models")
+    memory = sm.SessionMemory(7, 1, "main", str(tmp_path))
+    assert not await memory.prepare(1, "不用。", set(), "coder")
+    assert not await memory.prepare(2, "好的", set(), "coder")
+
+
+async def test_single_incidental_word_does_not_promote(sessions, tmp_path):
+    """A multi-word query matching one incidental word must not recall.
+
+    "electron" lives in packaging notes; a question about offscreen rendering
+    must not pull the release pipeline in.
+    """
+    await _seed_corpus(sessions)
+    await add_source(
+        sessions,
+        "convention:release_pipeline_pypi",
+        "发版流程：同步两个 electron 目录的 package.json 后 build 并 twine upload",
+        importance=0.9,
+    )
+    memory = sm.SessionMemory(7, 1, "main", str(tmp_path))
+    assert not await memory.prepare(1, "帮我看看 Electron 离屏渲染的截图怎么显示到界面上", set(), "coder")
+
+
+async def test_subject_word_at_query_start_still_recalls(sessions, tmp_path):
+    """The same rule must keep a genuine subject match: "大屏" leads the query."""
+    await _seed_corpus(sessions)
+    await add_source(sessions, "convention:dashboard_jump_id", "大屏跳转 ID 因租户而异，需向用户索取")
+    memory = sm.SessionMemory(7, 1, "main", str(tmp_path))
+    assert await memory.prepare(1, "大屏一般在大电视上，不太可能用键盘打字操作", set(), "coder")
+    keys = [json.loads(item)["key"] for item in (await payload(memory, {1}, "coder"))[1]]
+    assert keys == ["convention:dashboard_jump_id"]
+
+
+async def test_other_workspace_memory_is_invisible(sessions, tmp_path):
+    """A workspace-scoped memory never leaks into a different workspace.
+
+    Cross-project leakage ("大屏" pulling in a wolfkill speech note) comes from
+    memories that were *stored* as global; visibility itself is enforced by the
+    SQL scope filter, so a workspace-scoped row is not even a candidate here.
+    """
+    await _seed_corpus(sessions)
+    other = str(tmp_path / "other-project")
+    await add_source(
+        sessions,
+        "architecture:speech-pipeline",
+        "wolfkill 发言流水线：文字与语音合并广播，含打字与键盘输入处理",
+        scope="workspace",
+        workspace_path=other,
+    )
+    memory = sm.SessionMemory(7, 1, "main", str(tmp_path))
+    assert not await memory.prepare(1, "大屏一般在大电视上，不太可能用键盘打字操作", set(), "coder")
+    assert not await memory.prepare(2, "wolfkill 发言流水线怎么合并语音广播", set(), "coder")
+    # The same memory is visible from its own workspace.
+    home = sm.SessionMemory(7, 1, "main", other)
+    assert await home.prepare(3, "wolfkill 发言流水线怎么合并语音广播", set(), "coder")

@@ -75,7 +75,9 @@ describe("memory reference cards", () => {
     const turn: ChatMessage[] = [{ id: "db-42", role: "user", content: "fix backend" }];
     const cards = sseEventToMessages(event(["python-backend"]), turn);
     expect(cards.slice(1)).toMatchObject([{
-      id: "memory-references-42", role: "memory_references", memory_references: ["python-backend"],
+      id: "memory-references-42", role: "memory_references",
+      // Bare keys from the SSE payload are normalised to reference objects.
+      memory_references: [{ key: "python-backend" }],
     }]);
     expect(sseEventToMessages(event(["python-backend"]), cards)).toBe(cards);
   });
@@ -91,6 +93,24 @@ describe("memory reference cards", () => {
     const result = sseEventToMessages(event, streaming);
     expect(result.map((m) => m.role)).toEqual(["user", "memory_references", "thinking"]);
     expect(result[2]).toBe(streaming[1]);
+  });
+
+  it("attaches a receipt to the optimistic user turn while streaming", () => {
+    // During streaming the user turn has a local `u-<ts>` id, so the DB anchor
+    // cannot be matched by id. The card must still appear instead of waiting
+    // for the post-run reload.
+    const event: SSEEvent = {
+      type: "memory_references", timestamp: 0, data: { anchor_id: 42, keys: ["python-backend"] },
+    };
+    const streaming: ChatMessage[] = [
+      { id: "u-1732000000000", role: "user", content: "fix backend" },
+      { id: "s-1", role: "assistant", content: "thinking…", isStreaming: true },
+    ];
+    const result = sseEventToMessages(event, streaming);
+    expect(result.map((m) => m.role)).toEqual(["user", "memory_references", "assistant"]);
+    expect(result[1]).toMatchObject({
+      id: "memory-references-42", memory_references: [{ key: "python-backend" }],
+    });
   });
 
   it("drops a receipt whose user turn is no longer in view", () => {
@@ -109,5 +129,7 @@ it("restores a memory card immediately after its user turn", () => {
     { id: 43, sequence: 2, role: "assistant", content: "ok", created_at: null },
   ]);
   expect(messages.map((m) => m.role)).toEqual(["user", "memory_references", "assistant"]);
-  expect(messages[1]).toMatchObject({ id: "memory-references-42", memory_references: ["backend"] });
+  expect(messages[1]).toMatchObject({
+    id: "memory-references-42", memory_references: [{ key: "backend" }],
+  });
 });

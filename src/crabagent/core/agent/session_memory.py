@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import re
 from dataclasses import dataclass, field
 from heapq import nsmallest
@@ -32,6 +33,10 @@ _STOP_BIGRAMS = frozenset(
     "功能 内容 用户 消息 显示 前端 后端 修改 调整 处理 相关 部分 情况 方式 方法 配置 设置 "
     "一般 专门 操作 帮我 看看 有没 有没有 不好 不太 可能 太可 或者 来放 这边 那边 文件 东西 "
     "目前 已经 以及 方面 记录 数据 信息 结果 效果 质量 优化 方案 卡片 记忆 文档".split()
+    # Conversational acknowledgements / backchannels. A turn that is only one
+    # of these ("不用。", "好的", "行") carries no topic at all.
+    + "不用 好的 行吧 好吧 可以 那行 没问题 谢谢 继续 知道 明白 懂了 嗯哦 好嘞 不用了 "
+    "等等 等一下 等下 慢着 停 一下 先不 先不用 算了 还是 吧 呢 啊 哦 嗯 好的呀".split()
 )
 RESIDENT_BUDGET = 3000
 # Resident ("always") entries are injected on *every* turn, so what matters is
@@ -45,15 +50,43 @@ RESIDENT_MAX_BYTES = 200
 RESIDENT_MAX_COUNT = 4
 # ASCII terms shorter than this ("app", "the", "fix") are too weak to count.
 _MIN_ASCII_TERM = 4
-# A bigram present in at least this many visible memories is treated as
-# generic ("可能", "文件", "文档") and cannot carry a hit on its own.  Derived
-# from the corpus at rank time, so no hand-maintained stop list can fall
-# behind the data.  An absolute count (not a ratio) is stable across corpus
-# sizes: a topic word stays rare whether the user has 20 or 455 memories.
-_GENERIC_DF_COUNT = 4
+# A word present in at least this *share* of the visible memories is treated as
+# generic ("可能", "文件") and cannot carry a hit on its own. Derived from the
+# corpus at rank time, so no hand-maintained stop list can fall behind the data.
+# A ratio rather than an absolute count: with 260 memories a word seen 8 times
+# is a real topic ("发布" in a project that ships weekly), while at 20 memories
+# 8 occurrences would be a third of everything.
+_GENERIC_DF_RATIO = 0.06
+# Floor and ceiling so the ratio stays sane for very small and very large
+# corpora (20 memories → 2; 500 → 30).
+_GENERIC_DF_MIN = 3
+_GENERIC_DF_MAX = 40
 # Below this corpus size frequency counts are meaningless; fall back to the
 # static stop list plus the original two-bigram minimum.
 _MIN_CORPUS_FOR_IDF = 20
+# A query with fewer content words than this is treated as carrying no topic
+# for keyword matching ("不用。", "好的").  Vector recall still applies.
+_MIN_QUERY_TERMS = 2
+# Tool, library and platform names are never a *subject*: "electron" shows up
+# in packaging notes, release logs and UI work alike, so a single match on one
+# of these says nothing about what the user is asking. They may still
+# contribute when accompanied by other matched words.
+_TECH_TERMS = frozenset(
+    "electron python node react vue typescript javascript fastapi flask django sqlalchemy "
+    "docker git github npm pip pnpm yarn vite webpack pytest asyncio sqlite postgres mysql "
+    "redis linux macos windows ubuntu tailwind html css json yaml toml markdown "
+    "openai anthropic claude gpt litellm langchain pydantic uvicorn "
+    "officecli excel word powerpoint docx xlsx pptx".split()
+)
+# When a multi-word query matches a memory on exactly one word, that word must
+# be rare enough to name the subject rather than a tool or library everyone
+# mentions, and it must sit early in the query where Chinese puts the subject.
+_SINGLE_WORD_MAX_DF = 3
+_SINGLE_WORD_MIN_SHARE = 0.3
+# A memory recorded in a *different* workspace must reach this IDF-weighted
+# coverage before it may be recalled into the current one. Cross-project
+# leakage ("大屏" pulling in a wolfkill speech note) is worse than a miss.
+_CROSS_WORKSPACE_MIN_COVERAGE = 0.5
 
 
 def _bigram_df(documents: list[set[str]]) -> dict[str, int]:
@@ -65,7 +98,16 @@ def _bigram_df(documents: list[set[str]]) -> dict[str, int]:
     return df
 
 
-def _is_generic(term: str, df_count: int | None) -> bool:
+def _generic_threshold(corpus_size: int) -> int:
+    """Document frequency at or above which a word is considered generic.
+
+    Scales with the corpus so that "发布" (df=8) stays a topic in a 260-memory
+    project while still being generic in a 40-memory one.
+    """
+    return max(_GENERIC_DF_MIN, min(_GENERIC_DF_MAX, int(corpus_size * _GENERIC_DF_RATIO)))
+
+
+def _is_generic(term: str, df_count: int | None, corpus_size: int = 0) -> bool:
     """True when *term* is too weak to trigger a recall on its own.
 
     ``df_count`` is the number of visible memories containing *term*.
@@ -78,7 +120,7 @@ def _is_generic(term: str, df_count: int | None) -> bool:
     if term.isascii():
         return len(term) < _MIN_ASCII_TERM
     # Unknown terms (df_count None) cannot be judged — keep them.
-    return df_count is not None and df_count >= _GENERIC_DF_COUNT
+    return df_count is not None and df_count >= _generic_threshold(corpus_size)
 
 
 def _is_resident(source) -> bool:
@@ -98,13 +140,45 @@ def _injectable(source) -> str:
     return summary if summary else (source.content or "")
 
 
-def _candidate_rank(source, query: str, terms: set[str], corpus: dict[str, int] | None = None):
+def _query_word_order(value: str) -> list[str]:
+    """Content words of *value* in their original order (stop words removed).
+
+    Position matters: the subject of a Chinese question usually comes first,
+    so a memory matching the leading word is a stronger candidate than one
+    matching a trailing detail.
+    """
+    import jieba
+
+    ordered: list[str] = []
+    for chunk in re.findall(r"[a-z0-9_]{3,}|[\u3400-\u9fff]+", value.casefold()):
+        if chunk.isascii():
+            if len(chunk) >= _MIN_ASCII_TERM and chunk not in _STOP_BIGRAMS:
+                ordered.append(chunk)
+            continue
+        for word in jieba.lcut(chunk):
+            word = word.strip()
+            if len(word) >= 2 and word not in _STOP_BIGRAMS:
+                ordered.append(word)
+    return ordered
+
+
+def _candidate_rank(
+    source,
+    query: str,
+    terms: set[str],
+    corpus: dict[str, int] | None = None,
+    query_terms: set[str] | None = None,
+    corpus_size_hint: int = 0,
+    workspace_hint: str = "",
+):
     """Rank *source* against *query*.
 
     ``corpus`` maps each bigram to the number of visible memories containing
     it.  ``None`` disables corpus statistics and falls back to the static
     stop list plus a two-bigram minimum — used for tiny corpora where
-    frequency counts are meaningless.
+    frequency counts are meaningless.  ``query_terms`` are the query's content
+    words (stop words removed); when the whole query has fewer than
+    ``_MIN_QUERY_TERMS`` of them, keyword recall is skipped entirely.
     """
     key = (source.key or "").casefold()
     policy = source.recall_policy or ""
@@ -119,19 +193,76 @@ def _candidate_rank(source, query: str, terms: set[str], corpus: dict[str, int] 
     # asks about one, the full text is served instead of the digest.
     overlap = terms & _terms(f"{key} {source.content or ''}"[:4096]) if terms else set()
     counts = corpus or {}
-    topical = {t for t in overlap if not _is_generic(t, counts.get(t))}
+    topical = {t for t in overlap if not _is_generic(t, counts.get(t), corpus_size_hint)}
+    # A query that has fewer than two content words carries almost no signal:
+    # "不用。" matching a memory that also says "不用" is 100% lexical overlap
+    # and zero meaning.  Leave such turns to the semantic channel instead of
+    # letting a single shared word pull an unrelated memory in.
+    if len(query_terms or ()) < _MIN_QUERY_TERMS and not fixed and not exact:
+        return None
     # One *distinctive* bigram is enough when the rest of the query is generic
     # ("大屏在电视上" → 大屏).  Without corpus statistics a single bigram is
     # too weak, so require two — the original conservative rule.
     enough = bool(topical) and (corpus is not None or len(topical) >= 2)
     if not (fixed or exact or enough):
         return None
-    strength = sum(1.0 / counts.get(t, 1) for t in topical)
-    # Resident first (bounded), then exact key hits, then weighted overlap,
-    # then workspace locality and importance.
+    # A single matched word out of a multi-word query is weak evidence: the
+    # memory merely mentions the word. Two signals decide whether it is still
+    # worth recalling, and both must hold:
+    #   * the word must be *specific* — "electron" is a tool name, while
+    #     "大屏" names the subject;
+    #   * it must sit early in the query, where Chinese puts the subject.
+    # Position alone let "electron" (first content word of "帮我看看 Electron
+    # 离屏渲染…") drag a release note into an offscreen-rendering question.
+    weak_single = False
+    if len(topical) == 1 and len(query_terms or ()) >= 3 and not exact:
+        hit = next(iter(topical))
+        order = [t for t in _query_word_order(query) if t in query_terms]
+        pos = order.index(hit) if hit in order else len(order)
+        # First word → 1.0, second → 0.59, third → 0.43, …
+        total = sum(1.0 / (1.0 + 0.7 * i) for i in range(len(order))) or 1.0
+        share = (1.0 / (1.0 + 0.7 * pos)) / total
+        weak_single = hit in _TECH_TERMS or counts.get(hit, 0) > _SINGLE_WORD_MAX_DF or share < _SINGLE_WORD_MIN_SHARE
+        if weak_single and not fixed:
+            # Non-resident: a single incidental word is not a reason to inject.
+            return None
+        # Resident entries keep their digest slot (they are injected every turn
+        # anyway) but a weak single match must not promote them to full text.
+
+    # Coverage first, rarity second — but coverage is IDF-weighted so that
+    # matching "大屏" (the subject) counts for more than matching an incidental
+    # "打字". Comparing the matched weight against the query's *total* weight
+    # keeps the score in [0, 1] and independent of how many words the query has.
+    #
+    # BM25-style IDF rather than a bare 1/df: a word absent from the corpus
+    # ("键盘", df=0) must not out-score a rare-but-present subject word
+    # ("大屏", df=2). 1/df gave OOV terms the maximum weight, letting any
+    # memory containing an incidental rare word beat the one matching the topic.
+    corpus_size = corpus_size_hint or 1
+
+    def _w(t: str) -> float:
+        d = counts.get(t, 0)
+        return math.log(1.0 + (corpus_size - d + 0.5) / (d + 0.5))
+
+    total_weight = sum(_w(t) for t in (query_terms or ())) or 1.0
+    coverage = sum(_w(t) for t in topical) / total_weight
+    strength = sum(_w(t) for t in topical)
+    # Workspace affinity. A global-scope memory is visible from every
+    # workspace, so a wolfkill speech-pipeline note competes with a CrabAgent
+    # question on equal footing. Memories recorded in the current workspace
+    # rank above global ones, and a *different* workspace's memory must earn a
+    # clearly stronger match before it is allowed in at all.
+    local = bool(source.workspace_path) and source.workspace_path == (workspace_hint or "")
+    other_workspace = bool(source.workspace_path) and bool(workspace_hint) and source.workspace_path != workspace_hint
+    if other_workspace and not fixed and not exact and coverage < _CROSS_WORKSPACE_MIN_COVERAGE:
+        return None
+    # Resident first (bounded), then relevance (a weak single match does not
+    # count as relevance), then workspace affinity, coverage, overlap, importance.
     return (
         not fixed,
-        not (exact or enough),
+        not (exact or (enough and not weak_single)),
+        not local,
+        -coverage,
         not bool(source.workspace_path) if fixed else False,
         -strength,
         -bool(source.workspace_path),
@@ -261,11 +392,14 @@ class SessionMemory:
         # their own.  Too small a corpus makes counts meaningless, so the
         # static stop list plus the two-bigram minimum is used instead.
         corpus = _bigram_df(list(term_sets.values())) if len(term_sets) >= _MIN_CORPUS_FOR_IDF else None
+        # Content words only: a turn made purely of acknowledgements ("不用。")
+        # has no topic to match on.
+        query_terms = terms - _STOP_BIGRAMS
         resident, ranked = [], []
         for uid, source in pool.items():
             if uid in excluded:
                 continue
-            rank = _candidate_rank(source, query, terms, corpus)
+            rank = _candidate_rank(source, query, terms, corpus, query_terms, len(pool), self.workspace)
             if rank is None:
                 continue
             if rank[0] == 0:  # resident
