@@ -105,14 +105,9 @@ async def memory_save(
 
     workspace_path = context.metadata.get("workspace_path") or str(getattr(context, "workspace", "") or "")
     default_scope = ("workspace" if workspace_path else "global") if memory_type == "team" else "agent"
-    # Only cross-cutting conventions/decisions should be resident; topic
-    # knowledge (architecture/feature/api/project) is recalled on demand.
-    default_recall = (
-        "always"
-        if (memory_type == "team" and (category or "").strip().lower() in ("convention", "decision"))
-        else "query_only"
-    )
-
+    # Every memory is recalled on relevance only. What must be known on
+    # *every* turn belongs in the workspace AGENTS.md, not in the memory store.
+    # Scope still decides *visibility* (which workspace may see the entry).
     await agent_memory_upsert(
         user_id=user_id,
         memory_type=memory_type,
@@ -127,7 +122,7 @@ async def memory_save(
         task_category="",
         scope=default_scope,
         workspace_path="" if default_scope == "global" else workspace_path,
-        recall_policy=default_recall,
+        recall_policy="query_only",
         summary=(summary or "").strip()[:200],
     )
     return f"Memory saved: [{memory_type}] {key}"

@@ -229,7 +229,8 @@ async def test_memory_forget_not_found(monkeypatch: pytest.MonkeyPatch):
 
 
 @pytest.mark.asyncio
-async def test_memory_save_defaults_team_topic_knowledge_to_query_only(monkeypatch):
+async def test_memory_save_defaults_everything_to_query_only(monkeypatch):
+    """No category earns a resident slot: AGENTS.md is the only every-turn source."""
     ctx = AgentContext(workspace=Path.cwd())
     ctx.metadata["user_id"] = 1
     saved = {}
@@ -241,6 +242,10 @@ async def test_memory_save_defaults_team_topic_knowledge_to_query_only(monkeypat
     await memory_tools.memory_save(memory_type="team", category="feature", key="feature:x", content="v", context=ctx)
     assert saved["recall_policy"] == "query_only"
     await memory_tools.memory_save(memory_type="team", category="decision", key="decision:x", content="v", context=ctx)
-    assert saved["recall_policy"] == "always"
+    assert saved["recall_policy"] == "query_only"
+    await memory_tools.memory_save(
+        memory_type="team", category="convention", key="convention:x", content="v", context=ctx
+    )
+    assert saved["recall_policy"] == "query_only"
     await memory_tools.memory_save(memory_type="lesson", category="decision", key="lesson:x", content="v", context=ctx)
     assert saved["recall_policy"] == "query_only"

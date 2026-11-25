@@ -615,7 +615,12 @@ async def _run_agent(
 
             # Some providers stream a user-facing reply only as reasoning_content.
             # Preserve it as the response instead of leaving the CLI with no answer.
-            reasoning_only_reply = not full_text and bool(reasoning_text)
+            # Only a *final* turn (no tool calls) qualifies: on an intermediate
+            # tool-call turn an empty content is normal — the model emitted just
+            # reasoning + tool_calls. Moving that reasoning into content here
+            # would persist the thinking as the reply body and drop it from
+            # reasoning_content (glm-5.4 does this on nearly every first turn).
+            reasoning_only_reply = not full_text and bool(reasoning_text) and not tool_calls_list
             if reasoning_only_reply:
                 full_text = reasoning_text
 

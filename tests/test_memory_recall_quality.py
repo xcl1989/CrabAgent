@@ -19,8 +19,9 @@ from crabagent.core.agent import session_memory as sm
 from tests.test_session_memory_guard import add_source, payload
 
 
-async def test_long_always_entries_are_demoted_from_resident_pool(sessions, tmp_path):
-    # A 2000-char "always" decision used to take a resident slot on every turn.
+async def test_always_policy_is_inert_unless_relevant(sessions, tmp_path):
+    # ``recall_policy="always"`` used to inject these on *every* turn. It is now
+    # inert: an unrelated turn gets nothing, a related turn recalls on demand.
     await add_source(
         sessions,
         "decision:nonexclusive_file_collaboration",
@@ -36,14 +37,11 @@ async def test_long_always_entries_are_demoted_from_resident_pool(sessions, tmp_
         importance=0.7,
     )
     memory = sm.SessionMemory(7, 1, "main", str(tmp_path))
-    # Unrelated query: only the concise resident stays; the long one must not.
-    assert await memory.prepare(1, "大屏一般在大电视上，不太可能用键盘打字操作", set(), "coder")
-    keys = [json.loads(item)["key"] for item in (await payload(memory, {1}, "coder"))[1]]
-    assert "convention:release_pipeline_pypi" in keys
-    assert "decision:nonexclusive_file_collaboration" not in keys
-    # Related query: the demoted entry is still recallable on demand.
+    # Unrelated query: nothing at all.
+    assert not await memory.prepare(1, "大屏一般在大电视上，不太可能用键盘打字操作", set(), "coder")
+    # Related query: still recallable on demand.
     assert await memory.prepare(2, "非排他认领和文件协作怎么设计的", set(), "coder")
-    keys = [json.loads(item)["key"] for item in (await payload(memory, {1, 2}, "coder"))[2]]
+    keys = [json.loads(item)["key"] for item in (await payload(memory, {2}, "coder"))[2]]
     assert "decision:nonexclusive_file_collaboration" in keys
 
 
@@ -169,9 +167,9 @@ async def test_backfill_embeddings_is_idempotent(sessions, tmp_path, monkeypatch
     assert sorted(encoded) == ["a: first", "b: second"]
 
 
-async def test_summary_keeps_long_convention_resident(sessions, tmp_path, monkeypatch):
-    """A long convention with a one-line summary stays resident; the model sees
-    the digest and can pull the full text via memory_recall."""
+async def test_summary_does_not_change_injection(sessions, tmp_path, monkeypatch):
+    """``summary`` is a UI digest only; injection always uses the full content,
+    truncated to the per-item budget. No resident digest channel exists."""
     monkeypatch.setattr(loop.settings, "memory_max_inject", 4)
     body = (
         "发布流程：版本源 pyproject.toml → sync_version.py → 更新 README → git push → build → twine upload 到 PyPI。"
@@ -186,21 +184,19 @@ async def test_summary_keeps_long_convention_resident(sessions, tmp_path, monkey
         summary="发版：改版本号→sync→README→push→build→twine upload",
     )
     memory = sm.SessionMemory(7, 1, "main", str(tmp_path))
-    # Unrelated query: still resident, and only the digest is injected.
-    assert await memory.prepare(1, "今天天气怎么样", set(), "coder")
-    raw = (await payload(memory, {1}, "coder"))[1]
-    records = list(map(json.loads, raw))
-    assert [r["key"] for r in records] == ["convention:release_pipeline_pypi"]
-    assert records[0]["summary_of"] is True
-    assert "sync" in records[0]["content"] and len(records[0]["content"]) < 80
-    # Related query: the full text is injected because relevance asked for it.
+    # Unrelated query: nothing, summary or not.
+    assert not await memory.prepare(1, "今天天气怎么样", set(), "coder")
+    # Related query: full text, never the summary digest.
     assert await memory.prepare(2, "发布新版本到 PyPI 的流程", set(), "coder")
-    full = [json.loads(item) for item in (await payload(memory, {1, 2}, "coder"))[2]]
-    assert "summary_of" not in [r for r in full if r["key"] == "convention:release_pipeline_pypi"][0]
+    records = [json.loads(item) for item in (await payload(memory, {2}, "coder"))[2]]
+    hit = [r for r in records if r["key"] == "convention:release_pipeline_pypi"][0]
+    assert "summary_of" not in hit
+    assert "sync_version.py" in hit["content"]
+    assert hit["content"] != "发版：改版本号→sync→README→push→build→twine upload"
 
 
-async def test_resident_pool_is_hard_capped(sessions, tmp_path, monkeypatch):
-    """Many short conventions must not crowd out relevance-ranked memories."""
+async def test_always_entries_count_against_the_same_limit(sessions, tmp_path, monkeypatch):
+    """``always`` entries take no reserved slots; relevance alone decides."""
     monkeypatch.setattr(loop.settings, "memory_max_inject", 4)
     for i in range(8):
         await add_source(sessions, f"rule-{i}", f"规则{i}", recall_policy="always", importance=0.9 - i * 0.01)
@@ -208,12 +204,11 @@ async def test_resident_pool_is_hard_capped(sessions, tmp_path, monkeypatch):
     memory = sm.SessionMemory(7, 1, "main", str(tmp_path))
     assert await memory.prepare(1, "修复 Python 后端", set(), "coder")
     keys = [json.loads(item)["key"] for item in (await payload(memory, {1}, "coder"))[1]]
-    assert "backend" in keys
-    assert sum(k.startswith("rule-") for k in keys) <= sm.RESIDENT_MAX_COUNT
+    assert keys == ["backend"]
 
 
-async def test_long_resident_without_summary_is_demoted(sessions, tmp_path):
-    """No summary and too long → on-demand only, so it cannot dominate the prompt."""
+async def test_long_always_without_summary_is_not_injected_when_unrelated(sessions, tmp_path):
+    """No summary and too long → still nothing on an unrelated turn."""
     await add_source(sessions, "decision:long-note", "很长的决策说明。" * 60, recall_policy="always", importance=0.95)
     memory = sm.SessionMemory(7, 1, "main", str(tmp_path))
     assert not await memory.prepare(1, "今天天气怎么样", set(), "coder")
@@ -226,6 +221,39 @@ async def test_acknowledgement_only_turn_recalls_nothing(sessions, tmp_path):
     memory = sm.SessionMemory(7, 1, "main", str(tmp_path))
     assert not await memory.prepare(1, "不用。", set(), "coder")
     assert not await memory.prepare(2, "好的", set(), "coder")
+
+
+async def test_single_content_word_turn_recalls_nothing(sessions, tmp_path, monkeypatch):
+    """A one-content-word turn must not pull anything in, resident or not.
+
+    Production: "后续问题需要处理一下。" had one content word ("后续", not in the
+    stop list at the time). Two ``always`` entries happened to contain it, were
+    scored as *relevant*, and were injected in full — turning a topic-less turn
+    into four injected memories. "后续" is now a stop word, and even if it were
+    not, a single content word cannot pass the ``_MIN_QUERY_TERMS`` gate.
+    """
+    monkeypatch.setattr(loop.settings, "memory_max_inject", 4)
+    await _seed_corpus(sessions)
+    await add_source(
+        sessions,
+        "user_preference:collab_no_claim",
+        "协作偏好：改完后让后续其他 Agent 知道文件被修改了什么",
+        recall_policy="always",
+        importance=0.5,
+        summary="协作偏好：轻量变更可见性取代认领",
+    )
+    await add_source(
+        sessions,
+        "convention:unrelated_rule",
+        "完全无关的项目约定",
+        recall_policy="always",
+        importance=0.9,
+        summary="无关约定",
+    )
+    memory = sm.SessionMemory(7, 1, "main", str(tmp_path))
+    assert not await memory.prepare(1, "后续问题需要处理一下。", set(), "coder")
+    # The same entry is still reachable when the query actually names it.
+    assert await memory.prepare(2, "协作时不要显式认领文件锁", set(), "coder")
 
 
 async def test_single_incidental_word_does_not_promote(sessions, tmp_path):

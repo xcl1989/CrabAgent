@@ -8,6 +8,18 @@ English version: [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
+## [0.19.2] — 记忆全量按相关性召回 & 思考落库修复（2026-11-25）
+
+### 修复
+- **思考不再被当正文存入。** 模型在工具调用轮次只输出思考、不写正文时（glm-5.4 几乎每个中间轮次都这样），循环把空 content 误判为"仅含 reasoning 的回复"，将思考搬进 `content` 并跳过 `reasoning_content`。表现为：聊天里先显示思考块，刷新后同一段文字变成普通回复。该兜底现在只对不带工具调用的最终回复生效。
+
+### 变更
+- **不再有任何无条件注入的记忆。** `recall_policy=always` 退役：`session_memory.py` 的常驻槽位、`agents.py` 的固定"团队知识"块、`memory_save` 对 `convention` / `decision` 的 `always` 默认值全部删除。所有记忆一律按相关性召回；`scope`（global / workspace / agent）只决定可见性。必须在每轮都知道的内容写进工作区 `AGENTS.md`——用户可见、可编辑。
+- **会话内召回去重。** `SessionMemory.prepare()` 把已注入的快照加入 `excluded`，同一会话不重复注入同一记忆；新会话重新召回。
+- 记忆引用卡片改为单行（类型徽章 + 摘要，key 放 tooltip）；既然没有常驻项，常驻标记一并移除。
+
+---
+
 ## [0.19.1] — 记忆召回加固（2026-11-24）
 
 ### 变更

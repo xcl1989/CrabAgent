@@ -20,7 +20,9 @@ async def memory_db(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_prompt_filters_team_memories_and_preserves_legacy(memory_db):
+async def test_get_by_type_filters_scope_and_policy(memory_db):
+    """``agent_memory_get_by_type`` still filters by scope and recall policy;
+    callers other than the prompt builder rely on it (memory page, recall)."""
     rows = [
         (1, "team", "global", "", "always", "global"),
         (1, "team", "workspace", "/project/a", "always", "project-a"),
@@ -41,27 +43,32 @@ async def test_prompt_filters_team_memories_and_preserves_legacy(memory_db):
             ))
         await session.commit()
 
-    prompt = await build_memory_prompt(1, workspace_path="/project/a")
-    for key in ("global", "project-a", "legacy-global", "legacy-a"):
-        assert f"**{key}**" in prompt
-    for key in ("project-b", "legacy-b", "query-only", "agent-only", "other-user", "other-type"):
-        assert f"**{key}**" not in prompt
-
-    no_workspace = await build_memory_prompt(1)
-    assert "**legacy-global**" in no_workspace
-    assert "**legacy-a**" not in no_workspace
-    assert await database.agent_memory_get_by_type(1, "team", scope="workspace") == []
-    # Existing callers with no new filters retain the original behavior.
+    visible = await database.agent_memory_get_by_type(
+        1, "team", scope="workspace", workspace_path="/project/a", recall_policy="always"
+    )
+    # Legacy rows (blank policy) are treated as "always" by this helper so old
+    # data keeps working; they are still inert in injection (see test below).
+    assert [m["key"] for m in visible] == ["project-a", "legacy-a"]
+    # No policy filter → legacy (blank) rows are included, as before.
     assert len(await database.agent_memory_get_by_type(1, "team")) == 8
 
 
 @pytest.mark.asyncio
-async def test_filtering_happens_before_limit(memory_db):
+async def test_prompt_has_no_unconditional_team_block(memory_db, monkeypatch):
+    """``recall_policy="always"`` must not put anything into the system prompt.
+
+    The old ``build_memory_prompt`` prepended a "Team Knowledge" block on every
+    CLI turn; that block was removed. Only the save instruction and
+    query-relevant memories remain.
+    """
+    from crabagent.core.config import settings
+
+    monkeypatch.setattr(settings, "memory_auto_recall", False)
     async with memory_db() as session:
         for i in range(10):
-            session.add(database.AgentMemory(user_id=1, memory_type="team", key=f"wrong-{i}",
-                scope="workspace", workspace_path="/elsewhere", recall_policy="always", importance=1.0))
-        session.add(database.AgentMemory(user_id=1, memory_type="team", key="wanted",
-            content="included", scope="global", recall_policy="always", importance=0.1))
+            session.add(database.AgentMemory(user_id=1, memory_type="team", key=f"rule-{i}",
+                content=f"rule body {i}", scope="global", recall_policy="always", importance=1.0 - i * 0.01))
         await session.commit()
-    assert "included" in await build_memory_prompt(1, workspace_path="/project/a")
+    prompt = await build_memory_prompt(1, workspace_path="/project/a")
+    assert "**rule-" not in prompt
+    assert "memory_save" in prompt  # the save instruction is still there

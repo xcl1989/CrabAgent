@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.19.2] — Relevance-Only Memory & Reasoning Persistence (2026-11-25)
+
+### Fixed
+- **Thinking no longer persisted as the reply body.** When a model emits reasoning *and* a tool call but no prose (glm-5.4 does this on most intermediate turns), the loop treated the empty content as a "reasoning-only reply", moved the thinking into `content` and skipped `reasoning_content`. The chat showed the thinking block live, then re-rendered it as a normal assistant message after reload. The fallback now applies only to a final turn without tool calls.
+
+### Changed
+- **No memory is injected unconditionally any more.** `recall_policy=always` is retired: the resident slot in `session_memory.py`, the fixed "team knowledge" block in `agents.py`, and the `always` default for `convention` / `decision` entries in `memory_save` are gone. Every memory is recalled on relevance alone; `scope` (global / workspace / agent) only decides visibility. Knowledge that must be known on every turn belongs in the workspace `AGENTS.md`, which is user-visible and editable.
+- **Per-session recall de-duplication.** `SessionMemory.prepare()` adds admitted snapshots to `excluded`, so the same memory is not injected twice within one session; a new session recalls afresh.
+- Memory reference cards are a single line (type badge + digest, key in the tooltip); the resident marker is removed since nothing is resident.
+
+---
+
 ## [0.19.1] — Memory Recall Hardening (2026-11-24)
 
 ### Changed

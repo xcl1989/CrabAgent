@@ -285,7 +285,7 @@ export default function MemoryPage() {
         importance: 0.5,
         scope: tab === "project" ? (selectedWorkspace ? "workspace" : "global") : tab === "agent_lesson" ? "agent" : "global",
         workspace_path: tab === "project" ? selectedWorkspace : "",
-        recall_policy: tab === "project" ? "always" : "query_only",
+        recall_policy: "query_only",
       });
       toast.success(t("memory.memoryCreated"));
       setShowCreate(false);

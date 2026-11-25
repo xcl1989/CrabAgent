@@ -37,17 +37,10 @@ _STOP_BIGRAMS = frozenset(
     # of these ("不用。", "好的", "行") carries no topic at all.
     + "不用 好的 行吧 好吧 可以 那行 没问题 谢谢 继续 知道 明白 懂了 嗯哦 好嘞 不用了 "
     "等等 等一下 等下 慢着 停 一下 先不 先不用 算了 还是 吧 呢 啊 哦 嗯 好的呀".split()
+    # Temporal / sequencing words. "后续" matched two unrelated memories in
+    # production on the turn "后续问题需要处理一下。" and pulled them in.
+    + "后续 接着 随后 后面 前面 刚才 刚刚 接下来 以后 从此 自此 当时 原来 本来 之后 之前".split()
 )
-RESIDENT_BUDGET = 3000
-# Resident ("always") entries are injected on *every* turn, so what matters is
-# the cost of what gets injected, not the length of the stored text.  A long
-# convention with a one-line ``summary`` is cheap to keep resident; the full
-# text stays available through ``memory_recall``.  Entries without a summary
-# must be short enough to inject verbatim.
-RESIDENT_MAX_BYTES = 200
-# Hard cap on resident entries per turn regardless of budget.  Without it a
-# user with many conventions sees the same fixed block crowding out relevance.
-RESIDENT_MAX_COUNT = 4
 # ASCII terms shorter than this ("app", "the", "fix") are too weak to count.
 _MIN_ASCII_TERM = 4
 # A word present in at least this *share* of the visible memories is treated as
@@ -123,23 +116,6 @@ def _is_generic(term: str, df_count: int | None, corpus_size: int = 0) -> bool:
     return df_count is not None and df_count >= _generic_threshold(corpus_size)
 
 
-def _is_resident(source) -> bool:
-    """True for entries that qualify for every-turn injection."""
-    return (source.recall_policy or "") == "always" and (
-        source.memory_type == "team" or (source.memory_type == "user_preference" and source.source == "user")
-    )
-
-
-def _injectable(source) -> str:
-    """Text actually injected for *source*: the summary when present, else content.
-
-    Resident entries with a one-line summary stay cheap to inject every turn
-    while the full text remains available through ``memory_recall``.
-    """
-    summary = (getattr(source, "summary", "") or "").strip()
-    return summary if summary else (source.content or "")
-
-
 def _query_word_order(value: str) -> list[str]:
     """Content words of *value* in their original order (stop words removed).
 
@@ -181,16 +157,7 @@ def _candidate_rank(
     ``_MIN_QUERY_TERMS`` of them, keyword recall is skipped entirely.
     """
     key = (source.key or "").casefold()
-    policy = source.recall_policy or ""
-    fixed = policy == "always" and (
-        source.memory_type == "team" or (source.memory_type == "user_preference" and source.source == "user")
-    )
-    if fixed and len(_injectable(source).encode("utf-8")) > RESIDENT_MAX_BYTES:
-        # Demoted resident: still recallable, but must earn its place by relevance.
-        fixed = False
     exact = len(key) >= 3 and bool(re.search(r"(?<![a-z0-9_])" + re.escape(key) + r"(?![a-z0-9_])", query))
-    # Resident entries are scored for relevance too: when the user actually
-    # asks about one, the full text is served instead of the digest.
     overlap = terms & _terms(f"{key} {source.content or ''}"[:4096]) if terms else set()
     counts = corpus or {}
     topical = {t for t in overlap if not _is_generic(t, counts.get(t), corpus_size_hint)}
@@ -198,13 +165,13 @@ def _candidate_rank(
     # "不用。" matching a memory that also says "不用" is 100% lexical overlap
     # and zero meaning.  Leave such turns to the semantic channel instead of
     # letting a single shared word pull an unrelated memory in.
-    if len(query_terms or ()) < _MIN_QUERY_TERMS and not fixed and not exact:
+    if len(query_terms or ()) < _MIN_QUERY_TERMS and not exact:
         return None
     # One *distinctive* bigram is enough when the rest of the query is generic
     # ("大屏在电视上" → 大屏).  Without corpus statistics a single bigram is
     # too weak, so require two — the original conservative rule.
     enough = bool(topical) and (corpus is not None or len(topical) >= 2)
-    if not (fixed or exact or enough):
+    if not (exact or enough):
         return None
     # A single matched word out of a multi-word query is weak evidence: the
     # memory merely mentions the word. Two signals decide whether it is still
@@ -214,7 +181,6 @@ def _candidate_rank(
     #   * it must sit early in the query, where Chinese puts the subject.
     # Position alone let "electron" (first content word of "帮我看看 Electron
     # 离屏渲染…") drag a release note into an offscreen-rendering question.
-    weak_single = False
     if len(topical) == 1 and len(query_terms or ()) >= 3 and not exact:
         hit = next(iter(topical))
         order = [t for t in _query_word_order(query) if t in query_terms]
@@ -222,12 +188,9 @@ def _candidate_rank(
         # First word → 1.0, second → 0.59, third → 0.43, …
         total = sum(1.0 / (1.0 + 0.7 * i) for i in range(len(order))) or 1.0
         share = (1.0 / (1.0 + 0.7 * pos)) / total
-        weak_single = hit in _TECH_TERMS or counts.get(hit, 0) > _SINGLE_WORD_MAX_DF or share < _SINGLE_WORD_MIN_SHARE
-        if weak_single and not fixed:
-            # Non-resident: a single incidental word is not a reason to inject.
+        if hit in _TECH_TERMS or counts.get(hit, 0) > _SINGLE_WORD_MAX_DF or share < _SINGLE_WORD_MIN_SHARE:
+            # A single incidental word is not a reason to inject.
             return None
-        # Resident entries keep their digest slot (they are injected every turn
-        # anyway) but a weak single match must not promote them to full text.
 
     # Coverage first, rarity second — but coverage is IDF-weighted so that
     # matching "大屏" (the subject) counts for more than matching an incidental
@@ -254,16 +217,14 @@ def _candidate_rank(
     # clearly stronger match before it is allowed in at all.
     local = bool(source.workspace_path) and source.workspace_path == (workspace_hint or "")
     other_workspace = bool(source.workspace_path) and bool(workspace_hint) and source.workspace_path != workspace_hint
-    if other_workspace and not fixed and not exact and coverage < _CROSS_WORKSPACE_MIN_COVERAGE:
+    if other_workspace and not exact and coverage < _CROSS_WORKSPACE_MIN_COVERAGE:
         return None
-    # Resident first (bounded), then relevance (a weak single match does not
-    # count as relevance), then workspace affinity, coverage, overlap, importance.
+    # Relevance (exact key beats topical overlap), then workspace affinity,
+    # coverage, strength, importance.
     return (
-        not fixed,
-        not (exact or (enough and not weak_single)),
+        not exact,
         not local,
         -coverage,
-        not bool(source.workspace_path) if fixed else False,
         -strength,
         -bool(source.workspace_path),
         -(source.importance or 0),
@@ -395,21 +356,14 @@ class SessionMemory:
         # Content words only: a turn made purely of acknowledgements ("不用。")
         # has no topic to match on.
         query_terms = terms - _STOP_BIGRAMS
-        resident, ranked = [], []
+        ranked = []
         for uid, source in pool.items():
             if uid in excluded:
                 continue
             rank = _candidate_rank(source, query, terms, corpus, query_terms, len(pool), self.workspace)
             if rank is None:
                 continue
-            if rank[0] == 0:  # resident
-                resident.append((rank, source))
-                # Also matched the query → eligible for full-text injection.
-                if not rank[1]:
-                    ranked.append((rank, source))
-            else:
-                ranked.append((rank, source))
-        resident = nsmallest(limit, resident, key=lambda i: i[0])
+            ranked.append((rank, source))
         ranked = nsmallest(limit * 2, ranked, key=lambda i: i[0])
         # Fuse keyword hits with semantic hits (Reciprocal Rank Fusion) so a
         # memory surfaces when *either* signal is strong.  Keyword-only recall
@@ -427,24 +381,7 @@ class SessionMemory:
             (uid for uid in scores if uid in pool),
             key=lambda uid: (-scores[uid], uid),
         )
-        relevance = [pool[uid] for uid in fused]
-        relevant_uids = set(fused)
-        # A resident entry that *also* matched the query is served in full via
-        # the relevance channel — the user is asking about it, so the digest
-        # alone would be a worse answer.
-        resident = [(rank, s) for rank, s in resident if s.memory_uid not in relevant_uids]
-        # Resident entries share a fixed cap (count *and* bytes, measured on what
-        # is actually injected); relevance-ranked entries always keep at least
-        # half of the slots and the rest of the byte budget.
-        kept, cost = [], 0
-        for rank, source in resident:
-            payload_cost = len(_injectable(source).encode("utf-8")) + 80
-            if cost + payload_cost > RESIDENT_BUDGET or len(kept) >= RESIDENT_MAX_COUNT:
-                continue
-            kept.append((rank, source))
-            cost += payload_cost
-        kept = kept[: max(1, limit // 2)]
-        return [(s, True) for _, s in kept] + [(s, False) for s in relevance[: limit - len(kept)]]
+        return [pool[uid] for uid in fused[:limit]]
 
     async def prepare(self, anchor_id: int, query: str, historical: set[int], agent: str) -> bool:
         try:
@@ -463,8 +400,8 @@ class SessionMemory:
                     return False
                 ranked = await self._ranked(db, query, agent, {snap.memory_uid for snap in active})
             selected = []
-            for source, resident in ranked:
-                payload = self._excerpt(source, min(ITEM_BUDGET, remaining), resident=resident)
+            for source in ranked:
+                payload = self._excerpt(source, min(ITEM_BUDGET, remaining))
                 if payload is not None:
                     selected.append((source, payload))
                     remaining -= _cost(payload)
@@ -525,22 +462,22 @@ class SessionMemory:
             return False
 
     @staticmethod
-    def _payload(source, *, resident: bool = False):
-        # Resident entries inject their summary (if any); relevance hits inject
-        # the full text because the model asked for exactly this memory.
-        body = _injectable(source) if resident else (source.content or "")
-        data = {"id": source.memory_uid, "revision": source.content_revision, "key": source.key, "content": body}
-        if resident and body != (source.content or ""):
-            data["summary_of"] = True
+    def _payload(source):
+        data = {
+            "id": source.memory_uid,
+            "revision": source.content_revision,
+            "key": source.key,
+            "content": source.content or "",
+        }
         return _encoded(data)
 
     async def receipts(self, db, ids, agent):
         """Return visible, admitted titles without exposing the snapshot bodies.
 
-        Each entry is ``{key, summary, memory_type, resident}`` so the UI can
-        show *what* was injected (digest, type badge) instead of a bare key.
-        Only the stored one-line ``summary`` is exposed — never the injected
-        body, which may contain content the user did not ask to surface.
+        Each entry is ``{key, summary, memory_type}`` so the UI can show *what*
+        was injected (digest, type badge) instead of a bare key.  Only the
+        stored one-line ``summary`` is exposed — never the injected body, which
+        may contain content the user did not ask to surface.
         """
         if not ids:
             return {}
@@ -556,14 +493,13 @@ class SessionMemory:
                         "key": key,
                         "summary": (getattr(source, "summary", "") or "").strip(),
                         "memory_type": source.memory_type or "",
-                        "resident": bool(payload.get("summary_of")),
                     }
                 )
         return receipts
 
     @classmethod
-    def _excerpt(cls, source, budget, *, resident: bool = False):
-        payload = cls._payload(source, resident=resident)
+    def _excerpt(cls, source, budget):
+        payload = cls._payload(source)
         if _cost(payload) <= budget:
             return payload
         data = json.loads(payload)

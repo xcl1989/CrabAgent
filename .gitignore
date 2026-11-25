@@ -46,3 +46,6 @@ src/crabagent/VERSION
 src/crabagent/electron/dist-electron/
 src/crabagent/electron/resources/
 venv/
+scripts/diag_glm54_thinking.py
+scripts/diag_seq6_repro.py
+scripts/diag_fix_e2e.py

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 
 import litellm
 
@@ -546,8 +547,13 @@ async def persist_lesson(
 
     memory_type = lesson.get("memory_type", "agent_lesson")
     scope = "agent" if memory_type == "agent_lesson" else "global"
-    recall_policy = "query_only" if scope == "agent" else "always"
     workspace_path = (workspace_path or lesson.get("workspace_path") or "").strip()
+    # Every memory is recalled on relevance only; scope decides visibility.
+    recall_policy = "query_only"
+    # The UI card shows ``summary`` when present and falls back to the raw key
+    # otherwise. Lessons are single actionable sentences, so the first line of
+    # the content is already the right digest — no extra LLM call needed.
+    summary = (lesson.get("summary") or "").strip() or _lesson_summary(content)
 
     await agent_memory_upsert(
         user_id=user_id,
@@ -564,9 +570,20 @@ async def persist_lesson(
         scope=scope,
         workspace_path=workspace_path if scope != "global" else "",
         recall_policy=recall_policy,
+        summary=summary,
     )
 
     return True
+
+
+def _lesson_summary(content: str, limit: int = 200) -> str:
+    """First sentence of a lesson, trimmed to ``limit`` characters.
+
+    Lessons are written as one actionable sentence, occasionally followed by
+    a second one with the rationale. The first sentence is the digest.
+    """
+    first = re.split(r"(?<=[。！？.!?\n])\s*", content.strip(), maxsplit=1)[0].strip()
+    return (first or content.strip())[:limit]
 
 
 async def _enforce_lesson_cap(user_id: int, agent_name: str, cap: int = 30) -> None:

@@ -38,7 +38,7 @@ export interface Message {
   compressed?: boolean;
   image_data?: string;
   has_images?: boolean;
-  memory_references?: Array<string | { key: string; summary?: string; memory_type?: string; resident?: boolean }>;
+  memory_references?: Array<string | { key: string; summary?: string; memory_type?: string }>;
 }
 
 export interface BranchInfo {

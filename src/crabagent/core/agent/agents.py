@@ -370,47 +370,18 @@ async def build_memory_prompt(
     if not user_id:
         return ""
     from crabagent.core.config import settings
-    from crabagent.core.database import (
-        agent_memory_get_by_type,
-        agent_memory_search_vector,
-    )
+    from crabagent.core.database import agent_memory_search_vector
     from crabagent.core.i18n import t
 
     parts: list[str] = []
 
-    global_memories = await agent_memory_get_by_type(
-        user_id,
-        "team",
-        limit=6,
-        scope="global",
-        recall_policy="always",
-    )
-    workspace_memories = []
-    if workspace_path:
-        workspace_memories = await agent_memory_get_by_type(
-            user_id,
-            "team",
-            limit=8,
-            scope="workspace",
-            workspace_path=workspace_path,
-            recall_policy="always",
-        )
-    team_memories = global_memories + workspace_memories
-    if team_memories:
-        total_chars = sum(len(m["content"]) for m in team_memories)
-        if total_chars > 3000:
-            team_memories = team_memories[:5]
-        lines = [t("memory_prompt.team_knowledge_title", locale), ""]
-        for m in team_memories:
-            cat = m["category"]
-            lines.append(f"- **{m['key']}** ({cat}): {m['content']}")
-        lines.append("")
-        lines.append(t("memory_prompt.save_instruction", locale))
-        lines.append("")
-        parts.append("\n".join(lines))
+    # Every memory is recalled on relevance only. A fixed "team knowledge"
+    # block used to be injected on every CLI turn; it was removed because it
+    # crowded the prompt with entries unrelated to the task at hand.
+    parts.append(t("memory_prompt.save_instruction", locale))
 
-    # NEW (v0.9): query-aware recall. Searches both lessons and user_preferences
-    # by keyword; injects top-K relevant to the current user message.
+    # Query-aware recall. Searches both lessons and user_preferences by
+    # keyword/vector; injects top-K relevant to the current user message.
     max_inject = int(getattr(settings, "memory_max_inject", 5))
     if query and getattr(settings, "memory_auto_recall", True) and max_inject > 0:
         try:

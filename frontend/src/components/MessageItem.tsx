@@ -49,7 +49,6 @@ export interface MemoryReference {
   key: string;
   summary?: string;
   memory_type?: string;
-  resident?: boolean;
 }
 
 export function toMemoryReference(ref: MemoryReference | string): MemoryReference {
@@ -556,26 +555,22 @@ function memoryKind(ref: MemoryReference, t: (key: string) => string): { label: 
 
 function MemoryReferenceChip({ ref, t }: { ref: MemoryReference; t: (key: string) => string }) {
   const kind = memoryKind(ref, t);
-  const title = ref.summary?.trim() || ref.key;
+  const summary = ref.summary?.trim() ?? "";
+  // One line only: the digest when we have one, otherwise the key itself.
+  // The key (a technical identifier) is kept out of the visible row and is
+  // reachable via tooltip only when it is not already what is shown.
+  const title = summary || ref.key;
   return (
-    <li className="flex items-start gap-2 rounded-md bg-[var(--bg-secondary)] px-2 py-1.5">
+    <li className="flex items-center gap-2 rounded-md bg-[var(--bg-secondary)] px-2 py-1.5" title={ref.key}>
       <span
         className={cn(
-          "mt-px inline-flex shrink-0 items-center rounded px-1.5 py-px text-[10px] font-medium leading-4",
+          "inline-flex shrink-0 items-center rounded px-1.5 py-px text-[10px] font-medium leading-4",
           kind.cls,
         )}
       >
         {kind.label}
       </span>
-      <span className="min-w-0 flex-1">
-        <span className="block break-words text-[var(--text-secondary)]" title={ref.key}>
-          {title}
-        </span>
-        <span className="block truncate text-[10px] text-[var(--text-muted)]" title={ref.key}>
-          {ref.key}
-          {ref.resident ? ` · ${t("chat.memoryResident")}` : ""}
-        </span>
-      </span>
+      <span className="min-w-0 flex-1 text-[var(--text-secondary)]">{title}</span>
     </li>
   );
 }
@@ -585,7 +580,7 @@ function MemoryReferencesItem({ msg }: { msg: ChatMessage }) {
   const refs = msg.memory_references?.map(toMemoryReference);
   if (!refs?.length) return null;
   return (
-    <details className="my-1 w-fit max-w-full min-w-[16rem] rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs text-[var(--text-muted)]">
+    <details className="my-1 w-fit min-w-[16rem] max-w-[min(100%,28rem)] rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs text-[var(--text-muted)]">
       <summary className="cursor-pointer select-none">{t("chat.memoryReferences", { count: refs.length })}</summary>
       <ul className="mt-2 space-y-1">
         {refs.map((ref, i) => (

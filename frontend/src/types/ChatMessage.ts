@@ -4,7 +4,6 @@ export interface MemoryReference {
   key: string;
   summary?: string;
   memory_type?: string;
-  resident?: boolean;
 }
 
 export type MemoryReferenceInput = MemoryReference | string;

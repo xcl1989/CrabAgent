@@ -53,7 +53,6 @@
     "memoryReferences": "Memory sent with this turn ({{count}})",
     "memoryReferences_one": "Memory sent with this turn ({{count}})",
     "memoryReferences_other": "Memories sent with this turn ({{count}})",
-    "memoryResident": "resident",
     "memoryKind": {
       "convention": "Convention",
       "decision": "Decision",

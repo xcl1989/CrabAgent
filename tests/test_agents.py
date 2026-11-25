@@ -255,8 +255,13 @@ class TestBuildMemoryPrompt:
         assert result == ""
 
     @pytest.mark.asyncio
-    async def test_injects_team_memories(self, monkeypatch: pytest.MonkeyPatch):
+    async def test_does_not_inject_team_memories_unconditionally(self, monkeypatch: pytest.MonkeyPatch):
+        """Team memories are recall-only now; the prompt must not carry a
+        fixed block built from ``agent_memory_get_by_type``."""
+        calls = []
+
         async def fake_get_by_type(*a, **kw):
+            calls.append(kw)
             return [
                 {"key": "tech:stack", "content": "Python/FastAPI", "category": "tech_stack"},
             ]
@@ -269,7 +274,9 @@ class TestBuildMemoryPrompt:
 
         result = await agents_module.build_memory_prompt(user_id=1, query="test")
 
-        assert "Python/FastAPI" in result
+        assert "Python/FastAPI" not in result
+        assert calls == []
+        assert "memory_save" in result
 
     @pytest.mark.asyncio
     async def test_injects_related_lessons(self, monkeypatch: pytest.MonkeyPatch):

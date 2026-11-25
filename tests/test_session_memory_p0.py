@@ -105,8 +105,9 @@ async def test_hits_rank_by_priority_and_relevance_allow_cjk_and_respect_budget(
     await memory.prepare(1, "请修复 Python 后端", set(), "coder")
     raw = (await payload(memory, {1}, "coder"))[1]
     records = list(map(json.loads, raw))
-    # Resident entries take at most half the slots; the relevance hit gets one.
-    assert [record["key"] for record in records] == ["workspace-rule", "global-rule", "python-backend"]
+    # ``recall_policy="always"`` no longer injects anything on its own: only the
+    # relevance hit is served, and the long entry is truncated to fit the budget.
+    assert [record["key"] for record in records] == ["python-backend"]
     assert records[-1]["truncated"] is True
     assert all(len(item.encode()) + 4 <= 2400 for item in raw)
 
@@ -123,7 +124,8 @@ async def test_generic_bigrams_do_not_recall_topic_knowledge(sessions, tmp_path)
     assert await memory.prepare(2, "微信扫码登录怎么实现", set(), "default")
 
 
-async def test_resident_pool_is_capped_and_leaves_room_for_relevance(sessions, tmp_path, monkeypatch):
+async def test_always_policy_alone_does_not_inject(sessions, tmp_path, monkeypatch):
+    """``recall_policy="always"`` is inert: a turn only gets relevance hits."""
     monkeypatch.setattr(loop.settings, "memory_max_inject", 4)
     for i in range(6):
         await add_source(sessions, f"rule-{i}", "常驻规则" * 400, recall_policy="always", importance=0.9 - i * 0.01)
@@ -131,8 +133,7 @@ async def test_resident_pool_is_capped_and_leaves_room_for_relevance(sessions, t
     memory = SessionMemory(7, 1, "main", str(tmp_path))
     assert await memory.prepare(1, "Fix the Python backend", set(), "default")
     keys = [json.loads(item)["key"] for item in (await payload(memory, {1}, "default"))[1]]
-    assert "backend" in keys
-    assert sum(k.startswith("rule-") for k in keys) <= 2
+    assert keys == ["backend"]
 
 
 async def test_revocation_and_failed_adapter_handoff_do_not_emit_cards(sessions, tmp_path, monkeypatch):

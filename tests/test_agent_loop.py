@@ -453,6 +453,62 @@ async def test_run_agent_reasoning_only_reply_not_duplicated(monkeypatch: pytest
     assert not any(event.type == EventType.THINKING_DONE for event in events)
 
 
+@pytest.mark.asyncio
+async def test_run_agent_keeps_reasoning_out_of_content_on_tool_call_turn(monkeypatch: pytest.MonkeyPatch):
+    """An intermediate tool-call turn may legitimately carry reasoning but no
+    content. That reasoning must stay in reasoning_content — it is not the
+    reply — otherwise it is persisted as the assistant body and the thinking
+    block disappears after reload (glm-5.4 does this on most first turns)."""
+    registry = ToolRegistry()
+
+    @registry.register(name="echo_tool", description="echo", parameters={"type": "object", "properties": {}})
+    async def echo_tool(context=None):
+        return "ok"
+
+    context = AgentContext(workspace=Path.cwd(), tool_registry=registry, model="glm-5.4", max_iterations=3)
+    events = []
+    context.event_bus.subscribe(lambda event: events.append(event))
+
+    call_count = 0
+
+    async def fake_acompletion(**kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            # Turn 1: reasoning only + tool call, no content.
+            return _stream([
+                _chunk(delta=_delta(reasoning_content="The user wants X. Let me call the tool.")),
+                _chunk(delta=_delta(tool_calls=[_tool_call("call_1", "echo_tool", "{}")]), finish_reason="tool_calls"),
+                _usage_only_chunk(_usage()),
+            ])
+        # Turn 2: a real reply.
+        return _stream([_chunk(delta=_delta(content="done"), finish_reason="stop", usage=_usage())])
+
+    async def fake_provider(provider_name=None):
+        return SimpleNamespace(name="mock", provider_type="zhipu", api_key="k", base_url="", enabled=True)
+
+    monkeypatch.setattr(loop, "_resolve_provider", fake_provider)
+    monkeypatch.setattr(
+        loop, "litellm", SimpleNamespace(acompletion=fake_acompletion, exceptions=loop.litellm.exceptions)
+    )
+    monkeypatch.setattr("crabagent.core.proxy.resolve_llm_proxy", _async_return(""))
+
+    messages = await loop.run_agent(context, "hello")
+
+    first_assistant = next(msg for msg in messages if msg.get("role") == "assistant")
+    assert first_assistant["tool_calls"][0]["function"]["name"] == "echo_tool"
+    # Reasoning stays where it belongs; content is left empty for the tool turn.
+    assert first_assistant["reasoning_content"] == "The user wants X. Let me call the tool."
+    assert first_assistant["content"] == ""
+    assert any(
+        event.type == EventType.THINKING_DONE
+        and event.data["text"] == "The user wants X. Let me call the tool."
+        for event in events
+    )
+    # The final reply is unaffected.
+    assert messages[-1]["content"] == "done"
+
+
 def test_classify_rate_limit_distinguishes_model_permission_from_throttling():
     denied = loop._classify_rate_limit_error(RuntimeError("OpenAIException - 当前订阅套餐暂未开放GLM-5.3-FlashX权限"))
     throttled = loop._classify_rate_limit_error(RuntimeError("429 Too Many Requests"))
