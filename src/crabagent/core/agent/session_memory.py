@@ -40,6 +40,10 @@ _STOP_BIGRAMS = frozenset(
     # Temporal / sequencing words. "后续" matched two unrelated memories in
     # production on the turn "后续问题需要处理一下。" and pulled them in.
     + "后续 接着 随后 后面 前面 刚才 刚刚 接下来 以后 从此 自此 当时 原来 本来 之后 之前".split()
+    # Perception verbs name an action, never a subject. "已经看到窗口了" (the
+    # app window appeared) matched a memory about "seeing" thinking blocks in
+    # the frontend; the verb carried the hit on its own.
+    + "看到 看见 听到 收到 发现 找到 打开 点开 试过 试了 用过 碰到 遇到 碰见".split()
 )
 # ASCII terms shorter than this ("app", "the", "fix") are too weak to count.
 _MIN_ASCII_TERM = 4
@@ -181,7 +185,10 @@ def _candidate_rank(
     #   * it must sit early in the query, where Chinese puts the subject.
     # Position alone let "electron" (first content word of "帮我看看 Electron
     # 离屏渲染…") drag a release note into an offscreen-rendering question.
-    if len(topical) == 1 and len(query_terms or ()) >= 3 and not exact:
+    # The gate applies to two-word queries too: "已经看到窗口了" (the app
+    # window) recalled six memories about the *context* window because "窗口"
+    # alone counted as a full hit; with df=6 it is now rejected as too common.
+    if len(topical) == 1 and len(query_terms or ()) >= 2 and not exact:
         hit = next(iter(topical))
         order = [t for t in _query_word_order(query) if t in query_terms]
         pos = order.index(hit) if hit in order else len(order)

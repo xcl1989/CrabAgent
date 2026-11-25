@@ -283,6 +283,50 @@ async def test_subject_word_at_query_start_still_recalls(sessions, tmp_path):
     assert keys == ["convention:dashboard_jump_id"]
 
 
+async def test_two_word_query_single_hit_on_common_word_does_not_recall(sessions, tmp_path):
+    """A two-word query matching one moderately common word must not recall.
+
+    Production (2026-11-26): "已经看到窗口了" — the user meant the *app* window
+    had appeared — recalled a preference about the model *context* window. The
+    weak-single-word gate used to start at three content words, so a two-word
+    query with one hit ("窗口", df=6) passed as a full match. The gate now
+    applies from two words; a hit above ``_SINGLE_WORD_MAX_DF`` is rejected,
+    while a rare hit still recalls.
+    """
+    await _seed_corpus(sessions, filler=100)
+    # Push "窗口" past _SINGLE_WORD_MAX_DF (3) but keep it under the generic
+    # threshold (int(105 * 0.06) = 6), as in production where six memories
+    # mention a window of some kind.
+    for i in range(4):
+        await add_source(sessions, f"lesson:window_filler:{i}", f"第 {i} 条提到窗口的无关经验", importance=0.3)
+    await add_source(
+        sessions,
+        "user_preference:new_model_context_limit",
+        "新模型默认上下文 1,000,000 tokens；接口报告的窗口仍用于动态注册。",
+        importance=0.8,
+        summary="新模型默认上下文 1,000,000 tokens",
+        workspace_path=str(tmp_path),
+    )
+    memory = sm.SessionMemory(7, 1, "main", str(tmp_path))
+    # Two content words ("界面", "窗口"); only "窗口" matches, and it is common.
+    assert not await memory.prepare(1, "主界面窗口显示了", set(), "coder")
+    # Naming the subject still recalls it.
+    assert await memory.prepare(2, "新模型默认上下文窗口设多少", set(), "coder")
+    keys = [json.loads(item)["key"] for item in (await payload(memory, {2}, "coder"))[2]]
+    assert "user_preference:new_model_context_limit" in keys
+
+
+async def test_two_word_query_single_rare_hit_still_recalls(sessions, tmp_path):
+    """The two-word gate must not over-fire: one *rare* hit at the query start
+    still recalls (same contract as the three-word case)."""
+    await _seed_corpus(sessions)
+    await add_source(sessions, "convention:dashboard_jump_id", "大屏跳转 ID 因租户而异，需向用户索取")
+    memory = sm.SessionMemory(7, 1, "main", str(tmp_path))
+    assert await memory.prepare(1, "大屏在电视上", set(), "coder")
+    keys = [json.loads(item)["key"] for item in (await payload(memory, {1}, "coder"))[1]]
+    assert keys == ["convention:dashboard_jump_id"]
+
+
 async def test_other_workspace_memory_is_invisible(sessions, tmp_path):
     """A workspace-scoped memory never leaks into a different workspace.
 

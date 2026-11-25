@@ -49,3 +49,4 @@ venv/
 scripts/diag_glm54_thinking.py
 scripts/diag_seq6_repro.py
 scripts/diag_fix_e2e.py
+scripts/diag_recall_window.py
