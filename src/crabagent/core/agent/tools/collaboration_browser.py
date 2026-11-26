@@ -102,6 +102,17 @@ def _is_session_state_error(exc: BaseException) -> bool:
     return any(tag in msg for tag in ("TASK_MISMATCH:", "STOPPED:", "DUPLICATE_ACTION:"))
 
 
+def _is_stale_error(exc: BaseException) -> bool:
+    """The page moved under us; re-observing fixes it, so it is not a page-action failure.
+
+    STALE_PAGE / STALE_OBSERVATION are coordination signals exactly like TASK_MISMATCH.
+    Counting them as failures trips the 3-strike breaker and permanently locks the
+    browser session, which is what made "observe again" loops never recover.
+    """
+    msg = str(exc)
+    return "STALE_PAGE" in msg or "STALE_OBSERVATION" in msg or "Element not found" in msg
+
+
 async def _call(command: str, payload: dict[str, Any] | None, context: Any) -> str:
     session = get_session(context)
     observing = command == "observe"
@@ -110,13 +121,17 @@ async def _call(command: str, payload: dict[str, Any] | None, context: Any) -> s
     try:
         value = await asyncio.to_thread(lambda: _bridge_request(command, payload, context=context))
     except Exception as exc:
-        # Session-state errors (task mismatch, user-paused browser, idempotency
-        # guard) are recoverable coordination signals, not failed page actions.
-        # Counting them as failures would trip the consecutive-error circuit
-        # breaker and permanently deadlock the session (check() rejects every
-        # call once failures >= 3, so failures could never reset to 0).
-        if not _is_session_state_error(exc):
+        # Session-state errors (task mismatch, user-paused browser, idempotency guard) and
+        # stale-observation signals are recoverable coordination states, not failed page
+        # actions. Counting them as failures would trip the consecutive-error circuit
+        # breaker and permanently deadlock the session (check() rejects every call once
+        # failures >= 3, so failures could never reset to 0).
+        if not _is_session_state_error(exc) and not _is_stale_error(exc):
             session.failures += 1
+        if _is_stale_error(exc) and context is not None:
+            # The Bridge already invalidated this observation; drop it so the model is
+            # told to re-observe instead of retrying against a dead id.
+            context.metadata.pop("_collab_browser_observation_id", None)
         await record_browser_event(context, "action_result", action=command, decision="failed", started=started)
         raise
     session.record(value, observe=observing)
@@ -219,8 +234,8 @@ async def collab_browser_screenshot(context=None) -> str | list[dict[str, Any]]:
     try:
         value = await asyncio.to_thread(lambda: _bridge_request("computer_observe", context=context))
     except Exception as exc:
-        # See _call — session-state errors are not page-action failures.
-        if not _is_session_state_error(exc):
+        # See _call — session-state and stale errors are not page-action failures.
+        if not _is_session_state_error(exc) and not _is_stale_error(exc):
             session.failures += 1
         raise
     value = _remember_page_version(context, value)

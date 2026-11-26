@@ -101,6 +101,81 @@ async def test_stale_and_budget_rejected_without_bridge(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_page_version_is_accepted_as_observation_id(monkeypatch):
+    # Models regularly pass page_version where observation_id is expected because both
+    # are prominent in the observe result. The current page_version must be accepted.
+    monkeypatch.setattr(computer, "_bridge_request", lambda *_, **kwargs: {"performed": "move"})
+    ctx = context()
+    ctx.metadata["_collab_browser_page_version"] = 7
+    result = json.loads(await computer.computer_act("7", [{"type": "move", "x": 1, "y": 1}], ctx))
+    assert result["actions"][0]["status"] == "executed"
+
+
+@pytest.mark.asyncio
+async def test_stale_bridge_error_does_not_trip_breaker(monkeypatch):
+    # STALE_PAGE from the Bridge is a coordination signal: re-observing recovers it.
+    # Counting it as a failure would trip the 3-strike breaker and lock the session.
+    def bridge(command, payload=None, **kwargs):
+        raise RuntimeError(
+            'Collaboration browser rejected click: {"detail":"STALE_PAGE: observe the page again before acting"}'
+        )
+
+    monkeypatch.setattr(computer, "_bridge_request", bridge)
+    ctx = context()
+    session = ComputerSession()
+    ctx.metadata["_computer_session"] = session
+    for _ in range(4):
+        result = json.loads(await computer.computer_act("obs", [{"type": "move", "x": 1, "y": 1}], ctx))
+        assert result["actions"][0]["status"] == "failed"
+        ctx.metadata["_collab_browser_observation_id"] = "obs"
+    assert session.failures == 0
+    # A real page-action failure is still counted.
+    monkeypatch.setattr(computer, "_bridge_request", lambda *_, **kwargs: {"status": "failed"})
+    await computer.computer_act("obs", [{"type": "move", "x": 1, "y": 1}], ctx)
+    assert session.failures == 1
+
+
+@pytest.mark.asyncio
+async def test_observe_stale_error_does_not_trip_breaker(monkeypatch):
+    def bridge(command, payload=None, **kwargs):
+        raise RuntimeError(
+            "Collaboration browser rejected computer_observe: "
+            '{"detail":"STALE_PAGE: viewport changed during screenshot"}'
+        )
+
+    monkeypatch.setattr(computer, "_bridge_request", bridge)
+    ctx = context()
+    session = ComputerSession()
+    ctx.metadata["_computer_session"] = session
+    for _ in range(3):
+        with pytest.raises(RuntimeError, match="STALE_PAGE"):
+            await computer.computer_observe(context=ctx)
+    assert session.failures == 0
+    # The dead observation id is dropped so the next call is told to re-observe.
+    assert "_collab_browser_observation_id" not in ctx.metadata
+
+
+@pytest.mark.asyncio
+async def test_observe_puts_identifiers_first(monkeypatch):
+    # The observe result must lead with observation_id/page_version so the model does not
+    # miss them under the long element list.
+    monkeypatch.setattr(
+        computer,
+        "_bridge_request",
+        lambda *_, **kwargs: {
+            "elements": [{"index": 1, "text": "x" * 2000}],
+            "observation_id": "obs-uuid",
+            "page_version": 3,
+            "url": "https://example.com/",
+            "data_url": "data:image/jpeg;base64,AA",
+            "mime": "image/jpeg",
+        },
+    )
+    result = await computer.computer_observe(context=context())
+    assert result[0]["text"].index('"observation_id"') < result[0]["text"].index('"elements"')
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("first", ["move", "scroll", "wait"])
 async def test_batch_never_reuses_observation_after_first_action(monkeypatch, first):
     calls = []

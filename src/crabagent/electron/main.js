@@ -210,13 +210,29 @@ function ensureCollaborationView() {
       event.preventDefault();
     }
   });
-  for (const eventName of ['did-navigate', 'did-navigate-in-page', 'did-start-loading', 'did-stop-loading', 'page-title-updated']) {
-    collaborationView.webContents.on(eventName, () => {
-      if (eventName === 'did-navigate' || eventName === 'did-navigate-in-page' || eventName === 'did-start-loading') {
-        invalidateCollaborationObservation(eventName);
-      }
-      sendCollaborationBrowserState();
-    });
+  // Invalidation must be driven by real document changes, not by every loading signal.
+  // Heavy SPA sites (airchina, booking portals) keep fetching carousel images, analytics
+  // beacons and lazy fragments for minutes; each one used to bump the page version, so an
+  // observation went stale before the model could act on it (observed in production:
+  // page_version 5 -> 7 within a single observe/act pair).
+  //  - did-navigate: a new document -> invalidate.
+  //  - did-navigate-in-page: hash / pushState / replaceState keep the same document and
+  //    DOM nodes (the per-element fingerprint check before dispatch still catches a
+  //    route swap that rebuilt the DOM) -> state update only.
+  //  - did-start-loading: subresource fetches also emit it; only a main-frame
+  //    navigation invalidates.
+  //  - did-stop-loading / page-title-updated: never change DOM identity -> state only.
+  collaborationView.webContents.on('did-navigate', () => {
+    invalidateCollaborationObservation('did-navigate');
+    sendCollaborationBrowserState();
+  });
+  collaborationView.webContents.on('did-start-loading', () => {
+    if (!collaborationView.webContents.isLoadingMainFrame()) return;
+    invalidateCollaborationObservation('did-start-loading');
+    sendCollaborationBrowserState();
+  });
+  for (const eventName of ['did-navigate-in-page', 'did-stop-loading', 'page-title-updated']) {
+    collaborationView.webContents.on(eventName, () => { sendCollaborationBrowserState(); });
   }
   const browserSession = collaborationView.webContents.session;
   browserSession.webRequest.onBeforeRequest((details, callback) => {
@@ -416,15 +432,42 @@ function collaborationSnapshotScript(pageVersion) {
   })()`;
 }
 
-function requireCurrentPageVersion(payload) {
+// Hash-only URL changes (SPA routes via history.replaceState / pushState, carousels that
+// update #slide, tab widgets) keep the same document and DOM nodes. They must not be
+// treated as a navigation: before this, every hash update made an observation stale
+// because the recorded URL no longer matched webContents.getURL().
+function comparableUrl(rawUrl) {
+  try {
+    const parsed = new URL(rawUrl);
+    parsed.hash = '';
+    return parsed.toString();
+  } catch {
+    return String(rawUrl || '').split('#')[0];
+  }
+}
+
+async function requireCurrentPageVersion(payload) {
   const requested = Number(payload.page_version);
+  // Compare the live renderer viewport with the one recorded at observe time. Using the
+  // renderer's own innerWidth/innerHeight on both sides (not view.getBounds(), which
+  // updates ~100ms before the renderer re-lays out after the view moves between the
+  // background and visible windows) removes a race that made the first action after a
+  // page switch fail with STALE_PAGE.
+  let viewportMoved = false;
+  if (collaborationObservation) {
+    const live = await collaborationView.webContents
+      .executeJavaScript('({ width: innerWidth, height: innerHeight })', true)
+      .catch(() => null);
+    const recorded = collaborationObservation.viewport;
+    viewportMoved = Boolean(live && (Math.abs(live.width - recorded.width) > 4
+      || Math.abs(live.height - recorded.height) > 4));
+  }
   if (!Number.isInteger(requested) || requested !== collaborationPageVersion
       || !collaborationObservation || collaborationObservation.page_version !== requested
-      || collaborationObservation.url !== collaborationView.webContents.getURL()
+      || comparableUrl(collaborationObservation.url) !== comparableUrl(collaborationView.webContents.getURL())
       || payload.observation_id !== collaborationObservation.id
       || Date.now() - collaborationObservation.capturedAt > 30_000
-      || collaborationObservation.viewport.width !== collaborationView.getBounds().width
-      || collaborationObservation.viewport.height !== collaborationView.getBounds().height) {
+      || viewportMoved) {
     const error = new Error('STALE_PAGE: observe the page again before acting');
     error.code = 'STALE_PAGE';
     throw error;
@@ -476,12 +519,24 @@ async function handleCollaborationBridge(command, payload) {
     return { page_version: collaborationPageVersion, url: contents.getURL(), title: contents.getTitle() };
   }
   if (command === 'observe') {
+    // Right after the view moves between the background window (1200x800) and the
+    // visible window, view.getBounds() updates immediately while the renderer's
+    // innerWidth/innerHeight settles ~100ms later. If we snapshot in that window the
+    // recorded viewport is already wrong by the time the model acts (first action after
+    // a page switch failed with STALE_PAGE). Only wait when they actually disagree, so
+    // the steady-state path pays nothing.
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const bounds = view.getBounds();
+      const live = await contents.executeJavaScript('({ width: innerWidth, height: innerHeight })', true).catch(() => null);
+      if (!live || (Math.abs(live.width - bounds.width) <= 4 && Math.abs(live.height - bounds.height) <= 4)) break;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
     // Observe can race a transient navigation burst (start-page retries, layout settling).
     // Retry once after a short delay before giving up, per the design's retry-once rule.
     let snapshot = null;
     for (let attempt = 0; attempt < 2; attempt++) {
       snapshot = await contents.executeJavaScript(collaborationSnapshotScript(collaborationPageVersion), true);
-      if (snapshot.page_version === collaborationPageVersion && snapshot.url === contents.getURL()) break;
+      if (snapshot.page_version === collaborationPageVersion && comparableUrl(snapshot.url) === comparableUrl(contents.getURL())) break;
       if (attempt === 0) {
         log(`Observation stale: expected=${collaborationPageVersion} got=${snapshot.page_version} snapshotUrl=${snapshot.url} liveUrl=${contents.getURL()} loading=${contents.isLoading()}`);
         await new Promise((resolve) => setTimeout(resolve, 300));
@@ -491,7 +546,7 @@ async function handleCollaborationBridge(command, payload) {
     // getURL() keeps the attempted target. Treat them as the same document so the model
     // can observe the error text and navigate away instead of failing forever.
     const observedUrl = snapshot.url.startsWith('chrome-error://') ? contents.getURL() : snapshot.url;
-    if (snapshot.page_version !== collaborationPageVersion || observedUrl !== contents.getURL()) {
+    if (snapshot.page_version !== collaborationPageVersion || comparableUrl(observedUrl) !== comparableUrl(contents.getURL())) {
       throw new Error(`STALE_PAGE: navigation during observation (expected=${collaborationPageVersion} got=${snapshot.page_version} liveUrl=${contents.getURL()})`);
     }
     collaborationPending.clear();
@@ -521,10 +576,11 @@ async function handleCollaborationBridge(command, payload) {
     const after = await contents.executeJavaScript(`(() => ({url: location.href, width: innerWidth, height: innerHeight, scrollY}))()`, true);
     const beforeUrl = snapshot.url.startsWith('chrome-error://') ? contents.getURL() : snapshot.url;
     const afterUrl = after.url.startsWith('chrome-error://') ? contents.getURL() : after.url;
-    if (observation !== collaborationObservation || beforeUrl !== contents.getURL()
-        || afterUrl !== beforeUrl || after.width !== snapshot.viewport.width
-        || after.height !== snapshot.viewport.height || after.scrollY !== snapshot.viewport.scrollY
-        || bounds.width !== snapshot.viewport.width || bounds.height !== snapshot.viewport.height) {
+    // Only a navigation or a replaced observation makes the screenshot unusable.
+    // Viewport/scroll drift while the screenshot was in flight is a layout concern:
+    // element bounds are re-read from the DOM right before every action, and
+    // requireCurrentPageVersion compares against the live viewport separately.
+    if (observation !== collaborationObservation || comparableUrl(beforeUrl) !== comparableUrl(contents.getURL()) || comparableUrl(afterUrl) !== comparableUrl(beforeUrl)) {
       throw new Error('STALE_PAGE: viewport changed during screenshot');
     }
     return { ...snapshot, screenshot: { width: dimensions.width, height: dimensions.height,
@@ -533,7 +589,7 @@ async function handleCollaborationBridge(command, payload) {
   }
   if (command === 'screenshot') return handleCollaborationBridge('computer_observe', payload);
   if (command === 'click' || command === 'commit_click') {
-    requireCurrentPageVersion(payload);
+    await requireCurrentPageVersion(payload);
     if (command === 'commit_click' && !payload.pending_action_id) throw new Error('APPROVAL_INVALID');
     const index = Number(payload.index);
     if (!Number.isInteger(index) || index < 1 || index > 80) throw new Error('Invalid element index');
@@ -570,7 +626,7 @@ async function handleCollaborationBridge(command, payload) {
         x, y, url: location.href, title: document.title };
     })()`, true);
     if (observation !== collaborationObservation || observation.elements.get(index) !== target.fingerprint
-        || target.url !== observation.url) throw new Error('STALE_PAGE: target changed; observe again');
+        || comparableUrl(target.url) !== comparableUrl(observation.url)) throw new Error('STALE_PAGE: target changed; observe again');
     if (target.sensitive) throw new Error('SENSITIVE_INPUT');
     const risky = /pay|payment|purchase|order|delete|remove|send|submit|transfer|checkout|publish|account|security|付款|支付|下单|删除|发送|提交|转账|发布|账号|安全/i.test(target.label + ' ' + target.context)
       || target.crossOrigin || target.submit;
@@ -596,7 +652,7 @@ async function handleCollaborationBridge(command, payload) {
       throw new Error('CONFIRMATION_REQUIRED');
     }
     // Recheck after all asynchronous DOM queries, immediately before dispatch.
-    if (contents.getURL() !== target.url || observation !== collaborationObservation || collaborationStopped) throw new Error('STALE_PAGE');
+    if (comparableUrl(contents.getURL()) !== comparableUrl(target.url) || observation !== collaborationObservation || collaborationStopped) throw new Error('STALE_PAGE');
     contents.sendInputEvent({ type: 'mouseMove', x: target.x, y: target.y });
     contents.sendInputEvent({ type: 'mouseDown', x: target.x, y: target.y, button: 'left', clickCount: 1 });
     contents.sendInputEvent({ type: 'mouseUp', x: target.x, y: target.y, button: 'left', clickCount: 1 });
@@ -606,7 +662,7 @@ async function handleCollaborationBridge(command, payload) {
       url: target.url, title: target.title, page_version: collaborationPageVersion };
   }
   if (command === 'point' || command === 'commit_point') {
-    requireCurrentPageVersion(payload);
+    await requireCurrentPageVersion(payload);
     if (command === 'commit_point' && !payload.pending_action_id) throw new Error('APPROVAL_INVALID');
     const observation = collaborationObservation;
     const x = Number(payload.x);
@@ -628,7 +684,7 @@ async function handleCollaborationBridge(command, payload) {
         sensitive: ${isSensitiveInput.toString()}(input?.type || '', [label, form, input?.name, input?.id, input?.autocomplete, input?.getAttribute('aria-label')].join(' ')),
         editable: Boolean(input) };
     })()`, true);
-    if (observation !== collaborationObservation || details.url !== contents.getURL()) throw new Error('STALE_PAGE');
+    if (observation !== collaborationObservation || comparableUrl(details.url) !== comparableUrl(contents.getURL())) throw new Error('STALE_PAGE');
     if (details.sensitive || details.editable) throw new Error('SENSITIVE_OR_EDITABLE_POINT');
     if (kind === 'drag') {
       const x2 = Number(payload.x2), y2 = Number(payload.y2);
@@ -653,7 +709,7 @@ async function handleCollaborationBridge(command, payload) {
       if (!needsConfirmation || !pending || pending.expires < Date.now()
           || pending.observation !== observation || pending.digest !== digest) throw new Error('APPROVAL_INVALID');
     }
-    if (collaborationStopped || observation !== collaborationObservation || details.url !== contents.getURL()) throw new Error('STOPPED_OR_STALE');
+    if (collaborationStopped || observation !== collaborationObservation || comparableUrl(details.url) !== comparableUrl(contents.getURL())) throw new Error('STOPPED_OR_STALE');
     if (kind === 'scroll') {
       const amount = Number(payload.amount);
       if (!Number.isInteger(amount) || Math.abs(amount) > 2000) throw new Error('Invalid scroll');
@@ -700,7 +756,7 @@ async function handleCollaborationBridge(command, payload) {
     return { performed: kind, point: { x, y }, page_version: collaborationPageVersion };
   }
   if (command === 'type') {
-    requireCurrentPageVersion(payload);
+    await requireCurrentPageVersion(payload);
     const index = Number(payload.index);
     const input = String(payload.text || '');
     if (!Number.isInteger(index) || index < 1 || index > 80 || input.length > 10000) throw new Error('Invalid type request');
@@ -727,14 +783,14 @@ async function handleCollaborationBridge(command, payload) {
       return { fingerprint, url: location.href };
     })()`, true);
     if (observation !== collaborationObservation || observation.elements.get(index) !== target.fingerprint
-        || target.url !== contents.getURL() || collaborationStopped) throw new Error('STALE_PAGE');
+        || comparableUrl(target.url) !== comparableUrl(contents.getURL()) || collaborationStopped) throw new Error('STALE_PAGE');
     if (input) contents.insertText(input);
     collaborationObservation = null;
     collaborationPending.clear();
     return { typed: index, url: target.url, page_version: collaborationPageVersion };
   }
   if (command === 'scroll') {
-    requireCurrentPageVersion(payload);
+    await requireCurrentPageVersion(payload);
     const amount = Number(payload.amount);
     if (!Number.isInteger(amount) || Math.abs(amount) > 2000) throw new Error('Invalid scroll');
     if (collaborationStopped) throw new Error('STOPPED');
@@ -744,7 +800,7 @@ async function handleCollaborationBridge(command, payload) {
     return { ...outcome, page_version: collaborationPageVersion };
   }
   if (command === 'select') {
-    requireCurrentPageVersion(payload);
+    await requireCurrentPageVersion(payload);
     const index = Number(payload.index);
     const value = String(payload.value || '');
     if (!Number.isInteger(index) || index < 1 || index > 80 || value.length > 1000) throw new Error('Invalid select request');
@@ -752,7 +808,7 @@ async function handleCollaborationBridge(command, payload) {
     const target = await contents.executeJavaScript(`(() => { const el = document.querySelector('[data-crab-collab="${index}"]'); if (!el || el.tagName !== 'SELECT') throw new Error('Element not found or not select'); const label = String(el.innerText || el.placeholder || el.getAttribute('aria-label') || el.name || '').slice(0, 100); const fingerprint = [el.tagName, String(el.type || '').toLowerCase(), el.id, el.name, label].join('|').slice(0, 240); const option = Array.from(el.options).find((item) => item.value === ${JSON.stringify(value)} || item.text === ${JSON.stringify(value)}); if (!option) throw new Error('Option not found'); return { fingerprint, sensitive: ${isSensitiveInput.toString()}('', [el.getAttribute('aria-label'), el.name, el.id, el.autocomplete, option.text, el.closest('form')?.innerText].join(' ')), url: location.href }; })()`, true);
     if (target.sensitive) throw new Error('SENSITIVE_INPUT');
     if (observation !== collaborationObservation || observation.elements.get(index) !== target.fingerprint
-        || target.url !== contents.getURL() || collaborationStopped) throw new Error('STALE_PAGE');
+        || comparableUrl(target.url) !== comparableUrl(contents.getURL()) || collaborationStopped) throw new Error('STALE_PAGE');
     const outcome = await contents.executeJavaScript(`(() => { const el = document.querySelector('[data-crab-collab="${index}"]'); if (!el || !el.isConnected) throw new Error('STALE_PAGE'); const option = Array.from(el.options).find((item) => item.value === ${JSON.stringify(value)} || item.text === ${JSON.stringify(value)}); if (!option) throw new Error('STALE_PAGE'); el.value = option.value; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); return { selected: ${index}, url: location.href }; })()`, true);
     collaborationObservation = null;
     collaborationPending.clear();
@@ -761,7 +817,7 @@ async function handleCollaborationBridge(command, payload) {
   if (command === 'hold_game_keys' || command === 'game_plan') {
     const steps = command === 'game_plan' ? validateGamePlan(payload).steps : [{ type: 'hold_keys', ...payload }];
     if (command === 'hold_game_keys') validateGameKeys(payload);
-    requireCurrentPageVersion(payload);
+    await requireCurrentPageVersion(payload);
     const observation = collaborationObservation;
     const epoch = collaborationStopEpoch;
     const monitorKey = `__crabGameFocus_${crypto.randomBytes(16).toString('hex')}`;
@@ -789,7 +845,7 @@ async function handleCollaborationBridge(command, payload) {
         }
         return { url: location.href, focused: document.hasFocus(), safe };
       })()`, true);
-      requireCurrentPageVersion(payload);
+      await requireCurrentPageVersion(payload);
       if (observation !== collaborationObservation || target.url !== contents.getURL()
           || !target.focused || !target.safe || !contents.isFocused()) throw new Error('UNSAFE_GAME_TARGET');
       if (collaborationStopped || epoch !== collaborationStopEpoch) throw new Error('STOPPED');
@@ -799,7 +855,7 @@ async function handleCollaborationBridge(command, payload) {
         return Boolean(state && !state.lost && state.el.isConnected && document.hasFocus()
           && document.activeElement === state.el);
       })()`, true);
-      requireCurrentPageVersion(payload);
+      await requireCurrentPageVersion(payload);
       if (!focused || observation !== collaborationObservation || contents.isDestroyed()
           || contents.getURL() !== target.url || !contents.isFocused()) throw new Error('UNSAFE_GAME_TARGET');
       if (collaborationStopped || epoch !== collaborationStopEpoch) throw new Error('STOPPED');
@@ -897,7 +953,7 @@ async function handleCollaborationBridge(command, payload) {
     }
   }
   if (command === 'press_key') {
-    requireCurrentPageVersion(payload);
+    await requireCurrentPageVersion(payload);
     const key = String(payload.key || '');
     if (!/^(Enter|Escape|Tab|ArrowUp|ArrowDown|ArrowLeft|ArrowRight)$/.test(key)) throw new Error('Unsupported key');
     if (key === 'Enter') {

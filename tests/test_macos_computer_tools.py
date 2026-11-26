@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from crabagent.core.agent.tools import macos_computer
+from crabagent.core.computer.session import ComputerSession
 
 
 def context():
@@ -272,7 +273,59 @@ async def test_click_and_type_executes_in_order(monkeypatch):
     assert [item[0] for item in calls] == ["macos_click", "macos_type"]
     assert calls[1][1]["text"] == "hello"
     assert result["needs_observation"] is True
-    assert "_macos_batch_observation" not in ctx.metadata
+    # The coordinate observation is spent; only a window-level entry remains, which
+    # refuses further coordinate actions but still allows type / key / scroll.
+    assert ctx.metadata["_macos_batch_observation"][3] == "coordinate_spent"
+
+
+@pytest.mark.asyncio
+async def test_separate_click_then_type_needs_no_reobserve(monkeypatch):
+    # Regression: the model commonly calls macos_click (focus the field) and then
+    # macos_type as two tool calls. Each action used to consume the observation, so the
+    # second call always failed with STALE_OBSERVATION.
+    calls = []
+
+    async def bridge(command, payload, context=None):
+        calls.append(command)
+        return {"ok": True}
+
+    monkeypatch.setattr(macos_computer, "_call_bridge", bridge)
+    ctx = context()
+    ctx.metadata["_macos_batch_observation"] = (7, 42, macos_computer.time.monotonic())
+    await macos_computer.macos_click(7, 42, 10, 20, ctx)
+    await macos_computer.macos_type(7, "hello", ctx)
+    await macos_computer.macos_key(7, "return", ctx)
+    await macos_computer.macos_scroll(7, -120, ctx)
+    assert calls == ["macos_click", "macos_type", "macos_key", "macos_scroll"]
+    assert ctx.metadata["_computer_session"].failures == 0
+    # A second coordinate action still requires a fresh observation.
+    with pytest.raises(RuntimeError, match="STALE_OBSERVATION"):
+        await macos_computer.macos_click(7, 42, 11, 21, ctx)
+    assert calls[-1] == "macos_scroll"
+
+
+@pytest.mark.asyncio
+async def test_stale_observation_does_not_trip_breaker(monkeypatch):
+    # STALE_OBSERVATION is a coordination signal recovered by re-observing; it must not
+    # count toward the 3-strike breaker (which would lock the macOS session for good).
+    monkeypatch.setattr(macos_computer, "_call_bridge", lambda *a, **k: pytest.fail("bridge reached"))
+    ctx = context()
+    session = ctx.metadata.setdefault("_computer_session", ComputerSession())
+    ctx.metadata.pop("_macos_batch_observation", None)
+    for _ in range(4):
+        with pytest.raises(RuntimeError, match="STALE_OBSERVATION"):
+            await macos_computer.macos_type(7, "x", ctx)
+    assert session.failures == 0
+
+    # A real action failure is still counted.
+    async def bridge(command, payload, context=None):
+        raise RuntimeError("helper crashed")
+
+    monkeypatch.setattr(macos_computer, "_call_bridge", bridge)
+    ctx.metadata["_macos_batch_observation"] = (7, 42, macos_computer.time.monotonic())
+    with pytest.raises(RuntimeError, match="helper crashed"):
+        await macos_computer.macos_type(7, "x", ctx)
+    assert session.failures == 1
 
 
 @pytest.mark.asyncio

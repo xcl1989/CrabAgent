@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.19.4] — Collaboration Browser & macOS Control: No More False "Observe Again" (2026-11-26)
+
+### Fixed
+- **Collaboration browser no longer reports `STALE_PAGE` right after a successful observe.** Three independent causes, all reproduced on airchina.com.cn before the fix and gone after (6/6 observe→act pairs succeed, verified on the packaged app):
+  1. *Every loading signal bumped `page_version`.* Heavy SPA sites fetch carousel images, analytics beacons and lazy fragments for minutes; each one fired `did-start-loading` / `did-navigate-in-page` and invalidated the observation before the model could act (observed: `page_version 5 → 7` within one observe/act pair). Only a real document navigation (`did-navigate`, or `did-start-loading` while the main frame is loading) invalidates now; hash / `replaceState` / title / subresource events are state updates only.
+  2. *Hash routes counted as navigation.* SPA `history.replaceState('#/step2')` changed `webContents.getURL()`, so the recorded URL never matched even though the DOM was untouched. URL comparison now ignores the hash (`comparableUrl`); per-element fingerprint checks before dispatch still catch a route swap that rebuilt the DOM, and a real navigation still fails with `STALE_PAGE`.
+  3. *First action after switching to the browser page always failed.* The view moving from the background window (1200×800) to the visible one (1114×782) updates `view.getBounds()` immediately but the renderer's `innerWidth/innerHeight` ~100 ms later; the strict equality check in `requireCurrentPageVersion` and the post-screenshot viewport check both hit that window. Viewport comparison is now renderer-vs-renderer with a 4 px tolerance, and `observe` waits briefly only when bounds and renderer disagree.
+- **macOS control: `macos_click` → `macos_type` no longer fails with `STALE_OBSERVATION`.** `_input_preconditions` consumed the observation after *every* input action, so the common "click the field, then type" pair always broke on the second call (a dedicated `macos_click_and_type` compound tool existed only to work around this). Typing, key presses and scrolling do not depend on element coordinates, so they keep the observation alive within the 30 s TTL; coordinate actions still spend it — marked `coordinate_spent`, a second coordinate click requires a fresh observe, and the helper still enforces allowlist / frontmost / secure-input on every call. Verified end to end on the packaged app against Console: `macos_click(1156, 206)` → `macos_type("凭证诊断代码")` → screenshot shows the text in the search field.
+- **Stale / coordination errors no longer trip the 3-strike breaker.** `STALE_PAGE`, `STALE_OBSERVATION`, `WINDOW_NOT_FRONTMOST`, `WINDOW_NOT_FOUND`, `APP_NOT_ALLOWLISTED` and helper `ok:false` coordination replies were counted as failures; three in a row locked the browser or macOS session with `BUDGET_EXCEEDED` for good, so the "observe again" loop could never recover. They are now treated like `TASK_MISMATCH` / `STOPPED`: recoverable, not counted. Genuine action failures still count.
+- **`observation_id` mix-ups are actionable.** Models regularly passed `page_version` where `observation_id` was expected because the UUID was buried under the long element list. `computer_observe` now leads with `observation_id` / `page_version` / `url` / `title`, the current `page_version` is accepted as an alias for the id, and a genuine mismatch reports the current id and version instead of a bare "call computer_observe again". `computer_observe` also drops a dead observation id when the Bridge rejects it.
+
+### Changed
+- **Background executor lock is cross-platform.** `_claim_executor` used `fcntl.flock` unconditionally, which does not exist on Windows; the lock now uses `msvcrt.locking` on the first byte on Windows and `fcntl.flock` elsewhere, with the errno mapping kept (`EACCES` / `EAGAIN` / `EDEADLK` → "owned by another process").
+- Tool descriptions for `macos_click` / `macos_type` now state which actions spend the observation and which may follow directly, so the model does not insert unnecessary re-observes.
+
+### Tests
+- New `electron/test/computer-stale-regression.js` (headless, isolated profile): SPA background noise must not bump `page_version`, an action after hash changes must succeed, a real navigation must still be `STALE_PAGE`.
+- `electron/test/computer-integration.js` gains the same assertions inside the existing fixture run.
+- `tests/test_computer_tools.py` +4 (page_version alias, stale does not trip breaker, observe stale drops id, identifiers first); `tests/test_macos_computer_tools.py` +2 (separate click→type→key→scroll without re-observe, stale does not trip breaker).
+
+---
+
 ## [0.19.3] — Sub-agent Permission Bubbling, Non-abandonable Goals, Richer ask_question (2026-11-26)
 
 ### Added

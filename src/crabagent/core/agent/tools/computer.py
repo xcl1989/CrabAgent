@@ -7,7 +7,12 @@ import time
 import uuid
 from typing import Any
 
-from crabagent.core.agent.tools.collaboration_browser import _bridge_request, _remember_page_version, _result
+from crabagent.core.agent.tools.collaboration_browser import (
+    _bridge_request,
+    _is_stale_error,
+    _remember_page_version,
+    _result,
+)
 from crabagent.core.agent.tools.registry import registry
 from crabagent.core.computer.audit import record_browser_event
 from crabagent.core.computer.session import get_session
@@ -22,7 +27,8 @@ async def _call_bridge(command: str, payload=None, *, context=None) -> dict[str,
 
 @registry.register(
     name="computer_observe",
-    description="Observe the visible browser with one screenshot, page text, element bounds and an observation ID.",
+    description="Observe the visible browser with one screenshot, page text, element bounds and an observation ID. "
+    "The returned observation_id (a UUID) is required by computer_act; page_version alone is also accepted.",
     parameters={"type": "object", "properties": {}},
     metadata={"source": "builtin", "category": "collaboration_browser"},
 )
@@ -31,8 +37,17 @@ async def computer_observe(context=None) -> list[dict[str, Any]]:
     session.check(observe=True)
     try:
         value = await _call_bridge("computer_observe", context=context)
-    except Exception:
-        session.failures += 1
+    except Exception as exc:
+        # Stale/viewport drift on the first observation after a page switch is a
+        # coordination signal, not a page-action failure: re-observing recovers, and
+        # counting it would trip the 3-strike breaker and lock the browser session.
+        if not _is_stale_error(exc):
+            session.failures += 1
+        if _is_stale_error(exc):
+            # The Bridge no longer considers the previous observation valid; drop it so
+            # a follow-up action is told to re-observe instead of using a dead id.
+            context.metadata.pop("_collab_browser_observation_id", None)
+            context.metadata.pop("_computer_batch_snapshot", None)
         raise
     _remember_page_version(context, value)
     context.metadata["_computer_batch_snapshot"] = {
@@ -47,8 +62,17 @@ async def computer_observe(context=None) -> list[dict[str, Any]]:
     await record_browser_event(
         context, "observed", observation_id=value.get("observation_id", ""), url=value.get("url", "")
     )
+    # Put the identifiers the next action needs first so they are never buried under
+    # the long element list (models used to pass page_version as observation_id).
+    ordered = {
+        "observation_id": value.get("observation_id"),
+        "page_version": value.get("page_version"),
+        "url": value.get("url"),
+        "title": value.get("title"),
+    }
+    ordered.update({k: v for k, v in value.items() if k not in ordered})
     return [
-        {"type": "text", "text": _result(value)},
+        {"type": "text", "text": _result(ordered)},
         {"type": "image_url", "image_url": {"url": url}, "mime": mime},
     ]
 
@@ -107,16 +131,32 @@ async def computer_observe(context=None) -> list[dict[str, Any]]:
     },
     metadata={"source": "builtin", "category": "collaboration_browser"},
 )
+def _require_current_observation(context: Any, observation_id: str) -> str:
+    """Validate the model-supplied observation id and return the canonical one.
+
+    Models sometimes pass page_version where observation_id is expected (both are
+    prominent in the observe result). Accept either identifier as long as it refers
+    to the current observation, and make a genuine mismatch actionable.
+    """
+    current_id = context.metadata.get("_collab_browser_observation_id")
+    current_version = context.metadata.get("_collab_browser_page_version")
+    if current_id != observation_id and str(current_version) != str(observation_id):
+        raise RuntimeError(
+            "STALE_OBSERVATION: call computer_observe again, then pass its observation_id "
+            f"(current observation_id={current_id!r}, page_version={current_version!r})"
+        )
+    return str(current_id)
+
+
 async def computer_act(observation_id: str, actions: list[dict[str, Any]], context=None) -> str:
     session = get_session(context)
     if not 1 <= len(actions) <= 3:
         raise ValueError("Batch size must be between 1 and 3")
-    if context.metadata.get("_collab_browser_observation_id") != observation_id:
-        raise RuntimeError("STALE_OBSERVATION: call computer_observe again")
+    current_id = _require_current_observation(context, observation_id)
     results = []
     initial = context.metadata.pop("_computer_batch_snapshot", None)
     used_indices: set[int] = set()
-    current_id = observation_id
+    observation_id = current_id
     for action in actions:
         if results:
             # Only independent, semantically identified fields can be chained.
@@ -227,7 +267,10 @@ async def computer_act(observation_id: str, actions: list[dict[str, Any]], conte
             await record_browser_event(
                 context, "action_result", action=kind, decision="failed", observation_id=observation_id, started=started
             )
-            session.failures += 1
+            # STALE_* means the page moved under us; the fix is to re-observe, and it
+            # must not count toward the failure breaker.
+            if not _is_stale_error(exc):
+                session.failures += 1
             results.append({"type": kind, "status": "failed", "error": str(exc)})
             break
         if kind in {"type_text", "select_option"} and isinstance(action.get("index"), int):
@@ -261,10 +304,9 @@ async def computer_hold_game_keys(observation_id: str, keys: list[str], duration
     validate_game_plan([{"type": "hold_keys", "keys": keys, "duration_ms": duration_ms}])
     session = get_session(context)
     session.check()
-    if context.metadata.get("_collab_browser_observation_id") != observation_id:
-        raise RuntimeError("STALE_OBSERVATION: call computer_observe again")
+    _require_current_observation(context, observation_id)
     payload = {
-        "observation_id": observation_id,
+        "observation_id": context.metadata["_collab_browser_observation_id"],
         "page_version": context.metadata["_collab_browser_page_version"],
         "keys": keys,
         "duration_ms": duration_ms,
@@ -274,8 +316,9 @@ async def computer_hold_game_keys(observation_id: str, keys: list[str], duration
     started = time.monotonic()
     try:
         result = await _call_bridge("hold_game_keys", payload, context=context)
-    except Exception:
-        session.failures += 1
+    except Exception as exc:
+        if not _is_stale_error(exc):
+            session.failures += 1
         await record_browser_event(
             context, "action_result", action="hold_game_keys", decision="failed", started=started
         )
@@ -320,11 +363,10 @@ async def computer_game_plan(observation_id: str, steps: list[dict[str, Any]], c
     validate_game_plan(steps)
     session = get_session(context)
     session.check()
-    if context.metadata.get("_collab_browser_observation_id") != observation_id:
-        raise RuntimeError("STALE_OBSERVATION: call computer_observe again")
+    _require_current_observation(context, observation_id)
     action_id = str(uuid.uuid4())
     payload = {
-        "observation_id": observation_id,
+        "observation_id": context.metadata["_collab_browser_observation_id"],
         "page_version": context.metadata["_collab_browser_page_version"],
         "steps": steps,
         "action_id": action_id,
@@ -342,8 +384,9 @@ async def computer_game_plan(observation_id: str, steps: list[dict[str, Any]], c
         except Exception:
             pass
         raise
-    except Exception:
-        session.failures += 1
+    except Exception as exc:
+        if not _is_stale_error(exc):
+            session.failures += 1
         await record_browser_event(context, "action_result", action="game_plan", decision="failed", started=started)
         raise
     session.record(result)

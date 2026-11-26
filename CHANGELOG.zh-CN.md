@@ -8,6 +8,28 @@ English version: [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
+## [0.19.4] — 协作浏览器与 macOS 控制：告别假"重新观察"（2026-11-26）
+
+### 修复
+- **协作浏览器不再在刚 observe 完就报 `STALE_PAGE`。** 三个互相独立的根因，修复前均在 airchina.com.cn 上复现，修复后 6/6 组 observe→act 全部成功（打包版实测）：
+  1. *任何加载信号都递增 `page_version`。* 重 SPA 站点会持续几分钟拉取轮播图、埋点和懒加载片段，每次都触发 `did-start-loading` / `did-navigate-in-page`，模型还没来得及操作观察就失效了（实测：一组 observe/act 内 `page_version 5 → 7`）。现在只有真正的文档导航才失效（`did-navigate`，或主框架正在加载时的 `did-start-loading`）；hash / `replaceState` / 标题 / 子资源事件只更新状态。
+  2. *hash 路由被当成导航。* SPA 的 `history.replaceState('#/step2')` 会改变 `webContents.getURL()`，DOM 明明没动，记录的 URL 却永远对不上。URL 比对现在忽略 hash（`comparableUrl`）；派发前的逐元素指纹校验仍能抓住重建了 DOM 的路由切换，真实导航依旧报 `STALE_PAGE`。
+  3. *切到浏览器页后的第一个动作必失败。* view 从后台窗口（1200×800）挪到可见窗口（1114×782）时，`view.getBounds()` 立即更新，而渲染器的 `innerWidth/innerHeight` 要 ~100 ms 后才跟上；`requireCurrentPageVersion` 的严格相等校验和截图后的 viewport 校验都会撞进这个窗口。viewport 比对改为渲染器对渲染器、容差 4 px，`observe` 只在 bounds 与渲染器不一致时短暂等待。
+- **macOS 控制：`macos_click` → `macos_type` 不再报 `STALE_OBSERVATION`。** `_input_preconditions` 在*每个*输入动作后都消费掉观察，所以最常见的"点一下输入框、再打字"必定在第二步断掉（专门的 `macos_click_and_type` 组合工具就是为了绕过这个问题而存在的）。打字、按键、滚动不依赖元素坐标，现在在 30 秒 TTL 内保持观察有效；坐标动作仍然消费它——打上 `coordinate_spent` 标记，第二次坐标点击必须重新观察，helper 依旧在每次调用时校验 allowlist / 前台窗口 / 安全输入。在打包版上对"控制台"端到端实测：`macos_click(1156, 206)` → `macos_type("凭证诊断代码")` → 截图显示文字已在搜索框里。
+- **Stale / 协调类错误不再触发三振断路器。** `STALE_PAGE`、`STALE_OBSERVATION`、`WINDOW_NOT_FRONTMOST`、`WINDOW_NOT_FOUND`、`APP_NOT_ALLOWLISTED` 以及 helper 返回 `ok:false` 的协调性回复之前都被计入失败；连续三次就以 `BUDGET_EXCEEDED` 把浏览器或 macOS 会话永久锁死，"重新观察"循环永远恢复不了。现在它们与 `TASK_MISMATCH` / `STOPPED` 同级：可恢复、不计数。真正的动作失败仍然计数。
+- **`observation_id` 传错时错误信息可操作。** 模型经常把 `page_version` 当 `observation_id` 传，因为 UUID 被埋在长元素列表下面。`computer_observe` 现在把 `observation_id` / `page_version` / `url` / `title` 放在最前面，当前 `page_version` 可作为 id 的别名，真正不匹配时会报出当前 id 与版本，而不是干巴巴一句"call computer_observe again"。Bridge 拒绝时 `computer_observe` 也会清掉已失效的观察 id。
+
+### 变更
+- **后台执行器锁跨平台。** `_claim_executor` 之前无条件使用 `fcntl.flock`，Windows 上不存在；现在 Windows 用 `msvcrt.locking` 锁首字节，其他平台用 `fcntl.flock`，errno 映射保留（`EACCES` / `EAGAIN` / `EDEADLK` → "owned by another process"）。
+- `macos_click` / `macos_type` 的工具描述写明哪些动作会消费观察、哪些可以直接接续，避免模型插入不必要的重新观察。
+
+### 测试
+- 新增 `electron/test/computer-stale-regression.js`（无头、隔离 profile）：SPA 后台噪音不得递增 `page_version`，hash 变化后的动作必须成功，真实导航必须仍报 `STALE_PAGE`。
+- `electron/test/computer-integration.js` 在现有 fixture 流程中加入同样的断言。
+- `tests/test_computer_tools.py` +4（page_version 别名、stale 不计断路器、observe stale 清 id、标识符前置）；`tests/test_macos_computer_tools.py` +2（分开调用 click→type→key→scroll 无需重新观察、stale 不计断路器）。
+
+---
+
 ## [0.19.3] — 子 Agent 权限上浮、Goal 不可自弃、ask_question 增强（2026-11-26）
 
 ### 新增

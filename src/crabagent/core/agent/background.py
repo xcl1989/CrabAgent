@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import asyncio
-import fcntl
+import errno
 import json
 import os
 import uuid
@@ -46,14 +46,37 @@ def _claim_executor():
     database = engine.url.database
     if not database or database == ":memory:":
         raise ValueError("Background executor requires a file-backed database")
-    handle = open(os.path.realpath(database) + ".background.lock", "a")
+    handle = open(os.path.realpath(database) + ".background.lock", "a+b")
     try:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
+        _lock_exclusive(handle)
+    except OSError as exc:
         handle.close()
-        raise ValueError("Background executor is owned by another process") from None
+        if exc.errno in (errno.EACCES, errno.EAGAIN, errno.EDEADLK):
+            raise ValueError("Background executor is owned by another process") from None
+        raise
+    except BaseException:
+        handle.close()
+        raise
     _owner_file, _owner_pid = handle, os.getpid()
     return True
+
+
+def _lock_exclusive(handle):
+    """Acquire a non-blocking exclusive lock on ``handle`` for the process lifetime.
+
+    ``fcntl.flock`` only exists on POSIX; Windows uses ``msvcrt.locking`` on the
+    first byte. Both are released by the OS when the process exits.
+    """
+    if os.name == "nt":
+        import msvcrt
+
+        # All contenders lock the same byte, regardless of file length.
+        handle.seek(0)
+        msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+    else:
+        import fcntl
+
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
 
 
 async def _ensure_executor():

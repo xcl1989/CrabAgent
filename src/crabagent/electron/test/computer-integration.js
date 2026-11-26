@@ -17,6 +17,7 @@ const html = `<!doctype html><meta charset="utf-8"><style>body{margin:0} #canvas
 async function run() {
   const server = http.createServer((req, res) => {
     if (req.url === '/redirect-private') { res.writeHead(302, { Location: 'http://169.254.169.254/latest/meta-data/' }); res.end(); return; }
+    if (req.url.startsWith('/pixel.gif')) { res.writeHead(200, { 'Content-Type': 'image/gif' }); res.end(Buffer.from('R0lGODlhAQABAAAAACw=', 'base64')); return; }
     res.setHeader('Content-Type', 'text/html'); res.end(html);
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -278,6 +279,30 @@ async function run() {
     const loaded = new Promise((resolve) => view.webContents.once('did-finish-load', resolve));
     view.webContents.reload();
     await loaded;
+    await assert.rejects(action('scroll', o, { amount: 10 }), /STALE_PAGE/);
+    // Regression: background activity of a heavy SPA (subresource fetches, hash/history
+    // changes, title updates) must NOT invalidate the observation. Only a real document
+    // navigation does. Before the fix an observe/act pair on such pages failed with
+    // STALE_PAGE because every lazy image bumped the page version.
+    o = await observe();
+    await view.webContents.executeJavaScript(`
+      new Promise((resolve) => {
+        let n = 0;
+        const tick = () => {
+          document.title = 'title ' + (++n);
+          history.replaceState(null, '', '#/step' + n);
+          const img = new Image(); img.src = '/pixel.gif?t=' + n;
+          if (n < 3) setTimeout(tick, 40); else setTimeout(resolve, 150);
+        };
+        tick();
+      })`, true);
+    await action('scroll', o, { amount: 5 });
+    assert.equal(await view.webContents.executeJavaScript('location.hash.startsWith("#/step")'), true, 'hash navigation applied');
+    // A real navigation must still invalidate the pending observation.
+    o = await observe();
+    const navigated = new Promise((resolve) => view.webContents.once('did-finish-load', resolve));
+    view.webContents.loadURL(url + '?nav=1');
+    await navigated;
     await assert.rejects(action('scroll', o, { amount: 10 }), /STALE_PAGE/);
     // Drag-and-drop may leave pointer capture active; start the fixed click set focused.
     window.focus();

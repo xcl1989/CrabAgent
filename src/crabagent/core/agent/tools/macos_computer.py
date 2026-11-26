@@ -20,6 +20,8 @@ from crabagent.core.computer.game_plan import validate_game_plan
 from crabagent.core.computer.session import get_session
 
 _OBSERVATION_TTL = 30
+# Marker stored as the 4th tuple element after a coordinate action consumed the layout.
+_COORDINATE_SPENT = "coordinate_spent"
 
 
 def _clear_observation(context: Any) -> None:
@@ -56,7 +58,8 @@ async def macos_activate(bundle_id: str, context=None) -> str:
             "macos_activate", {"bundleId": bundle_id}, context, "macos_activate", started
         )
     except Exception as exc:
-        session.failures += 1
+        if not _is_stale_error(exc):
+            session.failures += 1
         await record_browser_event(
             context, "action_result", action="macos_activate", decision="failed", started=started
         )
@@ -109,11 +112,15 @@ async def macos_observe(window_id: int, pid: int, context=None) -> str:
     try:
         value = await _call_bridge("macos_observe", {"windowId": window_id, "pid": pid}, context)
     except Exception as exc:
-        session.failures += 1
+        if not _is_stale_error(exc):
+            session.failures += 1
         await record_browser_event(context, "action_result", action="macos_observe", decision="failed", started=started)
         raise RuntimeError(str(exc)) from exc
     if value.get("ok") is not True or not isinstance(value.get("nodes"), list):
-        session.failures += 1
+        # Window vanished, permission missing, app not running: coordination state, not a
+        # page-action failure. Counting it would trip the breaker while the model recovers.
+        if not _is_stale_error(RuntimeError(str(value.get("error", "")))):
+            session.failures += 1
         return _result(value)
     targets = {}
     for node in value["nodes"]:
@@ -148,7 +155,8 @@ async def macos_capture(window_id: int, context=None) -> list[dict[str, Any]]:
     try:
         value = await _call_bridge("macos_capture", {"windowId": window_id}, context)
     except Exception as exc:
-        session.failures += 1
+        if not _is_stale_error(exc):
+            session.failures += 1
         await record_browser_event(context, "action_result", action="macos_capture", decision="failed", started=started)
         raise RuntimeError(str(exc)) from exc
     data_url = value.pop("dataUrl", "")
@@ -163,7 +171,8 @@ async def macos_capture(window_id: int, context=None) -> list[dict[str, Any]]:
         session.record(value, observe=True)
         context.metadata["_macos_batch_observation"] = (window_id, pid, started)
     else:
-        session.failures += 1
+        if not _is_stale_error(RuntimeError(str(value.get("error", "")))):
+            session.failures += 1
         raise RuntimeError(str(value.get("error") or "CAPTURE_FAILED: missing window PID or screenshot"))
     await record_browser_event(context, "observed", action="macos_capture", decision="executed", url="")
     text = _result(value)
@@ -180,17 +189,58 @@ async def macos_capture(window_id: int, context=None) -> list[dict[str, Any]]:
     ]
 
 
-def _input_preconditions(context: Any, window_id: int, pid: int | None = None) -> dict[str, Any]:
+def _is_stale_error(exc: BaseException) -> bool:
+    """Stale/coordination signals are recovered by re-observing, not page-action failures."""
+    msg = str(exc)
+    return any(
+        tag in msg for tag in ("STALE_OBSERVATION", "WINDOW_NOT_FRONTMOST", "WINDOW_NOT_FOUND", "APP_NOT_ALLOWLISTED")
+    )
+
+
+def _input_preconditions(
+    context: Any, window_id: int, pid: int | None = None, *, consume: bool = True
+) -> dict[str, Any]:
+    """Validate the pending observation for an input action.
+
+    ``consume`` controls whether a successful validation invalidates the observation:
+
+    - Coordinate actions (click / drag / move) change the layout, so the observation is
+      consumed and the model must look again before the next coordinate action.
+    - Typing, key presses and scrolling do not depend on element coordinates. They keep
+      the observation alive (within the TTL) so "click the field, then type" works
+      without a re-observe between every keystroke. The Bridge/helper still enforce the
+      allowlist, frontmost window and secure-input checks on every call.
+    """
     get_session(context).check()
     observed = context.metadata.get("_macos_batch_observation")
-    if (
-        not observed
-        or observed[0] != window_id
-        or (pid is not None and observed[1] != pid)
-        or time.monotonic() - observed[2] > _OBSERVATION_TTL
-    ):
-        raise RuntimeError("STALE_OBSERVATION: observe or capture the target window again")
-    _clear_observation(context)
+    if not observed:
+        raise RuntimeError(
+            "STALE_OBSERVATION: observe or capture the target window again (no observation for this window yet)"
+        )
+    if observed[0] != window_id or (pid is not None and observed[1] != pid):
+        raise RuntimeError(
+            "STALE_OBSERVATION: observe or capture the target window again "
+            f"(observation is for window {observed[0]} pid {observed[1]}, "
+            f"action targets window {window_id} pid {pid})"
+        )
+    if time.monotonic() - observed[2] > _OBSERVATION_TTL:
+        raise RuntimeError(
+            "STALE_OBSERVATION: observe or capture the target window again "
+            f"(observation is {int(time.monotonic() - observed[2])}s old, TTL {_OBSERVATION_TTL}s)"
+        )
+    if consume:
+        if len(observed) > 3 and observed[3] == _COORDINATE_SPENT:
+            # The previous coordinate action already spent the full observation; only
+            # non-coordinate actions (type / key / scroll) may continue on it.
+            raise RuntimeError(
+                "STALE_OBSERVATION: observe or capture the target window again "
+                "(a coordinate action already ran; the layout may have changed)"
+            )
+        # Keep a window-level observation (window / pid / time + marker) so a follow-up
+        # type / key / scroll — which does not depend on element coordinates — still
+        # works without a re-observe: "click the field, then type" is the common flow.
+        context.metadata.pop("_macos_press_targets", None)
+        context.metadata["_macos_batch_observation"] = (window_id, observed[1], observed[2], _COORDINATE_SPENT)
     return {"windowId": window_id, "pid": observed[1]}
 
 
@@ -259,7 +309,9 @@ async def _input_with_allow_flow(
     "GLOBAL screen points (origin = top-left of the main display). To convert from a "
     "macos_capture image: capture is 1 pixel == 1 window point, so global = windowFrame.x/y + "
     "pixel. The app must be allowlisted and frontmost — first-time control of a new app asks "
-    "the user to confirm automatically.",
+    "the user to confirm automatically. A click spends the coordinate observation: another "
+    "click needs a fresh macos_observe / macos_capture, while macos_type / macos_key / "
+    "macos_scroll may follow directly.",
     parameters={
         "type": "object",
         "properties": {
@@ -280,7 +332,8 @@ async def macos_click(window_id: int, pid: int, x: int, y: int, context=None) ->
     try:
         value = await _input_with_allow_flow("macos_click", payload, context, "macos_click", started)
     except Exception as exc:
-        session.failures += 1
+        if not _is_stale_error(exc):
+            session.failures += 1
         await record_browser_event(context, "action_result", action="macos_click", decision="failed", started=started)
         raise RuntimeError(str(exc)) from exc
     session.record(value)
@@ -308,7 +361,8 @@ def _register_input_tool(
         try:
             value = await _input_with_allow_flow(name, payload, context, name, started)
         except Exception as exc:
-            session.failures += 1
+            if not _is_stale_error(exc):
+                session.failures += 1
             await record_browser_event(context, "action_result", action=name, decision="failed", started=started)
             raise RuntimeError(str(exc)) from exc
         decision = value.get("status", "executed" if value.get("ok") is True else "failed")
@@ -436,7 +490,9 @@ _register_input_tool(
     name="macos_type",
     description="Type Unicode text into a local macOS app window on the user's behalf, e.g. "
     "composing a message in a chat app (max 10000 bytes). Observe the window first with "
-    "macos_observe or macos_capture.",
+    "macos_observe or macos_capture. Typing does not consume the observation, so it can "
+    "directly follow macos_click on an input field (and macos_key / macos_scroll) without "
+    "re-observing; only further coordinate clicks need a fresh observation.",
     parameters={
         "type": "object",
         "properties": {
@@ -448,7 +504,11 @@ _register_input_tool(
     metadata={"source": "builtin", "category": "computer"},
 )
 async def macos_type(window_id: int, text: str, context=None) -> str:
-    return _result(await _type_input(_input_preconditions(context, window_id), text, context))
+    # Typing does not depend on element coordinates, so it keeps the observation alive
+    # (see _input_preconditions): "click the field, then type" must not require a
+    # re-observe between the two steps.
+    payload = _input_preconditions(context, window_id, consume=False)
+    return _result(await _type_input(payload, text, context))
 
 
 async def _type_input(payload: dict[str, Any], text: str, context: Any) -> dict[str, Any]:
@@ -458,7 +518,8 @@ async def _type_input(payload: dict[str, Any], text: str, context: Any) -> dict[
     try:
         value = await _input_with_allow_flow("macos_type", payload, context, "macos_type", started)
     except Exception as exc:
-        session.failures += 1
+        if not _is_stale_error(exc):
+            session.failures += 1
         await record_browser_event(context, "action_result", action="macos_type", decision="failed", started=started)
         raise RuntimeError(str(exc)) from exc
     session.record(value)
@@ -485,12 +546,14 @@ async def _type_input(payload: dict[str, Any], text: str, context: Any) -> dict[
 async def macos_key(window_id: int, key: str, context=None) -> str:
     session = get_session(context)
     started = time.monotonic()
-    payload = _input_preconditions(context, window_id)
+    # Key presses do not depend on element coordinates; keep the observation alive.
+    payload = _input_preconditions(context, window_id, consume=False)
     payload["key"] = key
     try:
         value = await _input_with_allow_flow("macos_key", payload, context, "macos_key", started)
     except Exception as exc:
-        session.failures += 1
+        if not _is_stale_error(exc):
+            session.failures += 1
         await record_browser_event(context, "action_result", action="macos_key", decision="failed", started=started)
         raise RuntimeError(str(exc)) from exc
     session.record(value)
@@ -538,14 +601,16 @@ async def macos_hold_game_keys(window_id: int, pid: int, keys: list[str], durati
         except Exception:
             pass
         raise
-    except Exception:
-        session.failures += 1
+    except Exception as exc:
+        if not _is_stale_error(exc):
+            session.failures += 1
         await record_browser_event(
             context, "action_result", action="macos_hold_game_keys", decision="failed", started=started
         )
         raise
     if not value.get("ok"):
-        session.failures += 1
+        if not _is_stale_error(RuntimeError(str(value.get("error", "")))):
+            session.failures += 1
     else:
         session.record(value)
     await record_browser_event(
@@ -605,8 +670,9 @@ async def macos_game_plan(window_id: int, pid: int, steps: list[dict[str, Any]],
         except Exception:
             pass
         raise
-    except Exception:
-        session.failures += 1
+    except Exception as exc:
+        if not _is_stale_error(exc):
+            session.failures += 1
         await record_browser_event(
             context, "action_result", action="macos_game_plan", decision="failed", started=started
         )
@@ -646,7 +712,9 @@ async def macos_game_plan(window_id: int, pid: int, steps: list[dict[str, Any]],
 async def macos_scroll(window_id: int, amount: int, context=None, x: int | None = None, y: int | None = None) -> str:
     session = get_session(context)
     started = time.monotonic()
-    payload = _input_preconditions(context, window_id)
+    # Scrolling keeps the observation alive so scroll-then-type flows work; the model
+    # still re-observes before the next coordinate click.
+    payload = _input_preconditions(context, window_id, consume=False)
     payload["amount"] = max(-2000, min(2000, amount))
     if x is not None and y is not None:
         payload["x"] = x
@@ -654,7 +722,8 @@ async def macos_scroll(window_id: int, amount: int, context=None, x: int | None 
     try:
         value = await _input_with_allow_flow("macos_scroll", payload, context, "macos_scroll", started)
     except Exception as exc:
-        session.failures += 1
+        if not _is_stale_error(exc):
+            session.failures += 1
         await record_browser_event(context, "action_result", action="macos_scroll", decision="failed", started=started)
         raise RuntimeError(str(exc)) from exc
     session.record(value)
