@@ -30,10 +30,18 @@ async def request_user_input(
     options: list[str] | None = None,
     user_id: int = 1,
     multiple: bool = False,
+    recommended: str | None = None,
+    header: str | None = None,
+    origin: dict | None = None,
 ) -> asyncio.Future[str]:
     input_id = uuid.uuid4().hex[:12]
     future: asyncio.Future[str] = asyncio.Future()
     _pending_inputs[input_id] = (future, question, options, session_id)
+
+    # ``recommended`` must be one of the offered choices; otherwise it is
+    # meaningless to the UI and misleading to the user.
+    if recommended is not None and options and recommended not in options:
+        recommended = None
 
     # Trusted work system: persist a TaskRequest so the question survives
     # restarts; the Future above is only a live bridge.
@@ -47,11 +55,16 @@ async def request_user_input(
                 user_id=user_id,
                 request_type="choice" if options else "input",
                 request_key=input_id,
-                title=question[:200],
+                title=(f"{header} · " if header else "") + question[:200],
                 session_id=session_id,
                 question=question,
                 options=options,
                 risk_level="low",
+                display_payload={
+                    k: v
+                    for k, v in (("recommended", recommended), ("header", header), ("origin", origin))
+                    if v is not None
+                },
                 expires_at=datetime.datetime.now() + datetime.timedelta(seconds=INPUT_TTL_SECONDS + 10),
             )
         register_live_future(input_id, future)
@@ -69,7 +82,7 @@ async def request_user_input(
             notify_request_created(
                 request_key=input_id,
                 request_type="choice" if options else "input",
-                title=question[:200],
+                title=(f"{header} · " if header else "") + question[:200],
                 body=question,
                 session_id=session_id,
             )
@@ -86,6 +99,12 @@ async def request_user_input(
         data["options"] = options
     if multiple:
         data["multiple"] = True
+    if recommended:
+        data["recommended"] = recommended
+    if header:
+        data["header"] = header
+    if origin:
+        data["origin"] = origin
     await event_bus.emit(
         AgentEvent(
             type=EventType.USER_INPUT_REQUEST,

@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.19.3] — Sub-agent Permission Bubbling, Non-abandonable Goals, Richer ask_question (2026-11-26)
+
+### Added
+- **Sub-agent permission bubbling.** A synchronously delegated sub-agent now inherits the parent conversation's confirm and ask channels: when it calls a confirmation-gated tool, the approval card appears in the parent conversation labelled "from Code Expert", and the sub-agent continues once approved. Previously the sub-agent's `confirm_callback` was `None`, and `registry.execute` treats that as "no channel → allow" — so the same coder profile asked once in the main conversation but wrote silently as a sub-agent. Background sub-agents are unchanged (their tool pool already excludes confirmation-gated tools). `AgentContext` gained `confirm()` / `ask()` entry points that inspect the callback's arity statically: serve callbacks take `origin`, legacy CLI callbacks degrade automatically. No try/except `TypeError` probing — a `TypeError` raised *inside* a callback would otherwise be mistaken for an arity mismatch and re-prompt.
+- **`ask_question` gains a recommended answer and a title.** New `recommended` (must be one of `options`; dropped otherwise) and `header` (card title). The UI moves the recommended option first with a brand-coloured border and a "Recommended" badge; `header` renders as a small caption for navigating multi-question interviews. The tool description now says "one question at a time, 3–4 options each, next question depends on the answer", so the agent can run a continuous interview without a new mode. Sub-agents can ask too (`ask_question` removed from `_DELEGATION_TOOLS`).
+
+### Changed
+- **Goals can no longer be paused or prematurely abandoned by the agent.** `update_goal` exposes only `complete` / `unmet` to the agent; `paused` / `active` are rejected with "pausing is a user action". Declaring `unmet` on an `auto_continue` goal before turn 2 is blocked with a nudge to try a workaround or call `ask_question` — the goal stays active while waiting. Previously the agent could escape forced continuation by calling `paused`. `_goal_status_updated` is now set only after success, otherwise the soft guard's rejection would skip the finalization checkpoint.
+- **Goal continuation prompt is now an audit.** Instead of "continue from the latest checkpoint", the agent must first map every success criterion to concrete evidence (file paths / test output / command results), then decide between `complete` and continuing; steps that already have evidence must not be repeated. The system prompt adds "effort ≠ completion", "ask_question instead of unmet when you need something", and "do not pause the goal yourself".
+
+---
+
 ## [0.19.2] — Relevance-Only Memory & Reasoning Persistence (2026-11-25)
 
 ### Fixed

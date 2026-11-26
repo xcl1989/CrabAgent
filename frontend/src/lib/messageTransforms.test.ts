@@ -133,3 +133,69 @@ it("restores a memory card immediately after its user turn", () => {
     id: "memory-references-42", memory_references: [{ key: "backend" }],
   });
 });
+
+describe("interactive card origin & recommended", () => {
+  const origin = { agent_name: "coder", display_name: "代码专家", sub_agent_id: "coder_abc" };
+
+  it("labels a confirm card bubbled from a sub-agent", () => {
+    const ev: SSEEvent = {
+      type: "tool_confirm_request",
+      timestamp: Date.now(),
+      data: { confirm_id: "c1", tool_name: "bash", args_summary: "{\"command\":\"ls\"}", origin },
+    };
+    const out = sseEventToMessages(ev, []);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ role: "tool_confirm", confirm_id: "c1", origin });
+  });
+
+  it("omits origin for main-agent cards", () => {
+    const ev: SSEEvent = {
+      type: "tool_confirm_request",
+      timestamp: Date.now(),
+      data: { confirm_id: "c2", tool_name: "bash", args_summary: "{}" },
+    };
+    const out = sseEventToMessages(ev, []);
+    expect(out[0].origin).toBeUndefined();
+  });
+
+  it("forwards recommended and header on question cards", () => {
+    const ev: SSEEvent = {
+      type: "user_input_request",
+      timestamp: Date.now(),
+      data: { input_id: "i1", question: "Which?", options: ["A", "B"], recommended: "B", header: "策略", origin },
+    };
+    const out = sseEventToMessages(ev, []);
+    expect(out[0]).toMatchObject({
+      role: "user_input",
+      input_recommended: "B",
+      input_header: "策略",
+      origin,
+    });
+  });
+
+  it("drops a recommended value that is not among the options", () => {
+    const ev: SSEEvent = {
+      type: "user_input_request",
+      timestamp: Date.now(),
+      data: { input_id: "i2", question: "Which?", options: ["A", "B"], recommended: "Z" },
+    };
+    const out = sseEventToMessages(ev, []);
+    expect(out[0].input_recommended).toBeUndefined();
+  });
+
+  it("restores origin from a persisted tool_confirm row", () => {
+    const out = dbMessagesToChat([
+      {
+        id: 7,
+        role: "tool_confirm",
+        content: JSON.stringify({ args_summary: "{}", status: "approved", origin }),
+        name: "write",
+        tool_call_id: "c9",
+        sequence: 1,
+        created_at: "",
+        branch_id: "main",
+      } as never,
+    ]);
+    expect(out[0]).toMatchObject({ role: "tool_confirm", confirmed: true, origin });
+  });
+});

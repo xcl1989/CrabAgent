@@ -446,7 +446,7 @@ async def collab_browser_wait_for_user(reason: str, context=None) -> str:
     if context is None or context.ask_callback is None:
         return "Waiting for the user is unavailable in this context. Ask the user to continue manually."
     question = f"请在协作浏览器中完成以下操作，然后回复继续：{reason}"
-    answer = await context.ask_callback(question, ["我已完成，继续", "取消此浏览器任务"])
+    answer = await context.ask(question, ["我已完成，继续", "取消此浏览器任务"])
     if "取消" in answer:
         return "The user cancelled the browser task. Stop browser actions and explain the cancellation."
     status = await asyncio.to_thread(lambda: _bridge_request("status", context=context))

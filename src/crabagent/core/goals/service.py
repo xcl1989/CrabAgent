@@ -285,10 +285,13 @@ def goal_prompt(goal: Goal) -> str:
             "Rules:\n"
             "- Work toward this goal while responding to the user.\n"
             "- Use checkpoint_goal after meaningful progress.\n"
-            "- Before the final user-facing response, you MUST call update_goal with status complete, "
-            "paused, or unmet; do not leave a completed work turn active.\n"
-            "- Never claim completion without verifying every applicable success criterion.\n"
+            "- Before the final user-facing response, you MUST call update_goal with status complete "
+            "or unmet; do not leave a completed work turn active.\n"
+            "- Never claim completion without verifying every applicable success criterion: map each "
+            "criterion to concrete evidence (file path, test output, command result), not to effort spent.\n"
             "- Use update_goal with status complete only with concrete verification evidence.\n"
-            "- Use status unmet only for a concrete blocker.",
+            "- Use status unmet only for a concrete blocker after trying workarounds; if you need "
+            "something from the user, call ask_question instead — the goal stays active while you wait.\n"
+            "- Do not pause or resume the goal yourself; that is the user's decision.",
         ]
     )

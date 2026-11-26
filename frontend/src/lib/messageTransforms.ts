@@ -32,6 +32,19 @@ function appendBashOutput(messages: ChatMessage[], text: string, callId?: string
   return false;
 }
 
+/** Normalise the optional `origin` payload of confirm/input events. The
+ *  backend omits it for the main agent and sets `{agent_name, display_name,
+ *  sub_agent_id}` when a synchronous sub-agent bubbled the request up. */
+function asOrigin(value: unknown): ChatMessage["origin"] {
+  if (!value || typeof value !== "object") return undefined;
+  const o = value as Record<string, unknown>;
+  const agentName = typeof o.agent_name === "string" ? o.agent_name : "";
+  const displayName = typeof o.display_name === "string" ? o.display_name : agentName;
+  const subAgentId = typeof o.sub_agent_id === "string" ? o.sub_agent_id : "";
+  if (!agentName && !displayName) return undefined;
+  return { agent_name: agentName, display_name: displayName, sub_agent_id: subAgentId };
+}
+
 export function sseEventToMessages(event: SSEEvent, messages: ChatMessage[]): ChatMessage[] {
   const updated = [...messages];
 
@@ -308,6 +321,7 @@ export function sseEventToMessages(event: SSEEvent, messages: ChatMessage[]): Ch
       confirm_id: event.data.confirm_id as string,
       tool_name: event.data.tool_name as string,
       args_summary: event.data.args_summary as string,
+      origin: asOrigin(event.data.origin),
     });
     return updated;
   }
@@ -318,6 +332,8 @@ export function sseEventToMessages(event: SSEEvent, messages: ChatMessage[]): Ch
       return messages;
     }
     const opts = event.data.options as string[] | undefined;
+    const recommended = typeof event.data.recommended === "string" ? (event.data.recommended as string) : undefined;
+    const header = typeof event.data.header === "string" ? (event.data.header as string) : undefined;
     updated.push({
       id: `in-${inputId || Date.now()}`,
       role: "user_input",
@@ -325,6 +341,9 @@ export function sseEventToMessages(event: SSEEvent, messages: ChatMessage[]): Ch
       confirm_id: event.data.input_id as string,
       options: opts && opts.length > 0 ? opts : undefined,
       input_multiple: event.data.multiple === true || undefined,
+      input_recommended: recommended && (!opts || opts.includes(recommended)) ? recommended : undefined,
+      input_header: header || undefined,
+      origin: asOrigin(event.data.origin),
     });
     return updated;
   }
@@ -494,11 +513,13 @@ export function dbMessagesToChat(msgs: Message[]): ChatMessage[] {
     if (m.role === "tool_confirm" && m.tool_call_id) {
       let argsSummary = "";
       let confirmed: boolean | undefined;
+      let origin: ChatMessage["origin"];
       try {
         const payload = JSON.parse(m.content || "{}");
         argsSummary = payload.args_summary || "";
         if (payload.status === "approved") confirmed = true;
         if (payload.status === "denied") confirmed = false;
+        origin = asOrigin(payload.origin);
       } catch {
         argsSummary = m.content || "";
       }
@@ -510,6 +531,7 @@ export function dbMessagesToChat(msgs: Message[]): ChatMessage[] {
         tool_name: m.name || "",
         args_summary: argsSummary,
         confirmed,
+        origin,
       });
       continue;
     }

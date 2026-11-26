@@ -68,9 +68,12 @@ export interface ChatMessage {
   tool_call_id?: string;
   args_summary?: string;
   confirmed?: boolean;
+  origin?: { agent_name: string; display_name: string; sub_agent_id: string };
   options?: string[];
   input_answer?: string;
   input_multiple?: boolean;
+  input_recommended?: string;
+  input_header?: string;
   source?: "builtin" | "mcp";
   server_name?: string;
   images?: string[];
@@ -336,6 +339,23 @@ const NoticeItem = memo(function NoticeItem({ msg }: { msg: ChatMessage }) {
   );
 });
 
+/** "from <sub-agent>" label for confirm / question cards that a synchronous
+ *  sub-agent bubbled up to the parent conversation. Renders nothing for the
+ *  main agent. */
+const OriginBadge = memo(function OriginBadge({ origin }: { origin?: ChatMessage["origin"] }) {
+  const { t } = useTranslation();
+  if (!origin?.display_name) return null;
+  return (
+    <span
+      className="shrink-0 inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-[var(--brand-bg)] text-[var(--brand)] border border-[var(--brand-border)]"
+      title={origin.sub_agent_id ? `${origin.agent_name} · ${origin.sub_agent_id}` : origin.agent_name}
+    >
+      <GitBranch size={10} />
+      {t("chatPanel.fromSubAgent", { name: origin.display_name })}
+    </span>
+  );
+});
+
 /** Tool confirmation request */
 const ToolConfirmItem = memo(function ToolConfirmItem({
   msg,
@@ -364,6 +384,7 @@ const ToolConfirmItem = memo(function ToolConfirmItem({
           <span className="font-medium text-[var(--text-primary)]">
             {t("chatPanel.toolRequiresPermission", { tool: msg.tool_name || t("toolResult.tool") })}
           </span>
+          <OriginBadge origin={msg.origin} />
           {resolved && (
             <span
               className={cn(
@@ -419,6 +440,8 @@ const UserInputItem = memo(function UserInputItem({
   const options = msg.options;
   const answer = msg.input_answer;
   const multiple = msg.input_multiple === true;
+  const header = msg.input_header;
+  const recommended = msg.input_recommended;
   // Multi-select answers arrive as the chosen options joined by ", "
   const multiAnswers =
     multiple && answer ? answer.split(/,\s*/).map((s) => s.trim()) : null;
@@ -432,6 +455,16 @@ const UserInputItem = memo(function UserInputItem({
             : "3px solid var(--accent)",
         }}
       >
+        {(header || msg.origin) && (
+          <div className="flex items-center gap-2 mb-1.5">
+            {header && (
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">
+                {header}
+              </span>
+            )}
+            <OriginBadge origin={msg.origin} />
+          </div>
+        )}
         {/* Question stays visible after answering — never overwritten */}
         <div className="flex items-start gap-2">
           <MessageSquare size={14} className="text-[var(--accent)] mt-0.5 shrink-0" />
@@ -485,6 +518,7 @@ const UserInputItem = memo(function UserInputItem({
                 inputId={msg.confirm_id}
                 onSubmit={onUserInput}
                 multiple={multiple}
+                recommended={recommended}
               />
             )}
             {onUserInput && (!options || options.length === 0) && (
@@ -910,15 +944,24 @@ function UserInputOptions({
   inputId,
   onSubmit,
   multiple = false,
+  recommended,
 }: {
   options: string[];
   inputId: string;
   onSubmit: (id: string, answer: string) => void;
   /** true → checkbox rows with a confirm button; false → radio rows, click to submit */
   multiple?: boolean;
+  /** The agent's suggested option. Rendered first and highlighted so the user
+   *  can accept the suggestion in one click. */
+  recommended?: string;
 }) {
   const { t } = useTranslation();
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  // Recommended option first; the rest keep their original order. Index-based
+  // state below refers to this display order.
+  const ordered = recommended && options.includes(recommended) && options[0] !== recommended
+    ? [recommended, ...options.filter((o) => o !== recommended)]
+    : options;
   const toggle = (i: number) => {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -931,19 +974,25 @@ function UserInputOptions({
     if (selected.size === 0) return;
     const chosen = Array.from(selected)
       .sort((a, b) => a - b)
-      .map((i) => options[i])
+      .map((i) => ordered[i])
       .join(", ");
     onSubmit(inputId, chosen);
   };
   return (
     <div className="mt-2.5 space-y-1.5">
-      {options.map((opt, i) => {
+      {ordered.map((opt, i) => {
         const checked = selected.has(i);
+        const isRecommended = opt === recommended;
         return (
           <button
             key={i}
             onClick={() => (multiple ? toggle(i) : onSubmit(inputId, opt))}
-            className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs text-left bg-[var(--bg-tertiary)] text-[var(--text-primary)] border border-[var(--border)] hover:border-[var(--brand)] hover:bg-[var(--brand-bg)] transition-colors"
+            className={cn(
+              "w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs text-left text-[var(--text-primary)] transition-colors",
+              isRecommended
+                ? "bg-[var(--brand-bg)] border border-[var(--brand)] hover:bg-[var(--brand-bg)]"
+                : "bg-[var(--bg-tertiary)] border border-[var(--border)] hover:border-[var(--brand)] hover:bg-[var(--brand-bg)]",
+            )}
           >
             {multiple ? (
               <span
@@ -959,6 +1008,11 @@ function UserInputOptions({
               <span className="w-3.5 h-3.5 rounded-full border border-[var(--border)] bg-[var(--bg-secondary)] shrink-0" />
             )}
             <span className="flex-1">{opt}</span>
+            {isRecommended && (
+              <span className="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium bg-[var(--brand)] text-white">
+                {t("chatPanel.recommendedTag")}
+              </span>
+            )}
           </button>
         );
       })}

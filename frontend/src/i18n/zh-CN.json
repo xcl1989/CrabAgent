@@ -388,6 +388,8 @@
     "answeredLabel": "已回答：",
     "confirmMulti": "确认选择",
     "multiSelectHint": "可多选",
+    "fromSubAgent": "来自 {{name}}",
+    "recommendedTag": "推荐",
     "heatmapTitle": "全年用量热力图",
     "heatmapDaily": "每日",
     "heatmapWeekly": "每周",

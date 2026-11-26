@@ -18,8 +18,10 @@ logger = logging.getLogger(__name__)
 
 CONFIRM_TTL_SECONDS = 120
 
-_pending_confirms: dict[str, tuple[asyncio.Future[bool], str, str, str]] = {}
-# confirm_id → (future, session_id, tool_name, args_summary)
+_pending_confirms: dict[str, tuple[asyncio.Future[bool], str, str, str, dict | None]] = {}
+# confirm_id → (future, session_id, tool_name, args_summary, origin)
+# ``origin`` is ``None`` for main-agent prompts and ``{"agent_name", "display_name",
+# "sub_agent_id"}`` when a synchronous sub-agent bubbled the request up.
 
 
 class ToolConfirmRequest(BaseModel):
@@ -28,7 +30,12 @@ class ToolConfirmRequest(BaseModel):
 
 
 async def request_confirmation(
-    event_bus, session_id: str, tool_name: str, args: dict, user_id: int = 1
+    event_bus,
+    session_id: str,
+    tool_name: str,
+    args: dict,
+    user_id: int = 1,
+    origin: dict | None = None,
 ) -> asyncio.Future[bool]:
     from crabagent.core.event import AgentEvent, EventType
 
@@ -40,8 +47,9 @@ async def request_confirmation(
     if len(args_summary) > 200:
         args_summary = args_summary[:200] + "..."
 
-    _pending_confirms[confirm_id] = (future, session_id, tool_name, args_summary)
-    await _persist_confirmation(session_id, confirm_id, tool_name, args_summary)
+    _pending_confirms[confirm_id] = (future, session_id, tool_name, args_summary, origin)
+    await _persist_confirmation(session_id, confirm_id, tool_name, args_summary, origin)
+    origin_label = f"（{origin['display_name']}）" if origin and origin.get("display_name") else ""
 
     # Trusted work system: also persist a TaskRequest so the approval
     # survives restarts. The live Future above is only a bridge.
@@ -55,12 +63,12 @@ async def request_confirmation(
                 user_id=user_id,
                 request_type="approval",
                 request_key=confirm_id,
-                title=f"确认执行 {tool_name}",
+                title=f"确认执行 {tool_name}{origin_label}",
                 session_id=session_id,
                 operation=f"tool:{tool_name}",
                 question="是否允许执行该操作？",
                 risk_level="high",
-                display_payload={"args_summary": args_summary},
+                display_payload={"args_summary": args_summary, **({"origin": origin} if origin else {})},
                 resource_version=args_summary[:200],
                 expires_at=datetime.datetime.now() + datetime.timedelta(seconds=CONFIRM_TTL_SECONDS + 10),
             )
@@ -80,7 +88,7 @@ async def request_confirmation(
             notify_request_created(
                 request_key=confirm_id,
                 request_type="approval",
-                title=f"确认执行 {tool_name}",
+                title=f"确认执行 {tool_name}{origin_label}",
                 body=args_summary,
                 session_id=session_id,
             )
@@ -88,21 +96,21 @@ async def request_confirmation(
     except Exception:
         logger.debug("confirm push hook failed (non-fatal)", exc_info=True)
 
-    await event_bus.emit(
-        AgentEvent(
-            type=EventType.TOOL_CONFIRM_REQUEST,
-            data={
-                "confirm_id": confirm_id,
-                "tool_name": tool_name,
-                "args_summary": args_summary,
-            },
-        )
-    )
+    data = {
+        "confirm_id": confirm_id,
+        "tool_name": tool_name,
+        "args_summary": args_summary,
+    }
+    if origin:
+        data["origin"] = origin
+    await event_bus.emit(AgentEvent(type=EventType.TOOL_CONFIRM_REQUEST, data=data))
 
     return future
 
 
-async def _persist_confirmation(session_id: str, confirm_id: str, tool_name: str, args_summary: str) -> None:
+async def _persist_confirmation(
+    session_id: str, confirm_id: str, tool_name: str, args_summary: str, origin: dict | None = None
+) -> None:
     """Store the card so session reloads do not depend on the SSE connection."""
     from sqlalchemy import func, select
 
@@ -116,12 +124,15 @@ async def _persist_confirmation(session_id: str, confirm_id: str, tool_name: str
         max_sequence = await db.scalar(
             select(func.max(Message.sequence)).where(Message.conversation_id == conversation.id)
         )
+        payload = {"args_summary": args_summary, "status": "pending"}
+        if origin:
+            payload["origin"] = origin
         db.add(
             Message(
                 conversation_id=conversation.id,
                 sequence=(max_sequence or 0) + 1,
                 role="tool_confirm",
-                content=json.dumps({"args_summary": args_summary, "status": "pending"}, ensure_ascii=False),
+                content=json.dumps(payload, ensure_ascii=False),
                 name=tool_name,
                 tool_call_id=confirm_id,
                 branch_id=conversation.active_branch or "main",
@@ -160,16 +171,17 @@ def pop_pending(confirm_id: str) -> asyncio.Future[bool] | None:
 def get_pending_confirms_for_session(session_id: str) -> list[dict]:
     """Return all pending (unanswered) tool_confirm requests for a session."""
     result = []
-    for confirm_id, (_future, sid, tool_name, args_summary) in _pending_confirms.items():
+    for confirm_id, (_future, sid, tool_name, args_summary, origin) in _pending_confirms.items():
         if sid != session_id or _future.done():
             continue
-        result.append(
-            {
-                "confirm_id": confirm_id,
-                "tool_name": tool_name,
-                "args_summary": args_summary,
-            }
-        )
+        item = {
+            "confirm_id": confirm_id,
+            "tool_name": tool_name,
+            "args_summary": args_summary,
+        }
+        if origin:
+            item["origin"] = origin
+        result.append(item)
     return result
 
 

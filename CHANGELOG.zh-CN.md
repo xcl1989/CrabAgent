@@ -8,6 +8,18 @@ English version: [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
+## [0.19.3] — 子 Agent 权限上浮、Goal 不可自弃、ask_question 增强（2026-11-26）
+
+### 新增
+- **子 Agent 权限上浮（permission bubbling）。** 同步委派的子 Agent 现在继承父会话的确认与提问通道：它调用需授权的工具时，确认卡出现在父会话里并标注"来自 代码专家"，用户批准后子 Agent 继续。之前子 Agent 的 `confirm_callback` 是 `None`，`registry.execute` 对此的语义是"无通道即放行"——同一个 coder，主会话写文件会问一次，子 Agent 写文件静默通过。后台子 Agent 不变（其工具池本就剔除了需确认的工具）。实现上给 `AgentContext` 加了 `confirm()` / `ask()` 统一入口，用 `inspect.signature` 静态判断回调参数个数，serve 回调收 `origin`、CLI 老回调自动降级——不用 try/except TypeError 探测，否则回调内部真抛 TypeError 会被误判为签名不匹配而重复弹卡。
+- **`ask_question` 支持推荐答案与标题。** 新增 `recommended`（必须是 `options` 之一，不在其中会被丢弃）和 `header`（卡片小标题）。前端把推荐项置顶、品牌色边框、加"推荐"徽标；`header` 以小标题显示，长访谈时帮助定位。工具描述里写明"一次只问一个、每题 3-4 选项、下一题取决于回答"，Agent 可据此做连续访谈，不必新造模式。子 Agent 现在也能提问（`ask_question` 从 `_DELEGATION_TOOLS` 移除）。
+
+### 变更
+- **Goal 不允许 Agent 自行暂停或过早放弃。** `update_goal` 对 Agent 只开放 `complete` / `unmet`：`paused` / `active` 被拒并提示"暂停是用户动作"。`auto_continue` 目标跑不满 2 轮就报 `unmet` 会被拦，提示先试绕过方案、确实需要用户介入就调 `ask_question`——目标保持 active 等待。之前 Agent 调 `paused` 即可逃掉续跑，stop hook 形同虚设。`_goal_status_updated` 标记改到成功后才设，否则软门槛拒绝时会误跳过 finalization checkpoint。
+- **Goal 续跑提示改为审计式。** 原来是"继续从最新检查点干活"，现在要求 Agent 先把每条 success criterion 对应到具体证据（文件路径 / 测试输出 / 命令结果），再决定 `complete` 还是继续；明确"不要重复已有证据的步骤"。系统提示同步加了"努力 ≠ 完成"、"需要东西就 ask_question 别报 unmet"、"不要自己暂停"。
+
+---
+
 ## [0.19.2] — 记忆全量按相关性召回 & 思考落库修复（2026-11-25）
 
 ### 修复

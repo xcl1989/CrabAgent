@@ -143,12 +143,15 @@ async def get_agent(name: str) -> dict | None:
 
 _MEMORY_TOOLS = {"memory_save", "memory_recall", "memory_replace", "memory_list", "memory_forget"}
 _SHARED_TOOLS = {"shared_get", "shared_put", "shared_list"}
+# Tools withheld from sub-agents: delegation primitives would let a child
+# spawn its own tree outside the parent's control. ``ask_question`` is NOT
+# listed — it is an interactive channel, and sub-agents inherit the parent's
+# ``ask_callback`` so questions surface in the parent UI (see ``spawn_sub_agent``).
 _DELEGATION_TOOLS = {
     "delegate_task",
     "delegate_parallel",
     "list_agents",
     "handoff_to",
-    "ask_question",
     "request_help",
 }
 
@@ -660,6 +663,10 @@ async def spawn_sub_agent(
         parent_provider=parent_context.provider_name or "",
         agent_def_model=agent_def.get("model") or "",
     )
+    import uuid as _uuid
+
+    sub_id = f"{agent_name}_{_uuid.uuid4().hex[:8]}"
+
     sub_context = AgentContext(
         workspace=parent_context.workspace,
         tool_registry=sub_registry,
@@ -676,7 +683,6 @@ async def spawn_sub_agent(
         ),
     )
 
-    sub_context.confirm_callback = None
     sub_context.tool_permissions = agent_tool_perms
     # Carry the unpruned pool forward so a second-level delegation is not limited
     # by this sub-agent's own deny list either.
@@ -685,6 +691,22 @@ async def spawn_sub_agent(
     sub_context.metadata["_sub_agent_depth"] = current_depth + 1
     sub_context.locale = sub_locale
     sub_context.metadata["locale"] = sub_locale
+
+    # Interactive channel inheritance (permission bubbling). A synchronous
+    # sub-agent runs while the parent is still waiting on it, so the parent's
+    # confirm/ask callbacks can surface prompts in the parent UI. The origin
+    # label tells the user which sub-agent is asking. Background sub-agents
+    # keep ``None``: their tool pool already excludes confirmation-gated
+    # tools (see the registry filter above), and nobody may be watching the
+    # parent conversation when they run.
+    sub_context.metadata["_agent_origin"] = {
+        "agent_name": agent_name,
+        "display_name": agent_def["display_name"],
+        "sub_agent_id": sub_id,
+    }
+    if not background:
+        sub_context.confirm_callback = parent_context.confirm_callback
+        sub_context.ask_callback = parent_context.ask_callback
 
     parent_user_id = parent_context.metadata.get("user_id", 0)
     if parent_user_id:
@@ -728,10 +750,6 @@ async def spawn_sub_agent(
     else:
         if shared_context:
             sub_context.messages = [{"role": "user", "content": f"{shared_context}\n\n## Your Task\n{task}"}]
-
-    import uuid as _uuid
-
-    sub_id = f"{agent_name}_{_uuid.uuid4().hex[:8]}"
 
     await parent_context.event_bus.emit(
         AgentEvent(

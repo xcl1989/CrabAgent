@@ -330,7 +330,7 @@ class ToolRegistry:
             if permission == "confirm":
                 if tool.name not in context.approved_tools:
                     if context.confirm_callback:
-                        approved = await context.confirm_callback(tool.name, arguments)
+                        approved = await context.confirm(tool.name, arguments)
                         if not approved:
                             return f"Tool '{tool.name}' execution denied by user."
                     context.approved_tools.add(tool.name)

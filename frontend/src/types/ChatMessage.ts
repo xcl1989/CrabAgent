@@ -25,9 +25,16 @@ export interface ChatMessage {
   tool_call_id?: string;
   args_summary?: string;
   confirmed?: boolean;
+  /** Who raised a confirm/input card: the main agent omits it; a synchronous
+   * sub-agent that bubbled the request up sets it so the UI can label it. */
+  origin?: { agent_name: string; display_name: string; sub_agent_id: string };
   options?: string[];
   input_answer?: string;
   input_multiple?: boolean;
+  /** Agent's suggested option (one of `options`); rendered first and highlighted. */
+  input_recommended?: string;
+  /** Short card title for a question, e.g. "Rate limit strategy". */
+  input_header?: string;
   source?: "builtin" | "mcp";
   server_name?: string;
   images?: string[];

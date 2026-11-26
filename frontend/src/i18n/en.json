@@ -388,6 +388,8 @@
     "answeredLabel": "Answered: ",
     "confirmMulti": "Confirm selection",
     "multiSelectHint": "multi-select",
+    "fromSubAgent": "from {{name}}",
+    "recommendedTag": "Recommended",
     "branchFromHere": "Branch from here",
     "reconnecting": "Reconnecting…",
     "thinking": "Thinking…"

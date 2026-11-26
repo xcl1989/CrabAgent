@@ -723,7 +723,9 @@ async def _setup_agent_context(
         description=(
             "Ask the user a question and get their response. "
             "Use when you need clarification, more information, "
-            "or a decision from the user before proceeding."
+            "or a decision from the user before proceeding. "
+            "For multi-question interviews ask ONE question at a time, each with 3-4 options and "
+            "`recommended` set to the option you advise; the next question depends on the answer."
         ),
         parameters={
             "type": "object",
@@ -744,17 +746,29 @@ async def _setup_agent_context(
                         "The answer is then the selected options joined by ', '."
                     ),
                 },
+                "recommended": {
+                    "type": "string",
+                    "description": "The option you recommend. Must be one of `options`.",
+                },
+                "header": {
+                    "type": "string",
+                    "description": "Short card title for this question, e.g. 'Rate limit strategy'.",
+                },
             },
             "required": ["question"],
         },
     )
     async def ask_question(
-        question: str, options: list[str] | None = None, multiple: bool = False, context=None
+        question: str,
+        options: list[str] | None = None,
+        multiple: bool = False,
+        recommended: str | None = None,
+        header: str | None = None,
+        context=None,
     ) -> str:
-        cb = getattr(context, "ask_callback", None)
-        if not cb:
+        if context is None or context.ask_callback is None:
             return "Error: no ask callback available"
-        return await cb(question, options, multiple)
+        return await context.ask(question, options, multiple, recommended=recommended, header=header)
 
     return context
 

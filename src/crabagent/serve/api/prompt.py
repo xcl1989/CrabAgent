@@ -81,11 +81,21 @@ def _should_continue_goal(snapshot: dict | None, metadata: dict) -> bool:
 
 
 def _goal_continuation_request(request: PromptRequest) -> PromptRequest:
-    """Keep the selected execution settings for an automatic Goal turn."""
+    """Keep the selected execution settings for an automatic Goal turn.
+
+    The message is an *audit* prompt rather than a plain "continue": the
+    agent is told to map every success criterion to concrete evidence before
+    doing new work, so a half-finished goal is not mistaken for a done one
+    because effort was spent.
+    """
     return PromptRequest(
         message=(
-            "Continue the active goal from the latest checkpoint. Work on the next "
-            "concrete unfinished step, then record progress or verified completion."
+            "Continue the active goal. Before starting new work: re-read the objective and every "
+            "success criterion, and list each criterion with the concrete evidence for it so far "
+            "(file paths, test output, command results). Then either call update_goal(status=\"complete\", "
+            "evidence=...) if every criterion is verified, or work on the first unverified criterion. "
+            "Do not repeat steps that already have evidence. If you are blocked, call ask_question "
+            "with what you need instead of declaring the goal unmet."
         ),
         model=request.model,
         provider=request.provider,
@@ -952,8 +962,10 @@ Use ordinary Markdown when a visualization is not helpful.
     # authorization cards whenever a background task was running.
     from crabagent.serve.api.confirm import request_confirmation
 
-    async def _serve_confirm(tool_name: str, args: dict) -> bool:
-        future = await request_confirmation(context.event_bus, session_id, tool_name, args, user_id=user.id)
+    async def _serve_confirm(tool_name: str, args: dict, origin: dict | None = None) -> bool:
+        future = await request_confirmation(
+            context.event_bus, session_id, tool_name, args, user_id=user.id, origin=origin
+        )
         try:
             return await asyncio.wait_for(future, timeout=120.0)
         except TimeoutError:
@@ -964,10 +976,23 @@ Use ordinary Markdown when a visualization is not helpful.
     from crabagent.serve.api.input import request_user_input
 
     async def _serve_ask(
-        question: str, options: list[str] | None = None, multiple: bool = False
+        question: str,
+        options: list[str] | None = None,
+        multiple: bool = False,
+        recommended: str | None = None,
+        header: str | None = None,
+        origin: dict | None = None,
     ) -> str:
         future = await request_user_input(
-            context.event_bus, session_id, question, options=options, multiple=multiple, user_id=user.id
+            context.event_bus,
+            session_id,
+            question,
+            options=options,
+            multiple=multiple,
+            user_id=user.id,
+            recommended=recommended,
+            header=header,
+            origin=origin,
         )
         try:
             return await asyncio.wait_for(future, timeout=300.0)
@@ -992,7 +1017,9 @@ Use ordinary Markdown when a visualization is not helpful.
         description=(
             "Ask the user a question and get their response. "
             "Use when you need clarification, more information, "
-            "or a decision from the user before proceeding."
+            "or a decision from the user before proceeding. "
+            "For multi-question interviews ask ONE question at a time, each with 3-4 options and "
+            "`recommended` set to the option you advise; the next question depends on the answer."
         ),
         parameters={
             "type": "object",
@@ -1013,17 +1040,35 @@ Use ordinary Markdown when a visualization is not helpful.
                         "The answer is then the selected options joined by ', '."
                     ),
                 },
+                "recommended": {
+                    "type": "string",
+                    "description": (
+                        "The option you recommend. Must be one of `options`. "
+                        "The UI highlights it so the user can accept your suggestion in one click."
+                    ),
+                },
+                "header": {
+                    "type": "string",
+                    "description": (
+                        "Short card title for this question, e.g. 'Rate limit strategy'. "
+                        "Helps the user navigate a sequence of questions."
+                    ),
+                },
             },
             "required": ["question"],
         },
     )
     async def ask_question(
-        question: str, options: list[str] | None = None, multiple: bool = False, context=None
+        question: str,
+        options: list[str] | None = None,
+        multiple: bool = False,
+        recommended: str | None = None,
+        header: str | None = None,
+        context=None,
     ) -> str:
-        cb = getattr(context, "ask_callback", None)
-        if not cb:
+        if context is None or context.ask_callback is None:
             return "Error: no ask callback available"
-        return await cb(question, options, multiple)
+        return await context.ask(question, options, multiple, recommended=recommended, header=header)
 
     async def _run():
         t0 = time.time()

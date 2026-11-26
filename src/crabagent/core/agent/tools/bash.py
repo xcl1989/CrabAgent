@@ -127,7 +127,7 @@ async def bash_command(
         if block_reason.startswith("NEED_CONFIRM:"):
             detail = block_reason[len("NEED_CONFIRM:"):]
             if context and context.confirm_callback:
-                approved = await context.confirm_callback("bash", {
+                approved = await context.confirm("bash", {
                     "command": command,
                     "warning": detail,
                 })
